@@ -1,0 +1,7 @@
+{
+  "name": "v2.9 Aetheria: Harmonic Resonance Player",
+  "description": "A 432Hz retuning media player with Solfeggio frequency layering, binaural beats, and sacred geometry visualizations.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
