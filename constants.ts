@@ -45,6 +45,18 @@ The Middle Pillar (Balance/Mildness): The harmonizing path that integrates Force
 Energetically, the Tree maps perfectly to the human body and the Chakra system. As music plays, observe how the frequencies stimulate the corresponding nodes, moving from the dense physical vibration of Malkuth up to the spiritual purity of Keter.
 `;
 
+export const GEOMETRY_INFO = [
+  { shape: 'Cube', freq: '174Hz', benefit: 'Stability, Grounding, Physical Safety', element: 'Earth' },
+  { shape: 'Reiki Symbol', freq: '285Hz', benefit: 'Healing, Tissue Restoration', element: 'Aether' },
+  { shape: 'Tetrahedron', freq: '396Hz', benefit: 'Liberation from Fear, Fire Energy', element: 'Fire' },
+  { shape: 'Icosahedron', freq: '417Hz', benefit: 'Facilitating Change, Fluidity', element: 'Water' },
+  { shape: 'Octahedron', freq: '528Hz', benefit: 'Transformation, Miracles, Air Energy', element: 'Air' },
+  { shape: 'Merkaba', freq: '639Hz', benefit: 'Connection, Relationships, Spirit/Body Balance', element: 'Light' },
+  { shape: 'Dodecahedron', freq: '741Hz', benefit: 'Expression, Solving Problems, Spirit', element: 'Ether' },
+  { shape: 'Torus', freq: '852Hz', benefit: 'Intuition, Returning to Order', element: 'Cosmos' },
+  { shape: 'Fibonacci Sphere', freq: '963Hz', benefit: 'Oneness, Connection to Source', element: 'Void' },
+];
+
 export const SEPHIROT_INFO = [
   { name: 'Malkuth', meaning: 'Kingdom', correspondence: 'The physical body, Earth, grounding, and final manifestation. (Root Chakra/Feet)', color: '#FF0000' },
   { name: 'Yesod', meaning: 'Foundation', correspondence: 'The subconscious, dreams, sexual energy, and connection. (Sacral Chakra)', color: '#FF8C00' },

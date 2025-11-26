@@ -2,10 +2,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2, 
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
-import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, CHAKRA_INFO_TEXT, SEPHIROT_INFO, TREE_OF_LIFE_EXPLANATION } from './constants';
+import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, CHAKRA_INFO_TEXT, SEPHIROT_INFO, TREE_OF_LIFE_EXPLANATION, GEOMETRY_INFO } from './constants';
 import Visualizer from './components/Visualizer';
 
 // --- Spectrum Analyzer Component ---
@@ -111,20 +111,18 @@ const getAudioDuration = (file: File): Promise<number> => {
 
 const detectDominantFrequency = async (buffer: AudioBuffer): Promise<number> => {
   try {
-    // Optimization: Use 3 seconds instead of 5 to speed up bulk scanning
     const sampleDuration = 3;
     const offlineCtx = new OfflineAudioContext(1, 44100 * sampleDuration, 44100); 
     const source = offlineCtx.createBufferSource();
     source.buffer = buffer;
     
     const analyser = offlineCtx.createAnalyser();
-    analyser.fftSize = 32768; // Maximize frequency resolution
+    analyser.fftSize = 32768; 
     analyser.smoothingTimeConstant = 0.1;
     
     source.connect(analyser);
     analyser.connect(offlineCtx.destination);
     
-    // Scan middle of track for stability
     const startOffset = Math.min(buffer.duration / 2, 30);
     source.start(0, startOffset, sampleDuration);
     
@@ -137,17 +135,14 @@ const detectDominantFrequency = async (buffer: AudioBuffer): Promise<number> => 
     let maxIndex = -1;
     
     const binSize = 44100 / analyser.fftSize;
-    // START BIN: Ignore < 70Hz to skip Kick Drums/Sub-bass that bias detection to 174Hz
     const startBin = Math.floor(70 / binSize);
 
     for (let i = startBin; i < data.length; i++) {
       let magnitude = data[i];
       const freq = i * binSize;
 
-      // WEIGHTING: Penalize lower-mid bass (70-250Hz) slightly to favor the harmonic midrange
-      // This forces the detector to look for the "Chord" center rather than the "Bass" root.
       if (freq < 250) {
-          magnitude -= 5; // -5dB penalty
+          magnitude -= 5; 
       }
 
       if (magnitude > maxVal) {
@@ -156,7 +151,6 @@ const detectDominantFrequency = async (buffer: AudioBuffer): Promise<number> => 
       }
     }
 
-    // Parabolic Interpolation for higher accuracy
     let freq = maxIndex * binSize;
     if (maxIndex > 0 && maxIndex < data.length - 1) {
        const alpha = data[maxIndex - 1];
@@ -182,9 +176,6 @@ const getHarmonicSolfeggio = (detectedFreq: number): number => {
 
     SOLFEGGIO_INFO.forEach(s => {
         const sFreq = s.freq;
-        // Expanded Harmonic Search:
-        // Check Fundamental, +/- 1 Octave, +/- 2 Octaves
-        // This helps if the song key is very high or very low relative to the Solfeggio tone
         const candidates = [
             sFreq, 
             sFreq / 2, sFreq * 2, 
@@ -234,6 +225,7 @@ const App: React.FC = () => {
     speed: 1.0,
     sensitivity: 1.0,
     particleDensity: 'medium',
+    particleBaseSize: 2.5, 
     coreSize: 1.0,
     showHexagons: true,
     hexOpacity: 0.6,
@@ -242,6 +234,8 @@ const App: React.FC = () => {
     hydroIntensity: 1.0,
     showTreeOfLife: false,
     colorMode: 'chakra',
+    autoRotate: true,
+    invertPerspective: false,
     particleMotion: 'flow',
     morphEnabled: true
   });
@@ -345,7 +339,6 @@ const App: React.FC = () => {
     solfeggioGainRef.current = gain;
   }, [isPlaying, selectedSolfeggio, solfeggioVolume]);
 
-  // Decoupled volume update effect
   useEffect(() => {
       if (binauralGainRef.current && audioCtxRef.current) {
           binauralGainRef.current.gain.setTargetAtTime(binauralVolume, audioCtxRef.current.currentTime, 0.1);
@@ -381,7 +374,6 @@ const App: React.FC = () => {
     merger.connect(mainGain);
     mainGain.connect(gainNodeRef.current!);
 
-    // Use value directly here for initial start
     mainGain.gain.value = binauralVolume;
 
     leftOsc.start();
@@ -391,8 +383,7 @@ const App: React.FC = () => {
     binauralRightOscRef.current = rightOsc;
     binauralMergerRef.current = merger;
     binauralGainRef.current = mainGain;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, selectedBinaural]); // Removed binauralVolume from dep to prevent re-trigger
+  }, [isPlaying, selectedBinaural]); 
 
   useEffect(() => { updateSolfeggio(); }, [updateSolfeggio]);
   useEffect(() => { updateBinaural(); }, [updateBinaural]);
@@ -481,10 +472,6 @@ const App: React.FC = () => {
         return updated;
     });
     
-    if (currentSongIndex === -1 && newSongs.length > 0) {
-        // Wait for user to play
-    }
-
     setIsUploading(false);
     setUploadProgress(0);
     event.target.value = ''; 
@@ -572,7 +559,6 @@ const App: React.FC = () => {
   };
 
   const generateWellnessPlaylist = () => {
-    // Focus on physical/deep healing: 174 (Pain), 285 (Tissue), 528 (DNA/Miracle)
     generateFilteredPlaylist(
         s => [174, 285, 528].includes(s.closestSolfeggio || 0), 
         'Deep Healing'
@@ -580,7 +566,6 @@ const App: React.FC = () => {
   };
 
   const generateMoodPlaylist = () => {
-    // Focus on emotional state: 396 (Fear/Guilt), 417 (Change), 639 (Relationships)
     generateFilteredPlaylist(
         s => [396, 417, 639].includes(s.closestSolfeggio || 0), 
         'Mood Elevation'
@@ -588,7 +573,6 @@ const App: React.FC = () => {
   };
 
   const generateMeditationPlaylist = () => {
-    // Focus on spiritual connection: 741 (Expression), 852 (Intuition), 963 (Oneness)
     generateFilteredPlaylist(
         s => [741, 852, 963].includes(s.closestSolfeggio || 0), 
         'Deep Meditation'
@@ -826,7 +810,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v2.9</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v3.1</span></h1>
           </div>
           <div className="flex gap-2 md:gap-4">
              
@@ -865,7 +849,7 @@ const App: React.FC = () => {
               <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowRecordOptions(false)}>
                   <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-md w-full shadow-2xl" onClick={e => e.stopPropagation()}>
                       <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Circle className="text-red-500" size={20}/> Start Recording</h3>
-                      <p className="text-sm text-slate-400 mb-6">Choose a recording mode. Audio-only is recommended for long sessions (&gt;10 mins) to prevent crashes.</p>
+                      <p className="text-sm text-slate-400 mb-6">Choose a recording mode. Audio-only is recommended for long sessions to prevent crashes.</p>
                       
                       <div className="grid grid-cols-3 gap-3 mb-4">
                           <button onClick={() => startRecording('audio')} className="p-4 border border-slate-700 bg-slate-800 hover:bg-slate-700 rounded-xl flex flex-col items-center gap-2 transition-all active:scale-95 hover:border-blue-500">
@@ -904,6 +888,25 @@ const App: React.FC = () => {
                           <p className="whitespace-pre-line mb-6 leading-relaxed">
                               {CHAKRA_INFO_TEXT}
                           </p>
+
+                          <div className="border-t border-slate-800 my-8"></div>
+
+                          <h3 className="text-gold-500 font-bold uppercase tracking-widest mb-4 flex items-center gap-2">
+                             <Hexagon size={18} /> Sacred Geometry & Frequencies
+                          </h3>
+                          <p className="text-slate-400 mb-4">Each Solfeggio frequency is visualized through a specific Platonic or Sacred solid that resonates with its elemental nature.</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
+                             {GEOMETRY_INFO.map(geo => (
+                                 <div key={geo.freq} className="p-3 bg-slate-800/40 rounded border border-slate-800 flex flex-col hover:border-gold-500/50 transition-colors">
+                                     <div className="flex justify-between items-center mb-1">
+                                        <span className="font-bold text-gold-400 text-sm">{geo.shape}</span>
+                                        <span className="text-[10px] bg-slate-700 px-1 rounded text-slate-300">{geo.freq}</span>
+                                     </div>
+                                     <div className="text-xs text-slate-400 italic mb-1">{geo.element} Element</div>
+                                     <div className="text-xs text-slate-500">{geo.benefit}</div>
+                                 </div>
+                             ))}
+                          </div>
                           
                           <div className="border-t border-slate-800 my-8"></div>
 
@@ -924,23 +927,6 @@ const App: React.FC = () => {
                                      </div>
                                  </div>
                              ))}
-                          </div>
-
-                          <div className="border-t border-slate-800 my-8"></div>
-
-                          <h3 className="text-gold-500 font-bold uppercase tracking-widest mb-4">Frequency Guide</h3>
-                          <div className="grid gap-3">
-                              {SOLFEGGIO_INFO.map(s => (
-                                  <div key={s.freq} className="flex items-center gap-4 p-3 rounded-lg bg-slate-800/50 border border-slate-800">
-                                      <div className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-slate-900 shrink-0" style={{ backgroundColor: s.color }}>
-                                          {s.freq}
-                                      </div>
-                                      <div>
-                                          <div className="font-bold text-slate-200">{s.benefit}</div>
-                                          <div className="text-xs text-slate-500 uppercase tracking-wider">{s.chakra} Chakra</div>
-                                      </div>
-                                  </div>
-                              ))}
                           </div>
                       </div>
                   </div>
@@ -1123,6 +1109,20 @@ const App: React.FC = () => {
                                         className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none"
                                     />
                                 </div>
+                                
+                                <div>
+                                    <div className="flex justify-between text-[10px] text-slate-400 mb-1">
+                                        <span>PARTICLE SIZE</span>
+                                        <span>{vizSettings.particleBaseSize.toFixed(1)}x</span>
+                                    </div>
+                                    <input 
+                                        type="range" min="0.5" max="8.0" step="0.5"
+                                        value={vizSettings.particleBaseSize}
+                                        onChange={(e) => setVizSettings({...vizSettings, particleBaseSize: parseFloat(e.target.value)})}
+                                        className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none"
+                                    />
+                                </div>
+
                                 <div>
                                     <div className="flex justify-between text-[10px] text-slate-400 mb-1">
                                         <span>AUDIO REACTIVITY</span>
@@ -1134,6 +1134,21 @@ const App: React.FC = () => {
                                         onChange={(e) => setVizSettings({...vizSettings, sensitivity: parseFloat(e.target.value)})}
                                         className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none"
                                     />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2">
+                                   <button 
+                                      onClick={() => setVizSettings({...vizSettings, autoRotate: !vizSettings.autoRotate})}
+                                      className={`text-xs py-2 rounded border flex items-center justify-center gap-1 transition-all ${vizSettings.autoRotate ? 'bg-gold-500/20 border-gold-500 text-gold-400' : 'bg-slate-900 border-slate-700 text-slate-500'}`}
+                                   >
+                                      <RotateCw size={12} /> Rotate {vizSettings.autoRotate ? 'ON' : 'OFF'}
+                                   </button>
+                                   <button 
+                                      onClick={() => setVizSettings({...vizSettings, invertPerspective: !vizSettings.invertPerspective})}
+                                      className={`text-xs py-2 rounded border flex items-center justify-center gap-1 transition-all ${vizSettings.invertPerspective ? 'bg-purple-500/20 border-purple-500 text-purple-400' : 'bg-slate-900 border-slate-700 text-slate-500'}`}
+                                   >
+                                      <ArrowUpCircle size={12} /> Ascension {vizSettings.invertPerspective ? 'ON' : 'OFF'}
+                                   </button>
                                 </div>
                                 
                                 <div className="grid grid-cols-2 gap-2">
@@ -1205,7 +1220,7 @@ const App: React.FC = () => {
 
                                 <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
                                     <div className="flex justify-between items-center mb-2">
-                                        <span className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">Morph Geometry</span>
+                                        <span className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">Show Sacred Geometry</span>
                                         <button 
                                             onClick={() => setVizSettings({...vizSettings, morphEnabled: !vizSettings.morphEnabled})}
                                             className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.morphEnabled ? 'bg-gold-500' : 'bg-slate-700'}`}
@@ -1214,7 +1229,9 @@ const App: React.FC = () => {
                                         </button>
                                     </div>
                                     <p className="text-[9px] text-slate-500">
-                                        Toggle rhythmic breathing of sacred geometry patterns.
+                                        {vizSettings.morphEnabled 
+                                          ? "Sacred forms appear based on frequency." 
+                                          : "Particles return to chaos/cloud state."}
                                     </p>
                                 </div>
 
@@ -1263,21 +1280,21 @@ const App: React.FC = () => {
                                         <button
                                             onClick={() => setVizSettings({...vizSettings, colorMode: 'chakra'})}
                                             className={`text-[10px] py-1 rounded border ${vizSettings.colorMode === 'chakra' ? 'bg-blue-500 text-white border-blue-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
-                                            title="Hex fixed, Core cycles"
+                                            title="Chakra Colors"
                                         >
-                                            Hybrid
+                                            Chakra
                                         </button>
                                         <button
                                             onClick={() => setVizSettings({...vizSettings, colorMode: 'cycle'})}
                                             className={`text-[10px] py-1 rounded border ${vizSettings.colorMode === 'cycle' ? 'bg-purple-500 text-white border-purple-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
-                                            title="All colors cycle"
+                                            title="RGB Cycle Sync"
                                         >
                                             Hypnotic
                                         </button>
                                         <button
                                             onClick={() => setVizSettings({...vizSettings, colorMode: 'static'})}
                                             className={`text-[10px] py-1 rounded border ${vizSettings.colorMode === 'static' ? 'bg-gold-500 text-black border-gold-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
-                                            title="Locked to Solfeggio"
+                                            title="Single Color"
                                         >
                                             Static
                                         </button>
@@ -1421,7 +1438,7 @@ const App: React.FC = () => {
                 
                 <div className="hidden md:flex flex-col items-start w-48 order-1 opacity-60">
                    <span className="text-[9px] text-gold-500 uppercase tracking-widest">Aetheria Engine</span>
-                   <span className="text-[9px] text-slate-500">v2.9 • High-Res Analysis</span>
+                   <span className="text-[9px] text-slate-500">v3.1 • High-Res Analysis</span>
                 </div>
    
                 <div className="flex items-center justify-center gap-6 order-2 flex-1 w-full md:w-auto">

@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect } from 'react';
 import { VizSettings } from '../types';
 
@@ -20,6 +19,7 @@ interface Particle {
   basePhase: number; 
   color: string; // Dynamic RGB string
   size: number;
+  noise: { x: number, y: number, z: number }; // Per-particle noise offset
 }
 
 interface HexCell {
@@ -221,16 +221,7 @@ const getDodecahedronPoints = (count: number, scale: number): Point3D[] => {
     const invPhi = 1/phi;
     const v: Point3D[] = [];
     
-    // Cube vertices
-    [-1,1].forEach(x => [-1,1].forEach(y => [-1,1].forEach(z => v.push({x,y,z}))));
-    
-    // Rectangle vertices
-    [-1,1].forEach(i => [-1,1].forEach(j => {
-        v.push({x:0, y:i*phi, z:j*invPhi});
-        v.push({x:i*invPhi, y:j*phi, z:0}); // Wait, orientation
-        v.push({x:i*phi, y:0, z:j*invPhi}); // Actually standard is (0, ±1/φ, ±φ), (±1/φ, ±φ, 0), (±φ, 0, ±1/φ)
-    }));
-    // Let's use standard definition
+    // Standard vertices
     const v2 = [
         // (±1, ±1, ±1)
         {x:1,y:1,z:1}, {x:1,y:1,z:-1}, {x:1,y:-1,z:1}, {x:1,y:-1,z:-1},
@@ -243,14 +234,9 @@ const getDodecahedronPoints = (count: number, scale: number): Point3D[] => {
         {x:phi,y:0,z:invPhi}, {x:phi,y:0,z:-invPhi}, {x:-phi,y:0,z:invPhi}, {x:-phi,y:0,z:-invPhi}
     ];
 
-    // Edges are complex to map manually, so we will use a "nearest neighbor" approach 
-    // to generate a cloud that represents the hull.
     const points: Point3D[] = [];
     for(let i=0; i<count; i++) {
-        // Pick 2 random vertices
         const vA = v2[Math.floor(Math.random()*v2.length)];
-        // Find closest neighbors (distance < 1.3 approx for edges)
-        // Simplified: Just interpolate random pairs that are close
         let vB = v2[Math.floor(Math.random()*v2.length)];
         const dist = Math.sqrt((vA.x-vB.x)**2 + (vA.y-vB.y)**2 + (vA.z-vB.z)**2);
         
@@ -262,7 +248,6 @@ const getDodecahedronPoints = (count: number, scale: number): Point3D[] => {
                 z: (vA.z + (vB.z - vA.z)*t) * scale
             });
         } else {
-             // Fallback to vertices
              points.push({x:vA.x*scale, y:vA.y*scale, z:vA.z*scale});
         }
     }
@@ -367,7 +352,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
             vx: 0, vy: 0, vz: 0,
             basePhase: Math.random() * Math.PI * 2,
             color: primaryColor,
-            size: Math.random() * 2 + 0.5
+            size: Math.random() * 2 + 1.0,
+            noise: { x: Math.random(), y: Math.random(), z: Math.random() }
         });
     }
     particlesRef.current = newParticles;
@@ -404,6 +390,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
   // Handle Geometry Morphing based on Frequency
   useEffect(() => {
+    // If we want the geometry to update, we can't block it too strictly, but we should avoid re-calculating identical frames.
+    // However, if we change frequency, we MUST update.
     if (Math.abs(selectedFrequency - prevFreqRef.current) < 5) return;
     prevFreqRef.current = selectedFrequency;
 
@@ -414,31 +402,22 @@ const Visualizer: React.FC<VisualizerProps> = ({
     // SACRED GEOMETRY EQ MAPPING
     // Map Solfeggio Frequencies to Sacred Geometry
     if (selectedFrequency <= 180) {
-        // 174 Hz - Earth Star -> Cube (Stability)
         newTargets = getCubePoints(pCount, scale);
     } else if (selectedFrequency <= 300) {
-        // 285 Hz - Root -> Reiki Symbol (Healing)
         newTargets = getReikiPoints(pCount, scale);
     } else if (selectedFrequency <= 400) {
-        // 396 Hz - Root -> Tetrahedron (Fire/Liberation)
         newTargets = getTetrahedronPoints(pCount, scale);
     } else if (selectedFrequency <= 450) {
-        // 417 Hz - Sacral -> Icosahedron (Water/Change)
         newTargets = getIcosahedronPoints(pCount, scale);
     } else if (selectedFrequency <= 580) {
-        // 528 Hz - Solar Plexus -> Octahedron (Air/Transformation)
         newTargets = getOctahedronPoints(pCount, scale);
     } else if (selectedFrequency <= 680) {
-        // 639 Hz - Heart -> Merkaba (Connection)
         newTargets = getMerkabaPoints(pCount, scale);
     } else if (selectedFrequency <= 780) {
-        // 741 Hz - Throat -> Dodecahedron (Ether/Expression)
         newTargets = getDodecahedronPoints(pCount, scale);
     } else if (selectedFrequency <= 900) {
-        // 852 Hz - Third Eye -> Torus (Intuition)
         newTargets = getTorusPoints(pCount, scale);
     } else {
-        // 963 Hz - Crown -> Fibonacci Sphere (Oneness)
         newTargets = getFibonacciSpherePoints(pCount, scale);
     }
 
@@ -449,7 +428,6 @@ const Visualizer: React.FC<VisualizerProps> = ({
             p.ty = newTargets[i].y;
             p.tz = newTargets[i].z;
         } else {
-            // Fold excess into center or loop
             const backup = newTargets[i % newTargets.length];
             p.tx = backup.x; p.ty = backup.y; p.tz = backup.z;
         }
@@ -521,18 +499,12 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
       // 5. Water Ripples Logic
       if (settings.showWaterRipples && isPlaying) {
-           // Intensity Modifier:
-           // High intensity (2.0) -> Multiplier 2.0 (Threshold drops effectively)
-           // Low intensity (0.1) -> Multiplier 0.1 (Threshold raises effectively)
            const intensity = settings.hydroIntensity || 1.0;
-           
            if ((bassEnergy * intensity) > 0.5 && bassEnergy > prevBassRef.current + 0.1 * settings.sensitivity) {
               ripplesRef.current.push({ x: cx, y: cy, radius: 10, maxRadius: Math.max(w, h) * 0.9, alpha: 1.0, speed: 6 * settings.speed, color: primaryStr, type: 'bass' });
            }
-           // Rain Probability increases with intensity
            const rainThreshold = 0.35 / Math.max(0.1, intensity);
-           const rainProbability = 0.7 - (intensity * 0.2); // Lower is more frequent
-           
+           const rainProbability = 0.7 - (intensity * 0.2); 
            if (highEnergy > rainThreshold && Math.random() > Math.max(0.1, rainProbability)) {
               ripplesRef.current.push({ x: Math.random() * w, y: Math.random() * h, radius: 0, maxRadius: 200, alpha: 0.8, speed: 3 * settings.speed, color: Math.random() > 0.5 ? shade2Str : shade1Str, type: 'rain' });
            }
@@ -541,6 +513,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
       prevHighRef.current = highEnergy;
 
       // CLEAR SCREEN
+      ctx.globalCompositeOperation = 'source-over';
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, w, h);
 
@@ -656,47 +629,117 @@ const Visualizer: React.FC<VisualizerProps> = ({
         ctx.save();
         ctx.translate(cx, cy);
         
-        // Slow rotation of the geometry container
-        const rotSpeed = timeRef.current * 0.2;
+        // Invert Perspective (Ascension Mode)
+        // Flip Y-axis to make particles feel like they are rising/geometry is above
+        if (settings.invertPerspective) {
+            ctx.scale(1, -1);
+        }
+
+        // Auto Rotation
+        const rotSpeed = settings.autoRotate ? timeRef.current * 0.1 : 0;
         ctx.rotate(rotSpeed);
         
+        // Use Additive Blending for Glow Effect
+        // This makes overlapping particles brighter
+        ctx.globalCompositeOperation = 'lighter';
+
+        // Morph Logic: If morph is DISABLED, we target a simple Sphere/Cloud instead of Sacred Geometry
+        const morphSpeed = 0.15 * settings.speed; // Faster morphing
+        const particleBaseSize = settings.particleBaseSize || 2.5;
+
         particlesRef.current.forEach((p, index) => {
-            // Morphing Logic: Lerp towards target
-            const speed = 0.05 * settings.speed;
-            p.x += (p.tx - p.x) * speed;
-            p.y += (p.ty - p.y) * speed;
-            p.z += (p.tz - p.z) * speed;
             
-            // Sacred Geometry Emanation (Golden Ratio Coloring)
-            if (activeNodeColor && isPlaying) {
-                 // The "Golden Ratio" effect: if index is close to Golden section, adopt active color
-                 // We use the residue of index * PHI to distribute the color "sparkles" evenly but naturally
+            // 1. Target Position Logic
+            let targetX = p.tx;
+            let targetY = p.ty;
+            let targetZ = p.tz;
+
+            if (!settings.morphEnabled) {
+                // If morph disabled, target is a loose cloud based on original sphere calc or noise
+                // We use basePhase to keep them in a consistent "cloud" spot
+                const r = 350;
+                targetX = Math.cos(p.basePhase) * Math.sin(index) * r;
+                targetY = Math.sin(p.basePhase) * Math.sin(index) * r;
+                targetZ = Math.cos(index) * r;
+            }
+
+            p.x += (targetX - p.x) * morphSpeed;
+            p.y += (targetY - p.y) * morphSpeed;
+            p.z += (targetZ - p.z) * morphSpeed;
+
+            // 2. Motion Logic (Flow/Float/Pulse) - Additive to base position
+            let mx = 0, my = 0, mz = 0;
+            
+            if (settings.particleMotion === 'flow') {
+                // Flow along Z-axis
+                const flowSpeed = 2 * settings.speed;
+                // Add noise to make it less uniform
+                const loopZ = (timeRef.current * 80 * settings.speed + p.noise.z * 1000) % 2000;
+                mz = loopZ - 1000; 
+            } else if (settings.particleMotion === 'float') {
+                // Gentle wandering
+                mx = Math.sin(timeRef.current * 0.5 + p.noise.x * 10) * 30;
+                my = Math.cos(timeRef.current * 0.3 + p.noise.y * 10) * 30;
+                mz = Math.sin(timeRef.current * 0.2 + p.noise.z * 10) * 30;
+            } else if (settings.particleMotion === 'pulse') {
+                // Expansion/Contraction
+                const pulse = 1 + Math.sin(timeRef.current * 3 + index * 0.1) * 0.4 * bassEnergy;
+                mx = p.x * (pulse - 1);
+                my = p.y * (pulse - 1);
+                mz = p.z * (pulse - 1);
+            }
+
+            // 3. Color Logic
+            if (settings.colorMode === 'cycle') {
+                // Hypnotic RGB Mode: Syncs with EQ
+                // Base Hue rotates with time + particle index
+                const cycleSpeed = 30 * settings.speed;
+                const baseHue = (timeRef.current * cycleSpeed + (index / particlesRef.current.length) * 360) % 360;
+                
+                // Shift hue by bass energy
+                const hue = (baseHue + bassEnergy * 60) % 360;
+                const sat = 70 + highEnergy * 30;
+                const lit = 50 + bassEnergy * 30;
+                
+                p.color = `hsl(${hue}, ${sat}%, ${lit}%)`;
+            } else if (settings.colorMode === 'chakra') {
                  const phiResidue = (index * PHI) % 1;
-                 // 20% of particles take on the active Sephirot color
-                 if (phiResidue < 0.2) {
+                 if (activeNodeColor && isPlaying && phiResidue < 0.2) {
                      p.color = activeNodeColor;
-                     // Slight jitter to make it look like energy pulsating
-                     p.x += (Math.random() - 0.5) * 5;
-                     p.y += (Math.random() - 0.5) * 5;
-                 } else if (Math.random() > 0.98) {
-                     // Slowly revert others to primary
+                 } else {
                      p.color = primaryColor;
                  }
+            } else {
+                // Static
+                p.color = primaryColor;
             }
 
             // 3D Projection
-            const fov = 300;
-            const scale = fov / (fov + p.z + 200);
-            const px = p.x * scale;
-            const py = p.y * scale;
-            const size = p.size * scale;
+            const fov = 400; 
+            const finalX = p.x + mx;
+            const finalY = p.y + my;
+            const finalZ = p.z + mz;
+
+            const scale = fov / (fov + finalZ + 200);
             
-            // Draw
-            ctx.beginPath();
-            ctx.arc(px, py, size, 0, Math.PI * 2);
-            ctx.fillStyle = p.color;
-            ctx.globalAlpha = Math.min(1, (p.z + 400) / 600) * 0.8;
-            ctx.fill();
+            // Avoid drawing behind camera or too far
+            if (scale > 0 && scale < 20) {
+                const px = finalX * scale;
+                const py = finalY * scale;
+                
+                // Size Calculation: Larger base size, scaled by depth
+                const size = Math.max(0.5, p.size * particleBaseSize * scale);
+                
+                // Alpha Calculation: Fade out if too close (clipping) or too far
+                const depthAlpha = Math.min(1, Math.max(0, (finalZ + 800) / 1000));
+                
+                ctx.beginPath();
+                ctx.arc(px, py, size, 0, Math.PI * 2);
+                ctx.fillStyle = p.color;
+                // Reduce alpha slightly for additive blending to prevent whiteout
+                ctx.globalAlpha = depthAlpha * 0.7; 
+                ctx.fill();
+            }
         });
         ctx.restore();
       }
