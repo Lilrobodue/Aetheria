@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2, 
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, CHAKRA_INFO_TEXT, SEPHIROT_INFO, TREE_OF_LIFE_EXPLANATION, GEOMETRY_INFO } from './constants';
@@ -221,11 +221,26 @@ const App: React.FC = () => {
   
   const [isVizPanelOpen, setIsVizPanelOpen] = useState(true);
 
+  // Disclaimer State
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+
+  useEffect(() => {
+    const accepted = localStorage.getItem('aetheria_v3_disclaimer');
+    if (accepted === 'true') {
+        setDisclaimerAccepted(true);
+    }
+  }, []);
+
+  const acceptDisclaimer = () => {
+      localStorage.setItem('aetheria_v3_disclaimer', 'true');
+      setDisclaimerAccepted(true);
+  };
+
   const [vizSettings, setVizSettings] = useState<VizSettings>({
     speed: 1.0,
     sensitivity: 1.0,
     particleDensity: 'medium',
-    particleBaseSize: 2.5, 
+    particleBaseSize: 3.5, // Increased default size
     coreSize: 1.0,
     showHexagons: true,
     hexOpacity: 0.6,
@@ -789,6 +804,36 @@ const App: React.FC = () => {
   return (
     <div className={`relative min-h-screen bg-black text-slate-200 font-sans overflow-hidden ${isFullScreen ? 'h-screen' : ''}`}>
       
+      {/* Disclaimer Modal */}
+      {!disclaimerAccepted && (
+        <div className="fixed inset-0 z-[150] bg-black/95 flex items-center justify-center p-6 backdrop-blur-md">
+            <div className="max-w-md w-full bg-slate-900 border border-gold-500/30 p-8 rounded-2xl shadow-2xl text-center relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent"></div>
+                 <AlertTriangle className="w-12 h-12 text-gold-500 mx-auto mb-4 animate-pulse" />
+                 <h2 className="text-2xl font-serif text-white mb-2 tracking-wide">Welcome to Aetheria</h2>
+                 <p className="text-xs text-slate-500 mb-6 uppercase tracking-widest">Resonance & Geometry Player</p>
+                 
+                 <div className="text-left text-slate-400 text-sm mb-6 space-y-4 bg-black/40 p-5 rounded-lg border border-slate-800">
+                    <p className="flex gap-2">
+                        <Zap size={16} className="text-gold-500 shrink-0 mt-0.5" />
+                        <span><strong className="text-slate-200">Photosensitivity Warning:</strong> This application generates intense visual patterns, flashing lights, and geometric strobing effects.</span>
+                    </p>
+                    <p className="flex gap-2">
+                        <Waves size={16} className="text-blue-500 shrink-0 mt-0.5" />
+                        <span><strong className="text-slate-200">Audio Disclaimer:</strong> Contains binaural beats and solfeggio frequencies. Do not use while driving or operating heavy machinery.</span>
+                    </p>
+                    <p className="text-xs text-slate-500 italic mt-2 text-center border-t border-slate-800 pt-2">
+                        By proceeding, you acknowledge this is for entertainment and meditation purposes only.
+                    </p>
+                 </div>
+                 
+                 <button onClick={acceptDisclaimer} className="w-full py-3 bg-gold-600 hover:bg-gold-500 text-black font-bold rounded-xl transition-all hover:scale-[1.02] active:scale-95 shadow-[0_0_20px_rgba(234,179,8,0.3)]">
+                    I Understand & Accept
+                 </button>
+            </div>
+        </div>
+      )}
+
       <div className="absolute inset-0 z-0 pointer-events-none">
         <Visualizer 
             analyser={analyserNode} 

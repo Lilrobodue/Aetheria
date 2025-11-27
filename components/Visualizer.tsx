@@ -358,7 +358,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
     }
     particlesRef.current = newParticles;
 
-    // Initialize Hex Grid (Same as before)
+    // Initialize Hex Grid
     const hexCells: HexCell[] = [];
     const size = 40;
     const cols = 30; 
@@ -636,8 +636,10 @@ const Visualizer: React.FC<VisualizerProps> = ({
         }
 
         // Auto Rotation
-        const rotSpeed = settings.autoRotate ? timeRef.current * 0.1 : 0;
-        ctx.rotate(rotSpeed);
+        if (settings.autoRotate) {
+             const rotSpeed = timeRef.current * 0.1;
+             ctx.rotate(rotSpeed);
+        }
         
         // Use Additive Blending for Glow Effect
         // This makes overlapping particles brighter
@@ -657,9 +659,10 @@ const Visualizer: React.FC<VisualizerProps> = ({
             if (!settings.morphEnabled) {
                 // If morph disabled, target is a loose cloud based on original sphere calc or noise
                 // We use basePhase to keep them in a consistent "cloud" spot
-                const r = 350;
-                targetX = Math.cos(p.basePhase) * Math.sin(index) * r;
-                targetY = Math.sin(p.basePhase) * Math.sin(index) * r;
+                // Increased chaos for "Cloud" mode so it looks distinctly different from geometry
+                const r = 400 + Math.sin(timeRef.current + index) * 50;
+                targetX = Math.cos(p.basePhase + timeRef.current * 0.1) * Math.sin(index) * r;
+                targetY = Math.sin(p.basePhase + timeRef.current * 0.1) * Math.sin(index) * r;
                 targetZ = Math.cos(index) * r;
             }
 
@@ -672,7 +675,6 @@ const Visualizer: React.FC<VisualizerProps> = ({
             
             if (settings.particleMotion === 'flow') {
                 // Flow along Z-axis
-                const flowSpeed = 2 * settings.speed;
                 // Add noise to make it less uniform
                 const loopZ = (timeRef.current * 80 * settings.speed + p.noise.z * 1000) % 2000;
                 mz = loopZ - 1000; 
@@ -691,15 +693,15 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
             // 3. Color Logic
             if (settings.colorMode === 'cycle') {
-                // Hypnotic RGB Mode: Syncs with EQ
-                // Base Hue rotates with time + particle index
-                const cycleSpeed = 30 * settings.speed;
+                // Hypnotic RGB Mode: Syncs with EQ + Full Spectrum Gradient
+                // Base Hue rotates with time + particle index to create a rainbow flow
+                const cycleSpeed = 50 * settings.speed;
                 const baseHue = (timeRef.current * cycleSpeed + (index / particlesRef.current.length) * 360) % 360;
                 
-                // Shift hue by bass energy
+                // Shift hue by bass energy to make it reactive
                 const hue = (baseHue + bassEnergy * 60) % 360;
-                const sat = 70 + highEnergy * 30;
-                const lit = 50 + bassEnergy * 30;
+                const sat = 80;
+                const lit = 60 + highEnergy * 20; // Brighter on high notes
                 
                 p.color = `hsl(${hue}, ${sat}%, ${lit}%)`;
             } else if (settings.colorMode === 'chakra') {
@@ -737,7 +739,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
                 ctx.arc(px, py, size, 0, Math.PI * 2);
                 ctx.fillStyle = p.color;
                 // Reduce alpha slightly for additive blending to prevent whiteout
-                ctx.globalAlpha = depthAlpha * 0.7; 
+                ctx.globalAlpha = depthAlpha * 0.6; 
                 ctx.fill();
             }
         });
