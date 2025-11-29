@@ -240,7 +240,7 @@ const App: React.FC = () => {
     speed: 1.0,
     sensitivity: 1.0,
     particleDensity: 'medium',
-    particleBaseSize: 3.5, // Increased default size
+    particleBaseSize: 3.5, 
     coreSize: 1.0,
     showHexagons: true,
     hexOpacity: 0.6,
@@ -251,8 +251,10 @@ const App: React.FC = () => {
     colorMode: 'chakra',
     autoRotate: true,
     invertPerspective: false,
-    particleMotion: 'flow',
-    morphEnabled: true
+    morphEnabled: true,
+    enableFlow: true,
+    enableFloat: false,
+    enablePulse: false,
   });
 
   const [volume, setVolume] = useState(0.8);
@@ -262,7 +264,7 @@ const App: React.FC = () => {
   const [selectedBinaural, setSelectedBinaural] = useState<BinauralPreset>(BINAURAL_PRESETS[2]); 
   const [useChakraOrder, setUseChakraOrder] = useState(false);
   const [showSpectrum, setShowSpectrum] = useState(false);
-  const [isAdaptiveBinaural, setIsAdaptiveBinaural] = useState(false);
+  const [isAdaptiveBinaural, setIsAdaptiveBinaural] = useState(true); // Default ON
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -847,7 +849,7 @@ const App: React.FC = () => {
 
       <div className={`relative z-10 flex flex-col h-screen transition-opacity duration-1000 ${isZenMode ? 'opacity-0 hover:opacity-100 active:opacity-100' : 'bg-black/20'}`}>
         
-        <header className="flex justify-between items-center p-4 border-b border-slate-800/50 bg-black/80 backdrop-blur-md z-30 shadow-lg safe-area-top shrink-0">
+        <header className="flex justify-between items-center p-3 md:p-4 border-b border-slate-800/50 bg-black/80 backdrop-blur-md z-30 shadow-lg safe-area-top shrink-0">
           <div className="flex items-center gap-2">
              <button onClick={() => setShowSidebar(!showSidebar)} className="md:hidden text-gold-500 mr-2 p-1 hover:bg-slate-800 rounded">
                <Menu />
@@ -855,7 +857,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v3.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v3.2</span></h1>
           </div>
           <div className="flex gap-2 md:gap-4">
              
@@ -1107,7 +1109,7 @@ const App: React.FC = () => {
           </aside>
 
           {showSettings && (
-            <div className="absolute inset-y-0 right-0 z-30 w-full md:w-96 bg-black/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shadow-2xl transform transition-transform animate-in slide-in-from-right duration-300" onClick={e => e.stopPropagation()}>
+            <div className="absolute inset-y-0 right-0 z-30 w-full md:w-96 bg-black/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shadow-2xl transform transition-transform animate-in slide-in-from-right duration-300">
                 <div className="flex justify-between items-start p-6 border-b border-slate-800">
                   <h3 className="text-gold-500 font-serif text-xl">Harmonic Control</h3>
                   <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-slate-800 rounded-full"><X className="text-slate-500 hover:text-white" /></button>
@@ -1151,7 +1153,7 @@ const App: React.FC = () => {
                                         type="range" min="0.1" max="3" step="0.1"
                                         value={vizSettings.speed}
                                         onChange={(e) => setVizSettings({...vizSettings, speed: parseFloat(e.target.value)})}
-                                        className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none"
+                                        className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none touch-none"
                                     />
                                 </div>
                                 
@@ -1164,7 +1166,7 @@ const App: React.FC = () => {
                                         type="range" min="0.5" max="8.0" step="0.5"
                                         value={vizSettings.particleBaseSize}
                                         onChange={(e) => setVizSettings({...vizSettings, particleBaseSize: parseFloat(e.target.value)})}
-                                        className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none"
+                                        className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none touch-none"
                                     />
                                 </div>
 
@@ -1177,7 +1179,7 @@ const App: React.FC = () => {
                                         type="range" min="0.1" max="2" step="0.1"
                                         value={vizSettings.sensitivity}
                                         onChange={(e) => setVizSettings({...vizSettings, sensitivity: parseFloat(e.target.value)})}
-                                        className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none"
+                                        className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none touch-none"
                                     />
                                 </div>
 
@@ -1209,7 +1211,7 @@ const App: React.FC = () => {
                                         title="Hex Opacity"
                                         value={vizSettings.hexOpacity}
                                         onChange={(e) => setVizSettings({...vizSettings, hexOpacity: parseFloat(e.target.value)})}
-                                        className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none"
+                                        className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none touch-none"
                                       />
                                    </div>
                                 </div>
@@ -1247,7 +1249,7 @@ const App: React.FC = () => {
                                                 type="range" min="0.1" max="2.0" step="0.1"
                                                 value={vizSettings.hydroIntensity}
                                                 onChange={(e) => setVizSettings({...vizSettings, hydroIntensity: parseFloat(e.target.value)})}
-                                                className="w-full accent-blue-500 h-1.5 bg-slate-700 rounded-lg appearance-none"
+                                                className="w-full accent-blue-500 h-1.5 bg-slate-700 rounded-lg appearance-none touch-none"
                                             />
                                         </div>
                                     )}
@@ -1296,23 +1298,23 @@ const App: React.FC = () => {
                                 </div>
 
                                 <div>
-                                    <div className="text-[10px] text-slate-400 mb-1 uppercase tracking-widest">Particle Physics</div>
+                                    <div className="text-[10px] text-slate-400 mb-1 uppercase tracking-widest">Particle Physics (Mixable)</div>
                                     <div className="grid grid-cols-3 gap-1">
                                         <button
-                                            onClick={() => setVizSettings({...vizSettings, particleMotion: 'flow'})}
-                                            className={`text-[10px] py-1 rounded border flex items-center justify-center gap-1 ${vizSettings.particleMotion === 'flow' ? 'bg-blue-500/20 text-blue-400 border-blue-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
+                                            onClick={() => setVizSettings({...vizSettings, enableFlow: !vizSettings.enableFlow})}
+                                            className={`text-[10px] py-1 rounded border flex items-center justify-center gap-1 transition-all ${vizSettings.enableFlow ? 'bg-blue-500/20 text-blue-400 border-blue-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
                                         >
                                             <Waves size={10} /> Flow
                                         </button>
                                         <button
-                                            onClick={() => setVizSettings({...vizSettings, particleMotion: 'float'})}
-                                            className={`text-[10px] py-1 rounded border flex items-center justify-center gap-1 ${vizSettings.particleMotion === 'float' ? 'bg-purple-500/20 text-purple-400 border-purple-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
+                                            onClick={() => setVizSettings({...vizSettings, enableFloat: !vizSettings.enableFloat})}
+                                            className={`text-[10px] py-1 rounded border flex items-center justify-center gap-1 transition-all ${vizSettings.enableFloat ? 'bg-purple-500/20 text-purple-400 border-purple-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
                                         >
                                             <Wind size={10} /> Float
                                         </button>
                                         <button
-                                            onClick={() => setVizSettings({...vizSettings, particleMotion: 'pulse'})}
-                                            className={`text-[10px] py-1 rounded border flex items-center justify-center gap-1 ${vizSettings.particleMotion === 'pulse' ? 'bg-red-500/20 text-red-400 border-red-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
+                                            onClick={() => setVizSettings({...vizSettings, enablePulse: !vizSettings.enablePulse})}
+                                            className={`text-[10px] py-1 rounded border flex items-center justify-center gap-1 transition-all ${vizSettings.enablePulse ? 'bg-red-500/20 text-red-400 border-red-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
                                         >
                                             <PulseIcon size={10} /> Pulse
                                         </button>
@@ -1373,10 +1375,8 @@ const App: React.FC = () => {
                         type="range" 
                         min="0" max="1" step="0.01" 
                         value={solfeggioVolume}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onTouchStart={(e) => e.stopPropagation()}
                         onChange={(e) => setSolfeggioVolume(parseFloat(e.target.value))}
-                        className="w-full accent-gold-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                        className="w-full accent-gold-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer touch-none"
                       />
                     </div>
                   </div>
@@ -1388,7 +1388,7 @@ const App: React.FC = () => {
                             onClick={() => setIsAdaptiveBinaural(!isAdaptiveBinaural)}
                             className={`text-[10px] px-2 py-1 rounded border flex items-center gap-1 transition-colors ${isAdaptiveBinaural ? 'bg-blue-500/20 text-blue-400 border-blue-500' : 'border-slate-700 text-slate-500'}`}
                         >
-                            <Sparkles size={10} /> {isAdaptiveBinaural ? 'Adaptive On' : 'Adaptive Off'}
+                            <Sparkles size={10} /> {isAdaptiveBinaural ? 'Adaptive ON' : 'Adaptive OFF'}
                         </button>
                     </div>
 
@@ -1396,7 +1396,7 @@ const App: React.FC = () => {
                        {BINAURAL_PRESETS.map((p) => (
                           <div 
                             key={p.name} 
-                            onClick={() => setSelectedBinaural(p)}
+                            onClick={() => { setSelectedBinaural(p); setIsAdaptiveBinaural(false); }}
                             className={`flex items-center p-3 rounded-lg cursor-pointer border transition-all ${selectedBinaural.name === p.name ? 'border-blue-500 bg-blue-500/10' : 'border-slate-800 bg-slate-900 hover:border-slate-600'}`}
                           >
                             <div className={`w-4 h-4 rounded-full border-2 mr-3 flex items-center justify-center ${selectedBinaural.name === p.name ? 'border-blue-500' : 'border-slate-600'}`}>
@@ -1418,11 +1418,8 @@ const App: React.FC = () => {
                         type="range" 
                         min="0" max="0.5" step="0.01" 
                         value={binauralVolume}
-                        onClick={(e) => e.stopPropagation()}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onTouchStart={(e) => e.stopPropagation()}
                         onChange={(e) => setBinauralVolume(parseFloat(e.target.value))}
-                        className="w-full accent-blue-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                        className="w-full accent-blue-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer touch-none"
                       />
                     </div>
                   </div>
@@ -1483,10 +1480,10 @@ const App: React.FC = () => {
                 
                 <div className="hidden md:flex flex-col items-start w-48 order-1 opacity-60">
                    <span className="text-[9px] text-gold-500 uppercase tracking-widest">Aetheria Engine</span>
-                   <span className="text-[9px] text-slate-500">v3.1 • High-Res Analysis</span>
+                   <span className="text-[9px] text-slate-500">v3.2 • High-Res Analysis</span>
                 </div>
    
-                <div className="flex items-center justify-center gap-6 order-2 flex-1 w-full md:w-auto">
+                <div className="flex items-center justify-center gap-4 md:gap-6 order-2 flex-1 w-full md:w-auto">
                   <button 
                      onClick={() => setIsShuffle(!isShuffle)} 
                      className={`p-2 rounded-full transition-all ${isShuffle ? 'text-gold-500' : 'text-slate-600 hover:text-slate-400'}`}
@@ -1500,7 +1497,7 @@ const App: React.FC = () => {
    
                   <button 
                      onClick={handlePlayPause}
-                     className="w-14 h-14 rounded-full bg-white text-black flex items-center justify-center shadow-[0_0_25px_rgba(255,255,255,0.3)] hover:scale-105 active:scale-95 transition-all"
+                     className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-white text-black flex items-center justify-center shadow-[0_0_25px_rgba(255,255,255,0.3)] hover:scale-105 active:scale-95 transition-all"
                   >
                        {isPlaying ? <Pause size={24} fill="black" /> : <Play size={24} fill="black" className="ml-1" />}
                   </button>
@@ -1517,14 +1514,14 @@ const App: React.FC = () => {
                   </button>
                 </div>
    
-                <div className="flex items-center gap-3 w-full md:w-48 justify-end order-3">
+                <div className="flex items-center gap-3 w-full md:w-48 justify-center md:justify-end order-3">
                   <Volume2 size={16} className="text-slate-500 shrink-0" />
                   <input 
                     type="range" 
                     min="0" max="1" step="0.05" 
                     value={volume}
                     onChange={(e) => setVolume(parseFloat(e.target.value))}
-                    className="w-full accent-gold-500 h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer"
+                    className="w-full accent-gold-500 h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer touch-none"
                   />
                 </div>
              </div>

@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect } from 'react';
 import { VizSettings } from '../types';
 
@@ -390,8 +391,6 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
   // Handle Geometry Morphing based on Frequency
   useEffect(() => {
-    // If we want the geometry to update, we can't block it too strictly, but we should avoid re-calculating identical frames.
-    // However, if we change frequency, we MUST update.
     if (Math.abs(selectedFrequency - prevFreqRef.current) < 5) return;
     prevFreqRef.current = selectedFrequency;
 
@@ -400,7 +399,6 @@ const Visualizer: React.FC<VisualizerProps> = ({
     let newTargets: Point3D[] = [];
 
     // SACRED GEOMETRY EQ MAPPING
-    // Map Solfeggio Frequencies to Sacred Geometry
     if (selectedFrequency <= 180) {
         newTargets = getCubePoints(pCount, scale);
     } else if (selectedFrequency <= 300) {
@@ -595,17 +593,52 @@ const Visualizer: React.FC<VisualizerProps> = ({
         const scaleUnit = Math.min(50, availableHeight / 11); 
         const breathing = Math.sin(timeRef.current * 0.5) * 5;
         
-        treeRef.current.edges.forEach(([startIdx, endIdx]) => {
+        // Animated Edges
+        treeRef.current.edges.forEach(([startIdx, endIdx], i) => {
             const sn = treeRef.current.nodes[startIdx];
             const en = treeRef.current.nodes[endIdx];
-            const sx = sn.x * scaleUnit, sy = -sn.y * scaleUnit; 
-            const ex = en.x * scaleUnit, ey = -en.y * scaleUnit;
+            // Apply breathing to edge coordinates too, to stay attached to nodes
+            const sx = sn.x * scaleUnit, sy = -sn.y * scaleUnit + breathing; 
+            const ex = en.x * scaleUnit, ey = -en.y * scaleUnit + breathing;
+
+            // 1. Static connection (Dimmed background)
             const grad = ctx.createLinearGradient(sx, sy, ex, ey);
             grad.addColorStop(0, sn.colorHex); grad.addColorStop(1, en.colorHex);
             ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey);
-            ctx.strokeStyle = grad; ctx.globalAlpha = 0.5; ctx.lineWidth = 2; ctx.stroke();
+            ctx.strokeStyle = grad; ctx.globalAlpha = 0.15; ctx.lineWidth = 1; ctx.stroke();
+
+            // 2. Harmonic Flow (Energy Particle)
+            // Energy flows from source node to destination node
+            const sourceEnergy = sn.currentEnergy || 0;
+            // Base flow plus extra if source is active
+            const flowIntensity = 0.2 + (sourceEnergy * 0.8);
+            
+            if (flowIntensity > 0.05) {
+                const flowSpeed = 0.4 * settings.speed;
+                // Offset phase so edges don't flash in perfect unison
+                const phase = (timeRef.current * flowSpeed + (i * 0.7)) % 1;
+                
+                // Lerp position
+                const px = sx + (ex - sx) * phase;
+                const py = sy + (ey - sy) * phase;
+
+                // Glowing Head (Source Color)
+                ctx.beginPath();
+                ctx.arc(px, py, 2 + (sourceEnergy * 4), 0, Math.PI * 2);
+                ctx.fillStyle = sn.colorHex; 
+                ctx.globalAlpha = flowIntensity;
+                ctx.fill();
+
+                // White Hot Core
+                ctx.beginPath();
+                ctx.arc(px, py, 1 + (sourceEnergy * 2), 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.globalAlpha = flowIntensity + 0.2;
+                ctx.fill();
+            }
         });
 
+        // Nodes
         treeRef.current.nodes.forEach(node => {
             const nx = node.x * scaleUnit, ny = -node.y * scaleUnit + breathing;
             const radius = scaleUnit * 0.25 * (1 + (node.currentEnergy || 0));
@@ -673,22 +706,38 @@ const Visualizer: React.FC<VisualizerProps> = ({
             // 2. Motion Logic (Flow/Float/Pulse) - Additive to base position
             let mx = 0, my = 0, mz = 0;
             
-            if (settings.particleMotion === 'flow') {
+            if (settings.enableFlow) {
                 // Flow along Z-axis
-                // Add noise to make it less uniform
-                const loopZ = (timeRef.current * 80 * settings.speed + p.noise.z * 1000) % 2000;
-                mz = loopZ - 1000; 
-            } else if (settings.particleMotion === 'float') {
+                const direction = settings.invertPerspective ? -1 : 1;
+                // If inverted (ascending), we might want particles to flow 'down' or 'up' relative to camera
+                // Standard flow: particles come towards camera (Z increase).
+                // Ascension flow: reverse it.
+                
+                const zRange = 2000;
+                const flowSpeed = 80 * settings.speed;
+                // Add large constant to avoid negative modulo issues
+                const timeOffset = (timeRef.current * flowSpeed * direction) + (p.noise.z * zRange);
+                // Wrap around zRange
+                let flowZ = (timeOffset % zRange);
+                
+                // Adjust to be centered around 0 (-1000 to 1000)
+                if (flowZ < 0) flowZ += zRange;
+                mz += flowZ - (zRange / 2);
+            } 
+            
+            if (settings.enableFloat) {
                 // Gentle wandering
-                mx = Math.sin(timeRef.current * 0.5 + p.noise.x * 10) * 30;
-                my = Math.cos(timeRef.current * 0.3 + p.noise.y * 10) * 30;
-                mz = Math.sin(timeRef.current * 0.2 + p.noise.z * 10) * 30;
-            } else if (settings.particleMotion === 'pulse') {
+                mx += Math.sin(timeRef.current * 0.5 + p.noise.x * 10) * 30;
+                my += Math.cos(timeRef.current * 0.3 + p.noise.y * 10) * 30;
+                mz += Math.sin(timeRef.current * 0.2 + p.noise.z * 10) * 30;
+            } 
+            
+            if (settings.enablePulse) {
                 // Expansion/Contraction
                 const pulse = 1 + Math.sin(timeRef.current * 3 + index * 0.1) * 0.4 * bassEnergy;
-                mx = p.x * (pulse - 1);
-                my = p.y * (pulse - 1);
-                mz = p.z * (pulse - 1);
+                mx += p.x * (pulse - 1);
+                my += p.y * (pulse - 1);
+                mz += p.z * (pulse - 1);
             }
 
             // 3. Color Logic

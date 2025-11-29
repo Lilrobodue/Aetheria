@@ -62,8 +62,12 @@ export interface VizSettings {
   colorMode: 'chakra' | 'cycle' | 'static'; 
   
   // Motion Logic
-  autoRotate: boolean; // New: Toggle rotation
-  invertPerspective: boolean; // New: Flip Y/Z axis
-  particleMotion: 'flow' | 'float' | 'pulse';
+  autoRotate: boolean; 
+  invertPerspective: boolean; // Ascension Mode
   morphEnabled: boolean; 
+  
+  // Physics Toggles (Independent)
+  enableFlow: boolean;
+  enableFloat: boolean;
+  enablePulse: boolean;
 }
