@@ -495,23 +495,23 @@ const Visualizer: React.FC<VisualizerProps> = ({
          }
       });
 
-      // 5. Water Ripples Logic with Natural Scaling
+      // 5. Water Ripples Logic with Natural Scaling (0-100 Non-Linear)
       if (settings.showWaterRipples && isPlaying) {
-           // Map 0-100 scale to physical intensity parameters
-           // Use a slight curve so 0-50% is gentle, 50-100% gets intense
+           // Apply a power curve so the effect ramps up naturally. 
+           // 0-40 is very subtle, 50-80 is moderate, 80-100 is storm-like.
            const rawInput = settings.hydroIntensity || 0;
-           const normalizedInput = rawInput / 100; // 0 to 1
-           const physicalIntensity = Math.pow(normalizedInput, 1.5) * 2.0; // 0 to 2.0 with curve
+           const normalizedCurve = Math.pow(rawInput / 100, 1.5); // 0 to 1 curved
+           const physicalIntensity = normalizedCurve * 2.5; // Scale up for visual impact
            
-           if ((bassEnergy * physicalIntensity) > 0.4 && bassEnergy > prevBassRef.current + 0.05) {
+           if ((bassEnergy * physicalIntensity) > 0.3 && bassEnergy > prevBassRef.current + 0.05) {
               ripplesRef.current.push({ x: cx, y: cy, radius: 10, maxRadius: Math.max(w, h) * 0.9, alpha: 1.0, speed: 6 * settings.speed, color: primaryStr, type: 'bass' });
            }
            
            // Rain Probability increases with intensity
-           const rainThreshold = 0.8 - (normalizedInput * 0.6); // High intensity lowers threshold
+           const rainThreshold = 0.9 - (normalizedCurve * 0.7); // High intensity lowers threshold drastically
            
-           if (highEnergy > rainThreshold && Math.random() < normalizedInput * 0.5) {
-              ripplesRef.current.push({ x: Math.random() * w, y: Math.random() * h, radius: 0, maxRadius: 150 + (normalizedInput * 150), alpha: 0.6 + (normalizedInput * 0.4), speed: 3 * settings.speed, color: Math.random() > 0.5 ? shade2Str : shade1Str, type: 'rain' });
+           if (highEnergy > rainThreshold && Math.random() < normalizedCurve * 0.6) {
+              ripplesRef.current.push({ x: Math.random() * w, y: Math.random() * h, radius: 0, maxRadius: 150 + (normalizedCurve * 200), alpha: 0.6 + (normalizedCurve * 0.4), speed: 3 * settings.speed, color: Math.random() > 0.5 ? shade2Str : shade1Str, type: 'rain' });
            }
       }
       prevBassRef.current = bassEnergy;
@@ -592,7 +592,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
           ctx.restore();
       }
 
-      // --- LAYER 3: TREE OF LIFE (3D Enhanced) ---
+      // --- LAYER 3: TREE OF LIFE (3D Sephirot + High-Vis Flow) ---
       if (settings.showTreeOfLife) {
         ctx.save();
         ctx.translate(cx, cy);
@@ -600,7 +600,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
         const scaleUnit = Math.min(50, availableHeight / 11); 
         const breathing = Math.sin(timeRef.current * 0.5) * 5;
         
-        // 1. Edges with Visible Energy Flow
+        // 1. Edges with "Comet" Energy Flow
         treeRef.current.edges.forEach(([startIdx, endIdx], i) => {
             const sn = treeRef.current.nodes[startIdx];
             const en = treeRef.current.nodes[endIdx];
@@ -613,99 +613,121 @@ const Visualizer: React.FC<VisualizerProps> = ({
             ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey);
             ctx.strokeStyle = grad; ctx.globalAlpha = 0.2; ctx.lineWidth = 2; ctx.stroke();
 
-            // Energy "Comet" - Enhanced Visibility
+            // High Visibility Comet
             const sourceEnergy = sn.currentEnergy || 0;
-            const flowIntensity = 0.3 + (sourceEnergy * 0.7);
+            // Always show a faint flow, boost with energy
+            const flowIntensity = 0.2 + (sourceEnergy * 0.8);
             
-            if (flowIntensity > 0.1) {
-                const flowSpeed = 0.5 * settings.speed;
+            if (flowIntensity > 0.05) {
+                const flowSpeed = 0.6 * settings.speed;
                 const phase = (timeRef.current * flowSpeed + (i * 0.7)) % 1;
                 
-                // Head position
+                // Current position
                 const px = sx + (ex - sx) * phase;
                 const py = sy + (ey - sy) * phase;
 
-                // Tail calculation (look significantly behind in time for longer tail)
-                const tailLen = 0.3; // Longer tail
-                const prevPhase = Math.max(0, phase - tailLen); 
-                const tpx = sx + (ex - sx) * prevPhase;
-                const tpy = sy + (ey - sy) * prevPhase;
+                // Comet Tail (Linear fade behind the head)
+                const tailLength = 0.4; 
+                // We draw the tail by iterating backwards slightly or just a gradient line
+                const tailStartX = px - (ex-sx)*tailLength;
+                const tailStartY = py - (ey-sy)*tailLength;
 
-                // Draw Comet Tail (Glow)
-                const tailGrad = ctx.createLinearGradient(tpx, tpy, px, py);
-                tailGrad.addColorStop(0, 'rgba(0,0,0,0)');
-                tailGrad.addColorStop(1, sn.colorHex);
+                // Ensure tail doesn't draw before start node logic (simplified via gradient clamp)
+                // Use lighter composite for "glowing energy" look
+                ctx.globalCompositeOperation = 'lighter';
                 
-                ctx.globalCompositeOperation = 'lighter'; // Additive blending
-                ctx.beginPath();
-                ctx.moveTo(tpx, tpy);
-                ctx.lineTo(px, py);
-                ctx.strokeStyle = tailGrad;
-                ctx.lineWidth = 6 + (sourceEnergy * 8); // Thicker
-                ctx.lineCap = 'round';
-                ctx.stroke();
+                const cometGrad = ctx.createLinearGradient(
+                    sx + (ex-sx) * (phase - tailLength), 
+                    sy + (ey-sy) * (phase - tailLength),
+                    px, py
+                );
+                cometGrad.addColorStop(0, 'rgba(0,0,0,0)');
+                cometGrad.addColorStop(1, sn.colorHex);
 
-                // Draw Comet Head (Bright Core)
                 ctx.beginPath();
-                ctx.arc(px, py, 4 + (sourceEnergy * 5), 0, Math.PI * 2);
+                // Clamp drawing to the segment
+                const t0 = Math.max(0, phase - tailLength);
+                const t1 = phase;
+                if (t1 > 0) {
+                    ctx.moveTo(sx + (ex-sx)*t0, sy + (ey-sy)*t0);
+                    ctx.lineTo(px, py);
+                    ctx.strokeStyle = cometGrad;
+                    ctx.lineWidth = 4 + (sourceEnergy * 6);
+                    ctx.lineCap = 'round';
+                    ctx.stroke();
+                }
+
+                // Head Glow
+                ctx.beginPath();
+                ctx.arc(px, py, 3 + (sourceEnergy * 4), 0, Math.PI * 2);
                 ctx.fillStyle = '#ffffff';
                 ctx.shadowColor = sn.colorHex;
-                ctx.shadowBlur = 20; // Stronger glow
+                ctx.shadowBlur = 15;
                 ctx.fill();
                 ctx.shadowBlur = 0;
+                
                 ctx.globalCompositeOperation = 'source-over';
             }
         });
 
-        // 2. 3D Nodes (Sephirot) - Enhanced 3D Effect
+        // 2. 3D Spherical Nodes (Sephirot)
         treeRef.current.nodes.forEach(node => {
             const nx = node.x * scaleUnit, ny = -node.y * scaleUnit + breathing;
-            const baseRadius = scaleUnit * 0.5; // Slightly larger
-            const currentRadius = baseRadius + (node.currentEnergy || 0) * 12;
+            const baseRadius = scaleUnit * 0.6; 
+            const energyPulse = (node.currentEnergy || 0) * 10;
+            const r = baseRadius + energyPulse;
             
-            // A. Outer Glow (Aura) - Soft and large
+            // A. Outer Aura (Glow)
             if (node.currentEnergy > 0.05) {
-                const aura = ctx.createRadialGradient(nx, ny, currentRadius, nx, ny, currentRadius * 3.0);
+                const aura = ctx.createRadialGradient(nx, ny, r, nx, ny, r * 2.5);
                 aura.addColorStop(0, node.colorHex); 
                 aura.addColorStop(1, 'transparent');
                 ctx.fillStyle = aura; 
                 ctx.globalAlpha = 0.4 * settings.sensitivity;
-                ctx.beginPath(); ctx.arc(nx, ny, currentRadius * 3.0, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(nx, ny, r * 2.5, 0, Math.PI * 2); ctx.fill();
             }
 
-            // B. 3D Sphere Body (Complex Gradient)
             ctx.globalAlpha = 1.0;
-            // Highlight offset to top-left (-x, -y) to simulate light source
+            
+            // B. 3D Sphere Rendering (Radial Gradient)
+            // Offset the center of the gradient to create a "lit from top-left" effect
+            const lightOffsetX = nx - r * 0.3;
+            const lightOffsetY = ny - r * 0.3;
+            
             const sphereGrad = ctx.createRadialGradient(
-                nx - currentRadius * 0.4, ny - currentRadius * 0.4, currentRadius * 0.1, 
-                nx, ny, currentRadius
+                lightOffsetX, lightOffsetY, r * 0.1, // Inner light point
+                nx, ny, r                            // Outer sphere boundary
             );
-            sphereGrad.addColorStop(0, '#ffffff');       // Specular Highlight (Pure White)
-            sphereGrad.addColorStop(0.15, node.colorHex);// Inner Glow (Bright Color)
-            sphereGrad.addColorStop(0.4, node.colorHex); // True Color
-            sphereGrad.addColorStop(0.9, '#000000');     // Shadow Edge
-            sphereGrad.addColorStop(1, 'transparent');   // Alpha Rim
+            
+            // 1. Specular Highlight (White hotspot)
+            sphereGrad.addColorStop(0, '#ffffff'); 
+            // 2. Inner Glow (Bright version of color)
+            sphereGrad.addColorStop(0.2, node.colorHex); 
+            // 3. Main Body (The color)
+            sphereGrad.addColorStop(0.5, node.colorHex); 
+            // 4. Shadow Edge (Darker version for 3D curvature)
+            sphereGrad.addColorStop(0.85, '#000000'); 
+            // 5. Smooth edge
+            sphereGrad.addColorStop(1, 'rgba(0,0,0,0)');
 
             ctx.beginPath();
-            ctx.arc(nx, ny, currentRadius, 0, Math.PI * 2);
+            ctx.arc(nx, ny, r, 0, Math.PI * 2);
             ctx.fillStyle = sphereGrad;
             ctx.fill();
-            
-            // C. Rim Light (Bottom Right Reflection)
+
+            // C. Rim Light (Reflection from bottom-right)
             ctx.beginPath();
-            ctx.arc(nx, ny, currentRadius * 0.9, 0.2 * Math.PI, 0.7 * Math.PI);
-            ctx.strokeStyle = node.colorHex;
-            ctx.lineWidth = 2;
-            ctx.globalAlpha = 0.6;
+            ctx.arc(nx, ny, r * 0.9, 0.25 * Math.PI, 0.75 * Math.PI);
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 1.5;
             ctx.stroke();
 
             // Label
-            ctx.globalAlpha = 1;
             ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 11px sans-serif';
+            ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
             ctx.shadowColor = 'black'; ctx.shadowBlur = 4;
-            ctx.fillText(node.name, nx, ny + currentRadius + 16);
+            ctx.fillText(node.name, nx, ny + r + 14);
             ctx.shadowBlur = 0;
         });
         ctx.restore();
@@ -717,7 +739,6 @@ const Visualizer: React.FC<VisualizerProps> = ({
         ctx.translate(cx, cy);
         
         // Invert Perspective (Ascension Mode)
-        // Flip Y-axis to make particles feel like they are rising/geometry is above
         if (settings.invertPerspective) {
             ctx.scale(1, -1);
         }
@@ -729,11 +750,9 @@ const Visualizer: React.FC<VisualizerProps> = ({
         }
         
         // Use Additive Blending for Glow Effect
-        // This makes overlapping particles brighter
         ctx.globalCompositeOperation = 'lighter';
 
-        // Morph Logic: If morph is DISABLED, we target a simple Sphere/Cloud instead of Sacred Geometry
-        const morphSpeed = 0.15 * settings.speed; // Faster morphing
+        const morphSpeed = 0.15 * settings.speed; 
         const particleBaseSize = settings.particleBaseSize || 2.5;
 
         particlesRef.current.forEach((p, index) => {
@@ -744,9 +763,6 @@ const Visualizer: React.FC<VisualizerProps> = ({
             let targetZ = p.tz;
 
             if (!settings.morphEnabled) {
-                // If morph disabled, target is a loose cloud based on original sphere calc or noise
-                // We use basePhase to keep them in a consistent "cloud" spot
-                // Increased chaos for "Cloud" mode so it looks distinctly different from geometry
                 const r = 400 + Math.sin(timeRef.current + index) * 50;
                 targetX = Math.cos(p.basePhase + timeRef.current * 0.1) * Math.sin(index) * r;
                 targetY = Math.sin(p.basePhase + timeRef.current * 0.1) * Math.sin(index) * r;
@@ -757,37 +773,26 @@ const Visualizer: React.FC<VisualizerProps> = ({
             p.y += (targetY - p.y) * morphSpeed;
             p.z += (targetZ - p.z) * morphSpeed;
 
-            // 2. Motion Logic (Flow/Float/Pulse) - Additive to base position
+            // 2. Motion Logic 
             let mx = 0, my = 0, mz = 0;
             
             if (settings.enableFlow) {
-                // Flow along Z-axis
                 const direction = settings.invertPerspective ? -1 : 1;
-                // If inverted (ascending), we might want particles to flow 'down' or 'up' relative to camera
-                // Standard flow: particles come towards camera (Z increase).
-                // Ascension flow: reverse it.
-                
                 const zRange = 2000;
                 const flowSpeed = 80 * settings.speed;
-                // Add large constant to avoid negative modulo issues
                 const timeOffset = (timeRef.current * flowSpeed * direction) + (p.noise.z * zRange);
-                // Wrap around zRange
                 let flowZ = (timeOffset % zRange);
-                
-                // Adjust to be centered around 0 (-1000 to 1000)
                 if (flowZ < 0) flowZ += zRange;
                 mz += flowZ - (zRange / 2);
             } 
             
             if (settings.enableFloat) {
-                // Gentle wandering
                 mx += Math.sin(timeRef.current * 0.5 + p.noise.x * 10) * 30;
                 my += Math.cos(timeRef.current * 0.3 + p.noise.y * 10) * 30;
                 mz += Math.sin(timeRef.current * 0.2 + p.noise.z * 10) * 30;
             } 
             
             if (settings.enablePulse) {
-                // Expansion/Contraction
                 const pulse = 1 + Math.sin(timeRef.current * 3 + index * 0.1) * 0.4 * bassEnergy;
                 mx += p.x * (pulse - 1);
                 my += p.y * (pulse - 1);
@@ -796,16 +801,11 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
             // 3. Color Logic
             if (settings.colorMode === 'cycle') {
-                // Hypnotic RGB Mode: Syncs with EQ + Full Spectrum Gradient
-                // Base Hue rotates with time + particle index to create a rainbow flow
                 const cycleSpeed = 50 * settings.speed;
                 const baseHue = (timeRef.current * cycleSpeed + (index / particlesRef.current.length) * 360) % 360;
-                
-                // Shift hue by bass energy to make it reactive
                 const hue = (baseHue + bassEnergy * 60) % 360;
                 const sat = 80;
-                const lit = 60 + highEnergy * 20; // Brighter on high notes
-                
+                const lit = 60 + highEnergy * 20; 
                 p.color = `hsl(${hue}, ${sat}%, ${lit}%)`;
             } else if (settings.colorMode === 'chakra') {
                  const phiResidue = (index * PHI) % 1;
@@ -815,7 +815,6 @@ const Visualizer: React.FC<VisualizerProps> = ({
                      p.color = primaryColor;
                  }
             } else {
-                // Static
                 p.color = primaryColor;
             }
 
@@ -827,21 +826,15 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
             const scale = fov / (fov + finalZ + 200);
             
-            // Avoid drawing behind camera or too far
             if (scale > 0 && scale < 20) {
                 const px = finalX * scale;
                 const py = finalY * scale;
-                
-                // Size Calculation: Larger base size, scaled by depth
                 const size = Math.max(0.5, p.size * particleBaseSize * scale);
-                
-                // Alpha Calculation: Fade out if too close (clipping) or too far
                 const depthAlpha = Math.min(1, Math.max(0, (finalZ + 800) / 1000));
                 
                 ctx.beginPath();
                 ctx.arc(px, py, size, 0, Math.PI * 2);
                 ctx.fillStyle = p.color;
-                // Reduce alpha slightly for additive blending to prevent whiteout
                 ctx.globalAlpha = depthAlpha * 0.6; 
                 ctx.fill();
             }

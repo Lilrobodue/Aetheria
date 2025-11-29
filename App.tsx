@@ -1,12 +1,14 @@
 
+
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2, 
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
-import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, CHAKRA_INFO_TEXT, SEPHIROT_INFO, TREE_OF_LIFE_EXPLANATION, GEOMETRY_INFO } from './constants';
+import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO } from './constants';
 import Visualizer from './components/Visualizer';
 
 // --- Spectrum Analyzer Component ---
@@ -254,8 +256,8 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             desc: "Control how the sacred geometry manifests.",
             content: (
                 <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
-                    <li className="flex gap-2">🌳 <strong>Tree of Life:</strong> Enable in 'Visualization Engine' to see energy flow through the 10 Sephirot nodes.</li>
-                    <li className="flex gap-2">💧 <strong>Hydro-Acoustics:</strong> Enable water ripples to visualize bass impact. Use the slider to control storm intensity.</li>
+                    <li className="flex gap-2">🌳 <strong>Tree of Life:</strong> Enable in 'Visualization Engine'. Observe the energy flowing through the 3D Sephirot nodes.</li>
+                    <li className="flex gap-2">💧 <strong>Hydro-Acoustics:</strong> Enable water ripples to visualize bass impact. Use the 0-100% slider to control storm intensity.</li>
                     <li className="flex gap-2">👁️ <strong>Zen Mode:</strong> Click the Eye icon in the header to hide all controls for pure visual immersion.</li>
                 </ul>
             )
@@ -384,7 +386,7 @@ const App: React.FC = () => {
     hexOpacity: 0.6,
     hexVisualMode: 'spectrum', 
     showWaterRipples: false,
-    hydroIntensity: 50, // Now 0-100 scale
+    hydroIntensity: 50, // 0-100 scale
     showTreeOfLife: false,
     colorMode: 'chakra',
     autoRotate: true,
@@ -1000,7 +1002,7 @@ const App: React.FC = () => {
             </div>
             <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v3.2</span></h1>
           </div>
-          <div className="flex gap-2 md:gap-4">
+          <div className="flex items-center gap-1 sm:gap-4">
              
              {isRecording ? (
                  <button 
@@ -1013,19 +1015,18 @@ const App: React.FC = () => {
              ) : (
                  <button 
                     onClick={() => setShowRecordOptions(true)} 
-                    className="p-2 text-slate-400 border-slate-800 bg-slate-900/50 hover:text-red-400 hover:border-red-500/50 transition-colors rounded-full border"
+                    className="p-1.5 sm:p-2 text-slate-400 border-slate-800 bg-slate-900/50 hover:text-red-400 hover:border-red-500/50 transition-colors rounded-full border"
                  >
                     <Circle size={20} />
                  </button>
              )}
 
-             <button onClick={() => setIsZenMode(!isZenMode)} className={`p-2 transition-colors rounded-full border ${isZenMode ? 'text-gold-500 border-gold-500 bg-gold-500/10' : 'text-slate-400 border-slate-800 bg-slate-900/50 hover:text-white'}`}>
+             <button onClick={() => setIsZenMode(!isZenMode)} className={`p-1.5 sm:p-2 transition-colors rounded-full border ${isZenMode ? 'text-gold-500 border-gold-500 bg-gold-500/10' : 'text-slate-400 border-slate-800 bg-slate-900/50 hover:text-white'}`}>
                 {isZenMode ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
-            <button onClick={() => setShowSettings(!showSettings)} className="p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><Settings size={20} /></button>
-            <button onClick={() => setShowInfo(!showInfo)} className="p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><Info size={20} /></button>
-            <button onClick={() => setShowTutorial(true)} className="p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><CircleHelp size={20} /></button>
-            <button onClick={() => setIsFullScreen(!isFullScreen)} className="p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800 hidden sm:block">
+            <button onClick={() => setShowSettings(!showSettings)} className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><Settings size={20} /></button>
+            <button onClick={() => setShowTutorial(true)} className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><CircleHelp size={20} /></button>
+            <button onClick={() => setIsFullScreen(!isFullScreen)} className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800 hidden sm:block">
               {isFullScreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
             </button>
           </div>
@@ -1059,63 +1060,112 @@ const App: React.FC = () => {
               </div>
           )}
           
-          {/* Info Modal */}
+          {/* Info Modal (Redesigned as Unified Theory Guide) */}
           {showInfo && (
               <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowInfo(false)}>
-                  <div className="bg-slate-900 border border-slate-700 p-8 rounded-2xl max-w-3xl w-full shadow-2xl max-h-[85vh] overflow-y-auto custom-scrollbar" onClick={e => e.stopPropagation()}>
-                      <div className="flex justify-between items-start mb-6 sticky top-0 bg-slate-900/95 pb-4 border-b border-slate-800 backdrop-blur-sm z-10">
-                          <div>
-                              <h2 className="text-2xl font-serif text-gold-400 mb-1">About Aetheria</h2>
-                              <p className="text-slate-500 text-sm">Harmonic Resonance & Sacred Geometry</p>
+                  <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full shadow-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                      
+                      {/* Modal Header */}
+                      <div className="flex justify-between items-center p-6 border-b border-slate-800 bg-slate-950/50">
+                          <div className="flex items-center gap-3">
+                              <div className="p-2 bg-gold-600/20 rounded-lg">
+                                  <BookOpen className="text-gold-500" size={24} />
+                              </div>
+                              <div>
+                                  <h2 className="text-2xl font-serif text-gold-400">The Guidebook</h2>
+                                  <p className="text-slate-500 text-xs uppercase tracking-widest">Aetheria: Philosophy & Science</p>
+                              </div>
                           </div>
                           <button onClick={() => setShowInfo(false)} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white">
                               <X size={24} />
                           </button>
                       </div>
                       
-                      <div className="prose prose-invert prose-sm max-w-none text-slate-300">
-                          <p className="whitespace-pre-line mb-6 leading-relaxed">
-                              {CHAKRA_INFO_TEXT}
-                          </p>
-
-                          <div className="border-t border-slate-800 my-8"></div>
-
-                          <h3 className="text-gold-500 font-bold uppercase tracking-widest mb-4 flex items-center gap-2">
-                             <Hexagon size={18} /> Sacred Geometry & Frequencies
-                          </h3>
-                          <p className="text-slate-400 mb-4">Each Solfeggio frequency is visualized through a specific Platonic or Sacred solid that resonates with its elemental nature.</p>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
-                             {GEOMETRY_INFO.map(geo => (
-                                 <div key={geo.freq} className="p-3 bg-slate-800/40 rounded border border-slate-800 flex flex-col hover:border-gold-500/50 transition-colors">
-                                     <div className="flex justify-between items-center mb-1">
-                                        <span className="font-bold text-gold-400 text-sm">{geo.shape}</span>
-                                        <span className="text-[10px] bg-slate-700 px-1 rounded text-slate-300">{geo.freq}</span>
-                                     </div>
-                                     <div className="text-xs text-slate-400 italic mb-1">{geo.element} Element</div>
-                                     <div className="text-xs text-slate-500">{geo.benefit}</div>
-                                 </div>
-                             ))}
-                          </div>
+                      {/* Modal Content - Scrollable */}
+                      <div className="flex-1 overflow-y-auto p-8 custom-scrollbar space-y-8">
                           
-                          <div className="border-t border-slate-800 my-8"></div>
+                          {/* Intro */}
+                          <div className="prose prose-invert max-w-none">
+                              <p className="text-lg text-slate-300 leading-relaxed font-serif italic border-l-4 border-gold-500 pl-4">
+                                  "{UNIFIED_THEORY.intro}"
+                              </p>
+                          </div>
 
-                          <h3 className="text-gold-500 font-bold uppercase tracking-widest mb-3 flex items-center gap-2">
-                             <Flower2 size={18} /> The Tree of Life (Etz Chaim)
-                          </h3>
-                          <p className="text-slate-400 mb-6 leading-relaxed whitespace-pre-line">
-                            {TREE_OF_LIFE_EXPLANATION}
-                          </p>
+                          {/* Section 1: Sound */}
+                          <section>
+                              <h3 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
+                                  <Waves className="text-blue-400" /> {UNIFIED_THEORY.section1.title}
+                              </h3>
+                              <p className="text-slate-400 leading-relaxed text-sm bg-slate-800/30 p-4 rounded-lg border border-slate-800">
+                                  {UNIFIED_THEORY.section1.content}
+                              </p>
+                          </section>
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">
-                             {SEPHIROT_INFO.map((node) => (
-                                 <div key={node.name} className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/40 border border-slate-800 hover:border-slate-700 transition-colors">
-                                     <div className="w-3 h-3 rounded-full mt-1 shrink-0" style={{ backgroundColor: node.color, boxShadow: `0 0 8px ${node.color}` }}></div>
-                                     <div>
-                                         <div className="font-bold text-slate-200 text-sm">{node.name} <span className="text-slate-500 font-normal">- {node.meaning}</span></div>
-                                         <div className="text-xs text-slate-400 mt-1">{node.correspondence}</div>
-                                     </div>
-                                 </div>
-                             ))}
+                          {/* Section 2: Biology */}
+                          <section>
+                              <h3 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
+                                  <Activity className="text-green-400" /> {UNIFIED_THEORY.section2.title}
+                              </h3>
+                              <p className="text-slate-400 leading-relaxed text-sm whitespace-pre-line mb-4">
+                                  {UNIFIED_THEORY.section2.content}
+                              </p>
+                              {/* Mini Grid for Solfeggio */}
+                              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                  {SOLFEGGIO_INFO.slice(0,6).map(s => (
+                                      <div key={s.freq} className="text-xs p-2 bg-slate-800 rounded border border-slate-700 flex justify-between items-center">
+                                          <span className="font-bold text-gold-500">{s.freq}Hz</span>
+                                          <span className="text-slate-400">{s.chakra}</span>
+                                      </div>
+                                  ))}
+                              </div>
+                          </section>
+
+                          {/* Section 3: Cosmology */}
+                          <section>
+                              <h3 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
+                                  <Flower2 className="text-purple-400" /> {UNIFIED_THEORY.section3.title}
+                              </h3>
+                              <p className="text-slate-400 leading-relaxed text-sm whitespace-pre-line bg-slate-800/30 p-4 rounded-lg border border-slate-800 mb-4">
+                                  {UNIFIED_THEORY.section3.content}
+                              </p>
+                              
+                              <h4 className="text-xs uppercase tracking-widest text-slate-500 mb-3">The Sephirot Map</h4>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {SEPHIROT_INFO.slice(0,4).map(node => (
+                                      <div key={node.name} className="flex items-center gap-2 p-2 bg-slate-800/50 rounded border border-slate-700">
+                                          <div className="w-2 h-2 rounded-full" style={{background: node.color}}></div>
+                                          <div>
+                                              <div className="text-xs font-bold text-slate-200">{node.name}</div>
+                                              <div className="text-[10px] text-slate-500">{node.meaning}</div>
+                                          </div>
+                                      </div>
+                                  ))}
+                                  <div className="p-2 text-xs text-slate-500 italic flex items-center justify-center bg-slate-900 rounded">
+                                      + 7 more nodes active in visualizer
+                                  </div>
+                              </div>
+                          </section>
+
+                          {/* Sacred Geometry Grid */}
+                          <section>
+                              <h3 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
+                                  <Hexagon className="text-red-400" /> Sacred Geometry
+                              </h3>
+                              <div className="grid grid-cols-2 gap-3">
+                                  {GEOMETRY_INFO.slice(0, 4).map(geo => (
+                                      <div key={geo.freq} className="p-3 bg-slate-800/40 rounded border border-slate-800">
+                                          <div className="flex justify-between items-center mb-1">
+                                              <span className="font-bold text-gold-400 text-xs">{geo.shape}</span>
+                                              <span className="text-[10px] bg-slate-700 px-1 rounded text-slate-300">{geo.freq}</span>
+                                          </div>
+                                          <div className="text-[10px] text-slate-500">{geo.benefit}</div>
+                                      </div>
+                                  ))}
+                              </div>
+                          </section>
+                          
+                          <div className="p-6 mt-4 bg-gradient-to-r from-gold-900/20 to-slate-900 border border-gold-500/20 rounded-xl text-center">
+                              <p className="text-sm text-gold-200 font-medium">"{UNIFIED_THEORY.conclusion}"</p>
                           </div>
                       </div>
                   </div>
@@ -1130,8 +1180,18 @@ const App: React.FC = () => {
             ${isFullScreen ? 'md:-ml-80' : ''}
           `}>
             <div className="p-4 border-b border-slate-800 shrink-0">
+               
+               {/* NEW GUIDEBOOK BUTTON */}
+               <button 
+                onClick={() => setShowInfo(true)}
+                className="w-full flex items-center justify-center gap-2 mb-3 p-3 rounded-lg font-medium tracking-wide transition-all active:scale-95 bg-gold-600/10 hover:bg-gold-600/20 text-gold-500 border border-gold-500/30 hover:border-gold-500/50 group"
+               >
+                 <BookOpen size={16} className="group-hover:scale-110 transition-transform" />
+                 <span className="text-xs font-bold uppercase tracking-wider">The Guidebook</span>
+               </button>
+
                <div className="grid grid-cols-2 gap-2 mb-3">
-                   <label className="flex items-center justify-center gap-2 p-3 border border-gold-600/30 rounded-lg cursor-pointer bg-gold-600/5 hover:bg-gold-600/20 text-gold-500 transition-all active:scale-95 group text-xs">
+                   <label className="flex items-center justify-center gap-2 p-3 border border-slate-700 rounded-lg cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all active:scale-95 group text-xs">
                       <Upload size={16} className="group-hover:animate-bounce" />
                       <span className="font-semibold">Import Folder</span>
                       <input 
@@ -1385,7 +1445,7 @@ const App: React.FC = () => {
                                         <div className="w-full mt-3 pt-3 border-t border-slate-800">
                                             <div className="flex justify-between text-[10px] text-slate-400 mb-1">
                                                 <span>RIPPLE INTENSITY</span>
-                                                <span>{vizSettings.hydroIntensity}%</span>
+                                                <span>{vizSettings.hydroIntensity.toFixed(0)}%</span>
                                             </div>
                                             <input 
                                                 type="range" min="0" max="100" step="1"

@@ -1,4 +1,5 @@
 
+
 import { SolfeggioFreq, BinauralPreset } from './types';
 
 export const SOLFEGGIO_INFO = [
@@ -24,26 +25,34 @@ export const BINAURAL_PRESETS: BinauralPreset[] = [
 // 432Hz Conversion Factor (432 / 440)
 export const PITCH_SHIFT_FACTOR = 0.981818; 
 
-export const CHAKRA_INFO_TEXT = `
-The ancient Solfeggio frequencies are believed to penetrate deep into the conscious and subconscious mind, 
-drawing forth emotional reactions that we sometimes cannot completely control. These frequencies trace back to ancient history 
-and are said to be the fundamental sounds used in Western Christianity and Eastern Indian religions, 
-chanted by the Gregorian Monks and in ancient Indian Sanskrit chants. 
+export const UNIFIED_THEORY = {
+  intro: `Aetheria is not just a music player; it is a harmonic alignment engine designed to synchronize three planes of existence: The Mathematical (Sound), The Biological (Body), and The Spiritual (Cosmos).`,
+  
+  section1: {
+    title: "The Mathematical Foundation (432Hz)",
+    content: `Standard music is tuned to A=440Hz, a frequency established in the mid-20th century that some theorists argue causes subconscious agitation. Aetheria mathematically retunes every audio signal to A=432Hz. This frequency is mathematically consistent with the patterns of the universe, often referred to as "Verdi's A" or the "Scientific Pitch." It is said to resonate with the Golden Ratio (Phi) found in nature, from the spiral of a nautilus shell to the orbital periods of planets.`
+  },
 
-Qi (Chi) is the life force energy that flows through all living things. 
-By aligning the frequencies of the music to the natural geometry of the universe (432Hz) and your body's energy centers (Chakras), 
-this player attempts to restore harmonic balance.
-`;
+  section2: {
+    title: "The Biological Interface (Solfeggio & Chakras)",
+    content: `Once the music is grounded in 432Hz, we layer specific Solfeggio Frequencies. These are distinct tones used in ancient Gregorian chants. In Aetheria, we map these tones directly to the human energy centers (Chakras).
+    
+    • Lower Frequencies (174-396Hz) target the dense physical body (pain relief, fear release), grounding you to the Earth.
+    • Middle Frequencies (417-639Hz) target the emotional body (change, DNA repair, connection), opening the Heart and Solar Plexus.
+    • Higher Frequencies (741-963Hz) target the etheric body (intuition, awakening), connecting the Pineal Gland to the Source.`
+  },
 
-export const TREE_OF_LIFE_EXPLANATION = `
-The Tree of Life (Etz Chaim) is the central mystical symbol of Kabbalah, representing the blueprint of the cosmos and the soul's journey toward the Divine. It is composed of ten emanations called Sephirot, connected by 22 paths, arranged into three columns:
+  section3: {
+    title: "The Cosmological Map (The Tree of Life)",
+    content: `The visualizations you see are not random. They represent the Kabbalistic Tree of Life (Etz Chaim), a map of how divine energy flows into the physical world.
 
-The Right Pillar (Force/Mercy): Active, expansive energy. It represents the urge to give and flow.
-The Left Pillar (Form/Severity): Passive, restrictive energy. It creates boundaries, structure, and discipline.
-The Middle Pillar (Balance/Mildness): The harmonizing path that integrates Force and Form, allowing for direct ascent to the Divine.
+    • The Spheres (Sephirot): These glowing nodes represent attributes of the Divine (Wisdom, Understanding, Mercy, Severity). As music plays, you see energy traveling between them.
+    • The Path of the Lightning Flash: Energy creates a zigzag pattern, moving from Keter (Crown/Source) down through the Sephirot to Malkuth (Kingdom/Physical Reality).
+    • The Goal: By watching the flow, you are visually "entraining" your mind to the concept of descending light (manifestation) and ascending light (liberation).`
+  },
 
-Energetically, the Tree maps perfectly to the human body and the Chakra system. As music plays, observe how the frequencies stimulate the corresponding nodes, moving from the dense physical vibration of Malkuth up to the spiritual purity of Keter.
-`;
+  conclusion: `When you use Aetheria, you are creating a feedback loop: The 432Hz music calms the mind, the Solfeggio tones align the Chakras, and the Sacred Geometry visualizations guide the consciousness along the divine path of the Tree of Life. This integration aims to produce a state of coherence, where thought, feeling, and geometry become one.`
+};
 
 export const GEOMETRY_INFO = [
   { shape: 'Cube', freq: '174Hz', benefit: 'Stability, Grounding, Physical Safety', element: 'Earth' },
