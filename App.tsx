@@ -246,7 +246,7 @@ const App: React.FC = () => {
     hexOpacity: 0.6,
     hexVisualMode: 'spectrum', 
     showWaterRipples: false,
-    hydroIntensity: 1.0,
+    hydroIntensity: 0.3,
     showTreeOfLife: false,
     colorMode: 'chakra',
     autoRotate: true,
@@ -1246,7 +1246,7 @@ const App: React.FC = () => {
                                                 <span>{(vizSettings.hydroIntensity * 100).toFixed(0)}%</span>
                                             </div>
                                             <input 
-                                                type="range" min="0.1" max="2.0" step="0.1"
+                                                type="range" min="0.0" max="1.0" step="0.05"
                                                 value={vizSettings.hydroIntensity}
                                                 onChange={(e) => setVizSettings({...vizSettings, hydroIntensity: parseFloat(e.target.value)})}
                                                 className="w-full accent-blue-500 h-1.5 bg-slate-700 rounded-lg appearance-none touch-none"

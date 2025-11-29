@@ -53,7 +53,7 @@ export interface VizSettings {
   
   // Water Effect
   showWaterRipples: boolean; 
-  hydroIntensity: number; // 0.1 to 2.0
+  hydroIntensity: number; // 0.0 to 1.0 (0-100%)
   
   // Overlays
   showTreeOfLife: boolean; 

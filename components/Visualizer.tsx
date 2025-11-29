@@ -497,14 +497,24 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
       // 5. Water Ripples Logic
       if (settings.showWaterRipples && isPlaying) {
-           const intensity = settings.hydroIntensity || 1.0;
-           if ((bassEnergy * intensity) > 0.5 && bassEnergy > prevBassRef.current + 0.1 * settings.sensitivity) {
-              ripplesRef.current.push({ x: cx, y: cy, radius: 10, maxRadius: Math.max(w, h) * 0.9, alpha: 1.0, speed: 6 * settings.speed, color: primaryStr, type: 'bass' });
+           // Scale intensity from 0-1 to a more natural range (0.1-3.0)
+           // This allows for subtle effects at low values and intense effects at high values
+           const rawIntensity = settings.hydroIntensity || 0.0;
+           const intensity = 0.1 + (rawIntensity * 2.9); // Maps 0-1 to 0.1-3.0
+           
+           // Bass ripples - scale the trigger threshold naturally
+           const bassThreshold = 0.8 - (rawIntensity * 0.6); // Easier to trigger at higher intensity
+           if ((bassEnergy * (1 + rawIntensity)) > bassThreshold && bassEnergy > prevBassRef.current + (0.15 - rawIntensity * 0.1) * settings.sensitivity) {
+              const rippleSize = Math.max(w, h) * (0.5 + rawIntensity * 0.4); // Bigger ripples at higher intensity
+              ripplesRef.current.push({ x: cx, y: cy, radius: 10, maxRadius: rippleSize, alpha: 0.8 + rawIntensity * 0.2, speed: (4 + rawIntensity * 4) * settings.speed, color: primaryStr, type: 'bass' });
            }
-           const rainThreshold = 0.35 / Math.max(0.1, intensity);
-           const rainProbability = 0.7 - (intensity * 0.2); 
-           if (highEnergy > rainThreshold && Math.random() > Math.max(0.1, rainProbability)) {
-              ripplesRef.current.push({ x: Math.random() * w, y: Math.random() * h, radius: 0, maxRadius: 200, alpha: 0.8, speed: 3 * settings.speed, color: Math.random() > 0.5 ? shade2Str : shade1Str, type: 'rain' });
+           
+           // Rain ripples - more natural scaling
+           const rainThreshold = 0.6 - (rawIntensity * 0.4); // Lower threshold = more rain at higher intensity
+           const rainProbability = 0.9 - (rawIntensity * 0.7); // Higher chance of rain at higher intensity
+           if (highEnergy > rainThreshold && Math.random() > Math.max(0.05, rainProbability)) {
+              const maxRainRadius = 150 + (rawIntensity * 150); // Bigger rain ripples at higher intensity
+              ripplesRef.current.push({ x: Math.random() * w, y: Math.random() * h, radius: 0, maxRadius: maxRainRadius, alpha: 0.6 + rawIntensity * 0.3, speed: (2 + rawIntensity * 3) * settings.speed, color: Math.random() > 0.5 ? shade2Str : shade1Str, type: 'rain' });
            }
       }
       prevBassRef.current = bassEnergy;
