@@ -1,11 +1,9 @@
 
-
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2, 
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO } from './constants';
@@ -1062,13 +1060,13 @@ const App: React.FC = () => {
           
           {/* Info Modal (Redesigned as Unified Theory Guide) */}
           {showInfo && (
-              <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowInfo(false)}>
-                  <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full shadow-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowInfo(false)}>
+                  <div className="bg-slate-950 border border-gold-500/20 rounded-2xl max-w-4xl w-full shadow-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
                       
                       {/* Modal Header */}
-                      <div className="flex justify-between items-center p-6 border-b border-slate-800 bg-slate-950/50">
+                      <div className="flex justify-between items-center p-6 border-b border-slate-800 bg-slate-900/50">
                           <div className="flex items-center gap-3">
-                              <div className="p-2 bg-gold-600/20 rounded-lg">
+                              <div className="p-2 bg-gold-600/10 rounded-lg border border-gold-500/20">
                                   <BookOpen className="text-gold-500" size={24} />
                               </div>
                               <div>
@@ -1076,96 +1074,99 @@ const App: React.FC = () => {
                                   <p className="text-slate-500 text-xs uppercase tracking-widest">Aetheria: Philosophy & Science</p>
                               </div>
                           </div>
-                          <button onClick={() => setShowInfo(false)} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white">
+                          <button onClick={() => setShowInfo(false)} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors">
                               <X size={24} />
                           </button>
                       </div>
                       
                       {/* Modal Content - Scrollable */}
-                      <div className="flex-1 overflow-y-auto p-8 custom-scrollbar space-y-8">
+                      <div className="flex-1 overflow-y-auto custom-scrollbar">
                           
-                          {/* Intro */}
-                          <div className="prose prose-invert max-w-none">
-                              <p className="text-lg text-slate-300 leading-relaxed font-serif italic border-l-4 border-gold-500 pl-4">
-                                  "{UNIFIED_THEORY.intro}"
-                              </p>
+                          {/* Intro Banner */}
+                          <div className="p-8 pb-4">
+                              <div className="bg-gradient-to-r from-slate-900 to-slate-900/50 border-l-4 border-gold-500 p-6 rounded-r-lg">
+                                <p className="text-lg text-slate-200 leading-relaxed font-serif italic">
+                                    "{UNIFIED_THEORY.intro}"
+                                </p>
+                              </div>
                           </div>
 
-                          {/* Section 1: Sound */}
-                          <section>
-                              <h3 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
-                                  <Waves className="text-blue-400" /> {UNIFIED_THEORY.section1.title}
-                              </h3>
-                              <p className="text-slate-400 leading-relaxed text-sm bg-slate-800/30 p-4 rounded-lg border border-slate-800">
-                                  {UNIFIED_THEORY.section1.content}
-                              </p>
-                          </section>
-
-                          {/* Section 2: Biology */}
-                          <section>
-                              <h3 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
-                                  <Activity className="text-green-400" /> {UNIFIED_THEORY.section2.title}
-                              </h3>
-                              <p className="text-slate-400 leading-relaxed text-sm whitespace-pre-line mb-4">
-                                  {UNIFIED_THEORY.section2.content}
-                              </p>
-                              {/* Mini Grid for Solfeggio */}
-                              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                  {SOLFEGGIO_INFO.slice(0,6).map(s => (
-                                      <div key={s.freq} className="text-xs p-2 bg-slate-800 rounded border border-slate-700 flex justify-between items-center">
-                                          <span className="font-bold text-gold-500">{s.freq}Hz</span>
-                                          <span className="text-slate-400">{s.chakra}</span>
-                                      </div>
-                                  ))}
-                              </div>
-                          </section>
-
-                          {/* Section 3: Cosmology */}
-                          <section>
-                              <h3 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
-                                  <Flower2 className="text-purple-400" /> {UNIFIED_THEORY.section3.title}
-                              </h3>
-                              <p className="text-slate-400 leading-relaxed text-sm whitespace-pre-line bg-slate-800/30 p-4 rounded-lg border border-slate-800 mb-4">
-                                  {UNIFIED_THEORY.section3.content}
-                              </p>
-                              
-                              <h4 className="text-xs uppercase tracking-widest text-slate-500 mb-3">The Sephirot Map</h4>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                  {SEPHIROT_INFO.slice(0,4).map(node => (
-                                      <div key={node.name} className="flex items-center gap-2 p-2 bg-slate-800/50 rounded border border-slate-700">
-                                          <div className="w-2 h-2 rounded-full" style={{background: node.color}}></div>
-                                          <div>
-                                              <div className="text-xs font-bold text-slate-200">{node.name}</div>
-                                              <div className="text-[10px] text-slate-500">{node.meaning}</div>
-                                          </div>
-                                      </div>
-                                  ))}
-                                  <div className="p-2 text-xs text-slate-500 italic flex items-center justify-center bg-slate-900 rounded">
-                                      + 7 more nodes active in visualizer
+                          <div className="px-8 pb-12 space-y-12">
+                              {/* Section 1: The Body (Chakras/Solfeggio) */}
+                              <section>
+                                  <div className="flex items-center gap-3 mb-6">
+                                    <div className="p-2 bg-blue-500/10 rounded-full"><User className="text-blue-400" size={24}/></div>
+                                    <h3 className="text-2xl font-bold text-white">The Body: Solfeggio Frequencies</h3>
                                   </div>
-                              </div>
-                          </section>
-
-                          {/* Sacred Geometry Grid */}
-                          <section>
-                              <h3 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
-                                  <Hexagon className="text-red-400" /> Sacred Geometry
-                              </h3>
-                              <div className="grid grid-cols-2 gap-3">
-                                  {GEOMETRY_INFO.slice(0, 4).map(geo => (
-                                      <div key={geo.freq} className="p-3 bg-slate-800/40 rounded border border-slate-800">
-                                          <div className="flex justify-between items-center mb-1">
-                                              <span className="font-bold text-gold-400 text-xs">{geo.shape}</span>
-                                              <span className="text-[10px] bg-slate-700 px-1 rounded text-slate-300">{geo.freq}</span>
+                                  <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">{UNIFIED_THEORY.section2?.content || "Harmonic frequencies that resonate with specific energy centers in the human body."}</p>
+                                  
+                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                      {SOLFEGGIO_INFO.map(s => (
+                                          <div key={s.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-slate-600 transition-colors group">
+                                              <div className="flex justify-between items-center mb-2">
+                                                  <span className="text-xl font-bold font-mono" style={{color: s.color}}>{s.freq} Hz</span>
+                                                  <span className="text-[10px] uppercase tracking-wider text-slate-500">{s.chakra}</span>
+                                              </div>
+                                              <h4 className="text-white font-medium mb-1">{s.benefit}</h4>
+                                              <p className="text-xs text-slate-400 mb-3 leading-relaxed">{s.description}</p>
+                                              <div className="text-[10px] text-slate-500 pt-3 border-t border-slate-800/50">
+                                                  <strong className="text-slate-400">Anatomy:</strong> {s.anatomy}
+                                              </div>
                                           </div>
-                                          <div className="text-[10px] text-slate-500">{geo.benefit}</div>
-                                      </div>
-                                  ))}
+                                      ))}
+                                  </div>
+                              </section>
+
+                              {/* Section 2: The Map (Tree of Life) */}
+                              <section>
+                                  <div className="flex items-center gap-3 mb-6">
+                                    <div className="p-2 bg-purple-500/10 rounded-full"><Map className="text-purple-400" size={24}/></div>
+                                    <h3 className="text-2xl font-bold text-white">The Map: Tree of Life (Sephirot)</h3>
+                                  </div>
+                                  <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">The blueprint of creation. A map of how the Divine manifests into the physical world through ten distinct attributes (Sephirot).</p>
+                                  
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      {SEPHIROT_INFO.map(node => (
+                                          <div key={node.name} className="flex gap-4 p-4 bg-slate-900/30 rounded-xl border border-slate-800/50 hover:bg-slate-900 transition-colors">
+                                              <div className="w-1 h-full rounded-full shrink-0" style={{background: node.color}}></div>
+                                              <div>
+                                                  <div className="flex items-baseline gap-2 mb-1">
+                                                      <h4 className="text-lg font-bold text-slate-200">{node.name}</h4>
+                                                      <span className="text-xs text-gold-500 font-serif italic">{node.title}</span>
+                                                  </div>
+                                                  <p className="text-xs text-slate-400 mb-2">{node.meaning}</p>
+                                                  <p className="text-xs text-slate-500 leading-relaxed italic">"{node.desc}"</p>
+                                              </div>
+                                          </div>
+                                      ))}
+                                  </div>
+                              </section>
+
+                              {/* Section 3: The Form (Geometry) */}
+                              <section>
+                                  <div className="flex items-center gap-3 mb-6">
+                                    <div className="p-2 bg-red-500/10 rounded-full"><Box className="text-red-400" size={24}/></div>
+                                    <h3 className="text-2xl font-bold text-white">The Form: Sacred Geometry</h3>
+                                  </div>
+                                  
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                      {GEOMETRY_INFO.map(geo => (
+                                          <div key={geo.freq} className="p-4 bg-slate-900/40 rounded-xl border border-slate-800">
+                                              <div className="flex justify-between items-start mb-2">
+                                                  <span className="font-bold text-gold-400 text-sm">{geo.shape}</span>
+                                                  <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-300 border border-slate-700">{geo.freq}</span>
+                                              </div>
+                                              <div className="text-xs text-blue-400 mb-2 font-medium">{geo.element} Element</div>
+                                              <p className="text-xs text-slate-400 leading-relaxed">{geo.desc}</p>
+                                          </div>
+                                      ))}
+                                  </div>
+                              </section>
+                              
+                              <div className="p-8 mt-4 bg-gradient-to-br from-slate-900 to-black border border-gold-500/20 rounded-2xl text-center relative overflow-hidden">
+                                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent opacity-50"></div>
+                                  <p className="text-xl font-serif text-gold-200 font-medium tracking-wide">"{UNIFIED_THEORY.conclusion}"</p>
                               </div>
-                          </section>
-                          
-                          <div className="p-6 mt-4 bg-gradient-to-r from-gold-900/20 to-slate-900 border border-gold-500/20 rounded-xl text-center">
-                              <p className="text-sm text-gold-200 font-medium">"{UNIFIED_THEORY.conclusion}"</p>
                           </div>
                       </div>
                   </div>

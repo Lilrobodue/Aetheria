@@ -497,18 +497,15 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
       // 5. Water Ripples Logic with Natural Scaling (0-100 Non-Linear)
       if (settings.showWaterRipples && isPlaying) {
-           // Apply a power curve so the effect ramps up naturally. 
-           // 0-40 is very subtle, 50-80 is moderate, 80-100 is storm-like.
            const rawInput = settings.hydroIntensity || 0;
            const normalizedCurve = Math.pow(rawInput / 100, 1.5); // 0 to 1 curved
-           const physicalIntensity = normalizedCurve * 2.5; // Scale up for visual impact
+           const physicalIntensity = normalizedCurve * 2.5; 
            
            if ((bassEnergy * physicalIntensity) > 0.3 && bassEnergy > prevBassRef.current + 0.05) {
               ripplesRef.current.push({ x: cx, y: cy, radius: 10, maxRadius: Math.max(w, h) * 0.9, alpha: 1.0, speed: 6 * settings.speed, color: primaryStr, type: 'bass' });
            }
            
-           // Rain Probability increases with intensity
-           const rainThreshold = 0.9 - (normalizedCurve * 0.7); // High intensity lowers threshold drastically
+           const rainThreshold = 0.9 - (normalizedCurve * 0.7); 
            
            if (highEnergy > rainThreshold && Math.random() < normalizedCurve * 0.6) {
               ripplesRef.current.push({ x: Math.random() * w, y: Math.random() * h, radius: 0, maxRadius: 150 + (normalizedCurve * 200), alpha: 0.6 + (normalizedCurve * 0.4), speed: 3 * settings.speed, color: Math.random() > 0.5 ? shade2Str : shade1Str, type: 'rain' });
@@ -592,7 +589,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
           ctx.restore();
       }
 
-      // --- LAYER 3: TREE OF LIFE (3D Sephirot + High-Vis Flow) ---
+      // --- LAYER 3: TREE OF LIFE (3D Sephirot + High-Vis SUPERCHARGED Flow) ---
       if (settings.showTreeOfLife) {
         ctx.save();
         ctx.translate(cx, cy);
@@ -600,75 +597,90 @@ const Visualizer: React.FC<VisualizerProps> = ({
         const scaleUnit = Math.min(50, availableHeight / 11); 
         const breathing = Math.sin(timeRef.current * 0.5) * 5;
         
-        // 1. Edges with "Comet" Energy Flow
+        // Use addtive blending for energy feel
+        ctx.globalCompositeOperation = 'lighter';
+
+        // 1. Edges with Supercharged Energy Flow
         treeRef.current.edges.forEach(([startIdx, endIdx], i) => {
             const sn = treeRef.current.nodes[startIdx];
             const en = treeRef.current.nodes[endIdx];
             const sx = sn.x * scaleUnit, sy = -sn.y * scaleUnit + breathing; 
             const ex = en.x * scaleUnit, ey = -en.y * scaleUnit + breathing;
 
-            // Background Line (Subtle)
-            const grad = ctx.createLinearGradient(sx, sy, ex, ey);
-            grad.addColorStop(0, sn.colorHex); grad.addColorStop(1, en.colorHex);
-            ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey);
-            ctx.strokeStyle = grad; ctx.globalAlpha = 0.2; ctx.lineWidth = 2; ctx.stroke();
+            // Average energy of the connection
+            const connectionEnergy = (sn.currentEnergy + en.currentEnergy) / 2;
+            const boost = connectionEnergy * 2; // Multiplier for intense moments
 
-            // High Visibility Comet
-            const sourceEnergy = sn.currentEnergy || 0;
-            // Always show a faint flow, boost with energy
-            const flowIntensity = 0.2 + (sourceEnergy * 0.8);
+            // Background Line (Pulsing)
+            const grad = ctx.createLinearGradient(sx, sy, ex, ey);
+            grad.addColorStop(0, sn.colorHex); 
+            grad.addColorStop(1, en.colorHex);
             
-            if (flowIntensity > 0.05) {
-                const flowSpeed = 0.6 * settings.speed;
-                const phase = (timeRef.current * flowSpeed + (i * 0.7)) % 1;
+            ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey);
+            ctx.strokeStyle = grad; 
+            ctx.globalAlpha = 0.2 + (boost * 0.1); 
+            ctx.lineWidth = 2 + boost; 
+            ctx.stroke();
+
+            // Supercharged Comet
+            const baseIntensity = 0.2;
+            // Total intensity determines visibility
+            const flowIntensity = baseIntensity + (boost * 1.5);
+            
+            if (flowIntensity > 0.1) {
+                // PHYSICS: Speed increases with bass/energy
+                const variableSpeed = settings.speed * (0.5 + (bassEnergy * 1.5));
+                const phase = (timeRef.current * variableSpeed + (i * 0.7)) % 1;
                 
-                // Current position
                 const px = sx + (ex - sx) * phase;
                 const py = sy + (ey - sy) * phase;
 
-                // Comet Tail (Linear fade behind the head)
-                const tailLength = 0.4; 
-                // We draw the tail by iterating backwards slightly or just a gradient line
-                const tailStartX = px - (ex-sx)*tailLength;
-                const tailStartY = py - (ey-sy)*tailLength;
-
-                // Ensure tail doesn't draw before start node logic (simplified via gradient clamp)
-                // Use lighter composite for "glowing energy" look
-                ctx.globalCompositeOperation = 'lighter';
+                const tailLength = 0.4 + (boost * 0.2); // Tail grows with energy
                 
+                // Color Logic: Turns white/bright when supercharged
+                const isSupercharged = boost > 0.8;
+                const headColor = isSupercharged ? '#ffffff' : sn.colorHex;
+
                 const cometGrad = ctx.createLinearGradient(
                     sx + (ex-sx) * (phase - tailLength), 
                     sy + (ey-sy) * (phase - tailLength),
                     px, py
                 );
                 cometGrad.addColorStop(0, 'rgba(0,0,0,0)');
-                cometGrad.addColorStop(1, sn.colorHex);
+                cometGrad.addColorStop(0.5, sn.colorHex); // Mid body is color
+                cometGrad.addColorStop(1, headColor); // Head is bright
 
-                ctx.beginPath();
-                // Clamp drawing to the segment
+                // Draw Comet Tail
                 const t0 = Math.max(0, phase - tailLength);
-                const t1 = phase;
-                if (t1 > 0) {
+                if (phase > 0) {
+                    ctx.beginPath();
                     ctx.moveTo(sx + (ex-sx)*t0, sy + (ey-sy)*t0);
                     ctx.lineTo(px, py);
                     ctx.strokeStyle = cometGrad;
-                    ctx.lineWidth = 4 + (sourceEnergy * 6);
+                    // Thickness pulses with music
+                    ctx.lineWidth = 4 + (boost * 8); 
                     ctx.lineCap = 'round';
+                    // Glow effect
+                    ctx.shadowBlur = 10 + (boost * 30);
+                    ctx.shadowColor = sn.colorHex;
                     ctx.stroke();
                 }
 
-                // Head Glow
+                // Draw Comet Head (The "Spark")
                 ctx.beginPath();
-                ctx.arc(px, py, 3 + (sourceEnergy * 4), 0, Math.PI * 2);
+                // Size grows significantly with energy
+                ctx.arc(px, py, 3 + (boost * 6), 0, Math.PI * 2);
                 ctx.fillStyle = '#ffffff';
-                ctx.shadowColor = sn.colorHex;
-                ctx.shadowBlur = 15;
+                ctx.shadowBlur = 20 + (boost * 40); // Intense electrical glow
+                ctx.shadowColor = isSupercharged ? '#ffffff' : sn.colorHex;
                 ctx.fill();
-                ctx.shadowBlur = 0;
                 
-                ctx.globalCompositeOperation = 'source-over';
+                // Reset shadow
+                ctx.shadowBlur = 0;
             }
         });
+
+        ctx.globalCompositeOperation = 'source-over';
 
         // 2. 3D Spherical Nodes (Sephirot)
         treeRef.current.nodes.forEach(node => {
@@ -689,25 +701,19 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
             ctx.globalAlpha = 1.0;
             
-            // B. 3D Sphere Rendering (Radial Gradient)
-            // Offset the center of the gradient to create a "lit from top-left" effect
+            // B. 3D Sphere Rendering
             const lightOffsetX = nx - r * 0.3;
             const lightOffsetY = ny - r * 0.3;
             
             const sphereGrad = ctx.createRadialGradient(
-                lightOffsetX, lightOffsetY, r * 0.1, // Inner light point
-                nx, ny, r                            // Outer sphere boundary
+                lightOffsetX, lightOffsetY, r * 0.1, 
+                nx, ny, r                            
             );
             
-            // 1. Specular Highlight (White hotspot)
             sphereGrad.addColorStop(0, '#ffffff'); 
-            // 2. Inner Glow (Bright version of color)
             sphereGrad.addColorStop(0.2, node.colorHex); 
-            // 3. Main Body (The color)
             sphereGrad.addColorStop(0.5, node.colorHex); 
-            // 4. Shadow Edge (Darker version for 3D curvature)
             sphereGrad.addColorStop(0.85, '#000000'); 
-            // 5. Smooth edge
             sphereGrad.addColorStop(1, 'rgba(0,0,0,0)');
 
             ctx.beginPath();
@@ -715,7 +721,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
             ctx.fillStyle = sphereGrad;
             ctx.fill();
 
-            // C. Rim Light (Reflection from bottom-right)
+            // C. Rim Light
             ctx.beginPath();
             ctx.arc(nx, ny, r * 0.9, 0.25 * Math.PI, 0.75 * Math.PI);
             ctx.strokeStyle = 'rgba(255,255,255,0.3)';
@@ -738,18 +744,9 @@ const Visualizer: React.FC<VisualizerProps> = ({
         ctx.save();
         ctx.translate(cx, cy);
         
-        // Invert Perspective (Ascension Mode)
-        if (settings.invertPerspective) {
-            ctx.scale(1, -1);
-        }
-
-        // Auto Rotation
-        if (settings.autoRotate) {
-             const rotSpeed = timeRef.current * 0.1;
-             ctx.rotate(rotSpeed);
-        }
+        if (settings.invertPerspective) ctx.scale(1, -1);
+        if (settings.autoRotate) ctx.rotate(timeRef.current * 0.1);
         
-        // Use Additive Blending for Glow Effect
         ctx.globalCompositeOperation = 'lighter';
 
         const morphSpeed = 0.15 * settings.speed; 
