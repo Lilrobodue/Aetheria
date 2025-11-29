@@ -495,26 +495,23 @@ const Visualizer: React.FC<VisualizerProps> = ({
          }
       });
 
-      // 5. Water Ripples Logic
+      // 5. Water Ripples Logic with Natural Scaling
       if (settings.showWaterRipples && isPlaying) {
-           // Scale intensity from 0-1 to a more natural range (0.1-3.0)
-           // This allows for subtle effects at low values and intense effects at high values
-           const rawIntensity = settings.hydroIntensity || 0.0;
-           const intensity = 0.1 + (rawIntensity * 2.9); // Maps 0-1 to 0.1-3.0
+           // Map 0-100 scale to physical intensity parameters
+           // Use a slight curve so 0-50% is gentle, 50-100% gets intense
+           const rawInput = settings.hydroIntensity || 0;
+           const normalizedInput = rawInput / 100; // 0 to 1
+           const physicalIntensity = Math.pow(normalizedInput, 1.5) * 2.0; // 0 to 2.0 with curve
            
-           // Bass ripples - scale the trigger threshold naturally
-           const bassThreshold = 0.8 - (rawIntensity * 0.6); // Easier to trigger at higher intensity
-           if ((bassEnergy * (1 + rawIntensity)) > bassThreshold && bassEnergy > prevBassRef.current + (0.15 - rawIntensity * 0.1) * settings.sensitivity) {
-              const rippleSize = Math.max(w, h) * (0.5 + rawIntensity * 0.4); // Bigger ripples at higher intensity
-              ripplesRef.current.push({ x: cx, y: cy, radius: 10, maxRadius: rippleSize, alpha: 0.8 + rawIntensity * 0.2, speed: (4 + rawIntensity * 4) * settings.speed, color: primaryStr, type: 'bass' });
+           if ((bassEnergy * physicalIntensity) > 0.4 && bassEnergy > prevBassRef.current + 0.05) {
+              ripplesRef.current.push({ x: cx, y: cy, radius: 10, maxRadius: Math.max(w, h) * 0.9, alpha: 1.0, speed: 6 * settings.speed, color: primaryStr, type: 'bass' });
            }
            
-           // Rain ripples - more natural scaling
-           const rainThreshold = 0.6 - (rawIntensity * 0.4); // Lower threshold = more rain at higher intensity
-           const rainProbability = 0.9 - (rawIntensity * 0.7); // Higher chance of rain at higher intensity
-           if (highEnergy > rainThreshold && Math.random() > Math.max(0.05, rainProbability)) {
-              const maxRainRadius = 150 + (rawIntensity * 150); // Bigger rain ripples at higher intensity
-              ripplesRef.current.push({ x: Math.random() * w, y: Math.random() * h, radius: 0, maxRadius: maxRainRadius, alpha: 0.6 + rawIntensity * 0.3, speed: (2 + rawIntensity * 3) * settings.speed, color: Math.random() > 0.5 ? shade2Str : shade1Str, type: 'rain' });
+           // Rain Probability increases with intensity
+           const rainThreshold = 0.8 - (normalizedInput * 0.6); // High intensity lowers threshold
+           
+           if (highEnergy > rainThreshold && Math.random() < normalizedInput * 0.5) {
+              ripplesRef.current.push({ x: Math.random() * w, y: Math.random() * h, radius: 0, maxRadius: 150 + (normalizedInput * 150), alpha: 0.6 + (normalizedInput * 0.4), speed: 3 * settings.speed, color: Math.random() > 0.5 ? shade2Str : shade1Str, type: 'rain' });
            }
       }
       prevBassRef.current = bassEnergy;
@@ -595,7 +592,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
           ctx.restore();
       }
 
-      // --- LAYER 3: TREE OF LIFE ---
+      // --- LAYER 3: TREE OF LIFE (3D Enhanced) ---
       if (settings.showTreeOfLife) {
         ctx.save();
         ctx.translate(cx, cy);
@@ -603,66 +600,113 @@ const Visualizer: React.FC<VisualizerProps> = ({
         const scaleUnit = Math.min(50, availableHeight / 11); 
         const breathing = Math.sin(timeRef.current * 0.5) * 5;
         
-        // Animated Edges
+        // 1. Edges with Visible Energy Flow
         treeRef.current.edges.forEach(([startIdx, endIdx], i) => {
             const sn = treeRef.current.nodes[startIdx];
             const en = treeRef.current.nodes[endIdx];
-            // Apply breathing to edge coordinates too, to stay attached to nodes
             const sx = sn.x * scaleUnit, sy = -sn.y * scaleUnit + breathing; 
             const ex = en.x * scaleUnit, ey = -en.y * scaleUnit + breathing;
 
-            // 1. Static connection (Dimmed background)
+            // Background Line (Subtle)
             const grad = ctx.createLinearGradient(sx, sy, ex, ey);
             grad.addColorStop(0, sn.colorHex); grad.addColorStop(1, en.colorHex);
             ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey);
-            ctx.strokeStyle = grad; ctx.globalAlpha = 0.15; ctx.lineWidth = 1; ctx.stroke();
+            ctx.strokeStyle = grad; ctx.globalAlpha = 0.2; ctx.lineWidth = 2; ctx.stroke();
 
-            // 2. Harmonic Flow (Energy Particle)
-            // Energy flows from source node to destination node
+            // Energy "Comet" - Enhanced Visibility
             const sourceEnergy = sn.currentEnergy || 0;
-            // Base flow plus extra if source is active
-            const flowIntensity = 0.2 + (sourceEnergy * 0.8);
+            const flowIntensity = 0.3 + (sourceEnergy * 0.7);
             
-            if (flowIntensity > 0.05) {
-                const flowSpeed = 0.4 * settings.speed;
-                // Offset phase so edges don't flash in perfect unison
+            if (flowIntensity > 0.1) {
+                const flowSpeed = 0.5 * settings.speed;
                 const phase = (timeRef.current * flowSpeed + (i * 0.7)) % 1;
                 
-                // Lerp position
+                // Head position
                 const px = sx + (ex - sx) * phase;
                 const py = sy + (ey - sy) * phase;
 
-                // Glowing Head (Source Color)
-                ctx.beginPath();
-                ctx.arc(px, py, 2 + (sourceEnergy * 4), 0, Math.PI * 2);
-                ctx.fillStyle = sn.colorHex; 
-                ctx.globalAlpha = flowIntensity;
-                ctx.fill();
+                // Tail calculation (look significantly behind in time for longer tail)
+                const tailLen = 0.3; // Longer tail
+                const prevPhase = Math.max(0, phase - tailLen); 
+                const tpx = sx + (ex - sx) * prevPhase;
+                const tpy = sy + (ey - sy) * prevPhase;
 
-                // White Hot Core
+                // Draw Comet Tail (Glow)
+                const tailGrad = ctx.createLinearGradient(tpx, tpy, px, py);
+                tailGrad.addColorStop(0, 'rgba(0,0,0,0)');
+                tailGrad.addColorStop(1, sn.colorHex);
+                
+                ctx.globalCompositeOperation = 'lighter'; // Additive blending
                 ctx.beginPath();
-                ctx.arc(px, py, 1 + (sourceEnergy * 2), 0, Math.PI * 2);
+                ctx.moveTo(tpx, tpy);
+                ctx.lineTo(px, py);
+                ctx.strokeStyle = tailGrad;
+                ctx.lineWidth = 6 + (sourceEnergy * 8); // Thicker
+                ctx.lineCap = 'round';
+                ctx.stroke();
+
+                // Draw Comet Head (Bright Core)
+                ctx.beginPath();
+                ctx.arc(px, py, 4 + (sourceEnergy * 5), 0, Math.PI * 2);
                 ctx.fillStyle = '#ffffff';
-                ctx.globalAlpha = flowIntensity + 0.2;
+                ctx.shadowColor = sn.colorHex;
+                ctx.shadowBlur = 20; // Stronger glow
                 ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.globalCompositeOperation = 'source-over';
             }
         });
 
-        // Nodes
+        // 2. 3D Nodes (Sephirot) - Enhanced 3D Effect
         treeRef.current.nodes.forEach(node => {
             const nx = node.x * scaleUnit, ny = -node.y * scaleUnit + breathing;
-            const radius = scaleUnit * 0.25 * (1 + (node.currentEnergy || 0));
-            if (node.currentEnergy > 0.1) {
-                const g = ctx.createRadialGradient(nx, ny, radius * 0.5, nx, ny, radius * 3);
-                g.addColorStop(0, node.colorHex); g.addColorStop(1, 'transparent');
-                ctx.fillStyle = g; ctx.globalAlpha = 0.6 * settings.sensitivity;
-                ctx.beginPath(); ctx.arc(nx, ny, radius * 3, 0, Math.PI * 2); ctx.fill();
+            const baseRadius = scaleUnit * 0.5; // Slightly larger
+            const currentRadius = baseRadius + (node.currentEnergy || 0) * 12;
+            
+            // A. Outer Glow (Aura) - Soft and large
+            if (node.currentEnergy > 0.05) {
+                const aura = ctx.createRadialGradient(nx, ny, currentRadius, nx, ny, currentRadius * 3.0);
+                aura.addColorStop(0, node.colorHex); 
+                aura.addColorStop(1, 'transparent');
+                ctx.fillStyle = aura; 
+                ctx.globalAlpha = 0.4 * settings.sensitivity;
+                ctx.beginPath(); ctx.arc(nx, ny, currentRadius * 3.0, 0, Math.PI * 2); ctx.fill();
             }
-            ctx.beginPath(); ctx.arc(nx, ny, radius, 0, Math.PI * 2);
-            ctx.fillStyle = node.colorHex; ctx.globalAlpha = 0.9; ctx.fill();
-            ctx.strokeStyle = '#ffffff'; ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.stroke();
-            ctx.fillStyle = '#ffffff'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-            ctx.fillText(node.name, nx, ny + radius + 15);
+
+            // B. 3D Sphere Body (Complex Gradient)
+            ctx.globalAlpha = 1.0;
+            // Highlight offset to top-left (-x, -y) to simulate light source
+            const sphereGrad = ctx.createRadialGradient(
+                nx - currentRadius * 0.4, ny - currentRadius * 0.4, currentRadius * 0.1, 
+                nx, ny, currentRadius
+            );
+            sphereGrad.addColorStop(0, '#ffffff');       // Specular Highlight (Pure White)
+            sphereGrad.addColorStop(0.15, node.colorHex);// Inner Glow (Bright Color)
+            sphereGrad.addColorStop(0.4, node.colorHex); // True Color
+            sphereGrad.addColorStop(0.9, '#000000');     // Shadow Edge
+            sphereGrad.addColorStop(1, 'transparent');   // Alpha Rim
+
+            ctx.beginPath();
+            ctx.arc(nx, ny, currentRadius, 0, Math.PI * 2);
+            ctx.fillStyle = sphereGrad;
+            ctx.fill();
+            
+            // C. Rim Light (Bottom Right Reflection)
+            ctx.beginPath();
+            ctx.arc(nx, ny, currentRadius * 0.9, 0.2 * Math.PI, 0.7 * Math.PI);
+            ctx.strokeStyle = node.colorHex;
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.6;
+            ctx.stroke();
+
+            // Label
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.shadowColor = 'black'; ctx.shadowBlur = 4;
+            ctx.fillText(node.name, nx, ny + currentRadius + 16);
+            ctx.shadowBlur = 0;
         });
         ctx.restore();
       }

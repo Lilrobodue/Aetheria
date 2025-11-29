@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2, 
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, CHAKRA_INFO_TEXT, SEPHIROT_INFO, TREE_OF_LIFE_EXPLANATION, GEOMETRY_INFO } from './constants';
@@ -194,6 +195,132 @@ const getHarmonicSolfeggio = (detectedFreq: number): number => {
     return bestMatch;
 };
 
+// --- Tutorial Component ---
+const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+    const [step, setStep] = useState(0);
+
+    const steps = [
+        {
+            title: "Welcome to Aetheria",
+            icon: <Activity className="text-gold-500 w-12 h-12" />,
+            desc: "Aetheria is a harmonic resonance engine that retunes your music to 432Hz and aligns it with sacred geometry.",
+            content: (
+                <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
+                    <li className="flex gap-2">✨ <strong>Automatic 432Hz:</strong> All imported music is instantly pitch-shifted from standard 440Hz to the harmonic 432Hz.</li>
+                    <li className="flex gap-2">💠 <strong>Living Visuals:</strong> The geometry engine reacts to the harmonic content of your audio in real-time.</li>
+                    <li className="flex gap-2">🎧 <strong>Best Experience:</strong> Use headphones to fully experience the binaural beats and spatial audio.</li>
+                </ul>
+            )
+        },
+        {
+            title: "1. Import Your Music",
+            icon: <Upload className="text-blue-400 w-12 h-12" />,
+            desc: "Aetheria runs entirely in your browser. Your files stay on your device.",
+            content: (
+                <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
+                    <li className="flex gap-2">📁 <strong>Folder Import:</strong> The best way to start. Click the folder icon in the sidebar to load an entire album.</li>
+                    <li className="flex gap-2">📄 <strong>File Select:</strong> Use the 'Add Files' button for individual tracks.</li>
+                    <li className="flex gap-2">💾 <strong>Privacy:</strong> No data is uploaded to any server. It is safe to use with your private collection.</li>
+                </ul>
+            )
+        },
+        {
+            title: "2. Scan Harmonics",
+            icon: <Search className="text-purple-400 w-12 h-12" />,
+            desc: "Unlock the hidden potential of your library by analyzing its musical key.",
+            content: (
+                <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
+                    <li className="flex gap-2">🔍 <strong>Scan Library:</strong> Click this in the sidebar. The engine analyzes the frequency spectrum of every song.</li>
+                    <li className="flex gap-2">🔗 <strong>Solfeggio Match:</strong> We automatically assign the mathematically closest healing frequency (e.g., 528Hz) to each track.</li>
+                    <li className="flex gap-2">🧘 <strong>Alignment Playlist:</strong> Use the 'Alignment' button to sort your music from Root (174Hz) to Crown (963Hz).</li>
+                </ul>
+            )
+        },
+        {
+            title: "3. Harmonic Layers",
+            icon: <Sliders className="text-green-400 w-12 h-12" />,
+            desc: "Open the Settings panel (gear icon) to customize your sonic environment.",
+            content: (
+                <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
+                    <li className="flex gap-2">🎚️ <strong>Solfeggio Layer:</strong> Adds a pure sine wave tone. Keep volume low (5-10%) for a subtle subconscious effect.</li>
+                    <li className="flex gap-2">🧠 <strong>Binaural Beats:</strong> Generates a frequency difference between ears to entrain brainwaves (Alpha, Theta).</li>
+                    <li className="flex gap-2">⚡ <strong>Adaptive Mode:</strong> If enabled, the beat frequency changes dynamically based on the song's energy.</li>
+                </ul>
+            )
+        },
+        {
+            title: "4. Visual Engine",
+            icon: <Hexagon className="text-red-400 w-12 h-12" />,
+            desc: "Control how the sacred geometry manifests.",
+            content: (
+                <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
+                    <li className="flex gap-2">🌳 <strong>Tree of Life:</strong> Enable in 'Visualization Engine' to see energy flow through the 10 Sephirot nodes.</li>
+                    <li className="flex gap-2">💧 <strong>Hydro-Acoustics:</strong> Enable water ripples to visualize bass impact. Use the slider to control storm intensity.</li>
+                    <li className="flex gap-2">👁️ <strong>Zen Mode:</strong> Click the Eye icon in the header to hide all controls for pure visual immersion.</li>
+                </ul>
+            )
+        }
+    ];
+
+    return (
+        <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in zoom-in duration-300">
+            <div className="bg-slate-900 border border-gold-500/30 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                
+                {/* Header */}
+                <div className="p-6 bg-slate-950/50 border-b border-slate-800 flex justify-between items-center">
+                    <h3 className="text-xl font-serif text-gold-400">Quick Guide</h3>
+                    <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors"><X size={24} /></button>
+                </div>
+
+                {/* Content */}
+                <div className="p-8 flex-1 flex flex-col items-center text-center overflow-y-auto">
+                    <div className="mb-6 p-4 bg-slate-800 rounded-full shadow-[0_0_20px_rgba(0,0,0,0.5)] text-gold-500">
+                        {steps[step].icon}
+                    </div>
+                    <h2 className="text-2xl font-bold text-white mb-2">{steps[step].title}</h2>
+                    <p className="text-slate-400 mb-6 font-medium">{steps[step].desc}</p>
+                    <div className="w-full">
+                        {steps[step].content}
+                    </div>
+                </div>
+
+                {/* Footer / Nav */}
+                <div className="p-4 border-t border-slate-800 bg-slate-950/50 flex justify-between items-center">
+                    <button 
+                        onClick={() => setStep(Math.max(0, step - 1))}
+                        disabled={step === 0}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                        <ChevronLeft size={16} /> Prev
+                    </button>
+
+                    <div className="flex gap-2">
+                        {steps.map((_, i) => (
+                            <div key={i} className={`h-2 rounded-full transition-all duration-300 ${i === step ? 'bg-gold-500 w-8' : 'bg-slate-700 w-2'}`}></div>
+                        ))}
+                    </div>
+
+                    {step === steps.length - 1 ? (
+                         <button 
+                            onClick={onClose}
+                            className="flex items-center gap-2 px-6 py-2 rounded-lg bg-gold-600 text-black font-bold hover:bg-gold-500 transition-colors shadow-lg shadow-gold-500/20"
+                        >
+                            Start <Zap size={16} />
+                        </button>
+                    ) : (
+                        <button 
+                            onClick={() => setStep(Math.min(steps.length - 1, step + 1))}
+                            className="flex items-center gap-2 px-4 py-2 rounded-lg text-white hover:text-gold-400 transition-colors bg-slate-800 hover:bg-slate-700"
+                        >
+                            Next <ChevronRight size={16} />
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const App: React.FC = () => {
   const [playlist, setPlaylist] = useState<Song[]>([]);
   const [originalPlaylist, setOriginalPlaylist] = useState<Song[]>([]); 
@@ -221,8 +348,9 @@ const App: React.FC = () => {
   
   const [isVizPanelOpen, setIsVizPanelOpen] = useState(true);
 
-  // Disclaimer State
+  // Disclaimer & Tutorial State
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
 
   useEffect(() => {
     const accepted = localStorage.getItem('aetheria_v3_disclaimer');
@@ -234,6 +362,16 @@ const App: React.FC = () => {
   const acceptDisclaimer = () => {
       localStorage.setItem('aetheria_v3_disclaimer', 'true');
       setDisclaimerAccepted(true);
+      // Show tutorial after first acceptance if not seen
+      const tutorialSeen = localStorage.getItem('aetheria_v3_tutorial_seen');
+      if (!tutorialSeen) {
+          setShowTutorial(true);
+      }
+  };
+
+  const closeTutorial = () => {
+      setShowTutorial(false);
+      localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
   };
 
   const [vizSettings, setVizSettings] = useState<VizSettings>({
@@ -246,7 +384,7 @@ const App: React.FC = () => {
     hexOpacity: 0.6,
     hexVisualMode: 'spectrum', 
     showWaterRipples: false,
-    hydroIntensity: 0.3,
+    hydroIntensity: 50, // Now 0-100 scale
     showTreeOfLife: false,
     colorMode: 'chakra',
     autoRotate: true,
@@ -836,6 +974,9 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* Tutorial Modal */}
+      {showTutorial && <TutorialModal onClose={closeTutorial} />}
+
       <div className="absolute inset-0 z-0 pointer-events-none">
         <Visualizer 
             analyser={analyserNode} 
@@ -883,6 +1024,7 @@ const App: React.FC = () => {
             </button>
             <button onClick={() => setShowSettings(!showSettings)} className="p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><Settings size={20} /></button>
             <button onClick={() => setShowInfo(!showInfo)} className="p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><Info size={20} /></button>
+            <button onClick={() => setShowTutorial(true)} className="p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><CircleHelp size={20} /></button>
             <button onClick={() => setIsFullScreen(!isFullScreen)} className="p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800 hidden sm:block">
               {isFullScreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
             </button>
@@ -1243,10 +1385,10 @@ const App: React.FC = () => {
                                         <div className="w-full mt-3 pt-3 border-t border-slate-800">
                                             <div className="flex justify-between text-[10px] text-slate-400 mb-1">
                                                 <span>RIPPLE INTENSITY</span>
-                                                <span>{(vizSettings.hydroIntensity * 100).toFixed(0)}%</span>
+                                                <span>{vizSettings.hydroIntensity}%</span>
                                             </div>
                                             <input 
-                                                type="range" min="0.0" max="1.0" step="0.05"
+                                                type="range" min="0" max="100" step="1"
                                                 value={vizSettings.hydroIntensity}
                                                 onChange={(e) => setVizSettings({...vizSettings, hydroIntensity: parseFloat(e.target.value)})}
                                                 className="w-full accent-blue-500 h-1.5 bg-slate-700 rounded-lg appearance-none touch-none"
