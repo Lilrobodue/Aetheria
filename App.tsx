@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
@@ -194,6 +195,16 @@ const getHarmonicSolfeggio = (detectedFreq: number): number => {
     return bestMatch;
 };
 
+// Fisher-Yates Shuffle
+const getShuffledIndices = (count: number) => {
+    const indices = Array.from({length: count}, (_, i) => i);
+    for (let i = indices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+    return indices;
+};
+
 // --- Tutorial Component ---
 const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     const [step, setStep] = useState(0);
@@ -327,6 +338,11 @@ const App: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isShuffle, setIsShuffle] = useState(false);
   const [isLoop, setIsLoop] = useState(false);
+  
+  // Advanced Shuffle State
+  const [shuffledIndices, setShuffledIndices] = useState<number[]>([]);
+  const [shufflePos, setShufflePos] = useState<number>(0);
+
   const [showInfo, setShowInfo] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -421,14 +437,34 @@ const App: React.FC = () => {
     playlist,
     currentSongIndex,
     isShuffle,
-    isLoop
+    isLoop,
+    shuffledIndices,
+    shufflePos
   });
 
   useEffect(() => {
-    stateRef.current = { playlist, currentSongIndex, isShuffle, isLoop };
-  }, [playlist, currentSongIndex, isShuffle, isLoop]);
+    stateRef.current = { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos };
+  }, [playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos]);
+
+  // Handle Shuffle State Logic
+  useEffect(() => {
+    if (isShuffle && playlist.length > 0) {
+        // If we just toggled shuffle or playlist changed size, generate new indices
+        // but try to preserve current position if possible
+        if (shuffledIndices.length !== playlist.length) {
+            const newIndices = getShuffledIndices(playlist.length);
+            setShuffledIndices(newIndices);
+            const currentIdxInShuffle = newIndices.indexOf(currentSongIndex);
+            setShufflePos(currentIdxInShuffle !== -1 ? currentIdxInShuffle : 0);
+        }
+    } else if (!isShuffle) {
+        setShuffledIndices([]);
+        setShufflePos(0);
+    }
+  }, [isShuffle, playlist.length]);
 
   const playTrackRef = useRef<(index: number, list?: Song[]) => Promise<void>>(async () => {});
+  const playNextRef = useRef<() => void>(() => {});
 
   // --- Audio Initialization ---
   const initAudio = useCallback(() => {
@@ -751,16 +787,7 @@ const App: React.FC = () => {
           setIsPlaying(false);
           const expectedWallDuration = buffer.duration / PITCH_SHIFT_FACTOR;
           if (audioCtxRef.current && Math.abs(audioCtxRef.current.currentTime - startTimeRef.current - expectedWallDuration) < 0.5) {
-             const { playlist, currentSongIndex, isShuffle, isLoop } = stateRef.current;
-             
-             let nextIndex = currentSongIndex + 1;
-             if (isShuffle) {
-                 nextIndex = Math.floor(Math.random() * playlist.length);
-             } else if (nextIndex >= playlist.length) {
-                 if (isLoop) nextIndex = 0;
-                 else return; 
-             }
-             playTrackRef.current(nextIndex);
+             playNextRef.current();
           }
       };
 
@@ -808,6 +835,47 @@ const App: React.FC = () => {
       playTrackRef.current = playTrack;
   }, [playTrack]);
 
+  // Centralized Play Next Logic for Shuffle/Loop
+  const playNext = useCallback(() => {
+    const { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos } = stateRef.current;
+    if (playlist.length === 0) return;
+
+    if (isShuffle) {
+        let nextPos = shufflePos + 1;
+        // Check if we've reached the end of the shuffled list
+        if (nextPos >= shuffledIndices.length) {
+            if (isLoop) {
+                // If looping, regenerate shuffle order and start from the beginning
+                const newIndices = getShuffledIndices(playlist.length);
+                setShuffledIndices(newIndices);
+                setShufflePos(0);
+                playTrack(newIndices[0]);
+            } else {
+                setIsPlaying(false);
+            }
+        } else {
+            // Otherwise, play next in shuffled queue
+            setShufflePos(nextPos);
+            playTrack(shuffledIndices[nextPos]);
+        }
+    } else {
+        // Normal sequential playback
+        let nextIndex = currentSongIndex + 1;
+        if (nextIndex >= playlist.length) {
+            if (isLoop) nextIndex = 0;
+            else {
+                setIsPlaying(false);
+                return;
+            }
+        }
+        playTrack(nextIndex);
+    }
+  }, [playTrack]);
+
+  useEffect(() => {
+      playNextRef.current = playNext;
+  }, [playNext]);
+
   const handlePlayPause = () => {
     initAudio();
     if (isPlaying) {
@@ -835,23 +903,20 @@ const App: React.FC = () => {
   };
 
   const handleNext = () => {
-    let nextIndex = currentSongIndex + 1;
-    if (isShuffle) {
-      nextIndex = Math.floor(Math.random() * playlist.length);
-    } else if (nextIndex >= playlist.length) {
-      if (isLoop) nextIndex = 0;
-      else {
-        setIsPlaying(false);
-        return;
-      }
-    }
-    playTrack(nextIndex);
+    playNext();
   };
 
   const handlePrev = () => {
-    let prev = currentSongIndex - 1;
-    if (prev < 0) prev = playlist.length - 1;
-    playTrack(prev);
+    const { isShuffle, shuffledIndices, shufflePos } = stateRef.current;
+    if (isShuffle && shufflePos > 0) {
+        const prevPos = shufflePos - 1;
+        setShufflePos(prevPos);
+        playTrack(shuffledIndices[prevPos]);
+    } else {
+        let prev = currentSongIndex - 1;
+        if (prev < 0) prev = playlist.length - 1;
+        playTrack(prev);
+    }
   };
 
   const startRecording = (type: 'audio' | 'video' | 'both') => {
@@ -1620,8 +1685,8 @@ const App: React.FC = () => {
             </div>
           )}
           
-          {/* NEW FOOTER */}
-          <div className="absolute bottom-0 left-0 right-0 z-50 p-4 pointer-events-none flex justify-center">
+          {/* NEW FOOTER - Changed to Fixed Bottom */}
+          <div className="fixed bottom-0 left-0 right-0 z-50 p-4 pointer-events-none flex justify-center">
              <div className="pointer-events-auto w-full max-w-2xl bg-black/80 backdrop-blur-xl border border-slate-800/50 rounded-2xl overflow-hidden shadow-2xl transition-all duration-300 hover:bg-black/90 group">
                 
                 {/* Seek Bar - Top Edge (Thin line that grows on hover) */}
