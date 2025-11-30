@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
@@ -256,7 +255,7 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
                     <li className="flex gap-2">🌳 <strong>Tree of Life:</strong> Enable in 'Visualization Engine'. Observe the energy flowing through the 3D Sephirot nodes.</li>
                     <li className="flex gap-2">💧 <strong>Hydro-Acoustics:</strong> Enable water ripples to visualize bass impact. Use the 0-100% slider to control storm intensity.</li>
-                    <li className="flex gap-2">👁️ <strong>Zen Mode:</strong> Click the Eye icon in the header to hide all controls for pure visual immersion.</li>
+                    <li className="flex gap-2">👁️ <strong>Zen Mode:</strong> Click the Eye icon in the header or footer to hide all controls for pure visual immersion.</li>
                 </ul>
             )
         }
@@ -352,15 +351,8 @@ const App: React.FC = () => {
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
 
-  useEffect(() => {
-    const accepted = localStorage.getItem('aetheria_v3_disclaimer');
-    if (accepted === 'true') {
-        setDisclaimerAccepted(true);
-    }
-  }, []);
-
+  // Disclaimer pop-up on every visit logic is handled by initial state being false
   const acceptDisclaimer = () => {
-      localStorage.setItem('aetheria_v3_disclaimer', 'true');
       setDisclaimerAccepted(true);
       // Show tutorial after first acceptance if not seen
       const tutorialSeen = localStorage.getItem('aetheria_v3_tutorial_seen');
@@ -397,7 +389,7 @@ const App: React.FC = () => {
 
   const [volume, setVolume] = useState(0.8);
   const [solfeggioVolume, setSolfeggioVolume] = useState(0.05); 
-  const [binauralVolume, setBinauralVolume] = useState(0.1);
+  const [binauralVolume, setBinauralVolume] = useState(0.03); // Initialized to 3%
   const [selectedSolfeggio, setSelectedSolfeggio] = useState<number>(396);
   const [selectedBinaural, setSelectedBinaural] = useState<BinauralPreset>(BINAURAL_PRESETS[2]); 
   const [useChakraOrder, setUseChakraOrder] = useState(false);
@@ -946,7 +938,7 @@ const App: React.FC = () => {
       
       {/* Disclaimer Modal */}
       {!disclaimerAccepted && (
-        <div className="fixed inset-0 z-[150] bg-black/95 flex items-center justify-center p-6 backdrop-blur-md">
+        <div className="fixed inset-0 z-[150] bg-black/95 flex items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-500">
             <div className="max-w-md w-full bg-slate-900 border border-gold-500/30 p-8 rounded-2xl shadow-2xl text-center relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent"></div>
                  <AlertTriangle className="w-12 h-12 text-gold-500 mx-auto mb-4 animate-pulse" />
@@ -992,7 +984,7 @@ const App: React.FC = () => {
         
         <header className="flex justify-between items-center p-3 md:p-4 border-b border-slate-800/50 bg-black/80 backdrop-blur-md z-30 shadow-lg safe-area-top shrink-0">
           <div className="flex items-center gap-2">
-             <button onClick={() => setShowSidebar(!showSidebar)} className="md:hidden text-gold-500 mr-2 p-1 hover:bg-slate-800 rounded">
+             <button onClick={() => setShowSidebar(!showSidebar)} className="text-gold-500 mr-2 p-1 hover:bg-slate-800 rounded">
                <Menu />
              </button>
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
@@ -1019,10 +1011,22 @@ const App: React.FC = () => {
                  </button>
              )}
 
-             <button onClick={() => setIsZenMode(!isZenMode)} className={`p-1.5 sm:p-2 transition-colors rounded-full border ${isZenMode ? 'text-gold-500 border-gold-500 bg-gold-500/10' : 'text-slate-400 border-slate-800 bg-slate-900/50 hover:text-white'}`}>
-                {isZenMode ? <EyeOff size={20} /> : <Eye size={20} />}
+             <button 
+                onClick={() => setIsZenMode(!isZenMode)} 
+                className={`p-1.5 sm:p-2 transition-colors rounded-full border ${isZenMode ? 'text-gold-500 border-gold-500 bg-gold-500/10' : 'text-slate-400 border-slate-800 bg-slate-900/50 hover:text-white'}`}
+                title={isZenMode ? "Show UI" : "Zen Mode (Hide UI)"}
+             >
+                {isZenMode ? <Eye size={20} /> : <EyeOff size={20} />}
             </button>
-            <button onClick={() => setShowSettings(!showSettings)} className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><Settings size={20} /></button>
+            <button 
+                onClick={() => {
+                    if (!showSettings) setShowSidebar(false);
+                    setShowSettings(!showSettings);
+                }} 
+                className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"
+            >
+                <Settings size={20} />
+            </button>
             <button onClick={() => setShowTutorial(true)} className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><CircleHelp size={20} /></button>
             <button onClick={() => setIsFullScreen(!isFullScreen)} className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800 hidden sm:block">
               {isFullScreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
@@ -1058,7 +1062,7 @@ const App: React.FC = () => {
               </div>
           )}
           
-          {/* Info Modal (Redesigned as Unified Theory Guide) */}
+          {/* Info Modal */}
           {showInfo && (
               <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowInfo(false)}>
                   <div className="bg-slate-950 border border-gold-500/20 rounded-2xl max-w-4xl w-full shadow-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -1177,7 +1181,7 @@ const App: React.FC = () => {
             absolute inset-y-0 left-0 z-[60] md:z-20 w-[85%] sm:w-80 md:relative 
             bg-black/90 md:bg-black/80 border-r border-slate-800 
             flex flex-col transition-transform duration-300 backdrop-blur-lg shadow-2xl
-            ${showSidebar ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+            ${showSidebar ? 'translate-x-0' : '-translate-x-full'}
             ${isFullScreen ? 'md:-ml-80' : ''}
           `}>
             <div className="p-4 border-b border-slate-800 shrink-0">
@@ -1197,8 +1201,7 @@ const App: React.FC = () => {
                       <span className="font-semibold">Import Folder</span>
                       <input 
                         type="file" 
-                        webkitdirectory="" 
-                        directory="" 
+                        {...({ webkitdirectory: "", directory: "" } as any)}
                         multiple 
                         className="hidden" 
                         onChange={(e) => { handleFileUpload(e); if(window.innerWidth < 768) setShowSidebar(false); }} 
@@ -1315,7 +1318,7 @@ const App: React.FC = () => {
             <div className="absolute inset-y-0 right-0 z-30 w-full md:w-96 bg-black/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shadow-2xl transform transition-transform animate-in slide-in-from-right duration-300">
                 <div className="flex justify-between items-start p-6 border-b border-slate-800">
                   <h3 className="text-gold-500 font-serif text-xl">Harmonic Control</h3>
-                  <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-slate-800 rounded-full"><X className="text-slate-500 hover:text-white" /></button>
+                  <button onClick={() => { setShowSettings(false); if(window.innerWidth < 768) setShowSidebar(true); }} className="p-2 hover:bg-slate-800 rounded-full"><X className="text-slate-500 hover:text-white" /></button>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar pb-32">
@@ -1606,138 +1609,112 @@ const App: React.FC = () => {
                                {selectedBinaural.name === p.name && <div className="w-2 h-2 rounded-full bg-blue-500"></div>}
                             </div>
                             <div className="flex-1">
-                               <div className="text-sm font-bold text-slate-200">{p.name}</div>
-                               <div className="text-xs text-slate-500">{p.description}</div>
+                                <span className="block text-sm font-bold text-slate-200">{p.name} ({p.delta}Hz)</span>
+                                <span className="text-[10px] text-slate-400">{p.description}</span>
                             </div>
                           </div>
                        ))}
-                    </div>
-                     <div className="mt-4 bg-slate-900 p-4 rounded-xl border border-slate-800">
-                      <div className="flex justify-between text-xs text-slate-400 mb-2">
-                         <span>Beat Volume</span>
-                         <span>{(binauralVolume * 100).toFixed(0)}%</span>
-                      </div>
-                      <input 
-                        type="range" 
-                        min="0" max="0.5" step="0.01" 
-                        value={binauralVolume}
-                        onChange={(e) => setBinauralVolume(parseFloat(e.target.value))}
-                        className="w-full accent-blue-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer touch-none"
-                      />
                     </div>
                   </div>
                 </div>
             </div>
           )}
-        </main>
-
-        <div className="fixed bottom-0 left-0 right-0 z-50 flex flex-col items-center safe-area-bottom pointer-events-none group">
-           <div 
-             className={`
-                w-full max-w-2xl mx-auto transition-all duration-500 pointer-events-auto
-                ${isZenMode 
-                  ? 'opacity-0 translate-y-20 group-hover:opacity-100 group-hover:translate-y-0' 
-                  : (isPlaying ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0')
-                }
-             `}
-           >
-             <div className="bg-black/90 backdrop-blur-xl border-t border-x border-gold-500/20 rounded-t-2xl px-6 py-4 mx-2 md:mx-0 shadow-[0_-5px_30px_rgba(0,0,0,0.8)] text-center">
-                 <h2 className="text-lg md:text-xl font-serif text-white font-bold mb-1 line-clamp-1 drop-shadow-md">
-                   {playlist[currentSongIndex]?.name || "Select Track"}
-                 </h2>
-                 <div className="flex justify-center items-center gap-2">
-                   {isAnalyzing ? (
-                       <span className="text-[10px] uppercase tracking-widest text-gold-500 animate-pulse">Scanning Harmonics...</span>
-                   ) : (
-                       <>
-                           <span className="text-[10px] uppercase tracking-widest text-gold-500 font-bold">{selectedSolfeggio}Hz <span className="text-slate-500 font-normal">Resonance</span></span>
-                           <div className="w-1 h-1 bg-slate-600 rounded-full"></div>
-                           <span className="text-[10px] uppercase tracking-widest text-blue-400 font-bold">{selectedBinaural.name} <span className="text-slate-500 font-normal">Wave</span></span>
-                       </>
-                   )}
-                 </div>
-             </div>
-           </div>
-
-           <footer className={`w-full bg-black/95 backdrop-blur-2xl border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] transition-all duration-1000 pointer-events-auto ${showSpectrum ? 'pb-2' : ''} ${isZenMode ? 'opacity-0 translate-y-full group-hover:opacity-100 group-hover:translate-y-0' : 'opacity-100'}`}>
-             
-             <div 
-                className="w-full h-2 bg-slate-900 cursor-pointer group relative"
-                onClick={handleSeek}
-             >
-                <div className="absolute inset-y-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none w-full"></div>
+          
+          {/* NEW FOOTER */}
+          <div className="absolute bottom-0 left-0 right-0 z-50 p-4 pointer-events-none flex justify-center">
+             <div className="pointer-events-auto w-full max-w-2xl bg-black/80 backdrop-blur-xl border border-slate-800/50 rounded-2xl overflow-hidden shadow-2xl transition-all duration-300 hover:bg-black/90 group">
                 
+                {/* Seek Bar - Top Edge (Thin line that grows on hover) */}
                 <div 
-                  className="h-full bg-gradient-to-r from-gold-600 via-gold-400 to-white w-0 relative shadow-[0_0_15px_rgba(250,204,21,0.6)] transition-all duration-100 ease-linear"
-                  style={{ width: `${currDuration > 0 ? (currTime / currDuration) * 100 : 0}%` }}
+                    className="w-full h-1 hover:h-2 bg-slate-800/50 cursor-pointer relative transition-all group-hover/seek:h-2"
+                    onClick={handleSeek}
                 >
-                   <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity scale-125"></div>
+                    <div className="absolute inset-y-0 left-0 bg-gold-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]" style={{width: `${(currTime / (currDuration || 1)) * 100}%`}}></div>
                 </div>
 
-                <div className="absolute top-[-20px] left-2 text-[10px] text-slate-400 font-mono pointer-events-none">
-                   {formatDuration(currTime)} / {formatDuration(currDuration)}
+                <div className="px-3 py-2 flex flex-col items-center gap-1.5">
+                    
+                    {/* Top Row: Info (Very Compact) */}
+                    <div className="flex flex-wrap justify-center items-center gap-x-3 gap-y-1 text-[10px] font-medium text-slate-400">
+                        <span className="text-slate-200 truncate max-w-[150px] sm:max-w-[300px] font-bold">
+                            {playlist[currentSongIndex]?.name || "Aetheria Harmonic Player"}
+                        </span>
+                        
+                        <div className="flex items-center gap-2">
+                             <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-gold-500/10 text-gold-500 border border-gold-500/20">
+                                <Activity size={8} /> {playlist[currentSongIndex]?.closestSolfeggio || selectedSolfeggio}Hz
+                             </span>
+                             <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                <Waves size={8} /> {selectedBinaural.name}
+                             </span>
+                             <span className="font-mono text-slate-600 ml-1">
+                                {formatDuration(currTime)} / {formatDuration(currDuration)}
+                             </span>
+                        </div>
+                    </div>
+
+                    {/* Bottom Row: Controls & Mixer (One line on mobile if possible, or tight wrap) */}
+                    <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 w-full">
+                        
+                        {/* Playback Controls */}
+                        <div className="flex items-center gap-3">
+                            <button onClick={() => setIsShuffle(!isShuffle)} className={`${isShuffle ? 'text-gold-500' : 'text-slate-600'} hover:text-white transition-colors`}><Shuffle size={14}/></button>
+                            <button onClick={handlePrev} className="text-slate-300 hover:text-white transition-colors"><SkipBack size={16}/></button>
+                            
+                            <button 
+                                onClick={handlePlayPause} 
+                                className="w-8 h-8 rounded-full bg-gold-500 hover:bg-gold-400 flex items-center justify-center text-black shadow-lg shadow-gold-500/20 transition-all hover:scale-105 active:scale-95"
+                            >
+                                {isPlaying ? <Pause size={16} fill="black" /> : <Play size={16} fill="black" className="ml-0.5" />}
+                            </button>
+                            
+                            <button onClick={handleNext} className="text-slate-300 hover:text-white transition-colors"><SkipForward size={16}/></button>
+                            <button onClick={() => setIsLoop(!isLoop)} className={`${isLoop ? 'text-gold-500' : 'text-slate-600'} hover:text-white transition-colors`}><Repeat size={14}/></button>
+                        </div>
+
+                        {/* Divider (Hidden on very small screens) */}
+                        <div className="w-px h-6 bg-slate-800 hidden sm:block"></div>
+
+                        {/* Volumes */}
+                        <div className="flex items-center gap-4">
+                            {/* Master */}
+                            <div className="flex items-center gap-2 group/vol">
+                                <Volume2 size={14} className="text-slate-500 group-hover/vol:text-gold-400 transition-colors" />
+                                <input 
+                                    type="range" min="0" max="1" step="0.01" 
+                                    value={volume} onChange={e => setVolume(parseFloat(e.target.value))} 
+                                    className="w-16 sm:w-20 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-gold-500 hover:h-1.5 transition-all" 
+                                    title={`Master Volume: ${Math.round(volume*100)}%`}
+                                />
+                            </div>
+                            
+                            {/* Binaural */}
+                            <div className="flex items-center gap-2 group/bin">
+                                <Zap size={14} className="text-slate-500 group-hover/bin:text-blue-400 transition-colors" />
+                                <input 
+                                    type="range" min="0" max="0.2" step="0.001" 
+                                    value={binauralVolume} onChange={e => setBinauralVolume(parseFloat(e.target.value))} 
+                                    className="w-16 sm:w-20 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500 hover:h-1.5 transition-all" 
+                                    title={`Binaural Volume: ${Math.round(binauralVolume/0.2*100)}%`}
+                                />
+                            </div>
+
+                             {/* Zen Mode Button Added Here */}
+                             <div className="w-px h-6 bg-slate-800 hidden sm:block ml-2"></div>
+                             <button 
+                                onClick={() => setIsZenMode(!isZenMode)} 
+                                className={`flex items-center justify-center p-1.5 rounded-full transition-colors ${isZenMode ? 'text-gold-500 bg-gold-500/10' : 'text-slate-500 hover:text-white'}`}
+                                title={isZenMode ? "Show UI" : "Zen Mode (Hide UI)"}
+                             >
+                                {isZenMode ? <Eye size={16} /> : <EyeOff size={16} />}
+                            </button>
+                        </div>
+
+                    </div>
                 </div>
              </div>
-             
-             <div className="flex flex-col md:flex-row items-center justify-between px-4 md:px-8 py-3 gap-3 md:gap-0">
-                
-                <div className="hidden md:flex flex-col items-start w-48 order-1 opacity-60">
-                   <span className="text-[9px] text-gold-500 uppercase tracking-widest">Aetheria Engine</span>
-                   <span className="text-[9px] text-slate-500">v3.2 • High-Res Analysis</span>
-                </div>
-   
-                <div className="flex items-center justify-center gap-4 md:gap-6 order-2 flex-1 w-full md:w-auto">
-                  <button 
-                     onClick={() => setIsShuffle(!isShuffle)} 
-                     className={`p-2 rounded-full transition-all ${isShuffle ? 'text-gold-500' : 'text-slate-600 hover:text-slate-400'}`}
-                   >
-                     <Shuffle size={16} />
-                  </button>
-   
-                  <button onClick={handlePrev} className="p-2 text-slate-300 hover:text-white transition-colors active:scale-90">
-                    <SkipBack size={24} fill="currentColor" className="opacity-80"/>
-                  </button>
-   
-                  <button 
-                     onClick={handlePlayPause}
-                     className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-white text-black flex items-center justify-center shadow-[0_0_25px_rgba(255,255,255,0.3)] hover:scale-105 active:scale-95 transition-all"
-                  >
-                       {isPlaying ? <Pause size={24} fill="black" /> : <Play size={24} fill="black" className="ml-1" />}
-                  </button>
-   
-                  <button onClick={handleNext} className="p-2 text-slate-300 hover:text-white transition-colors active:scale-90">
-                    <SkipForward size={24} fill="currentColor" className="opacity-80"/>
-                  </button>
-   
-                  <button 
-                     onClick={() => setIsLoop(!isLoop)} 
-                     className={`p-2 rounded-full transition-all ${isLoop ? 'text-gold-500' : 'text-slate-600 hover:text-slate-400'}`}
-                   >
-                     <Repeat size={16} />
-                  </button>
-                </div>
-   
-                <div className="flex items-center gap-3 w-full md:w-48 justify-center md:justify-end order-3">
-                  <Volume2 size={16} className="text-slate-500 shrink-0" />
-                  <input 
-                    type="range" 
-                    min="0" max="1" step="0.05" 
-                    value={volume}
-                    onChange={(e) => setVolume(parseFloat(e.target.value))}
-                    className="w-full accent-gold-500 h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer touch-none"
-                  />
-                </div>
-             </div>
-   
-             {showSpectrum && (
-                 <div className="px-4 pb-2 w-full animate-in fade-in slide-in-from-bottom-2 duration-300">
-                     <SpectrumAnalyzer analyser={analyserNode} visible={showSpectrum} />
-                 </div>
-             )}
-           </footer>
-        </div>
-        
-        {/* Upload & Scan Progress Modals omitted for brevity (same as before) */}
+          </div>
+        </main>
       </div>
     </div>
   );

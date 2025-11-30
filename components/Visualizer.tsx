@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect } from 'react';
 import { VizSettings } from '../types';
 
@@ -220,7 +219,6 @@ const getMerkabaPoints = (count: number, scale: number): Point3D[] => {
 const getDodecahedronPoints = (count: number, scale: number): Point3D[] => {
     const phi = PHI;
     const invPhi = 1/phi;
-    const v: Point3D[] = [];
     
     // Standard vertices
     const v2 = [
@@ -289,19 +287,19 @@ const getFibonacciSpherePoints = (count: number, radius: number): Point3D[] => {
 };
 
 // Tree of Life Data
-const getTreeOfLife = (): { nodes: TreeNode[], edges: [number, number][] } => {
+const getTreeOfLife = (scale: number = 1): { nodes: TreeNode[], edges: [number, number][] } => {
     const rawNodes: TreeNode[] = [
-        { x: 0, y: -4.5, z: 0, name: 'Malkuth', colorHex: '#FF0000', freqRange: [20, 80], currentEnergy: 0 }, 
-        { x: 0, y: -1.5, z: 0, name: 'Yesod', colorHex: '#FF8C00', freqRange: [80, 200], currentEnergy: 0 },   
-        { x: 0, y: 1.0, z: 0, name: 'Tiferet', colorHex: '#008000', freqRange: [200, 500], currentEnergy: 0 }, 
-        { x: 0, y: 3.5, z: 0, name: 'Daat', colorHex: '#4B0082', freqRange: [2000, 4000], currentEnergy: 0 },    
-        { x: 0, y: 5.5, z: 0, name: 'Keter', colorHex: '#EE82EE', freqRange: [8000, 20000], currentEnergy: 0 }, 
-        { x: 2.0, y: -2.5, z: 0, name: 'Netzach', colorHex: '#FFD700', freqRange: [150, 300], currentEnergy: 0 }, 
-        { x: 2.0, y: 0.0, z: 0, name: 'Chesed', colorHex: '#00BFFF', freqRange: [500, 1000], currentEnergy: 0 },  
-        { x: 2.0, y: 4.0, z: 0, name: 'Chokhmah', colorHex: '#4B0082', freqRange: [4000, 8000], currentEnergy: 0 }, 
-        { x: -2.0, y: -2.5, z: 0, name: 'Hod', colorHex: '#FFD700', freqRange: [150, 300], currentEnergy: 0 },
-        { x: -2.0, y: 0.0, z: 0, name: 'Gevurah', colorHex: '#00BFFF', freqRange: [500, 1000], currentEnergy: 0 },
-        { x: -2.0, y: 4.0, z: 0, name: 'Binah', colorHex: '#4B0082', freqRange: [2000, 4000], currentEnergy: 0 },
+        { x: 0 * scale, y: -4.5 * scale, z: 0 * scale, name: 'Malkuth', colorHex: '#FF0000', freqRange: [20, 80], currentEnergy: 0 }, 
+        { x: 0 * scale, y: -1.5 * scale, z: 0 * scale, name: 'Yesod', colorHex: '#FF8C00', freqRange: [80, 200], currentEnergy: 0 },   
+        { x: 0 * scale, y: 1.0 * scale, z: 0 * scale, name: 'Tiferet', colorHex: '#008000', freqRange: [200, 500], currentEnergy: 0 }, 
+        { x: 0 * scale, y: 3.5 * scale, z: 0 * scale, name: 'Daat', colorHex: '#4B0082', freqRange: [2000, 4000], currentEnergy: 0 },    
+        { x: 0 * scale, y: 5.5 * scale, z: 0 * scale, name: 'Keter', colorHex: '#EE82EE', freqRange: [8000, 20000], currentEnergy: 0 }, 
+        { x: 2.0 * scale, y: -2.5 * scale, z: 0 * scale, name: 'Netzach', colorHex: '#FFD700', freqRange: [150, 300], currentEnergy: 0 }, 
+        { x: 2.0 * scale, y: 0.0 * scale, z: 0 * scale, name: 'Chesed', colorHex: '#00BFFF', freqRange: [500, 1000], currentEnergy: 0 },  
+        { x: 2.0 * scale, y: 4.0 * scale, z: 0 * scale, name: 'Chokhmah', colorHex: '#4B0082', freqRange: [4000, 8000], currentEnergy: 0 }, 
+        { x: -2.0 * scale, y: -2.5 * scale, z: 0 * scale, name: 'Hod', colorHex: '#FFD700', freqRange: [150, 300], currentEnergy: 0 },
+        { x: -2.0 * scale, y: 0.0 * scale, z: 0 * scale, name: 'Gevurah', colorHex: '#00BFFF', freqRange: [500, 1000], currentEnergy: 0 },
+        { x: -2.0 * scale, y: 4.0 * scale, z: 0 * scale, name: 'Binah', colorHex: '#4B0082', freqRange: [2000, 4000], currentEnergy: 0 },
     ];
 
     const edges: [number, number][] = [
@@ -321,11 +319,11 @@ const Visualizer: React.FC<VisualizerProps> = ({
   selectedFrequency
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number>();
+  const rafRef = useRef<number>(0);
   const particlesRef = useRef<Particle[]>([]);
   const hexGridRef = useRef<HexCell[]>([]);
   const ripplesRef = useRef<Ripple[]>([]);
-  const treeRef = useRef(getTreeOfLife());
+  const treeRef = useRef(getTreeOfLife(1));
   
   const timeRef = useRef(0);
   const prevFreqRef = useRef(0);
@@ -628,9 +626,10 @@ const Visualizer: React.FC<VisualizerProps> = ({
             const flowIntensity = baseIntensity + (boost * 1.5);
             
             if (flowIntensity > 0.1) {
-                // PHYSICS: Speed increases with bass/energy
-                const variableSpeed = settings.speed * (0.5 + (bassEnergy * 1.5));
-                const phase = (timeRef.current * variableSpeed + (i * 0.7)) % 1;
+                // PHYSICS: Calming flow independent of bass acceleration
+                const flowSpeed = 0.0002 * settings.speed;
+                const steadyTime = Date.now() * flowSpeed; 
+                const phase = (steadyTime + (i * 0.7)) % 1;
                 
                 const px = sx + (ex - sx) * phase;
                 const py = sy + (ey - sy) * phase;
@@ -685,7 +684,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
         // 2. 3D Spherical Nodes (Sephirot)
         treeRef.current.nodes.forEach(node => {
             const nx = node.x * scaleUnit, ny = -node.y * scaleUnit + breathing;
-            const baseRadius = scaleUnit * 0.6; 
+            // Reduced base radius for less crowding on small screens (0.35 -> 0.20)
+            const baseRadius = scaleUnit * 0.20; 
             const energyPulse = (node.currentEnergy || 0) * 10;
             const r = baseRadius + energyPulse;
             
@@ -839,7 +839,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
         ctx.restore();
       }
 
-      timeRef.current += 0.01 * settings.speed;
+      // Add bass energy to global time accumulator for acceleration effects
+      timeRef.current += (0.01 * settings.speed) + (bassEnergy * 0.03); 
       rafRef.current = requestAnimationFrame(render);
     };
 
