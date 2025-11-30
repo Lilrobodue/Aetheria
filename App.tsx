@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
@@ -266,7 +265,7 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
                     <li className="flex gap-2">🌳 <strong>Tree of Life:</strong> Enable in 'Visualization Engine'. Observe the energy flowing through the 3D Sephirot nodes.</li>
                     <li className="flex gap-2">💧 <strong>Hydro-Acoustics:</strong> Enable water ripples to visualize bass impact. Use the 0-100% slider to control storm intensity.</li>
-                    <li className="flex gap-2">👁️ <strong>Zen Mode:</strong> Click the Eye icon in the header or footer to hide all controls for pure visual immersion.</li>
+                    <li className="flex gap-2">👁️ <strong>Zen Mode:</strong> Click the Eye icon in the footer to hide all controls for pure visual immersion.</li>
                 </ul>
             )
         }
@@ -346,7 +345,12 @@ const App: React.FC = () => {
   const [showInfo, setShowInfo] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  
+  // Zen Mode with Mouse Detect
   const [isZenMode, setIsZenMode] = useState(false);
+  const [zenUiVisible, setZenUiVisible] = useState(true);
+  const zenTimeoutRef = useRef<number | null>(null);
+
   const [isRecording, setIsRecording] = useState(false);
   const [showRecordOptions, setShowRecordOptions] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true); 
@@ -446,18 +450,44 @@ const App: React.FC = () => {
     stateRef.current = { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos };
   }, [playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos]);
 
+  // Handle Zen Mode Mouse tracking
+  useEffect(() => {
+    if (!isZenMode) {
+      setZenUiVisible(true);
+      return;
+    }
+
+    const handleMouseMove = () => {
+      setZenUiVisible(true);
+      if (zenTimeoutRef.current) clearTimeout(zenTimeoutRef.current);
+      zenTimeoutRef.current = setTimeout(() => {
+        setZenUiVisible(false);
+      }, 3000); 
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    // Initial trigger to show UI when entering mode
+    handleMouseMove();
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      if (zenTimeoutRef.current) clearTimeout(zenTimeoutRef.current);
+    };
+  }, [isZenMode]);
+
   // Handle Shuffle State Logic
   useEffect(() => {
     if (isShuffle && playlist.length > 0) {
-        // If we just toggled shuffle or playlist changed size, generate new indices
-        // but try to preserve current position if possible
+        // If we just toggled shuffle or playlist changed size
         if (shuffledIndices.length !== playlist.length) {
             const newIndices = getShuffledIndices(playlist.length);
             setShuffledIndices(newIndices);
+            // Try to keep the current song playing without jumping
             const currentIdxInShuffle = newIndices.indexOf(currentSongIndex);
             setShufflePos(currentIdxInShuffle !== -1 ? currentIdxInShuffle : 0);
         }
     } else if (!isShuffle) {
+        // Clear shuffle state when disabled
         setShuffledIndices([]);
         setShufflePos(0);
     }
@@ -841,25 +871,40 @@ const App: React.FC = () => {
     if (playlist.length === 0) return;
 
     if (isShuffle) {
-        let nextPos = shufflePos + 1;
-        // Check if we've reached the end of the shuffled list
-        if (nextPos >= shuffledIndices.length) {
+        // Shuffle Mode Logic
+        // Ensure we have a valid shuffle list
+        let currentIndices = shuffledIndices;
+        let currentPos = shufflePos;
+
+        if (currentIndices.length !== playlist.length) {
+             // Fallback if state drifted
+             currentIndices = getShuffledIndices(playlist.length);
+             const found = currentIndices.indexOf(currentSongIndex);
+             currentPos = found !== -1 ? found : 0;
+             setShuffledIndices(currentIndices);
+        }
+
+        const nextPos = currentPos + 1;
+
+        if (nextPos >= currentIndices.length) {
+            // End of shuffled list
             if (isLoop) {
-                // If looping, regenerate shuffle order and start from the beginning
+                // Loop: Generate NEW random order and start from 0 (Carry the vibes refresh)
                 const newIndices = getShuffledIndices(playlist.length);
                 setShuffledIndices(newIndices);
                 setShufflePos(0);
                 playTrack(newIndices[0]);
             } else {
+                // No Loop: Stop
                 setIsPlaying(false);
             }
         } else {
-            // Otherwise, play next in shuffled queue
+            // Next in shuffled list
             setShufflePos(nextPos);
-            playTrack(shuffledIndices[nextPos]);
+            playTrack(currentIndices[nextPos]);
         }
     } else {
-        // Normal sequential playback
+        // Normal Sequential Logic
         let nextIndex = currentSongIndex + 1;
         if (nextIndex >= playlist.length) {
             if (isLoop) nextIndex = 0;
@@ -1045,7 +1090,9 @@ const App: React.FC = () => {
         />
       </div>
 
-      <div className={`relative z-10 flex flex-col h-screen transition-opacity duration-1000 ${isZenMode ? 'opacity-0 hover:opacity-100 active:opacity-100' : 'bg-black/20'}`}>
+      <div 
+        className={`relative z-10 flex flex-col h-screen transition-opacity duration-1000 ${(!isZenMode || zenUiVisible) ? 'opacity-100' : 'opacity-0'} ${isZenMode ? '' : 'bg-black/20'}`}
+      >
         
         <header className="flex justify-between items-center p-3 md:p-4 border-b border-slate-800/50 bg-black/80 backdrop-blur-md z-30 shadow-lg safe-area-top shrink-0">
           <div className="flex items-center gap-2">
@@ -1076,13 +1123,6 @@ const App: React.FC = () => {
                  </button>
              )}
 
-             <button 
-                onClick={() => setIsZenMode(!isZenMode)} 
-                className={`p-1.5 sm:p-2 transition-colors rounded-full border ${isZenMode ? 'text-gold-500 border-gold-500 bg-gold-500/10' : 'text-slate-400 border-slate-800 bg-slate-900/50 hover:text-white'}`}
-                title={isZenMode ? "Show UI" : "Zen Mode (Hide UI)"}
-             >
-                {isZenMode ? <Eye size={20} /> : <EyeOff size={20} />}
-            </button>
             <button 
                 onClick={() => {
                     if (!showSettings) setShowSidebar(false);
@@ -1243,9 +1283,10 @@ const App: React.FC = () => {
           )}
 
           <aside className={`
-            absolute inset-y-0 left-0 z-[60] md:z-20 w-[85%] sm:w-80 md:relative 
+            absolute inset-y-0 left-0 w-[85%] sm:w-80 md:relative 
             bg-black/90 md:bg-black/80 border-r border-slate-800 
             flex flex-col transition-transform duration-300 backdrop-blur-lg shadow-2xl
+            z-[60]
             ${showSidebar ? 'translate-x-0' : '-translate-x-full'}
             ${isFullScreen ? 'md:-ml-80' : ''}
           `}>
@@ -1685,21 +1726,21 @@ const App: React.FC = () => {
             </div>
           )}
           
-          {/* NEW FOOTER - Changed to Fixed Bottom */}
-          <div className="fixed bottom-0 left-0 right-0 z-50 p-4 pointer-events-none flex justify-center">
-             <div className="pointer-events-auto w-full max-w-2xl bg-black/80 backdrop-blur-xl border border-slate-800/50 rounded-2xl overflow-hidden shadow-2xl transition-all duration-300 hover:bg-black/90 group">
+          {/* NEW FOOTER - SNAPPED TO BOTTOM */}
+          <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none flex justify-center">
+             <div className="pointer-events-auto w-full bg-black/90 backdrop-blur-xl border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] transition-all duration-300 group">
                 
-                {/* Seek Bar - Top Edge (Thin line that grows on hover) */}
+                {/* Seek Bar */}
                 <div 
-                    className="w-full h-1 hover:h-2 bg-slate-800/50 cursor-pointer relative transition-all group-hover/seek:h-2"
+                    className="w-full h-1 hover:h-2 bg-slate-800/50 cursor-pointer relative transition-all group-hover:h-2"
                     onClick={handleSeek}
                 >
                     <div className="absolute inset-y-0 left-0 bg-gold-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]" style={{width: `${(currTime / (currDuration || 1)) * 100}%`}}></div>
                 </div>
 
-                <div className="px-3 py-2 flex flex-col items-center gap-1.5">
+                <div className="px-3 py-3 flex flex-col items-center gap-2">
                     
-                    {/* Top Row: Info (Very Compact) */}
+                    {/* Top Row: Info */}
                     <div className="flex flex-wrap justify-center items-center gap-x-3 gap-y-1 text-[10px] font-medium text-slate-400">
                         <span className="text-slate-200 truncate max-w-[150px] sm:max-w-[300px] font-bold">
                             {playlist[currentSongIndex]?.name || "Aetheria Harmonic Player"}
@@ -1718,7 +1759,7 @@ const App: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Bottom Row: Controls & Mixer (One line on mobile if possible, or tight wrap) */}
+                    {/* Bottom Row: Controls */}
                     <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 w-full">
                         
                         {/* Playback Controls */}
@@ -1764,7 +1805,7 @@ const App: React.FC = () => {
                                 />
                             </div>
 
-                             {/* Zen Mode Button Added Here */}
+                             {/* Zen Mode Button */}
                              <div className="w-px h-6 bg-slate-800 hidden sm:block ml-2"></div>
                              <button 
                                 onClick={() => setIsZenMode(!isZenMode)} 
