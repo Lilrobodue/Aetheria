@@ -8,77 +8,6 @@ import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO } from './constants';
 import Visualizer from './components/Visualizer';
 
-// --- Spectrum Analyzer Component ---
-const SpectrumAnalyzer: React.FC<{ analyser: AnalyserNode | null; visible: boolean }> = ({ analyser, visible }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    if (!visible || !canvasRef.current || !analyser) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    let animationId: number;
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-
-    const draw = () => {
-      animationId = requestAnimationFrame(draw);
-      
-      if (canvas.width !== canvas.offsetWidth || canvas.height !== canvas.offsetHeight) {
-          canvas.width = canvas.offsetWidth;
-          canvas.height = canvas.offsetHeight;
-      }
-      
-      analyser.getByteFrequencyData(dataArray);
-      
-      const w = canvas.width;
-      const h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
-      
-      const barCount = 128; 
-      const barSpacing = 1;
-      const totalSpacing = (barCount - 1) * barSpacing;
-      const barWidth = (w - totalSpacing) / barCount;
-      
-      const gradient = ctx.createLinearGradient(0, h, 0, 0);
-      gradient.addColorStop(0, '#f59e0b'); 
-      gradient.addColorStop(0.5, '#ef4444'); 
-      gradient.addColorStop(1, '#a855f7'); 
-
-      ctx.fillStyle = gradient;
-
-      for(let i = 0; i < barCount; i++) {
-        const percent = i / barCount;
-        const logIndex = Math.floor(percent * percent * (bufferLength / 1.5));
-        let value = dataArray[logIndex] || 0;
-        value = value * (1 + percent * 0.5);
-        const barHeight = (value / 255) * h;
-        const x = i * (barWidth + barSpacing);
-        const y = h - barHeight;
-
-        if (barHeight > 0) {
-            ctx.fillRect(x, y, barWidth, barHeight);
-        }
-      }
-    };
-    draw();
-
-    return () => {
-      cancelAnimationFrame(animationId);
-    };
-  }, [analyser, visible]);
-
-  if (!visible) return null;
-
-  return (
-    <div className="w-full h-24 bg-black/50 rounded-lg border border-slate-800/50 backdrop-blur-sm overflow-hidden relative shadow-inner mt-2">
-      <div className="absolute top-1 left-2 text-[9px] text-gold-500/50 font-mono tracking-widest uppercase">High-Res Spectral Analysis</div>
-      <canvas ref={canvasRef} className="w-full h-full opacity-90" />
-    </div>
-  );
-};
-
 // --- Helpers ---
 const formatDuration = (seconds: number) => {
   if (!seconds || isNaN(seconds)) return "00:00";
@@ -405,6 +334,7 @@ const App: React.FC = () => {
     enableFlow: true,
     enableFloat: false,
     enablePulse: false,
+    enableTrails: false,
   });
 
   const [volume, setVolume] = useState(0.8);
@@ -413,7 +343,6 @@ const App: React.FC = () => {
   const [selectedSolfeggio, setSelectedSolfeggio] = useState<number>(396);
   const [selectedBinaural, setSelectedBinaural] = useState<BinauralPreset>(BINAURAL_PRESETS[2]); 
   const [useChakraOrder, setUseChakraOrder] = useState(false);
-  const [showSpectrum, setShowSpectrum] = useState(false);
   const [isAdaptiveBinaural, setIsAdaptiveBinaural] = useState(true); // Default ON
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
@@ -460,7 +389,7 @@ const App: React.FC = () => {
     const handleMouseMove = () => {
       setZenUiVisible(true);
       if (zenTimeoutRef.current) clearTimeout(zenTimeoutRef.current);
-      zenTimeoutRef.current = setTimeout(() => {
+      zenTimeoutRef.current = window.setTimeout(() => {
         setZenUiVisible(false);
       }, 3000); 
     };
@@ -1445,13 +1374,13 @@ const App: React.FC = () => {
                              
                              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800">
                                 <span className="text-xs text-slate-300 flex items-center gap-2">
-                                  <BarChart3 size={14} className="text-gold-500"/> Audio Spectrum
+                                  <Sparkles size={14} className="text-gold-500"/> Astral Trails
                                 </span>
                                 <button 
-                                  onClick={() => setShowSpectrum(!showSpectrum)}
-                                  className={`w-10 h-5 rounded-full relative transition-colors ${showSpectrum ? 'bg-gold-500' : 'bg-slate-700'}`}
+                                  onClick={() => setVizSettings({...vizSettings, enableTrails: !vizSettings.enableTrails})}
+                                  className={`w-10 h-5 rounded-full relative transition-colors ${vizSettings.enableTrails ? 'bg-gold-500' : 'bg-slate-700'}`}
                                 >
-                                  <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-transform ${showSpectrum ? 'left-6' : 'left-1'}`}></div>
+                                  <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.enableTrails ? 'left-6' : 'left-1'}`}></div>
                                 </button>
                              </div>
 

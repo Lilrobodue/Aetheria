@@ -514,7 +514,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
       // CLEAR SCREEN
       ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = '#000000';
+      // Astral Trails Logic: Don't fully clear if trails are enabled
+      ctx.fillStyle = settings.enableTrails ? 'rgba(0, 0, 0, 0.15)' : '#000000';
       ctx.fillRect(0, 0, w, h);
 
       // --- LAYER 1: HEX GRID ---
