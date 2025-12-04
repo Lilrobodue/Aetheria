@@ -73,13 +73,15 @@ const detectDominantFrequency = async (buffer: AudioBuffer): Promise<number> => 
       const freq = i * binSize;
 
       // Weighting to favor mid-range (melody/harmony) over heavy bass
-      // This prevents most modern tracks from defaulting to 174Hz/285Hz just because the kick is loud
-      if (freq < 150) {
-          magnitude -= 25; 
-      } else if (freq < 300) {
-          magnitude -= 10;
+      // Tuned: Aggressively penalize sub 250Hz to avoid 174/285 bias from kick drums
+      if (freq < 100) {
+          magnitude -= 40; 
+      } else if (freq < 250) {
+          magnitude -= 20;
       } else if (freq > 3000) {
-          magnitude -= 10; // Penalize high hiss/air
+          magnitude -= 15; // Penalize high hiss/air
+      } else {
+          magnitude += 5; // Slight boost to mid-range (vocals/synths)
       }
 
       if (magnitude > maxVal) {
@@ -814,29 +816,31 @@ const App: React.FC = () => {
 
   // Centralized Play Next Logic for Shuffle/Loop
   const playNext = useCallback(() => {
-    const { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos } = stateRef.current;
+    const { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices } = stateRef.current;
     if (playlist.length === 0) return;
 
     if (isShuffle) {
-        // Shuffle Mode Logic
-        // Ensure we have a valid shuffle list
+        // Robust Shuffle Logic: Always find current position dynamically
         let currentIndices = shuffledIndices;
-        let currentPos = shufflePos;
 
+        // Ensure indices match playlist length (Sync check)
         if (currentIndices.length !== playlist.length) {
-             // Fallback if state drifted
              currentIndices = getShuffledIndices(playlist.length);
-             const found = currentIndices.indexOf(currentSongIndex);
-             currentPos = found !== -1 ? found : 0;
              setShuffledIndices(currentIndices);
         }
 
-        const nextPos = currentPos + 1;
+        // Determine where we are in the shuffle list
+        let currentShufflePos = currentIndices.indexOf(currentSongIndex);
+        
+        // If track is not found or invalid, reset
+        if (currentShufflePos === -1) currentShufflePos = -1;
 
-        if (nextPos >= currentIndices.length) {
-            // End of shuffled list
+        const nextShufflePos = currentShufflePos + 1;
+
+        if (nextShufflePos >= currentIndices.length) {
+            // End of Shuffle List
             if (isLoop) {
-                // Loop: Generate NEW random order and start from 0 (Carry the vibes refresh)
+                // Loop: Generate NEW random order and start from 0
                 const newIndices = getShuffledIndices(playlist.length);
                 setShuffledIndices(newIndices);
                 setShufflePos(0);
@@ -847,8 +851,8 @@ const App: React.FC = () => {
             }
         } else {
             // Next in shuffled list
-            setShufflePos(nextPos);
-            playTrack(currentIndices[nextPos]);
+            setShufflePos(nextShufflePos);
+            playTrack(currentIndices[nextShufflePos]);
         }
     } else {
         // Normal Sequential Logic
@@ -1072,8 +1076,12 @@ const App: React.FC = () => {
 
             <button 
                 onClick={() => {
-                    if (!showSettings) setShowSidebar(false);
-                    setShowSettings(!showSettings);
+                    if (showSettings) {
+                        setShowSettings(false);
+                    } else {
+                        setShowSettings(true);
+                        if (window.innerWidth < 768) setShowSidebar(false);
+                    }
                 }} 
                 className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"
             >
