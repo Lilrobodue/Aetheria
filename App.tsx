@@ -52,6 +52,7 @@ const detectDominantFrequency = async (buffer: AudioBuffer): Promise<number> => 
     source.connect(analyser);
     analyser.connect(offlineCtx.destination);
     
+    // Sample from the middle of the track to avoid intro/outro silence
     const startOffset = Math.min(buffer.duration / 2, 30);
     source.start(0, startOffset, sampleDuration);
     
@@ -64,14 +65,21 @@ const detectDominantFrequency = async (buffer: AudioBuffer): Promise<number> => 
     let maxIndex = -1;
     
     const binSize = 44100 / analyser.fftSize;
-    const startBin = Math.floor(70 / binSize);
+    // Start analysis higher to skip sub-bass rumble
+    const startBin = Math.floor(60 / binSize);
 
     for (let i = startBin; i < data.length; i++) {
       let magnitude = data[i];
       const freq = i * binSize;
 
-      if (freq < 250) {
-          magnitude -= 5; 
+      // Weighting to favor mid-range (melody/harmony) over heavy bass
+      // This prevents most modern tracks from defaulting to 174Hz/285Hz just because the kick is loud
+      if (freq < 150) {
+          magnitude -= 25; 
+      } else if (freq < 300) {
+          magnitude -= 10;
+      } else if (freq > 3000) {
+          magnitude -= 10; // Penalize high hiss/air
       }
 
       if (magnitude > maxVal) {
@@ -81,6 +89,8 @@ const detectDominantFrequency = async (buffer: AudioBuffer): Promise<number> => 
     }
 
     let freq = maxIndex * binSize;
+    
+    // Quadratic interpolation for better precision
     if (maxIndex > 0 && maxIndex < data.length - 1) {
        const alpha = data[maxIndex - 1];
        const beta = data[maxIndex];
@@ -765,6 +775,14 @@ const App: React.FC = () => {
     
     if (index < 0 || index >= tracks.length) return;
     
+    // Sync Shuffle Position if we are jumping to a specific track manually
+    if (stateRef.current.isShuffle && !playlistOverride) {
+        const shuffleIdx = stateRef.current.shuffledIndices.indexOf(index);
+        if (shuffleIdx !== -1) {
+             setShufflePos(shuffleIdx);
+        }
+    }
+
     setCurrTime(0);
     pausedAtRef.current = 0;
     setIsAnalyzing(true);
@@ -1031,7 +1049,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v3.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v3.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -1130,6 +1148,17 @@ const App: React.FC = () => {
                           </div>
 
                           <div className="px-8 pb-12 space-y-12">
+                              {/* Section 0: The Physics (432Hz) */}
+                              <section>
+                                  <div className="flex items-center gap-3 mb-6">
+                                    <div className="p-2 bg-gold-500/10 rounded-full"><Waves className="text-gold-500" size={24}/></div>
+                                    <h3 className="text-2xl font-bold text-white">{UNIFIED_THEORY.section1.title}</h3>
+                                  </div>
+                                  <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">
+                                      {UNIFIED_THEORY.section1.content}
+                                  </p>
+                              </section>
+
                               {/* Section 1: The Body (Chakras/Solfeggio) */}
                               <section>
                                   <div className="flex items-center gap-3 mb-6">
@@ -1353,7 +1382,7 @@ const App: React.FC = () => {
             <div className="absolute inset-y-0 right-0 z-30 w-full md:w-96 bg-black/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shadow-2xl transform transition-transform animate-in slide-in-from-right duration-300">
                 <div className="flex justify-between items-start p-6 border-b border-slate-800">
                   <h3 className="text-gold-500 font-serif text-xl">Harmonic Control</h3>
-                  <button onClick={() => { setShowSettings(false); if(window.innerWidth < 768) setShowSidebar(true); }} className="p-2 hover:bg-slate-800 rounded-full"><X className="text-slate-500 hover:text-white" /></button>
+                  <button onClick={() => { setShowSettings(false); }} className="p-2 hover:bg-slate-800 rounded-full"><X className="text-slate-500 hover:text-white" /></button>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar pb-32">
