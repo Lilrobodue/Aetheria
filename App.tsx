@@ -302,6 +302,7 @@ const App: React.FC = () => {
 
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [pendingDurationAnalysis, setPendingDurationAnalysis] = useState<string[]>([]);
   
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
@@ -593,6 +594,46 @@ const App: React.FC = () => {
   }, [isPlaying, currDuration]);
 
 
+  // BACKGROUND DURATION ANALYZER
+  useEffect(() => {
+    if (pendingDurationAnalysis.length === 0) return;
+
+    const processNextBatch = async () => {
+       const batchSize = 5;
+       const processing = pendingDurationAnalysis.slice(0, batchSize);
+       const remaining = pendingDurationAnalysis.slice(batchSize);
+       
+       const updates: {id: string, duration: number}[] = [];
+       
+       // Process batch
+       await Promise.all(processing.map(async (id) => {
+          // Find song object in current playlist state (via ref or effect dependence) - using functional update below
+          const song = originalPlaylist.find(s => s.id === id); 
+          if (song) {
+              const dur = await getAudioDuration(song.file);
+              updates.push({ id, duration: dur });
+          }
+       }));
+       
+       if (updates.length > 0) {
+           setPlaylist(prev => prev.map(s => {
+               const update = updates.find(u => u.id === s.id);
+               return update ? { ...s, duration: update.duration } : s;
+           }));
+           setOriginalPlaylist(prev => prev.map(s => {
+               const update = updates.find(u => u.id === s.id);
+               return update ? { ...s, duration: update.duration } : s;
+           }));
+       }
+       
+       setPendingDurationAnalysis(remaining);
+    };
+
+    const timer = setTimeout(processNextBatch, 100);
+    return () => clearTimeout(timer);
+  }, [pendingDurationAnalysis, originalPlaylist]);
+
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
@@ -600,34 +641,26 @@ const App: React.FC = () => {
     setIsUploading(true);
     setUploadProgress(0);
 
-    const newSongs: Song[] = [];
-    const fileList = (Array.from(files) as File[]).filter(f => f.type.includes('audio') || f.name.endsWith('.wav'));
-    const totalFiles = fileList.length;
-    const BATCH_SIZE = 20;
-
-    for (let i = 0; i < totalFiles; i += BATCH_SIZE) {
-      const batch = fileList.slice(i, i + BATCH_SIZE);
-      await Promise.all(batch.map(async (file) => {
-        const duration = await getAudioDuration(file);
-        newSongs.push({
-          file: file,
-          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          name: file.name.replace(/\.[^/.]+$/, ""),
-          duration: duration
-        });
-      }));
-      setUploadProgress(Math.round(((i + batch.length) / totalFiles) * 100));
-      await new Promise(r => setTimeout(r, 10));
-    }
+    const fileList = (Array.from(files) as File[]).filter(f => f.type.includes('audio') || f.name.endsWith('.wav') || f.name.endsWith('.mp3'));
+    
+    // 1. Create Song objects immediately with 0 duration to unblock UI
+    const newSongs: Song[] = fileList.map(file => ({
+        file: file,
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name: file.name.replace(/\.[^/.]+$/, ""),
+        duration: 0 // Will be filled in background
+    }));
 
     setPlaylist(prev => {
         const updated = [...prev, ...newSongs];
         setOriginalPlaylist(updated); 
         return updated;
     });
+
+    // 2. Queue for background analysis
+    setPendingDurationAnalysis(prev => [...prev, ...newSongs.map(s => s.id)]);
     
     setIsUploading(false);
-    setUploadProgress(0);
     event.target.value = ''; 
   };
 
@@ -1375,7 +1408,7 @@ const App: React.FC = () => {
                           <span className="truncate font-medium">{song.name}</span>
                           {song.closestSolfeggio && <span className="text-[9px] px-1 rounded bg-slate-800 text-gold-500 ml-2 h-fit">{song.closestSolfeggio}Hz</span>}
                       </div>
-                      <span className="text-[10px] text-slate-600">{formatDuration(song.duration || 0)}</span>
+                      <span className="text-[10px] text-slate-600">{song.duration === 0 ? '...' : formatDuration(song.duration || 0)}</span>
                   </div>
                 </div>
               ))}
