@@ -1487,6 +1487,14 @@ const App: React.FC = () => {
                      <Moon size={16} className="mb-1 text-purple-500" />
                      Meditation
                    </button>
+
+                   <button 
+                    onClick={() => generateFrequencyPlaylist([285, 417, 528, 639, 741], 'Flow State')}
+                    className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-cyan-400 hover:border-cyan-500 transition-all active:scale-95"
+                   >
+                     <Waves size={16} className="mb-1 text-cyan-500" />
+                     Flow State
+                   </button>
                </div>
 
                <button 
