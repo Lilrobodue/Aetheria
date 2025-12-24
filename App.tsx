@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2, 
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box, Trash2
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO } from './constants';
@@ -279,6 +279,10 @@ const App: React.FC = () => {
   const [isShuffle, setIsShuffle] = useState(false);
   const [isLoop, setIsLoop] = useState(false);
   
+  // Search functionality
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filteredPlaylist, setFilteredPlaylist] = useState<Song[]>([]);
+  
   // Advanced Shuffle State
   const [shuffledIndices, setShuffledIndices] = useState<number[]>([]);
   const [shufflePos, setShufflePos] = useState<number>(0);
@@ -391,6 +395,45 @@ const App: React.FC = () => {
   useEffect(() => {
     stateRef.current = { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos };
   }, [playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos]);
+
+  // Search functionality effect
+  useEffect(() => {
+    if (searchTerm.trim() === '') {
+      setFilteredPlaylist(playlist);
+    } else {
+      const filtered = playlist.filter(song => 
+        song.name.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+      setFilteredPlaylist(filtered);
+    }
+  }, [searchTerm, playlist]);
+
+  // Delete song function
+  const deleteSong = useCallback((songId: string) => {
+    const updatePlaylist = (prev: Song[]) => prev.filter(song => song.id !== songId);
+    
+    // Update both playlists
+    setPlaylist(updatePlaylist);
+    setOriginalPlaylist(updatePlaylist);
+    
+    // Handle currently playing song
+    const deletingIndex = playlist.findIndex(song => song.id === songId);
+    if (deletingIndex === currentSongIndex) {
+      // If currently playing song is deleted, stop playback
+      setIsPlaying(false);
+      if (sourceNodeRef.current) {
+        try { 
+          sourceNodeRef.current.stop(); 
+          sourceNodeRef.current.disconnect();
+        } catch(e) {}
+        sourceNodeRef.current = null;
+      }
+      setCurrentSongIndex(-1);
+    } else if (deletingIndex < currentSongIndex) {
+      // If deleted song was before current song, adjust index
+      setCurrentSongIndex(prev => prev - 1);
+    }
+  }, [playlist, currentSongIndex]);
 
   // Handle Zen Mode Mouse tracking
   useEffect(() => {
@@ -711,6 +754,7 @@ const App: React.FC = () => {
           setPlaylist(candidates);
           setUseChakraOrder(true);
           setCurrentSongIndex(0);
+          setSearchTerm(''); // Clear search when creating filtered playlist
           playTrackRef.current(0, candidates);
       } else {
           alert(`No songs found matching '${name}'. Try scanning your library first or add more variety.`);
@@ -737,6 +781,7 @@ const App: React.FC = () => {
           setPlaylist(journeyPlaylist);
           setUseChakraOrder(true);
           setCurrentSongIndex(0);
+          setSearchTerm(''); // Clear search when creating aligned playlist
           setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
           playTrackRef.current(0, journeyPlaylist); 
           if(window.innerWidth < 768) setShowSidebar(false);
@@ -745,31 +790,71 @@ const App: React.FC = () => {
       }
   };
 
+  // Generate full library alignment ordered by frequency
+  const generateFullLibraryAlignment = () => {
+      const frequencyOrder = [174, 285, 396, 417, 528, 639, 741, 852, 963];
+      const alignedPlaylist: Song[] = [];
+      
+      // Sort songs by frequency order, then by harmonic deviation (quality)
+      frequencyOrder.forEach(freq => {
+          const songsForFreq = originalPlaylist
+              .filter(s => s.closestSolfeggio === freq)
+              .sort((a, b) => (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999));
+          
+          alignedPlaylist.push(...songsForFreq);
+      });
+      
+      if (alignedPlaylist.length > 0) {
+          setPlaylist(alignedPlaylist);
+          setUseChakraOrder(true);
+          setCurrentSongIndex(0);
+          setSearchTerm(''); // Clear search when creating aligned playlist
+          setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
+          if(window.innerWidth < 768) setShowSidebar(false);
+      } else {
+          alert("No analyzed songs found. Please scan your library first.");
+      }
+  };
+
+  // Generate specific frequency playlists
+  const generateFrequencyPlaylist = (frequencies: number[], name: string) => {
+      const filtered = originalPlaylist
+          .filter(s => frequencies.includes(s.closestSolfeggio || 0))
+          .sort((a, b) => {
+              const freqIndexA = frequencies.indexOf(a.closestSolfeggio || 0);
+              const freqIndexB = frequencies.indexOf(b.closestSolfeggio || 0);
+              if (freqIndexA !== freqIndexB) return freqIndexA - freqIndexB;
+              return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
+          });
+      
+      if (filtered.length > 0) {
+          setPlaylist(filtered);
+          setUseChakraOrder(true);
+          setCurrentSongIndex(0);
+          setSearchTerm(''); // Clear search when creating filtered playlist
+          if(window.innerWidth < 768) setShowSidebar(false);
+      } else {
+          alert(`No songs found for ${name}. Try scanning your library first or add more variety.`);
+      }
+  };
+
   const generateWellnessPlaylist = () => {
-    generateFilteredPlaylist(
-        s => [174, 285, 528].includes(s.closestSolfeggio || 0), 
-        'Deep Healing'
-    );
+    generateFrequencyPlaylist([174, 285, 528], 'Deep Healing');
   };
 
   const generateMoodPlaylist = () => {
-    generateFilteredPlaylist(
-        s => [396, 417, 639].includes(s.closestSolfeggio || 0), 
-        'Mood Elevation'
-    );
+    generateFrequencyPlaylist([396, 417, 639], 'Mood Elevation');
   };
 
   const generateMeditationPlaylist = () => {
-    generateFilteredPlaylist(
-        s => [741, 852, 963].includes(s.closestSolfeggio || 0), 
-        'Deep Meditation'
-    );
+    generateFrequencyPlaylist([741, 852, 963], 'Deep Meditation');
   };
 
   const restoreLibrary = () => {
       if (originalPlaylist.length > 0) {
           setPlaylist(originalPlaylist);
           setUseChakraOrder(false);
+          setSearchTerm(''); // Clear search when restoring library
       }
   };
 
@@ -1086,7 +1171,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v3.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v3.4</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -1284,12 +1369,12 @@ const App: React.FC = () => {
           <aside className={`
             absolute inset-y-0 left-0 w-[85%] sm:w-80 md:relative 
             bg-black/90 md:bg-black/80 border-r border-slate-800 
-            flex flex-col transition-transform duration-300 backdrop-blur-lg shadow-2xl
-            z-[60]
+            transition-transform duration-300 backdrop-blur-lg shadow-2xl
+            z-[60] overflow-y-auto custom-scrollbar
             ${showSidebar ? 'translate-x-0' : '-translate-x-full'}
             ${isFullScreen ? 'md:-ml-80' : ''}
           `}>
-            <div className="p-4 border-b border-slate-800 shrink-0">
+            <div className="p-4 border-b border-slate-800">
                
                {/* NEW GUIDEBOOK BUTTON */}
                <button 
@@ -1325,6 +1410,26 @@ const App: React.FC = () => {
                    </label>
                </div>
                
+               {/* Search Section */}
+               <div className="relative mb-3">
+                   <Search size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500" />
+                   <input
+                       type="text"
+                       placeholder="Search songs..."
+                       value={searchTerm}
+                       onChange={(e) => setSearchTerm(e.target.value)}
+                       className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-gold-500 focus:ring-1 focus:ring-gold-500/20"
+                   />
+                   {searchTerm && (
+                       <button
+                           onClick={() => setSearchTerm('')}
+                           className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-500 hover:text-white"
+                       >
+                           <X size={14} />
+                       </button>
+                   )}
+               </div>
+               
                {/* Tools Section */}
                <div className="grid grid-cols-2 gap-2">
                    <button 
@@ -1340,11 +1445,19 @@ const App: React.FC = () => {
                     className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-gold-400 hover:border-gold-500 transition-all active:scale-95"
                    >
                      <Layers size={16} className="mb-1" />
-                     Alignment
+                     Best Alignment
                    </button>
                    
                    <button 
-                    onClick={() => generateFilteredPlaylist(s => [174, 285, 396, 417].includes(s.closestSolfeggio || 0), 'Qi Strengthening')}
+                    onClick={generateFullLibraryAlignment}
+                    className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-purple-400 hover:border-purple-500 transition-all active:scale-95"
+                   >
+                     <Flower2 size={16} className="mb-1 text-purple-500" />
+                     Full Alignment
+                   </button>
+
+                   <button 
+                    onClick={() => generateFrequencyPlaylist([174, 285, 396, 417], 'Qi Strengthening')}
                     className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-red-400 hover:border-red-500 transition-all active:scale-95"
                    >
                      <Flame size={16} className="mb-1 text-red-500" />
@@ -1385,36 +1498,65 @@ const App: React.FC = () => {
                </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar pb-24">
+            <div className="p-2 space-y-1 pb-32">
               {playlist.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-48 text-center text-slate-600 p-6">
                   <p>Library Empty</p>
                   <p className="text-xs mt-2">Upload a folder or add files to begin.</p>
                 </div>
               )}
-              {playlist.map((song, idx) => (
-                <div 
-                  key={song.id}
-                  onClick={() => { playTrack(idx); if(window.innerWidth < 768) setShowSidebar(false); }}
-                  className={`p-3 rounded-lg cursor-pointer truncate text-sm flex items-center gap-3 transition-all active:scale-95 ${
-                    currentSongIndex === idx 
-                      ? 'bg-gold-600/20 text-gold-400 border-l-4 border-gold-500 pl-2' 
-                      : 'hover:bg-slate-800 text-slate-400'
-                  }`}
-                >
-                  <span className="text-xs opacity-50 w-5 text-right">{idx + 1}</span>
-                  <div className="flex flex-col truncate flex-1">
-                      <div className="flex justify-between">
-                          <span className="truncate font-medium">{song.name}</span>
-                          {song.closestSolfeggio && <span className="text-[9px] px-1 rounded bg-slate-800 text-gold-500 ml-2 h-fit">{song.closestSolfeggio}Hz</span>}
-                      </div>
-                      <span className="text-[10px] text-slate-600">{song.duration === 0 ? '...' : formatDuration(song.duration || 0)}</span>
-                  </div>
+              {searchTerm && filteredPlaylist.length === 0 && playlist.length > 0 && (
+                <div className="flex flex-col items-center justify-center h-32 text-center text-slate-600 p-6">
+                  <p>No Results</p>
+                  <p className="text-xs mt-2">Try a different search term.</p>
                 </div>
-              ))}
+              )}
+              {(searchTerm ? filteredPlaylist : playlist).map((song, displayIdx) => {
+                // Find the actual index in the full playlist
+                const actualIdx = playlist.findIndex(s => s.id === song.id);
+                return (
+                  <div 
+                    key={song.id}
+                    className={`p-3 rounded-lg text-sm flex items-center gap-3 transition-all group ${
+                      currentSongIndex === actualIdx 
+                        ? 'bg-gold-600/20 text-gold-400 border-l-4 border-gold-500 pl-2' 
+                        : 'hover:bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    <span className="text-xs opacity-50 w-5 text-right">{searchTerm ? displayIdx + 1 : actualIdx + 1}</span>
+                    <div 
+                      className="flex flex-col truncate flex-1 cursor-pointer"
+                      onClick={() => { playTrack(actualIdx); if(window.innerWidth < 768) setShowSidebar(false); }}
+                    >
+                        <div className="flex justify-between">
+                            <span className="truncate font-medium">{song.name}</span>
+                            {song.closestSolfeggio && <span className="text-[9px] px-1 rounded bg-slate-800 text-gold-500 ml-2 h-fit">{song.closestSolfeggio}Hz</span>}
+                        </div>
+                        <span className="text-[10px] text-slate-600">{song.duration === 0 ? '...' : formatDuration(song.duration || 0)}</span>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`Delete "${song.name}" from library?`)) {
+                          deleteSong(song.id);
+                        }
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-1 text-red-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-all"
+                      title="Delete song"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
-            <div className="p-3 bg-black/95 backdrop-blur text-center text-xs text-slate-500 border-t border-slate-900 flex justify-between px-6 shrink-0 z-20">
-                <span>{playlist.length} Tracks</span>
+            <div className="p-3 bg-black/95 backdrop-blur text-center text-xs text-slate-500 border-t border-slate-900 flex justify-between px-6 shrink-0 z-20 mb-20">
+                <span>
+                  {searchTerm 
+                    ? `${filteredPlaylist.length}/${playlist.length} Tracks` 
+                    : `${playlist.length} Tracks`
+                  }
+                </span>
                 <span className="text-gold-500/80">{getTotalDuration()} Total</span>
             </div>
           </aside>
