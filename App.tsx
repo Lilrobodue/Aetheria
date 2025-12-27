@@ -1086,7 +1086,8 @@ const App: React.FC = () => {
 
   // Generate full library alignment ordered by frequency
   const generateFullLibraryAlignment = () => {
-      const frequencyOrder = [174, 285, 396, 417, 528, 639, 741, 852, 963];
+      // Get all frequency values from SOLFEGGIO_INFO in order
+      const frequencyOrder = SOLFEGGIO_INFO.map(info => info.freq);
       const alignedPlaylist: Song[] = [];
       
       // Sort songs by frequency order, then by harmonic deviation (quality)
