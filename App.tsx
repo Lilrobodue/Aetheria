@@ -1193,6 +1193,75 @@ const App: React.FC = () => {
     }
   };
 
+  const generateUltimateAlignmentPlaylist = () => {
+    // Get all solfeggio frequencies in order from First through Sixth order
+    const ultimateFrequencyOrder = SOLFEGGIO_INFO.map(info => info.freq);
+    const ultimatePlaylist: Song[] = [];
+    const usedIds = new Set<string>();
+
+    // For each frequency, find the best matching track
+    ultimateFrequencyOrder.forEach(freq => {
+      const candidates = originalPlaylist.filter(s => s.closestSolfeggio === freq && !usedIds.has(s.id));
+      if (candidates.length > 0) {
+        // Enhanced sorting with multiple criteria
+        candidates.sort((a, b) => {
+          // 1. Prioritize songs with high golden ratio alignment
+          const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
+          const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
+          
+          if (Math.abs(aGolden - bGolden) > 0.1) {
+            return bGolden - aGolden; // Higher golden ratio first
+          }
+          
+          // 2. Then prioritize DNA resonance
+          const aDNA = a.fractalAnalysis?.dnaResonanceScore || 0;
+          const bDNA = b.fractalAnalysis?.dnaResonanceScore || 0;
+          
+          if (Math.abs(aDNA - bDNA) > 0.1) {
+            return bDNA - aDNA;
+          }
+          
+          // 3. Finally sort by harmonic deviation (accuracy)
+          return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
+        });
+        
+        const bestMatch = candidates[0];
+        ultimatePlaylist.push(bestMatch);
+        usedIds.add(bestMatch.id);
+      }
+    });
+    
+    if (ultimatePlaylist.length > 0) {
+      setPlaylist(ultimatePlaylist);
+      setUseChakraOrder(true);
+      setCurrentSongIndex(0);
+      setSearchTerm('');
+      
+      // Enable Tree of Life visualization for this ultimate journey
+      setVizSettings(prev => ({ 
+        ...prev, 
+        showTreeOfLife: true,
+        morphEnabled: true,
+        colorMode: 'chakra'
+      }));
+      
+      // Show notification about the ultimate alignment
+      const ordersIncluded = new Set(ultimatePlaylist.map(s => 
+        SOLFEGGIO_INFO.find(info => info.freq === s.closestSolfeggio)?.order
+      )).size;
+      
+      setAnalysisNotification(
+        `Ultimate Alignment activated! Journey through ${ultimatePlaylist.length} frequencies across ${ordersIncluded} orders of consciousness.`
+      );
+      setTimeout(() => setAnalysisNotification(null), 7000);
+      
+      playTrackRef.current(0, ultimatePlaylist);
+      if(window.innerWidth < 768) setShowSidebar(false);
+    } else {
+      alert("Not enough analyzed songs for Ultimate Alignment. Please scan your library first.");
+    }
+  };
+
   const restoreLibrary = () => {
       if (originalPlaylist.length > 0) {
           setPlaylist(originalPlaylist);
@@ -1957,6 +2026,15 @@ const App: React.FC = () => {
                    >
                      <Hexagon size={16} className="mb-1 text-green-500" />
                      DNA Resonant
+                   </button>
+
+                   <button 
+                    onClick={generateUltimateAlignmentPlaylist}
+                    className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-indigo-400 hover:border-indigo-500 transition-all active:scale-95"
+                   >
+                     <Layers size={16} className="mb-1 text-indigo-500" />
+                     <span>Ultimate</span>
+                     <span className="text-[8px] text-indigo-400">All Orders</span>
                    </button>
                </div>
 
