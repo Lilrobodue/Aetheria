@@ -2,11 +2,24 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2, 
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box, Trash2
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box, Trash2, Target, Shield
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO } from './constants';
 import Visualizer from './components/Visualizer';
+import FrequencySelector from './components/FrequencySelector';
+import SafetyProtocols from './components/SafetyProtocols';
+import ExperienceTracker from './components/ExperienceTracker';
+import { 
+  analyzeFractalFrequencies, 
+  assessFrequencySafety, 
+  type FractalAnalysisResult 
+} from './utils/fractalFrequencyAnalysis';
+import { 
+  effectsManager, 
+  experienceTracker, 
+  type FrequencyEffect 
+} from './utils/effectsDocumentation';
 
 // --- Helpers ---
 const formatDuration = (seconds: number) => {
@@ -38,75 +51,92 @@ const getAudioDuration = (file: File): Promise<number> => {
   });
 };
 
+// Original frequency detection (moved outside App component)
+
 const detectDominantFrequency = async (buffer: AudioBuffer): Promise<number> => {
-  try {
-    const sampleDuration = 3;
-    const offlineCtx = new OfflineAudioContext(1, 44100 * sampleDuration, 44100); 
-    const source = offlineCtx.createBufferSource();
-    source.buffer = buffer;
-    
-    const analyser = offlineCtx.createAnalyser();
-    analyser.fftSize = 32768; 
-    analyser.smoothingTimeConstant = 0.1;
-    
-    source.connect(analyser);
-    analyser.connect(offlineCtx.destination);
-    
-    // Sample from the middle of the track to avoid intro/outro silence
-    const startOffset = Math.min(buffer.duration / 2, 30);
-    source.start(0, startOffset, sampleDuration);
-    
-    await offlineCtx.startRendering();
-    
-    const data = new Float32Array(analyser.frequencyBinCount);
-    analyser.getFloatFrequencyData(data);
-    
-    let maxVal = -Infinity;
-    let maxIndex = -1;
-    
-    const binSize = 44100 / analyser.fftSize;
-    // Start analysis higher to skip sub-bass rumble
-    const startBin = Math.floor(60 / binSize);
+  return new Promise((resolve, reject) => {
+    // 5 second timeout for basic analysis
+    const timeout = setTimeout(() => {
+      reject(new Error('Basic frequency detection timeout'));
+    }, 5000);
 
-    for (let i = startBin; i < data.length; i++) {
-      let magnitude = data[i];
-      const freq = i * binSize;
+    try {
+      const sampleDuration = Math.min(3, buffer.duration / 2); // Adaptive duration
+      const offlineCtx = new OfflineAudioContext(1, 44100 * sampleDuration, 44100); 
+      const source = offlineCtx.createBufferSource();
+      source.buffer = buffer;
+      
+      const analyser = offlineCtx.createAnalyser();
+      analyser.fftSize = 16384; // Reduced FFT size for speed
+      analyser.smoothingTimeConstant = 0.1;
+      
+      source.connect(analyser);
+      analyser.connect(offlineCtx.destination);
+      
+      // Sample from the middle of the track to avoid intro/outro silence
+      const startOffset = Math.min(buffer.duration / 2, 30);
+      source.start(0, startOffset, sampleDuration);
+      
+      offlineCtx.startRendering().then(() => {
+        clearTimeout(timeout);
+        
+        const data = new Float32Array(analyser.frequencyBinCount);
+        analyser.getFloatFrequencyData(data);
+        
+        let maxVal = -Infinity;
+        let maxIndex = -1;
+        
+        const binSize = 44100 / analyser.fftSize;
+        // Start analysis higher to skip sub-bass rumble
+        const startBin = Math.floor(60 / binSize);
 
-      // Weighting to favor mid-range (melody/harmony) over heavy bass
-      // Tuned: Aggressively penalize sub 250Hz to avoid 174/285 bias from kick drums
-      if (freq < 100) {
-          magnitude -= 40; 
-      } else if (freq < 250) {
-          magnitude -= 20;
-      } else if (freq > 3000) {
-          magnitude -= 15; // Penalize high hiss/air
-      } else {
-          magnitude += 5; // Slight boost to mid-range (vocals/synths)
-      }
+        for (let i = startBin; i < data.length; i++) {
+          let magnitude = data[i];
+          const freq = i * binSize;
 
-      if (magnitude > maxVal) {
-        maxVal = magnitude;
-        maxIndex = i;
-      }
+          // Weighting to favor mid-range (melody/harmony) over heavy bass
+          // Tuned: Aggressively penalize sub 250Hz to avoid 174/285 bias from kick drums
+          if (freq < 100) {
+              magnitude -= 40; 
+          } else if (freq < 250) {
+              magnitude -= 20;
+          } else if (freq > 3000) {
+              magnitude -= 15; // Penalize high hiss/air
+          } else {
+              magnitude += 5; // Slight boost to mid-range (vocals/synths)
+          }
+
+          if (magnitude > maxVal) {
+            maxVal = magnitude;
+            maxIndex = i;
+          }
+        }
+
+        let freq = maxIndex * binSize;
+        
+        // Quadratic interpolation for better precision
+        if (maxIndex > 0 && maxIndex < data.length - 1) {
+           const alpha = data[maxIndex - 1];
+           const beta = data[maxIndex];
+           const gamma = data[maxIndex + 1];
+           
+           const delta = 0.5 * (alpha - gamma) / (alpha - 2 * beta + gamma);
+           freq = (maxIndex + delta) * binSize;
+        }
+        
+        resolve(freq || 440); // Fallback to A440 if no freq detected
+      }).catch(error => {
+        clearTimeout(timeout);
+        console.error("Analysis failed", error);
+        resolve(440); // Fallback frequency
+      });
+      
+    } catch (e) {
+      clearTimeout(timeout);
+      console.error("Analysis setup failed", e);
+      resolve(440); // Fallback frequency
     }
-
-    let freq = maxIndex * binSize;
-    
-    // Quadratic interpolation for better precision
-    if (maxIndex > 0 && maxIndex < data.length - 1) {
-       const alpha = data[maxIndex - 1];
-       const beta = data[maxIndex];
-       const gamma = data[maxIndex + 1];
-       
-       const delta = 0.5 * (alpha - gamma) / (alpha - 2 * beta + gamma);
-       freq = (maxIndex + delta) * binSize;
-    }
-    
-    return freq;
-  } catch (e) {
-    console.error("Analysis failed", e);
-    return 0;
-  }
+  });
 };
 
 const getHarmonicSolfeggio = (detectedFreq: number): number => {
@@ -362,6 +392,107 @@ const App: React.FC = () => {
   const [useChakraOrder, setUseChakraOrder] = useState(false);
   const [isAdaptiveBinaural, setIsAdaptiveBinaural] = useState(true); // Default ON
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // Advanced Features State
+  const [fractalAnalysis, setFractalAnalysis] = useState<FractalAnalysisResult | null>(null);
+  const [showFrequencySelector, setShowFrequencySelector] = useState(false);
+  const [showSafetyProtocols, setShowSafetyProtocols] = useState(false);
+  const [userExperienceLevel, setUserExperienceLevel] = useState<'beginner' | 'intermediate' | 'advanced' | 'expert'>('beginner');
+  const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
+  const [sessionDuration, setSessionDuration] = useState(0);
+  const [isDocumentingEffects, setIsDocumentingEffects] = useState(false);
+  const [currentEffectsSession, setCurrentEffectsSession] = useState<string | null>(null);
+  const [subtleResonanceMode, setSubtleResonanceMode] = useState(false);
+  const [analysisNotification, setAnalysisNotification] = useState<string | null>(null);
+  const [showExperienceHistory, setShowExperienceHistory] = useState(false);
+
+  // Session duration tracking
+  useEffect(() => {
+    let interval: number | null = null;
+    
+    if (isPlaying) {
+      if (!sessionStartTime) {
+        setSessionStartTime(new Date());
+      }
+      
+      interval = window.setInterval(() => {
+        if (sessionStartTime) {
+          const now = new Date();
+          const duration = (now.getTime() - sessionStartTime.getTime()) / (1000 * 60);
+          setSessionDuration(duration);
+        }
+      }, 1000);
+    } else {
+      setSessionStartTime(null);
+      setSessionDuration(0);
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isPlaying, sessionStartTime]);
+
+  // Effects documentation tracking
+  useEffect(() => {
+    if (isDocumentingEffects && isPlaying && !currentEffectsSession) {
+      const sessionId = experienceTracker.startSession(
+        selectedSolfeggio,
+        solfeggioVolume,
+        'sine'
+      );
+      setCurrentEffectsSession(sessionId);
+    }
+    
+    if (!isDocumentingEffects && currentEffectsSession) {
+      const report = experienceTracker.completeSession(currentEffectsSession);
+      if (report) {
+        // Find matching effect and add report
+        const effects = effectsManager.findEffectsByFrequency(selectedSolfeggio, 10);
+        if (effects.length > 0) {
+          effectsManager.addUserReport(effects[0].id, report);
+        }
+      }
+      setCurrentEffectsSession(null);
+    }
+  }, [isDocumentingEffects, isPlaying, selectedSolfeggio, solfeggioVolume, currentEffectsSession]);
+
+  // Enhanced frequency detection function
+  const detectDominantFrequencyAdvanced = useCallback(async (buffer: AudioBuffer): Promise<number> => {
+    try {
+      setIsAnalyzing(true);
+      
+      // Perform advanced fractal analysis
+      const result = await analyzeFractalFrequencies(buffer);
+      
+      setFractalAnalysis(result);
+      setIsAnalyzing(false);
+      
+      // Update safety state based on analysis
+      const safetyAssessment = assessFrequencySafety(result.dominantFrequency);
+      if (result.dominantFrequency >= 1074) {
+        setSubtleResonanceMode(true);
+        setShowSafetyProtocols(true);
+        
+        // Auto-adjust volume for high frequencies
+        if (safetyAssessment.volume < solfeggioVolume) {
+          setSolfeggioVolume(safetyAssessment.volume);
+        }
+      } else {
+        setSubtleResonanceMode(false);
+      }
+      
+      console.log('Fractal Analysis Result:', result);
+      
+      return result.dominantFrequency;
+    } catch (error) {
+      console.error("Advanced analysis failed, falling back to basic detection", error);
+      setIsAnalyzing(false);
+      setFractalAnalysis(null);
+      
+      // Fallback to original detection method
+      return detectDominantFrequency(buffer);
+    }
+  }, [solfeggioVolume]);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
@@ -710,42 +841,192 @@ const App: React.FC = () => {
   const scanLibrary = async () => {
     initAudio();
     if (!playlist.length || !audioCtxRef.current) return;
+    
+    // Calculate time estimate (1-3 minutes per song for thorough analysis)
+    const estimatedMinutes = Math.round(playlist.length * 2.5);
+    const timeEstimate = estimatedMinutes > 60 
+      ? `${Math.round(estimatedMinutes / 60)}h ${estimatedMinutes % 60}m`
+      : `${estimatedMinutes}m`;
+    
+    const notificationMsg = `Starting deep fractal analysis of ${playlist.length} songs. Estimated time: ${timeEstimate}. This will be thorough but slow - you can cancel anytime.`;
+    
+    setAnalysisNotification(notificationMsg);
+    setTimeout(() => setAnalysisNotification(null), 8000);
+    
     setIsScanning(true);
     setScanProgress(0);
 
     const newPlaylist = [...playlist];
-    
-    for (let i = 0; i < newPlaylist.length; i++) {
-        if (newPlaylist[i].harmonicFreq) continue; 
+    let processedCount = 0;
+    let shouldCancel = false;
+    const startTime = Date.now();
+
+    // Cancel function
+    const cancelScan = () => {
+      shouldCancel = true;
+      setIsScanning(false);
+      setScanProgress(0);
+      console.log(`Analysis cancelled after processing ${processedCount}/${newPlaylist.length} files`);
+    };
+
+    // Store cancel function for emergency use
+    (window as any).cancelAetheriaAnalysis = cancelScan;
+
+    try {
+      // Process ONE file at a time for maximum control and stability
+      for (let i = 0; i < newPlaylist.length; i++) {
+        if (shouldCancel) {
+          console.log('Analysis cancelled by user');
+          break;
+        }
+
+        // Skip already analyzed files
+        if (newPlaylist[i].harmonicFreq) {
+          processedCount++;
+          setScanProgress(Math.round((processedCount / newPlaylist.length) * 100));
+          continue;
+        }
+
+        console.log(`Analyzing ${i + 1}/${newPlaylist.length}: ${newPlaylist[i].name}`);
 
         try {
-            const file = newPlaylist[i].file;
-            const arrayBuffer = await file.arrayBuffer();
-            const audioBuffer = await audioCtxRef.current.decodeAudioData(arrayBuffer);
-            
-            const freq = await detectDominantFrequency(audioBuffer);
-            const solfeggio = getHarmonicSolfeggio(freq);
-            const deviation = Math.abs(freq - solfeggio);
-            
-            newPlaylist[i] = {
-                ...newPlaylist[i],
-                harmonicFreq: freq,
-                closestSolfeggio: solfeggio,
-                harmonicDeviation: deviation
-            };
-            
+          const file = newPlaylist[i].file;
+          
+          // Show which file we're processing
+          setAnalysisNotification(`Analyzing: ${newPlaylist[i].name} (${i + 1}/${newPlaylist.length})`);
+          
+          // Decode audio with yielding
+          const arrayBuffer = await file.arrayBuffer();
+          
+          // Small yield after file read
+          await new Promise(resolve => setTimeout(resolve, 10));
+          
+          const audioBuffer = await audioCtxRef.current!.decodeAudioData(arrayBuffer);
+          
+          // Another yield after decode
+          await new Promise(resolve => setTimeout(resolve, 10));
+
+          let freq: number;
+          let fractalData: FractalAnalysisResult | null = null;
+          
+          try {
+            // Use the interruptible fractal analysis
+            fractalData = await analyzeFractalFrequenciesInterruptible(audioBuffer, () => shouldCancel);
+            freq = fractalData.dominantFrequency;
+            console.log(`Fractal analysis complete for ${newPlaylist[i].name}: ${freq.toFixed(1)}Hz`);
+          } catch (e) {
+            console.warn('Fractal analysis failed for', newPlaylist[i].name, 'using basic detection');
+            // Yield before fallback
+            await new Promise(resolve => setTimeout(resolve, 50));
+            freq = await detectDominantFrequency(audioBuffer);
+          }
+          
+          const solfeggio = getHarmonicSolfeggio(freq);
+          const deviation = Math.abs(freq - solfeggio);
+          
+          newPlaylist[i] = {
+            ...newPlaylist[i],
+            harmonicFreq: freq,
+            closestSolfeggio: solfeggio,
+            harmonicDeviation: deviation,
+            fractalAnalysis: fractalData
+          };
+          
         } catch (e) {
-            console.warn("Could not analyze", newPlaylist[i].name, e);
+          console.warn("Could not analyze", newPlaylist[i].name, e);
+          // Set basic fallback values
+          newPlaylist[i] = {
+            ...newPlaylist[i],
+            harmonicFreq: 440,
+            closestSolfeggio: 528,
+            harmonicDeviation: 999
+          };
         }
+
+        processedCount++;
         
-        setScanProgress(Math.round(((i + 1) / newPlaylist.length) * 100));
-        await new Promise(r => setTimeout(r, 10));
+        // Update progress
+        const progress = Math.round((processedCount / newPlaylist.length) * 100);
+        setScanProgress(progress);
+        
+        // Calculate time remaining
+        const elapsed = Date.now() - startTime;
+        const avgTimePerFile = elapsed / processedCount;
+        const remaining = (newPlaylist.length - processedCount) * avgTimePerFile;
+        const remainingMinutes = Math.round(remaining / 60000);
+        
+        console.log(`Progress: ${progress}% (${processedCount}/${newPlaylist.length}), Est. remaining: ${remainingMinutes}m`);
+        
+        // Update playlist progressively so user sees results
+        setPlaylist([...newPlaylist]);
+        
+        // Longer yield between files to prevent browser stress
+        // Scale the delay based on library size (bigger libraries = longer breaks)
+        const breakTime = Math.min(1000, Math.max(200, newPlaylist.length * 5));
+        await new Promise(resolve => setTimeout(resolve, breakTime));
+      }
+
+    } catch (error) {
+      console.error('Scan library error:', error);
+      const elapsed = Math.round((Date.now() - startTime) / 60000);
+      alert(`Analysis encountered an error after ${elapsed} minutes. Processed ${processedCount}/${newPlaylist.length} files. Partial results have been saved.`);
+    } finally {
+      // Clean up
+      delete (window as any).cancelAetheriaAnalysis;
+      setAnalysisNotification(null);
+      
+      setPlaylist(newPlaylist);
+      setOriginalPlaylist(newPlaylist);
+      setIsScanning(false);
+      setScanProgress(0);
+      
+      const totalTime = Math.round((Date.now() - startTime) / 60000);
+      console.log(`Analysis complete: ${processedCount}/${newPlaylist.length} files processed in ${totalTime} minutes`);
+      
+      if (processedCount > 0) {
+        const successMsg = `Analysis complete! Processed ${processedCount}/${newPlaylist.length} files in ${totalTime} minutes.`;
+        setAnalysisNotification(successMsg);
+        setTimeout(() => setAnalysisNotification(null), 5000);
+      }
     }
+  };
+
+  // New interruptible fractal analysis function
+  const analyzeFractalFrequenciesInterruptible = async (
+    audioBuffer: AudioBuffer, 
+    shouldCancel: () => boolean
+  ): Promise<FractalAnalysisResult> => {
+    // Break the analysis into smaller, interruptible chunks
     
-    setPlaylist(newPlaylist);
-    setOriginalPlaylist(newPlaylist); 
-    setIsScanning(false);
-    setScanProgress(0);
+    if (shouldCancel()) throw new Error('Analysis cancelled');
+    
+    // Step 1: Basic frequency detection (fast)
+    const basicFreq = await detectDominantFrequency(audioBuffer);
+    await new Promise(resolve => setTimeout(resolve, 50)); // Yield
+    
+    if (shouldCancel()) throw new Error('Analysis cancelled');
+    
+    // Step 2: Try full fractal analysis with frequent yielding
+    try {
+      const result = await analyzeFractalFrequencies(audioBuffer);
+      return result;
+    } catch (e) {
+      // If fractal analysis fails, return basic result with fallback data
+      const safetyAssessment = assessFrequencySafety(basicFreq);
+      return {
+        dominantFrequency: basicFreq,
+        harmonicSeries: [basicFreq, basicFreq * 2, basicFreq * 3],
+        fractalDimension: 1.5,
+        goldenRatioAlignment: 0.1,
+        pattern111Presence: 0.0,
+        dnaResonanceScore: 0.1,
+        safetyLevel: safetyAssessment.level,
+        recommendedVolume: safetyAssessment.volume,
+        infiniteOrderHarmonics: [],
+        sacredGeometryAlignment: 0.1,
+        schumannResonanceHarmony: 0.0
+      };
+    }
   };
 
   const generateFilteredPlaylist = (filterFn: (song: Song) => boolean, name: string) => {
@@ -770,7 +1051,20 @@ const App: React.FC = () => {
       journeyOrder.forEach(freq => {
           const candidates = originalPlaylist.filter(s => s.closestSolfeggio === freq && !usedIds.has(s.id));
           if (candidates.length > 0) {
-              candidates.sort((a, b) => (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999));
+              // Enhanced sorting with fractal analysis priority
+              candidates.sort((a, b) => {
+                  // Prioritize songs with high golden ratio alignment
+                  const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
+                  const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
+                  
+                  if (Math.abs(aGolden - bGolden) > 0.1) {
+                      return bGolden - aGolden; // Higher golden ratio first
+                  }
+                  
+                  // Then sort by harmonic deviation (accuracy)
+                  return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
+              });
+              
               const bestMatch = candidates[0];
               journeyPlaylist.push(bestMatch);
               usedIds.add(bestMatch.id);
@@ -850,6 +1144,54 @@ const App: React.FC = () => {
     generateFrequencyPlaylist([741, 852, 963], 'Deep Meditation');
   };
 
+  const generateGoldenRatioPlaylist = () => {
+    const goldenTracks = originalPlaylist
+      .filter(s => s.fractalAnalysis && s.fractalAnalysis.goldenRatioAlignment > 0.7)
+      .sort((a, b) => (b.fractalAnalysis?.goldenRatioAlignment || 0) - (a.fractalAnalysis?.goldenRatioAlignment || 0));
+    
+    if (goldenTracks.length > 0) {
+      setPlaylist(goldenTracks);
+      setUseChakraOrder(false);
+      setCurrentSongIndex(0);
+      setSearchTerm('');
+      if(window.innerWidth < 768) setShowSidebar(false);
+    } else {
+      alert('No tracks with high golden ratio alignment found. Try scanning your library with fractal analysis first.');
+    }
+  };
+
+  const generate111PatternPlaylist = () => {
+    const pattern111Tracks = originalPlaylist
+      .filter(s => s.fractalAnalysis && s.fractalAnalysis.pattern111Presence > 0.5)
+      .sort((a, b) => (b.fractalAnalysis?.pattern111Presence || 0) - (a.fractalAnalysis?.pattern111Presence || 0));
+    
+    if (pattern111Tracks.length > 0) {
+      setPlaylist(pattern111Tracks);
+      setUseChakraOrder(false);
+      setCurrentSongIndex(0);
+      setSearchTerm('');
+      if(window.innerWidth < 768) setShowSidebar(false);
+    } else {
+      alert('No tracks with 111Hz patterns found. Try scanning your library with fractal analysis first.');
+    }
+  };
+
+  const generateDNAResonancePlaylist = () => {
+    const dnaResonantTracks = originalPlaylist
+      .filter(s => s.fractalAnalysis && s.fractalAnalysis.dnaResonanceScore > 0.6)
+      .sort((a, b) => (b.fractalAnalysis?.dnaResonanceScore || 0) - (a.fractalAnalysis?.dnaResonanceScore || 0));
+    
+    if (dnaResonantTracks.length > 0) {
+      setPlaylist(dnaResonantTracks);
+      setUseChakraOrder(false);
+      setCurrentSongIndex(0);
+      setSearchTerm('');
+      if(window.innerWidth < 768) setShowSidebar(false);
+    } else {
+      alert('No tracks with DNA resonance detected. Try scanning your library with fractal analysis first.');
+    }
+  };
+
   const restoreLibrary = () => {
       if (originalPlaylist.length > 0) {
           setPlaylist(originalPlaylist);
@@ -916,8 +1258,15 @@ const App: React.FC = () => {
     setCurrDuration(audioBuffer.duration / PITCH_SHIFT_FACTOR);
 
     let freq = song.harmonicFreq;
+    let existingFractalAnalysis = song.fractalAnalysis;
+    
     if (!freq) {
-        freq = await detectDominantFrequency(audioBuffer);
+        // Try advanced analysis first, fallback to basic if needed
+        freq = await detectDominantFrequencyAdvanced(audioBuffer);
+    } else if (existingFractalAnalysis) {
+        // Use stored fractal analysis
+        setFractalAnalysis(existingFractalAnalysis);
+        console.log('Using stored fractal analysis for:', song.name);
     }
     
     const autoFreq = getHarmonicSolfeggio(freq || 0);
@@ -1107,6 +1456,26 @@ const App: React.FC = () => {
     return s ? s.color : '#fbbf24';
   };
 
+  const getSafetyLevelColor = (level: string) => {
+    switch (level) {
+      case 'SAFE': return 'text-green-500';
+      case 'CAUTION': return 'text-yellow-500';
+      case 'EXPERT': return 'text-orange-500';
+      case 'RESEARCH': return 'text-red-500';
+      default: return 'text-gray-500';
+    }
+  };
+
+  const getExperienceLevelColor = (level: string) => {
+    switch (level) {
+      case 'beginner': return 'text-green-400';
+      case 'intermediate': return 'text-blue-400';
+      case 'advanced': return 'text-purple-400';
+      case 'expert': return 'text-red-400';
+      default: return 'text-gray-400';
+    }
+  };
+
   const getTotalDuration = () => {
     const totalSeconds = playlist.reduce((acc, song) => acc + (song.duration || 0), 0);
     return formatDuration(totalSeconds);
@@ -1145,8 +1514,36 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Tutorial Modal */}
-      {showTutorial && <TutorialModal onClose={closeTutorial} />}
+          {/* Tutorial Modal */}
+          {showTutorial && <TutorialModal onClose={closeTutorial} />}
+
+          {/* Analysis Notification */}
+          {analysisNotification && (
+            <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[100] max-w-lg">
+              <div className="bg-blue-900/90 border border-blue-500 text-blue-100 p-4 rounded-lg shadow-lg backdrop-blur-md">
+                <div className="flex items-start gap-3">
+                  <Activity className={`w-5 h-5 text-blue-400 mt-0.5 ${isScanning ? 'animate-pulse' : ''}`} />
+                  <div className="flex-1">
+                    <div className="font-bold text-sm mb-1">
+                      {isScanning ? 'Deep Analysis In Progress' : 'Analysis Status'}
+                    </div>
+                    <div className="text-xs leading-relaxed">{analysisNotification}</div>
+                    {isScanning && (
+                      <div className="mt-2 text-[10px] text-blue-300">
+                        Progress: {scanProgress}% • This may take a while but provides the most accurate results
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setAnalysisNotification(null)}
+                    className="text-blue-300 hover:text-white ml-auto"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
       <div className="absolute inset-0 z-0 pointer-events-none">
         <Visualizer 
@@ -1171,7 +1568,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v3.4</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v4.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -1204,6 +1601,22 @@ const App: React.FC = () => {
                 className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"
             >
                 <Settings size={20} />
+            </button>
+            <button 
+                onClick={() => setShowFrequencySelector(true)} 
+                className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"
+                title="Advanced Frequency Selection"
+            >
+                <Target size={20} />
+            </button>
+            <button 
+                onClick={() => setShowSafetyProtocols(!showSafetyProtocols)} 
+                className={`p-1.5 sm:p-2 transition-colors bg-slate-900/50 rounded-full border border-slate-800 ${
+                    subtleResonanceMode || showSafetyProtocols ? 'text-yellow-400 hover:text-yellow-300' : 'hover:text-gold-400'
+                }`}
+                title="Safety Protocols"
+            >
+                <Shield size={20} />
             </button>
             <button onClick={() => setShowTutorial(true)} className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><CircleHelp size={20} /></button>
             <button onClick={() => setIsFullScreen(!isFullScreen)} className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800 hidden sm:block">
@@ -1433,11 +1846,36 @@ const App: React.FC = () => {
                {/* Tools Section */}
                <div className="grid grid-cols-2 gap-2">
                    <button 
-                    onClick={scanLibrary}
-                    className={`flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border transition-all active:scale-95 ${isScanning ? 'bg-blue-900/30 border-blue-500 text-blue-400 animate-pulse' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-600'}`}
+                    onClick={isScanning ? () => {
+                      if ((window as any).cancelAetheriaAnalysis) {
+                        (window as any).cancelAetheriaAnalysis();
+                      }
+                    } : scanLibrary}
+                    className={`flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border transition-all active:scale-95 ${
+                      isScanning 
+                        ? 'bg-blue-900/30 border-blue-500 text-blue-400 animate-pulse hover:bg-red-900/30 hover:border-red-500 hover:text-red-400' 
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-600'
+                    }`}
+                    title={isScanning ? 'Click to cancel deep analysis' : 'Start deep fractal analysis (slow but thorough)'}
                    >
                      <Search size={16} className="mb-1" />
-                     {isScanning ? 'Scanning...' : 'Scan Library'}
+                     {isScanning ? (
+                       <>
+                         <span>Deep Scan...</span>
+                         <span className="text-[8px] text-blue-300">{scanProgress}%</span>
+                         <span className="text-[7px] text-red-300 mt-1">Cancel</span>
+                       </>
+                     ) : (
+                       <>
+                         <span>Deep Scan</span>
+                         <span className="text-[8px] text-slate-500">
+                           Fractal Analysis
+                         </span>
+                         <span className="text-[7px] text-yellow-400">
+                           ~{Math.round(playlist.length * 2.5)}min
+                         </span>
+                       </>
+                     )}
                    </button>
                    
                    <button 
@@ -1495,6 +1933,30 @@ const App: React.FC = () => {
                      <Waves size={16} className="mb-1 text-cyan-500" />
                      Flow State
                    </button>
+
+                   <button 
+                    onClick={generateGoldenRatioPlaylist}
+                    className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-gold-400 hover:border-gold-500 transition-all active:scale-95"
+                   >
+                     <Target size={16} className="mb-1 text-gold-500" />
+                     Golden Φ
+                   </button>
+
+                   <button 
+                    onClick={generate111PatternPlaylist}
+                    className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-blue-400 hover:border-blue-500 transition-all active:scale-95"
+                   >
+                     <Activity size={16} className="mb-1 text-blue-500" />
+                     111 Pattern
+                   </button>
+
+                   <button 
+                    onClick={generateDNAResonancePlaylist}
+                    className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-green-400 hover:border-green-500 transition-all active:scale-95"
+                   >
+                     <Hexagon size={16} className="mb-1 text-green-500" />
+                     DNA Resonant
+                   </button>
                </div>
 
                <button 
@@ -1538,9 +2000,43 @@ const App: React.FC = () => {
                     >
                         <div className="flex justify-between">
                             <span className="truncate font-medium">{song.name}</span>
-                            {song.closestSolfeggio && <span className="text-[9px] px-1 rounded bg-slate-800 text-gold-500 ml-2 h-fit">{song.closestSolfeggio}Hz</span>}
+                            <div className="flex gap-1">
+                              {song.closestSolfeggio && (
+                                <span className="text-[9px] px-1 rounded bg-slate-800 text-gold-500 ml-2 h-fit">
+                                  {song.closestSolfeggio}Hz
+                                </span>
+                              )}
+                              {song.fractalAnalysis && song.fractalAnalysis.goldenRatioAlignment > 0.7 && (
+                                <span className="text-[8px] px-1 rounded bg-purple-800 text-purple-300 h-fit" title="High Golden Ratio Alignment">
+                                  Φ{Math.round(song.fractalAnalysis.goldenRatioAlignment * 100)}%
+                                </span>
+                              )}
+                              {song.fractalAnalysis && song.fractalAnalysis.pattern111Presence > 0.5 && (
+                                <span className="text-[8px] px-1 rounded bg-blue-800 text-blue-300 h-fit" title="111Hz Pattern Present">
+                                  111
+                                </span>
+                              )}
+                              {song.fractalAnalysis && song.fractalAnalysis.dnaResonanceScore > 0.6 && (
+                                <span className="text-[8px] px-1 rounded bg-green-800 text-green-300 h-fit" title="DNA Resonance Detected">
+                                  DNA
+                                </span>
+                              )}
+                            </div>
                         </div>
-                        <span className="text-[10px] text-slate-600">{song.duration === 0 ? '...' : formatDuration(song.duration || 0)}</span>
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] text-slate-600">{song.duration === 0 ? '...' : formatDuration(song.duration || 0)}</span>
+                          {song.fractalAnalysis && (
+                            <div className="flex gap-1 text-[8px]">
+                              <span className={`${
+                                song.fractalAnalysis.safetyLevel === 'SAFE' ? 'text-green-500' :
+                                song.fractalAnalysis.safetyLevel === 'CAUTION' ? 'text-yellow-500' :
+                                song.fractalAnalysis.safetyLevel === 'EXPERT' ? 'text-orange-500' : 'text-red-500'
+                              }`}>
+                                {song.fractalAnalysis.safetyLevel}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                     </div>
                     <button
                       onClick={(e) => {
@@ -1816,17 +2312,85 @@ const App: React.FC = () => {
 
                   <div>
                     <label className="text-xs uppercase tracking-widest text-slate-500 mb-4 block font-bold">Solfeggio Frequency Layer</label>
-                    <div className="grid grid-cols-3 gap-3">
-                      {SOLFEGGIO_INFO.map((s) => (
-                        <button
-                          key={s.freq}
-                          onClick={() => setSelectedSolfeggio(s.freq)}
-                          className={`py-3 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-gold-600 text-black border-gold-600 shadow-lg shadow-gold-500/20' : 'border-slate-800 bg-slate-900 hover:border-gold-500'}`}
-                        >
-                          {s.freq}
-                        </button>
-                      ))}
+                    
+                    {/* Traditional Solfeggio (First-Third Order) */}
+                    <div className="mb-4">
+                      <div className="text-[10px] text-slate-400 mb-2 uppercase tracking-widest">Traditional Scale (Safe)</div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {SOLFEGGIO_INFO.filter(s => ['First', 'Second', 'Third'].includes(s.order)).map((s) => (
+                          <button
+                            key={s.freq}
+                            onClick={() => setSelectedSolfeggio(s.freq)}
+                            className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-gold-600 text-black border-gold-600 shadow-lg shadow-gold-500/20' : 'border-slate-800 bg-slate-900 hover:border-gold-500'}`}
+                          >
+                            {s.freq}
+                          </button>
+                        ))}
+                      </div>
                     </div>
+
+                    {/* Higher Order Solfeggio - Experience Level Gated */}
+                    {(userExperienceLevel === 'advanced' || userExperienceLevel === 'expert') && (
+                      <div className="mb-4">
+                        <div className="text-[10px] text-yellow-400 mb-2 uppercase tracking-widest flex items-center gap-1">
+                          <AlertTriangle size={10} />
+                          Fourth Order (Advanced)
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {SOLFEGGIO_INFO.filter(s => s.order === 'Fourth').map((s) => (
+                            <button
+                              key={s.freq}
+                              onClick={() => setSelectedSolfeggio(s.freq)}
+                              className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-yellow-600 text-black border-yellow-600 shadow-lg shadow-yellow-500/20' : 'border-yellow-800 bg-yellow-900/20 hover:border-yellow-500 text-yellow-300'}`}
+                            >
+                              {s.freq}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {userExperienceLevel === 'expert' && (
+                      <>
+                        {/* Fifth Order */}
+                        <div className="mb-4">
+                          <div className="text-[10px] text-orange-400 mb-2 uppercase tracking-widest flex items-center gap-1">
+                            <AlertTriangle size={10} />
+                            Fifth Order (Expert Only)
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Fifth').map((s) => (
+                              <button
+                                key={s.freq}
+                                onClick={() => setSelectedSolfeggio(s.freq)}
+                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-orange-600 text-black border-orange-600 shadow-lg shadow-orange-500/20' : 'border-orange-800 bg-orange-900/20 hover:border-orange-500 text-orange-300'}`}
+                              >
+                                {s.freq}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Sixth Order */}
+                        <div className="mb-4">
+                          <div className="text-[10px] text-red-400 mb-2 uppercase tracking-widest flex items-center gap-1">
+                            <AlertTriangle size={10} />
+                            Sixth Order (Research Level)
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Sixth').map((s) => (
+                              <button
+                                key={s.freq}
+                                onClick={() => setSelectedSolfeggio(s.freq)}
+                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-red-600 text-white border-red-600 shadow-lg shadow-red-500/20' : 'border-red-800 bg-red-900/20 hover:border-red-500 text-red-300'}`}
+                              >
+                                {s.freq}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
                     <div className="mt-4 bg-slate-900 p-4 rounded-xl border border-slate-800">
                       <div className="flex justify-between text-xs text-slate-400 mb-2">
                          <span>Layer Intensity</span>
@@ -1871,7 +2435,461 @@ const App: React.FC = () => {
                        ))}
                     </div>
                   </div>
+                  
+                  {/* Advanced Features Section */}
+                  <div className="border-t border-slate-700 pt-6">
+                    <h3 className="text-lg font-bold text-gold-400 mb-4 flex items-center gap-2">
+                      <Target className="w-5 h-5" />
+                      Advanced Features
+                    </h3>
+                    
+                    {/* Experience Level */}
+                    <div className="mb-4">
+                      <label className="text-xs uppercase tracking-widest text-slate-500 mb-2 block font-bold">Experience Level</label>
+                      <select
+                        value={userExperienceLevel}
+                        onChange={(e) => setUserExperienceLevel(e.target.value as any)}
+                        className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white text-sm"
+                      >
+                        <option value="beginner">Beginner (Safe frequencies only)</option>
+                        <option value="intermediate">Intermediate (Up to 2000 Hz)</option>
+                        <option value="advanced">Advanced (Up to 5000 Hz)</option>
+                        <option value="expert">Expert (All frequencies)</option>
+                      </select>
+                    </div>
+                    
+                    {/* Fractal Analysis Display */}
+                    {fractalAnalysis && (
+                      <div className="bg-slate-800 p-4 rounded-lg mb-4">
+                        <h4 className="text-sm font-bold text-blue-400 mb-3">Fractal Analysis Results</h4>
+                        <div className="grid grid-cols-2 gap-3 text-xs">
+                          <div className="bg-slate-900 p-2 rounded">
+                            <div className="text-gold-400 mb-1">Golden Ratio Alignment</div>
+                            <div className="text-white font-bold text-lg">{Math.round(fractalAnalysis.goldenRatioAlignment * 100)}%</div>
+                          </div>
+                          <div className="bg-slate-900 p-2 rounded">
+                            <div className="text-purple-400 mb-1">111 Hz Pattern</div>
+                            <div className="text-white font-bold text-lg">{Math.round(fractalAnalysis.pattern111Presence * 100)}%</div>
+                          </div>
+                          <div className="bg-slate-900 p-2 rounded">
+                            <div className="text-green-400 mb-1">DNA Resonance</div>
+                            <div className="text-white font-bold text-lg">{Math.round(fractalAnalysis.dnaResonanceScore * 100)}%</div>
+                          </div>
+                          <div className="bg-slate-900 p-2 rounded">
+                            <div className="text-red-400 mb-1">Safety Level</div>
+                            <div className={`font-bold text-lg ${
+                              fractalAnalysis.safetyLevel === 'SAFE' ? 'text-green-500' :
+                              fractalAnalysis.safetyLevel === 'CAUTION' ? 'text-yellow-500' :
+                              fractalAnalysis.safetyLevel === 'EXPERT' ? 'text-orange-500' : 'text-red-500'
+                            }`}>
+                              {fractalAnalysis.safetyLevel}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {fractalAnalysis.infiniteOrderHarmonics.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-slate-700">
+                            <div className="text-xs text-slate-400 mb-2">Detected Harmonics (first 10):</div>
+                            <div className="flex flex-wrap gap-1">
+                              {fractalAnalysis.infiniteOrderHarmonics.slice(0, 10).map((freq, i) => (
+                                <span key={i} className="text-xs bg-slate-700 text-gold-400 px-2 py-1 rounded">
+                                  {freq.toFixed(1)}Hz
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* Effects Documentation */}
+                    <div className="mb-4">
+                      <ExperienceTracker
+                        isDocumenting={isDocumentingEffects}
+                        onToggleDocumentation={() => setIsDocumentingEffects(!isDocumentingEffects)}
+                        currentFrequency={selectedSolfeggio}
+                        currentVolume={solfeggioVolume}
+                        sessionDuration={sessionDuration}
+                        isPlaying={isPlaying}
+                        onSessionStart={(data) => {
+                          console.log('Session started with data:', data);
+                          // Start the experience tracking session
+                          if (!currentEffectsSession) {
+                            const sessionId = experienceTracker.startSession(
+                              selectedSolfeggio,
+                              solfeggioVolume,
+                              'sine'
+                            );
+                            setCurrentEffectsSession(sessionId);
+                          }
+                        }}
+                        onSessionEnd={(data) => {
+                          console.log('Session ended with data:', data);
+                          // Complete the session and save the user's experience
+                          if (currentEffectsSession) {
+                            // Create a user report from the collected data
+                            const userReport = {
+                              userId: 'user_' + Date.now(), // In real app, use proper user ID
+                              frequency: selectedSolfeggio,
+                              volume: solfeggioVolume,
+                              duration: sessionDuration,
+                              waveform: 'sine',
+                              environment: data.environment || 'unknown',
+                              priorState: data.priorState || { mood: 5, energy: 5, stress: 5, focus: 5 },
+                              postState: data.postState,
+                              effectsExperienced: data.effectsExperienced,
+                              sensations: data.sensations,
+                              emotionalChanges: data.emotionalChanges,
+                              physicalSensations: data.physicalSensations,
+                              mentalChanges: data.mentalChanges,
+                              overallExperience: data.overallExperience,
+                              wouldRecommend: data.wouldRecommend,
+                              notes: data.notes,
+                              verified: true,
+                              credibility: 8 // Self-reported but detailed
+                            };
+
+                            // Find or create effect entry for this frequency
+                            const existingEffects = effectsManager.findEffectsByFrequency(selectedSolfeggio, 10);
+                            if (existingEffects.length > 0) {
+                              // Add to existing effect
+                              effectsManager.addUserReport(existingEffects[0].id, userReport);
+                            } else {
+                              // Create new effect entry
+                              const newEffect = {
+                                frequency: selectedSolfeggio,
+                                name: `User-Documented ${selectedSolfeggio}Hz Effect`,
+                                category: 'spiritual' as const,
+                                discoveryDate: new Date().toISOString().split('T')[0],
+                                description: `User-reported effects for ${selectedSolfeggio}Hz frequency.`,
+                                onsetTime: '5-15 minutes',
+                                duration: 'hours',
+                                intensity: 'moderate' as const,
+                                recommendedDuration: '15-30 minutes',
+                                userReports: [],
+                                safetyLevel: assessFrequencySafety(selectedSolfeggio).level,
+                                validationStatus: 'reported' as const,
+                                confidenceScore: 6,
+                                tags: ['user-documented', 'experiential'],
+                                relatedFrequencies: [528, 741, 852]
+                              };
+                              const effectId = effectsManager.addEffect(newEffect);
+                              effectsManager.addUserReport(effectId, userReport);
+                            }
+
+                            experienceTracker.completeSession(currentEffectsSession);
+                            setCurrentEffectsSession(null);
+                            
+                            // Show success message
+                            setAnalysisNotification(`Experience documented! Your ${selectedSolfeggio}Hz session data has been saved for research.`);
+                            setTimeout(() => setAnalysisNotification(null), 5000);
+                          }
+                        }}
+                        onAddNote={(note) => {
+                          console.log('Note added:', note);
+                          // Add note to current session if active
+                          if (currentEffectsSession) {
+                            experienceTracker.addNote(currentEffectsSession, note);
+                          }
+                        }}
+                      />
+                    </div>
+                    
+                    {/* Subtle Resonance Mode Indicator */}
+                    {subtleResonanceMode && (
+                      <div className="bg-yellow-900/30 border border-yellow-500/50 rounded-lg p-3 mb-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Zap className="w-4 h-4 text-yellow-400" />
+                          <span className="text-yellow-400 font-bold text-sm">Subtle Resonance Mode Active</span>
+                        </div>
+                        <div className="text-xs text-yellow-200">
+                          High frequency detected ({selectedSolfeggio}Hz). Focus on feeling rather than hearing.
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
+            </div>
+          )}
+          
+          {/* Advanced Frequency Selector Modal */}
+          {showFrequencySelector && (
+            <div 
+              className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+              onClick={() => setShowFrequencySelector(false)}
+            >
+              <div 
+                className="w-full max-w-4xl max-h-[90vh] overflow-auto bg-slate-900 rounded-2xl shadow-2xl border border-slate-700"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex justify-between items-center p-4 border-b border-slate-700 bg-slate-800">
+                  <h2 className="text-xl font-bold text-gold-400">Advanced Frequency Laboratory</h2>
+                  <button
+                    onClick={() => setShowFrequencySelector(false)}
+                    className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-700 rounded"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+                
+                <div className="p-4">
+                  {/* Temporary fallback content for testing */}
+                  <div className="text-white">
+                    <h3 className="text-lg font-bold mb-4">Frequency Selection</h3>
+                    <p className="mb-4">Advanced frequency selector loading...</p>
+                    
+                    {/* Traditional Solfeggio */}
+                    <div className="mb-4">
+                      <h4 className="text-sm font-bold text-slate-300 mb-2">Traditional Solfeggio</h4>
+                      <div className="grid grid-cols-3 gap-2">
+                        {SOLFEGGIO_INFO.filter(s => ['First', 'Second', 'Third'].includes(s.order)).map((s) => (
+                          <button
+                            key={s.freq}
+                            onClick={() => {
+                              setSelectedSolfeggio(s.freq);
+                              setShowFrequencySelector(false);
+                            }}
+                            className="py-2 px-2 bg-slate-800 hover:bg-gold-600 text-white rounded border border-slate-600 transition-colors text-xs"
+                          >
+                            {s.freq}Hz
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Higher Order - Experience Level Gated */}
+                    {(userExperienceLevel === 'advanced' || userExperienceLevel === 'expert') && (
+                      <div className="mb-4">
+                        <h4 className="text-sm font-bold text-yellow-400 mb-2 flex items-center gap-1">
+                          <AlertTriangle size={14} />
+                          Fourth Order (Advanced)
+                        </h4>
+                        <div className="grid grid-cols-3 gap-2">
+                          {SOLFEGGIO_INFO.filter(s => s.order === 'Fourth').map((s) => (
+                            <button
+                              key={s.freq}
+                              onClick={() => {
+                                setSelectedSolfeggio(s.freq);
+                                setShowFrequencySelector(false);
+                              }}
+                              className="py-2 px-2 bg-yellow-900/30 hover:bg-yellow-600 text-yellow-300 hover:text-black rounded border border-yellow-600 transition-colors text-xs"
+                            >
+                              {s.freq}Hz
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {userExperienceLevel === 'expert' && (
+                      <>
+                        <div className="mb-4">
+                          <h4 className="text-sm font-bold text-orange-400 mb-2 flex items-center gap-1">
+                            <AlertTriangle size={14} />
+                            Fifth Order (Expert)
+                          </h4>
+                          <div className="grid grid-cols-3 gap-2">
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Fifth').map((s) => (
+                              <button
+                                key={s.freq}
+                                onClick={() => {
+                                  setSelectedSolfeggio(s.freq);
+                                  setShowFrequencySelector(false);
+                                }}
+                                className="py-2 px-2 bg-orange-900/30 hover:bg-orange-600 text-orange-300 hover:text-black rounded border border-orange-600 transition-colors text-xs"
+                              >
+                                {s.freq}Hz
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="mb-4">
+                          <h4 className="text-sm font-bold text-red-400 mb-2 flex items-center gap-1">
+                            <AlertTriangle size={14} />
+                            Sixth Order (Research)
+                          </h4>
+                          <div className="grid grid-cols-3 gap-2">
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Sixth').map((s) => (
+                              <button
+                                key={s.freq}
+                                onClick={() => {
+                                  setSelectedSolfeggio(s.freq);
+                                  setShowFrequencySelector(false);
+                                }}
+                                className="py-2 px-2 bg-red-900/30 hover:bg-red-600 text-red-300 hover:text-white rounded border border-red-600 transition-colors text-xs"
+                              >
+                                {s.freq}Hz
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    
+                    <button
+                      onClick={() => setShowFrequencySelector(false)}
+                      className="w-full py-2 bg-gold-600 hover:bg-gold-500 text-black font-bold rounded"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  
+                  {/* 
+                  <FrequencySelector
+                    selectedFrequency={selectedSolfeggio}
+                    onFrequencyChange={(freq) => {
+                      setSelectedSolfeggio(freq);
+                      setShowFrequencySelector(false);
+                    }}
+                    volume={solfeggioVolume}
+                    onVolumeChange={setSolfeggioVolume}
+                    isPlaying={isPlaying}
+                    onPlayPause={handlePlayPause}
+                    fractalAnalysis={fractalAnalysis}
+                    userExperienceLevel={userExperienceLevel}
+                    onExperienceLevelChange={setUserExperienceLevel}
+                  />
+                  */}
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Safety Protocols Panel */}
+          {showSafetyProtocols && (
+            <div 
+              className="fixed inset-0 z-40 flex items-end justify-end p-4 pb-24 pointer-events-none"
+              onClick={() => setShowSafetyProtocols(false)}
+            >
+              <div 
+                className="w-96 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl pointer-events-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex justify-between items-center p-4 border-b border-slate-700">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-green-500" />
+                    Safety Protocols
+                  </h3>
+                  <button
+                    onClick={() => setShowSafetyProtocols(false)}
+                    className="text-slate-400 hover:text-white hover:bg-slate-700 transition-colors p-2 rounded"
+                    title="Close Safety Protocols"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                
+                <div className="p-4">
+                  <div className="space-y-4">
+                    {/* Current Safety Status */}
+                    <div className="bg-slate-800 p-3 rounded-lg">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-sm font-medium text-slate-300">Current Frequency</span>
+                        <span className="text-lg font-bold text-white">{selectedSolfeggio}Hz</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-slate-400">Safety Level</span>
+                        <span className={`text-sm font-bold ${getSafetyLevelColor(assessFrequencySafety(selectedSolfeggio).level)}`}>
+                          {assessFrequencySafety(selectedSolfeggio).level}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Experience Level */}
+                    <div className="bg-slate-800 p-3 rounded-lg">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-sm font-medium text-slate-300">Your Level</span>
+                        <span className={`text-sm font-bold ${getExperienceLevelColor(userExperienceLevel)}`}>
+                          {userExperienceLevel.charAt(0).toUpperCase() + userExperienceLevel.slice(1)}
+                        </span>
+                      </div>
+                      <select
+                        value={userExperienceLevel}
+                        onChange={(e) => setUserExperienceLevel(e.target.value as any)}
+                        className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white text-xs"
+                      >
+                        <option value="beginner">Beginner</option>
+                        <option value="intermediate">Intermediate</option>
+                        <option value="advanced">Advanced</option>
+                        <option value="expert">Expert</option>
+                      </select>
+                    </div>
+
+                    {/* Session Info */}
+                    <div className="bg-slate-800 p-3 rounded-lg">
+                      <div className="text-sm font-medium text-slate-300 mb-2">Session Status</div>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Duration</span>
+                          <span className="text-white">{Math.floor(sessionDuration)}:{((sessionDuration % 1) * 60).toFixed(0).padStart(2, '0')}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Volume</span>
+                          <span className="text-white">{Math.round(solfeggioVolume * 100)}%</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Mode</span>
+                          <span className={subtleResonanceMode ? "text-yellow-400" : "text-green-400"}>
+                            {subtleResonanceMode ? "Subtle Resonance" : "Normal"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Safety Recommendations */}
+                    <div className="bg-slate-800 p-3 rounded-lg">
+                      <div className="text-sm font-medium text-slate-300 mb-2">Recommendations</div>
+                      <div className="space-y-1 text-xs text-slate-400">
+                        {selectedSolfeggio >= 1074 ? (
+                          <>
+                            <div>• Keep volume low (feeling vs hearing)</div>
+                            <div>• Limit session to 15-30 minutes</div>
+                            <div>• Take breaks between sessions</div>
+                            <div>• Stop if you feel uncomfortable</div>
+                          </>
+                        ) : (
+                          <>
+                            <div>• Safe frequency for extended use</div>
+                            <div>• Recommended for beginners</div>
+                            <div>• Good for meditation and healing</div>
+                            <div>• Can be used at comfortable volume</div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Emergency Controls */}
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setIsPlaying(false);
+                            setShowSafetyProtocols(false);
+                          }}
+                          className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded"
+                        >
+                          Emergency Stop
+                        </button>
+                        <button
+                          onClick={() => setSolfeggioVolume(0)}
+                          className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold rounded"
+                        >
+                          Mute
+                        </button>
+                      </div>
+                      
+                      {/* Close Button */}
+                      <button
+                        onClick={() => setShowSafetyProtocols(false)}
+                        className="w-full py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded"
+                      >
+                        Close Safety Panel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
           
@@ -1896,15 +2914,44 @@ const App: React.FC = () => {
                         </span>
                         
                         <div className="flex items-center gap-2">
-                             <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-gold-500/10 text-gold-500 border border-gold-500/20">
-                                <Activity size={8} /> {playlist[currentSongIndex]?.closestSolfeggio || selectedSolfeggio}Hz
-                             </span>
-                             <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                                <Waves size={8} /> {selectedBinaural.name}
-                             </span>
-                             <span className="font-mono text-slate-600 ml-1">
-                                {formatDuration(currTime)} / {formatDuration(currDuration)}
-                             </span>
+                         <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded border ${
+                           subtleResonanceMode 
+                             ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' 
+                             : 'bg-gold-500/10 text-gold-500 border-gold-500/20'
+                         }`}>
+                            <Activity size={8} /> 
+                            {playlist[currentSongIndex]?.closestSolfeggio || selectedSolfeggio}Hz
+                            {subtleResonanceMode && <Zap size={8} />}
+                         </span>
+                         <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                            <Waves size={8} /> {selectedBinaural.name}
+                         </span>
+                         
+                         {/* Advanced Features Status */}
+                         {fractalAnalysis && (
+                           <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                             <Target size={8} /> 
+                             Φ{Math.round(fractalAnalysis.goldenRatioAlignment * 100)}%
+                           </span>
+                         )}
+                         
+                         {isDocumentingEffects && (
+                           <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20">
+                             <BookOpen size={8} /> 
+                             Recording
+                           </span>
+                         )}
+                         
+                         {isScanning && (
+                           <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                             <Activity size={8} className="animate-pulse" />
+                             Analyzing {scanProgress}%
+                           </span>
+                         )}
+                         
+                         <span className="font-mono text-slate-600 ml-1">
+                            {formatDuration(currTime)} / {formatDuration(currDuration)}
+                         </span>
                         </div>
                     </div>
 

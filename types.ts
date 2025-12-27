@@ -8,6 +8,7 @@ export interface Song {
   harmonicFreq?: number;       // The dominant frequency detected
   closestSolfeggio?: number;   // The calculated nearest Solfeggio tone
   harmonicDeviation?: number;  // How close it is to the target (lower is better)
+  fractalAnalysis?: import('./utils/fractalFrequencyAnalysis').FractalAnalysisResult; // Complete fractal analysis
 }
 
 export enum SolfeggioFreq {
