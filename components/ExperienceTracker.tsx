@@ -282,7 +282,7 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
       {/* Pre-Session Modal */}
       {showStartModal && (
         <div 
-          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 isolate"
+          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 pb-32 isolate"
           onClick={() => {
             setShowStartModal(false);
             onToggleDocumentation();
@@ -290,20 +290,34 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
           style={{ zIndex: 9999 }}
         >
           <div 
-            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-lg w-full max-h-[calc(100vh-120px)] flex flex-col shadow-2xl shadow-purple-500/20 relative my-auto"
+            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-lg w-full max-h-[calc(100vh-180px)] flex flex-col shadow-2xl shadow-purple-500/20 relative my-auto"
             onClick={(e) => e.stopPropagation()}
             style={{ zIndex: 10000, isolation: 'isolate' }}
           >
             {/* Fixed Header */}
             <div className="p-6 border-b border-slate-700 shrink-0">
-              <h2 className="text-xl font-bold text-purple-400 flex items-center gap-2">
-                <User className="w-5 h-5" />
-                Pre-Session Assessment
-              </h2>
-              <p className="text-slate-400 text-sm mt-1">How are you feeling right now?</p>
-              <div className="text-xs text-purple-300 mt-2 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
-                Scroll down to see all options and continue
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <h2 className="text-xl font-bold text-purple-400 flex items-center gap-2">
+                    <User className="w-5 h-5" />
+                    Pre-Session Assessment
+                  </h2>
+                  <p className="text-slate-400 text-sm mt-1">How are you feeling right now?</p>
+                  <div className="text-xs text-purple-300 mt-2 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    Scroll down to see all options and continue
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowStartModal(false);
+                    onToggleDocumentation();
+                  }}
+                  className="text-slate-400 hover:text-white hover:bg-slate-700 transition-colors p-2 rounded ml-4 flex-shrink-0"
+                  title="Close"
+                >
+                  <X size={20} />
+                </button>
               </div>
             </div>
             
@@ -416,8 +430,8 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
             
             {/* Fixed Footer - Always Visible */}
             <div 
-              className="p-6 border-t border-slate-700 bg-slate-900 shrink-0 min-h-[80px] flex items-center relative"
-              style={{ zIndex: 10001, position: 'relative' }}
+              className="p-4 border-t border-slate-700 bg-slate-900 shrink-0 flex items-center relative shadow-lg"
+              style={{ zIndex: 10001, position: 'sticky', bottom: 0 }}
             >
               <div className="flex gap-3 w-full">
                 <button
@@ -446,7 +460,7 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
       {/* Post-Session Modal */}
       {showEndModal && (
         <div 
-          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 isolate"
+          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 pb-32 isolate"
           onClick={() => {
             setShowEndModal(false);
             resetAllState();
@@ -454,20 +468,34 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
           style={{ zIndex: 9999 }}
         >
           <div 
-            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-2xl w-full max-h-[calc(100vh-120px)] flex flex-col shadow-2xl shadow-purple-500/20 relative my-auto"
+            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-2xl w-full max-h-[calc(100vh-180px)] flex flex-col shadow-2xl shadow-purple-500/20 relative my-auto"
             onClick={(e) => e.stopPropagation()}
             style={{ zIndex: 10000, isolation: 'isolate' }}
           >
             {/* Fixed Header */}
             <div className="p-6 border-b border-slate-700 shrink-0">
-              <h2 className="text-xl font-bold text-purple-400 flex items-center gap-2">
-                <Target className="w-5 h-5" />
-                Post-Session Assessment
-              </h2>
-              <p className="text-slate-400 text-sm mt-1">How do you feel after the session?</p>
-              <div className="text-xs text-purple-300 mt-2 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
-                Scroll down to see all options and save your experience
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <h2 className="text-xl font-bold text-purple-400 flex items-center gap-2">
+                    <Target className="w-5 h-5" />
+                    Post-Session Assessment
+                  </h2>
+                  <p className="text-slate-400 text-sm mt-1">How do you feel after the session?</p>
+                  <div className="text-xs text-purple-300 mt-2 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    Scroll down to see all options and save your experience
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowEndModal(false);
+                    resetAllState();
+                  }}
+                  className="text-slate-400 hover:text-white hover:bg-slate-700 transition-colors p-2 rounded ml-4 flex-shrink-0"
+                  title="Close"
+                >
+                  <X size={20} />
+                </button>
               </div>
             </div>
             
@@ -618,8 +646,8 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
             
             {/* Fixed Footer - Always Visible */}
             <div 
-              className="p-6 border-t border-slate-700 bg-slate-900 shrink-0 min-h-[80px] flex items-center relative"
-              style={{ zIndex: 10001, position: 'relative' }}
+              className="p-4 border-t border-slate-700 bg-slate-900 shrink-0 flex items-center relative shadow-lg"
+              style={{ zIndex: 10001, position: 'sticky', bottom: 0 }}
             >
               <div className="flex gap-3 w-full">
                 <button

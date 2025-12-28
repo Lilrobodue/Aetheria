@@ -30,11 +30,14 @@ On mobile devices, the safety protocols, pre-session and post-session modals nee
 
 ### Key Changes:
 
-1. **Removed fixed positioning offsets**: Removed `pt-20` (padding-top) and `pb-24` (padding-bottom) from modal containers
+1. **Removed fixed positioning offsets**: Removed `pt-20` (padding-top) and adjusted `pb-24` to `pb-32` for media player footer clearance
 2. **Used flexbox centering**: `flex items-center justify-center` ensures proper centering
-3. **Dynamic height calculation**: `max-h-[calc(100vh-120px)]` leaves ~60px space at top and bottom for header/footer
+3. **Dynamic height calculation**: `max-h-[calc(100vh-180px)]` leaves ~90px space at top and bottom for header/footer
 4. **Vertical auto margins**: `my-auto` helps with additional centering
 5. **Overflow handling**: Added `overflow-y-auto` where needed to handle content that exceeds available space
+6. **Added close buttons**: Added X close buttons in the top-right corner of pre/post session modals
+7. **Sticky footer positioning**: Modal footers use `position: sticky, bottom: 0` to stay visible above media player
+8. **Reduced padding**: Changed footer padding from `p-6` to `p-4` and removed `min-h-[80px]` for better space usage
 
 ### Testing Instructions:
 
@@ -67,7 +70,18 @@ On mobile devices, the safety protocols, pre-session and post-session modals nee
 
 ### Additional Notes:
 
-- The `120px` in `calc(100vh-120px)` accounts for typical header + footer heights
+- The `180px` in `calc(100vh-180px)` accounts for header + media player footer heights
+- The `pb-32` (padding-bottom: 8rem) ensures modal footers appear above the media player
 - The `my-auto` class provides additional vertical centering
 - Overflow scrolling is enabled where content might exceed available space
 - All modals maintain their backdrop blur and animations
+- Close buttons are now visible and easily accessible
+- Modal footers stay sticky at the bottom of their containers for better usability
+
+### Modal Footer Improvements:
+
+1. **Visible Above Media Player**: Modal footers now appear above the media player footer
+2. **Sticky Positioning**: Footers stick to the bottom of their modal containers
+3. **Reduced Padding**: Optimized spacing for mobile screens
+4. **Shadow Effects**: Added shadows to make footers stand out
+5. **Always Accessible**: Buttons are always visible and clickable

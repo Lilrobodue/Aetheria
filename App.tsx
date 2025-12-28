@@ -1671,7 +1671,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v4.2.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -2871,11 +2871,11 @@ const App: React.FC = () => {
           {/* Safety Protocols Panel */}
           {showSafetyProtocols && (
             <div 
-              className="fixed inset-0 z-40 flex items-end justify-end p-4 pb-24 pointer-events-none"
+              className="fixed inset-0 z-40 flex items-center justify-center p-4 pb-32 pointer-events-none"
               onClick={() => setShowSafetyProtocols(false)}
             >
               <div 
-                className="w-96 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl pointer-events-auto"
+                className="w-96 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-180px)] overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl pointer-events-auto my-auto"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex justify-between items-center p-4 border-b border-slate-700">
