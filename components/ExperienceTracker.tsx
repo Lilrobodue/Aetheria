@@ -282,7 +282,7 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
       {/* Pre-Session Modal */}
       {showStartModal && (
         <div 
-          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-start justify-center pt-20 p-2 sm:p-4 pb-24 isolate"
+          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 isolate"
           onClick={() => {
             setShowStartModal(false);
             onToggleDocumentation();
@@ -290,7 +290,7 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
           style={{ zIndex: 9999 }}
         >
           <div 
-            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-lg w-full h-[75vh] flex flex-col shadow-2xl shadow-purple-500/20 relative"
+            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-lg w-full max-h-[calc(100vh-120px)] flex flex-col shadow-2xl shadow-purple-500/20 relative my-auto"
             onClick={(e) => e.stopPropagation()}
             style={{ zIndex: 10000, isolation: 'isolate' }}
           >
@@ -446,7 +446,7 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
       {/* Post-Session Modal */}
       {showEndModal && (
         <div 
-          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-start justify-center pt-20 p-2 sm:p-4 pb-24 isolate"
+          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 isolate"
           onClick={() => {
             setShowEndModal(false);
             resetAllState();
@@ -454,7 +454,7 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
           style={{ zIndex: 9999 }}
         >
           <div 
-            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-2xl w-full h-[75vh] flex flex-col shadow-2xl shadow-purple-500/20 relative"
+            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-2xl w-full max-h-[calc(100vh-120px)] flex flex-col shadow-2xl shadow-purple-500/20 relative my-auto"
             onClick={(e) => e.stopPropagation()}
             style={{ zIndex: 10000, isolation: 'isolate' }}
           >

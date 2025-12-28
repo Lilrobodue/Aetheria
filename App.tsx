@@ -244,7 +244,7 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
     return (
         <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in zoom-in duration-300">
-            <div className="bg-slate-900 border border-gold-500/30 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-slate-900 border border-gold-500/30 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100vh-120px)] my-auto">
                 
                 {/* Header */}
                 <div className="p-6 bg-slate-950/50 border-b border-slate-800 flex justify-between items-center">
@@ -1589,8 +1589,8 @@ const App: React.FC = () => {
       
       {/* Disclaimer Modal */}
       {!disclaimerAccepted && (
-        <div className="fixed inset-0 z-[150] bg-black/95 flex items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-500">
-            <div className="max-w-md w-full bg-slate-900 border border-gold-500/30 p-8 rounded-2xl shadow-2xl text-center relative overflow-hidden">
+        <div className="fixed inset-0 z-[150] bg-black/95 flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-500">
+            <div className="max-w-md w-full max-h-[calc(100vh-120px)] bg-slate-900 border border-gold-500/30 p-8 rounded-2xl shadow-2xl text-center relative overflow-hidden overflow-y-auto my-auto">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent"></div>
                  <AlertTriangle className="w-12 h-12 text-gold-500 mx-auto mb-4 animate-pulse" />
                  <h2 className="text-2xl font-serif text-white mb-2 tracking-wide">Welcome to Aetheria</h2>
@@ -1671,7 +1671,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v4.2.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v4.2.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -1733,7 +1733,7 @@ const App: React.FC = () => {
           {/* Recording Options Modal */}
           {showRecordOptions && (
               <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowRecordOptions(false)}>
-                  <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-md w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+                  <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-md w-full shadow-2xl max-h-[calc(100vh-120px)] overflow-y-auto my-auto" onClick={e => e.stopPropagation()}>
                       <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Circle className="text-red-500" size={20}/> Start Recording</h3>
                       <p className="text-sm text-slate-400 mb-6">Choose a recording mode. Audio-only is recommended for long sessions to prevent crashes.</p>
                       
@@ -1759,7 +1759,7 @@ const App: React.FC = () => {
           {/* Info Modal */}
           {showInfo && (
               <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowInfo(false)}>
-                  <div className="bg-slate-950 border border-gold-500/20 rounded-2xl max-w-4xl w-full shadow-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                  <div className="bg-slate-950 border border-gold-500/20 rounded-2xl max-w-4xl w-full shadow-2xl max-h-[calc(100vh-120px)] flex flex-col my-auto" onClick={e => e.stopPropagation()}>
                       
                       {/* Modal Header */}
                       <div className="flex justify-between items-center p-6 border-b border-slate-800 bg-slate-900/50">
@@ -2731,7 +2731,7 @@ const App: React.FC = () => {
               onClick={() => setShowFrequencySelector(false)}
             >
               <div 
-                className="w-full max-w-4xl max-h-[90vh] overflow-auto bg-slate-900 rounded-2xl shadow-2xl border border-slate-700"
+                className="w-full max-w-4xl max-h-[calc(100vh-120px)] overflow-auto bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 my-auto"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex justify-between items-center p-4 border-b border-slate-700 bg-slate-800">

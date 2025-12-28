@@ -583,7 +583,7 @@ const SafetyProtocols: React.FC<SafetyProtocolsProps> = ({
       {/* Break Reminder Modal */}
       {showBreakReminder && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-blue-500 rounded-xl p-6 max-w-md w-full">
+          <div className="bg-slate-900 border border-blue-500 rounded-xl p-6 max-w-md w-full max-h-[calc(100vh-120px)] overflow-y-auto my-auto">
             <div className="text-center">
               <Bell className="w-12 h-12 text-blue-500 mx-auto mb-4" />
               <h3 className="text-xl font-bold text-white mb-2">Break Time</h3>
