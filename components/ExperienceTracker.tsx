@@ -282,15 +282,15 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
       {/* Pre-Session Modal */}
       {showStartModal && (
         <div 
-          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 pb-32 isolate"
+          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center isolate"
           onClick={() => {
             setShowStartModal(false);
             onToggleDocumentation();
           }}
-          style={{ zIndex: 9999 }}
+          style={{ zIndex: 9999, paddingTop: '80px', paddingBottom: '120px', padding: '16px' }}
         >
           <div 
-            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-lg w-full max-h-[calc(100vh-180px)] flex flex-col shadow-2xl shadow-purple-500/20 relative my-auto"
+            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-lg w-full max-h-full flex flex-col shadow-2xl shadow-purple-500/20 relative"
             onClick={(e) => e.stopPropagation()}
             style={{ zIndex: 10000, isolation: 'isolate' }}
           >
@@ -460,15 +460,15 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
       {/* Post-Session Modal */}
       {showEndModal && (
         <div 
-          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 pb-32 isolate"
+          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center isolate"
           onClick={() => {
             setShowEndModal(false);
             resetAllState();
           }}
-          style={{ zIndex: 9999 }}
+          style={{ zIndex: 9999, paddingTop: '80px', paddingBottom: '120px', padding: '16px' }}
         >
           <div 
-            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-2xl w-full max-h-[calc(100vh-180px)] flex flex-col shadow-2xl shadow-purple-500/20 relative my-auto"
+            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-2xl w-full max-h-full flex flex-col shadow-2xl shadow-purple-500/20 relative"
             onClick={(e) => e.stopPropagation()}
             style={{ zIndex: 10000, isolation: 'isolate' }}
           >
