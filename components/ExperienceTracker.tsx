@@ -287,12 +287,21 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
             setShowStartModal(false);
             onToggleDocumentation();
           }}
-          style={{ zIndex: 9999, paddingTop: '80px', paddingBottom: '120px', padding: '16px' }}
+          style={{ 
+            zIndex: 9999,
+            padding: '16px',
+            paddingTop: '80px',
+            paddingBottom: '200px' // Extra space for mobile media player
+          }}
         >
           <div 
-            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-lg w-full max-h-full flex flex-col shadow-2xl shadow-purple-500/20 relative"
+            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-lg w-full flex flex-col shadow-2xl shadow-purple-500/20 relative"
             onClick={(e) => e.stopPropagation()}
-            style={{ zIndex: 10000, isolation: 'isolate' }}
+            style={{ 
+              zIndex: 10000, 
+              isolation: 'isolate',
+              maxHeight: 'calc(100vh - 280px)' // Leave more room for mobile
+            }}
           >
             {/* Fixed Header */}
             <div className="p-6 border-b border-slate-700 shrink-0">
@@ -430,8 +439,12 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
             
             {/* Fixed Footer - Always Visible */}
             <div 
-              className="p-4 border-t border-slate-700 bg-slate-900 shrink-0 flex items-center relative shadow-lg"
-              style={{ zIndex: 10001, position: 'sticky', bottom: 0 }}
+              className="p-4 border-t border-slate-700 bg-slate-900 shrink-0 flex items-center relative shadow-lg shadow-slate-900/50"
+              style={{ 
+                zIndex: 10001,
+                position: 'sticky',
+                bottom: 0
+              }}
             >
               <div className="flex gap-3 w-full">
                 <button
@@ -465,12 +478,21 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
             setShowEndModal(false);
             resetAllState();
           }}
-          style={{ zIndex: 9999, paddingTop: '80px', paddingBottom: '120px', padding: '16px' }}
+          style={{ 
+            zIndex: 9999,
+            padding: '16px',
+            paddingTop: '80px',
+            paddingBottom: '200px' // Extra space for mobile media player
+          }}
         >
           <div 
-            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-2xl w-full max-h-full flex flex-col shadow-2xl shadow-purple-500/20 relative"
+            className="bg-slate-900 border border-purple-500/50 rounded-2xl max-w-2xl w-full flex flex-col shadow-2xl shadow-purple-500/20 relative"
             onClick={(e) => e.stopPropagation()}
-            style={{ zIndex: 10000, isolation: 'isolate' }}
+            style={{ 
+              zIndex: 10000, 
+              isolation: 'isolate',
+              maxHeight: 'calc(100vh - 280px)' // Leave more room for mobile
+            }}
           >
             {/* Fixed Header */}
             <div className="p-6 border-b border-slate-700 shrink-0">
@@ -646,8 +668,12 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
             
             {/* Fixed Footer - Always Visible */}
             <div 
-              className="p-4 border-t border-slate-700 bg-slate-900 shrink-0 flex items-center relative shadow-lg"
-              style={{ zIndex: 10001, position: 'sticky', bottom: 0 }}
+              className="p-4 border-t border-slate-700 bg-slate-900 shrink-0 flex items-center relative shadow-lg shadow-slate-900/50"
+              style={{ 
+                zIndex: 10001,
+                position: 'sticky',
+                bottom: 0
+              }}
             >
               <div className="flex gap-3 w-full">
                 <button

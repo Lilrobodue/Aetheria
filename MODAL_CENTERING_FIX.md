@@ -85,3 +85,19 @@ On mobile devices, the safety protocols, pre-session and post-session modals nee
 3. **Reduced Padding**: Optimized spacing for mobile screens
 4. **Shadow Effects**: Added shadows to make footers stand out
 5. **Always Accessible**: Buttons are always visible and clickable
+
+### Mobile-Specific Fixes (v4.3):
+
+1. **Enhanced Mobile Spacing**: Increased bottom padding to 200px on all screens to ensure buttons are visible
+2. **Simplified Positioning**: Removed complex responsive logic in favor of consistent spacing
+3. **Better Height Calculation**: Modal max-height set to `calc(100vh - 280px)` to leave adequate room
+4. **Consistent Footer Shadows**: Added `shadow-slate-900/50` for better visual separation
+5. **Version Update**: Updated header to display "v4.3"
+
+### Technical Changes Applied:
+
+- **Container Padding**: `paddingBottom: '200px'` for all screen sizes
+- **Max Height**: `maxHeight: 'calc(100vh - 280px)'` for consistent sizing
+- **Footer Styling**: Simplified sticky positioning without viewport-dependent logic
+- **Z-Index Management**: Maintained proper layering (9999 for overlay, 10000+ for content)
+- **Shadow Enhancement**: Added stronger shadows for better visual hierarchy
