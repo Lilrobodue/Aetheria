@@ -1105,6 +1105,17 @@ const App: React.FC = () => {
           setCurrentSongIndex(0);
           setSearchTerm(''); // Clear search when creating aligned playlist
           setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
+          
+          // Check if we have high frequency tracks and adjust settings accordingly
+          const hasHighFrequencies = alignedPlaylist.some(s => (s.closestSolfeggio || 0) >= 1074);
+          if (hasHighFrequencies && userExperienceLevel === 'beginner') {
+              setUserExperienceLevel('intermediate');
+              setAnalysisNotification(
+                  `Full Alignment includes higher frequency tracks. Experience level temporarily set to 'Intermediate' for proper playback.`
+              );
+              setTimeout(() => setAnalysisNotification(null), 5000);
+          }
+          
           if(window.innerWidth < 768) setShowSidebar(false);
       } else {
           alert("No analyzed songs found. Please scan your library first.");
@@ -1245,15 +1256,27 @@ const App: React.FC = () => {
         colorMode: 'chakra'
       }));
       
+      // For higher frequencies, set appropriate experience level to prevent interruptions
+      const hasHighFrequencies = ultimatePlaylist.some(s => (s.closestSolfeggio || 0) >= 1074);
+      if (hasHighFrequencies && userExperienceLevel === 'beginner') {
+        setUserExperienceLevel('advanced');
+        setAnalysisNotification(
+          `Ultimate Alignment includes higher frequencies. Experience level temporarily set to 'Advanced' for uninterrupted playback.`
+        );
+        setTimeout(() => setAnalysisNotification(null), 5000);
+      }
+      
       // Show notification about the ultimate alignment
       const ordersIncluded = new Set(ultimatePlaylist.map(s => 
         SOLFEGGIO_INFO.find(info => info.freq === s.closestSolfeggio)?.order
       )).size;
       
-      setAnalysisNotification(
-        `Ultimate Alignment activated! Journey through ${ultimatePlaylist.length} frequencies across ${ordersIncluded} orders of consciousness.`
-      );
-      setTimeout(() => setAnalysisNotification(null), 7000);
+      setTimeout(() => {
+        setAnalysisNotification(
+          `Ultimate Alignment activated! Journey through ${ultimatePlaylist.length} frequencies across ${ordersIncluded} orders of consciousness.`
+        );
+        setTimeout(() => setAnalysisNotification(null), 7000);
+      }, hasHighFrequencies ? 5500 : 0);
       
       playTrackRef.current(0, ultimatePlaylist);
       if(window.innerWidth < 768) setShowSidebar(false);
@@ -1341,6 +1364,16 @@ const App: React.FC = () => {
     
     const autoFreq = getHarmonicSolfeggio(freq || 0);
     setSelectedSolfeggio(autoFreq);
+    
+    // Check if this is a high frequency track but don't interrupt playback
+    if (autoFreq >= 1074) {
+        setSubtleResonanceMode(true);
+        // Don't automatically show safety protocols during playlist playback
+        // Only show if manually selected
+    } else {
+        setSubtleResonanceMode(false);
+    }
+    
     setIsAnalyzing(false);
 
     playBuffer(audioBuffer, 0);
@@ -1638,7 +1671,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v4.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v4.2.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
