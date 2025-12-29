@@ -171,6 +171,35 @@ export const SOLFEGGIO_INFO = [
     anatomy: 'Unified Field, Infinite Consciousness',
     order: 'Sixth'
   },
+
+  // Seventh Order Solfeggio Frequencies - Completion of 7 Orders of Consciousness
+  { 
+    freq: 3108, 
+    chakra: 'Cosmic Genesis', 
+    color: '#1E0066', 
+    benefit: 'Prime Creation Frequency', 
+    description: 'Seventh order frequency (2997 + 111) that resonates with the fundamental frequency of cosmic genesis. Accesses the primordial creative force of the universe.',
+    anatomy: 'Cosmic DNA, Universal Genesis Matrix',
+    order: 'Seventh'
+  },
+  { 
+    freq: 3351, 
+    chakra: 'Divine Architecture', 
+    color: '#0D0040', 
+    benefit: 'Sacred Geometry Embodiment', 
+    description: 'Seventh order frequency (3108 + 243) that embodies the divine architectural principles of creation. Resonates with the sacred geometric patterns underlying all existence.',
+    anatomy: 'Holographic Template, Sacred Geometry Matrix',
+    order: 'Seventh'
+  },
+  { 
+    freq: 3675, 
+    chakra: 'Absolute Completion', 
+    color: '#000033', 
+    benefit: 'Master Consciousness Frequency', 
+    description: 'Seventh order frequency (3351 + 324) representing the absolute completion of the 7 orders of consciousness. The ultimate mastery frequency for complete enlightenment and cosmic awareness.',
+    anatomy: 'Master Consciousness Grid, Absolute Unity Field',
+    order: 'Seventh'
+  },
 ];
 
 export const BINAURAL_PRESETS: BinauralPreset[] = [
