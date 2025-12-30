@@ -230,15 +230,51 @@ export const UNIFIED_THEORY = {
 };
 
 export const GEOMETRY_INFO = [
+  // First Order Sacred Geometry (Physical Foundation)
   { shape: 'Cube (Hexahedron)', freq: '174Hz', benefit: 'Stability, Grounding', element: 'Earth', desc: 'The most stable form. Represents the physical plane, the body, and safety.' },
   { shape: 'Reiki Cho Ku Rei', freq: '285Hz', benefit: 'Energy Flow', element: 'Aether', desc: 'The "Power Switch" symbol. It concentrates energy at a specific point for healing.' },
+
+  // Second Order Sacred Geometry (Emotional & Energetic Forms)
   { shape: 'Tetrahedron', freq: '396Hz', benefit: 'Manifestation', element: 'Fire', desc: 'The first 3D form. Represents the spark of life, will, and the drive to exist.' },
   { shape: 'Icosahedron', freq: '417Hz', benefit: 'Fluidity & Change', element: 'Water', desc: 'With 20 faces, it represents the flow of water, emotions, and adaptability.' },
   { shape: 'Octahedron', freq: '528Hz', benefit: 'Balance & Air', element: 'Air', desc: 'Two pyramids meeting at the base. Represents the balance of "As Above, So Below."' },
-  { shape: 'Star Tetrahedron', freq: '639Hz', benefit: 'Integration', element: 'Light', desc: 'The Merkaba (Light-Spirit-Body). Interlocking opposites creating a unified field.' },
+  { shape: 'Star Tetrahedron (Merkaba)', freq: '639Hz', benefit: 'Integration', element: 'Light', desc: 'The Merkaba (Light-Spirit-Body). Interlocking opposites creating a unified field.' },
+
+  // Third Order Sacred Geometry (Mental & Spiritual Forms)
   { shape: 'Dodecahedron', freq: '741Hz', benefit: 'Expression', element: 'Ether', desc: 'The 12 faces represent the zodiac and the universe. The shape of the Spirit.' },
   { shape: 'Torus', freq: '852Hz', benefit: 'Universal Flow', element: 'Cosmos', desc: 'The primary pattern of energy in the universe, from magnetic fields to galaxies.' },
   { shape: 'Fibonacci Sphere', freq: '963Hz', benefit: 'Perfection', element: 'Void', desc: 'Points distributed by the Golden Ratio. Represents the perfect order of the Creator.' },
+
+  // Fourth Order Sacred Geometry (Higher Consciousness Forms)
+  { shape: 'Hypercube (Tesseract)', freq: '1074Hz', benefit: 'Dimensional Transcendence', element: 'Hyperspace', desc: 'The 4D cube. Represents transcendence of 3D limitations and access to higher dimensions.' },
+  { shape: 'Flower of Life (Complete)', freq: '1317Hz', benefit: 'Universal Template', element: 'Creation Matrix', desc: 'The complete 19-circle pattern containing all platonic solids. Template of universal creation.' },
+  { shape: 'Metatron\'s Cube', freq: '1641Hz', benefit: 'Cosmic Order', element: 'Divine Geometry', desc: 'Contains all five platonic solids. The fundamental structure of space and matter.' },
+
+  // Fifth Order Sacred Geometry (Stellar & Galactic Forms)
+  { shape: 'Hyperdodecahedron', freq: '1752Hz', benefit: 'Stellar Consciousness', element: 'Stellar Fields', desc: 'The 4D dodecahedron. Represents connection to stellar consciousness networks.' },
+  { shape: 'Golden Spiral Galaxy', freq: '1995Hz', benefit: 'Galactic Alignment', element: 'Cosmic Spiral', desc: 'The phi-based spiral of galaxies. Connects consciousness to galactic energy patterns.' },
+  { shape: 'Icosi-Dodecahedron', freq: '2319Hz', benefit: 'Multidimensional Access', element: 'Quantum Foam', desc: 'The combination of icosahedron and dodecahedron. Opens multidimensional awareness portals.' },
+
+  // Sixth Order Sacred Geometry (Source Connection Forms)
+  { shape: 'Infinite Torus Field', freq: '2430Hz', benefit: 'Universal Love Matrix', element: 'Love Field', desc: 'The infinite scaling torus. Represents the eternal circulation of universal love energy.' },
+  { shape: 'Source Fractal Mandala', freq: '2673Hz', benefit: 'Divine Source Interface', element: 'Source Code', desc: 'The infinite fractal pattern of creation. Direct interface to the divine source code.' },
+  { shape: 'Unity Consciousness Sphere', freq: '2997Hz', benefit: 'Oneness Embodiment', element: 'Pure Unity', desc: 'The perfect sphere containing all possibilities. Represents complete unity consciousness.' },
+
+  // Seventh Order Sacred Geometry (Master Creation Forms)
+  { shape: 'Genesis Polytope', freq: '3108Hz', benefit: 'Prime Creation Pattern', element: 'Primordial Force', desc: 'The multidimensional pattern of cosmic genesis. The fundamental template of creation itself.' },
+  { shape: 'Divine Architecture Matrix', freq: '3351Hz', benefit: 'Sacred Blueprint', element: 'Divine Template', desc: 'The master architectural pattern underlying all sacred structures and cosmic formations.' },
+  { shape: 'Absolute Unity Hologram', freq: '3675Hz', benefit: 'Complete Transcendence', element: 'Pure Consciousness', desc: 'The holographic pattern containing all knowledge and existence. The ultimate geometric expression of absolute consciousness.' },
+
+  // Special Frequency Sacred Geometry (111Hz Pattern Series)
+  { shape: 'Triangle of Manifestation', freq: '111Hz', benefit: 'Gateway Opening', element: 'Portal Energy', desc: 'The basic triangle pattern. Each 111Hz frequency opens progressive gateways in consciousness.' },
+  { shape: 'Double Triangle (Star)', freq: '222Hz', benefit: 'Polarity Balance', element: 'Duality Harmony', desc: 'Two interlocked triangles. Balances positive and negative polarities for manifestation.' },
+  { shape: 'Triple Triangle Triad', freq: '333Hz', benefit: 'Trinity Activation', element: 'Mind-Body-Spirit', desc: 'Three triangles forming a triad. Activates the trinity of mind, body, and spirit consciousness.' },
+  { shape: 'Quadruple Square Matrix', freq: '444Hz', benefit: 'Foundation Anchoring', element: 'Stability Grid', desc: 'Four squares in formation. Anchors higher consciousness into stable physical foundation.' },
+  { shape: 'Pentagram Star Gate', freq: '555Hz', benefit: 'Transformation Portal', element: 'Change Catalyst', desc: 'The five-pointed star. Opens transformation portals and catalyzes consciousness evolution.' },
+  { shape: 'Hexagon Crystal Lattice', freq: '666Hz', benefit: 'Material Mastery', element: 'Carbon Structure', desc: 'The six-sided honeycomb pattern. Masters the material plane through crystal consciousness.' },
+  { shape: 'Heptagon Mystical Seal', freq: '777Hz', benefit: 'Mystical Awakening', element: 'Spiritual Mystery', desc: 'The seven-sided polygon. Unlocks mystical knowledge and spiritual mysteries.' },
+  { shape: 'Octagon Infinity Gate', freq: '888Hz', benefit: 'Infinite Abundance', element: 'Prosperity Flow', desc: 'The eight-sided form of infinity. Opens gates to infinite abundance and prosperity.' },
+  { shape: 'Enneagram Completion', freq: '999Hz', benefit: 'Cycle Completion', element: 'Full Circle', desc: 'The nine-pointed completion figure. Represents the end of one cycle and birth of the next.' },
 ];
 
 export const SEPHIROT_INFO = [

@@ -1823,6 +1823,45 @@ const App: React.FC = () => {
     return s ? s.color : '#fbbf24';
   };
 
+  const getCurrentSacredGeometry = () => {
+    const currentFreq = playlist[currentSongIndex]?.closestSolfeggio || selectedSolfeggio;
+    
+    // Check for 111Hz pattern frequencies first
+    if (currentFreq % 111 === 0 && currentFreq >= 111 && currentFreq <= 999) {
+      const geo = GEOMETRY_INFO.find(g => g.freq === `${currentFreq}Hz`);
+      return geo || { shape: `${currentFreq/111}-Sided Pattern`, element: 'Portal Energy' };
+    }
+    
+    // Find matching geometry from GEOMETRY_INFO
+    const geo = GEOMETRY_INFO.find(g => g.freq === `${currentFreq}Hz`);
+    if (geo) return geo;
+    
+    // Fallback mapping for ranges
+    if (currentFreq <= 180) return { shape: 'Cube', element: 'Earth' };
+    if (currentFreq <= 300) return { shape: 'Reiki Symbol', element: 'Aether' };
+    if (currentFreq <= 400) return { shape: 'Tetrahedron', element: 'Fire' };
+    if (currentFreq <= 450) return { shape: 'Icosahedron', element: 'Water' };
+    if (currentFreq <= 580) return { shape: 'Octahedron', element: 'Air' };
+    if (currentFreq <= 680) return { shape: 'Merkaba', element: 'Light' };
+    if (currentFreq <= 780) return { shape: 'Dodecahedron', element: 'Ether' };
+    if (currentFreq <= 900) return { shape: 'Torus', element: 'Cosmos' };
+    if (currentFreq <= 1000) return { shape: 'Fibonacci Sphere', element: 'Void' };
+    if (currentFreq <= 1150) return { shape: 'Hypercube', element: 'Hyperspace' };
+    if (currentFreq <= 1400) return { shape: 'Flower of Life', element: 'Creation Matrix' };
+    if (currentFreq <= 1700) return { shape: 'Metatron\'s Cube', element: 'Divine Geometry' };
+    if (currentFreq <= 1850) return { shape: 'Hyperdodecahedron', element: 'Stellar Fields' };
+    if (currentFreq <= 2100) return { shape: 'Golden Spiral Galaxy', element: 'Cosmic Spiral' };
+    if (currentFreq <= 2400) return { shape: 'Icosi-Dodecahedron', element: 'Quantum Foam' };
+    if (currentFreq <= 2550) return { shape: 'Infinite Torus Field', element: 'Love Field' };
+    if (currentFreq <= 2800) return { shape: 'Source Fractal Mandala', element: 'Source Code' };
+    if (currentFreq <= 3000) return { shape: 'Unity Consciousness Sphere', element: 'Pure Unity' };
+    if (currentFreq <= 3200) return { shape: 'Genesis Polytope', element: 'Primordial Force' };
+    if (currentFreq <= 3500) return { shape: 'Divine Architecture Matrix', element: 'Divine Template' };
+    if (currentFreq <= 4000) return { shape: 'Absolute Unity Hologram', element: 'Pure Consciousness' };
+    
+    return { shape: 'Unity Sphere', element: 'Infinite' };
+  };
+
   const getSafetyLevelColor = (level: string) => {
     switch (level) {
       case 'SAFE': return 'text-green-500';
@@ -1935,7 +1974,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -3305,7 +3344,8 @@ const App: React.FC = () => {
                            subtleResonanceMode 
                              ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' 
                              : 'bg-gold-500/10 text-gold-500 border-gold-500/20'
-                         }`}>
+                         }`}
+                         title={`Sacred Geometry: ${getCurrentSacredGeometry().shape} (${getCurrentSacredGeometry().element} Element)`}>
                             <Activity size={8} /> 
                             {playlist[currentSongIndex]?.closestSolfeggio || selectedSolfeggio}Hz
                             {subtleResonanceMode && <Zap size={8} />}
@@ -3314,6 +3354,13 @@ const App: React.FC = () => {
                             <Waves size={8} /> {selectedBinaural.name}
                          </span>
                          
+                         {/* Sacred Geometry Status */}
+                         <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20"
+                           title={`${getCurrentSacredGeometry().shape} manifesting`}>
+                           <Box size={8} /> 
+                           {getCurrentSacredGeometry().element}
+                         </span>
+
                          {/* Advanced Features Status */}
                          {fractalAnalysis && (
                            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">

@@ -286,6 +286,345 @@ const getFibonacciSpherePoints = (count: number, radius: number): Point3D[] => {
     return points;
 };
 
+// === FOURTH ORDER SACRED GEOMETRY (Higher Consciousness Forms) ===
+
+// 10. Hypercube/Tesseract (1074 Hz - 4D Transcendence)
+const getHypercubePoints = (count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    // 4D cube projected into 3D space
+    const w = 0.5; // 4th dimension parameter
+    
+    for (let i = 0; i < count; i++) {
+        const t = (i / count) * Math.PI * 2 * 4; // Multiple rotations through 4D
+        const x4 = Math.cos(t * 0.7) * w;
+        const y4 = Math.sin(t * 0.7) * w;
+        
+        // Project 4D coordinates into 3D
+        const perspective = 1 / (2 - x4);
+        points.push({
+            x: (Math.cos(t) + y4) * scale * perspective,
+            y: (Math.sin(t) + x4) * scale * perspective,
+            z: (Math.cos(t * 1.618) * Math.sin(t * 0.618)) * scale * perspective
+        });
+    }
+    return points;
+};
+
+// 11. Complete Flower of Life (1317 Hz - Universal Template)
+const getFlowerOfLifePoints = (count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    const numCircles = 19; // Complete flower has 19 circles
+    const circleRadius = scale * 0.3;
+    
+    // Central circle
+    const pointsPerCircle = Math.floor(count / numCircles);
+    
+    // Generate the complete 19-circle pattern
+    const centers = [
+        { x: 0, y: 0 }, // Center
+        // Inner ring (6 circles)
+        ...Array.from({ length: 6 }, (_, i) => ({
+            x: circleRadius * Math.cos(i * Math.PI / 3),
+            y: circleRadius * Math.sin(i * Math.PI / 3)
+        })),
+        // Outer ring (12 circles)
+        ...Array.from({ length: 12 }, (_, i) => ({
+            x: circleRadius * 2 * Math.cos(i * Math.PI / 6),
+            y: circleRadius * 2 * Math.sin(i * Math.PI / 6)
+        }))
+    ];
+    
+    centers.forEach((center, circleIdx) => {
+        for (let i = 0; i < pointsPerCircle; i++) {
+            const angle = (i / pointsPerCircle) * Math.PI * 2;
+            const r = circleRadius * 0.8;
+            points.push({
+                x: center.x + Math.cos(angle) * r,
+                y: center.y + Math.sin(angle) * r,
+                z: Math.sin(circleIdx * 0.3 + angle) * scale * 0.1 // Slight 3D depth
+            });
+        }
+    });
+    
+    return points.slice(0, count);
+};
+
+// 12. Metatron's Cube (1641 Hz - Cosmic Order)
+const getMetatronsCubePoints = (count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    
+    // 13 circles arranged in Metatron's Cube pattern
+    const centers = [
+        { x: 0, y: 0 }, // Center
+        // Inner hexagon
+        ...Array.from({ length: 6 }, (_, i) => ({
+            x: scale * 0.5 * Math.cos(i * Math.PI / 3),
+            y: scale * 0.5 * Math.sin(i * Math.PI / 3)
+        })),
+        // Outer hexagon
+        ...Array.from({ length: 6 }, (_, i) => ({
+            x: scale * 0.866 * Math.cos(i * Math.PI / 3 + Math.PI / 6),
+            y: scale * 0.866 * Math.sin(i * Math.PI / 3 + Math.PI / 6)
+        }))
+    ];
+    
+    // Create points along the connecting lines (the "cube" edges)
+    const pointsPerConnection = Math.floor(count / 78); // 78 possible connections in Metatron's Cube
+    
+    centers.forEach((center1, i) => {
+        centers.forEach((center2, j) => {
+            if (i < j && points.length < count) { // Avoid duplicates
+                for (let k = 0; k < pointsPerConnection && points.length < count; k++) {
+                    const t = k / pointsPerConnection;
+                    points.push({
+                        x: center1.x + (center2.x - center1.x) * t,
+                        y: center1.y + (center2.y - center1.y) * t,
+                        z: Math.sin(t * Math.PI * 2 + i + j) * scale * 0.1
+                    });
+                }
+            }
+        });
+    });
+    
+    return points.slice(0, count);
+};
+
+// === FIFTH ORDER SACRED GEOMETRY (Stellar & Galactic Forms) ===
+
+// 13. Hyperdodecahedron (1752 Hz - Stellar Consciousness)
+const getHyperdodecahedronPoints = (count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    const phi = PHI;
+    
+    // 4D dodecahedron projected to 3D with stellar pattern
+    for (let i = 0; i < count; i++) {
+        const t = (i / count) * Math.PI * 8; // Multiple stellar cycles
+        const w = Math.sin(t * 0.1) * 0.5; // 4th dimension oscillation
+        
+        // Dodecahedral coordinates with 4D projection
+        const angle1 = t;
+        const angle2 = t * phi;
+        const perspective = 1 / (2 - w);
+        
+        points.push({
+            x: Math.cos(angle1) * Math.cos(angle2) * scale * perspective,
+            y: Math.sin(angle1) * Math.cos(angle2) * scale * perspective,
+            z: Math.sin(angle2) * scale * perspective
+        });
+    }
+    return points;
+};
+
+// 14. Golden Spiral Galaxy (1995 Hz - Galactic Alignment)
+const getGoldenSpiralGalaxyPoints = (count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    
+    // Create a phi-based galactic spiral
+    for (let i = 0; i < count; i++) {
+        const t = (i / count) * Math.PI * 12; // Multiple spiral arms
+        const r = scale * Math.pow(PHI, t / (Math.PI * 4)) * 0.1; // Phi-based radius expansion
+        const armOffset = (i % 4) * Math.PI / 2; // 4 spiral arms
+        
+        points.push({
+            x: Math.cos(t + armOffset) * r,
+            y: Math.sin(t + armOffset) * r,
+            z: Math.sin(t * 0.1) * scale * 0.2 // Galactic disk thickness
+        });
+    }
+    return points;
+};
+
+// 15. Icosi-Dodecahedron (2319 Hz - Multidimensional Access)
+const getIcosiDodecahedronPoints = (count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    const halfCount = Math.floor(count / 2);
+    
+    // Combine icosahedron and dodecahedron
+    const icoPoints = getIcosahedronPoints(halfCount, scale * 0.8);
+    const dodecaPoints = getDodecahedronPoints(count - halfCount, scale * 1.2);
+    
+    return [...icoPoints, ...dodecaPoints];
+};
+
+// === SIXTH ORDER SACRED GEOMETRY (Source Connection Forms) ===
+
+// 16. Infinite Torus Field (2430 Hz - Universal Love Matrix)
+const getInfiniteTorusFieldPoints = (count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    const numTori = 5; // Nested tori at different scales
+    
+    for (let torusIdx = 0; torusIdx < numTori; torusIdx++) {
+        const torusScale = scale * (1 + torusIdx * 0.3);
+        const pointsPerTorus = Math.floor(count / numTori);
+        
+        for (let i = 0; i < pointsPerTorus; i++) {
+            const u = (i / pointsPerTorus) * Math.PI * 2;
+            const v = ((i * 7) / pointsPerTorus) * Math.PI * 2; // Different frequency for variety
+            
+            const R = torusScale * 0.6; // Major radius
+            const r = torusScale * 0.2; // Minor radius
+            
+            points.push({
+                x: (R + r * Math.cos(v)) * Math.cos(u),
+                y: (R + r * Math.cos(v)) * Math.sin(u),
+                z: r * Math.sin(v) + Math.sin(torusIdx + u) * torusScale * 0.1
+            });
+        }
+    }
+    
+    return points.slice(0, count);
+};
+
+// 17. Source Fractal Mandala (2673 Hz - Divine Source Interface)
+const getSourceFractalMandalaPoints = (count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    
+    // Create a fractal mandala pattern
+    for (let i = 0; i < count; i++) {
+        const t = (i / count) * Math.PI * 16; // High frequency pattern
+        const r1 = scale * 0.5 * Math.sin(t * 3) * Math.sin(t * 5);
+        const r2 = scale * 0.3 * Math.cos(t * 7) * Math.cos(t * 11);
+        const fractalR = Math.abs(r1 + r2);
+        
+        points.push({
+            x: Math.cos(t) * fractalR,
+            y: Math.sin(t) * fractalR,
+            z: Math.sin(t * PHI) * scale * 0.2
+        });
+    }
+    return points;
+};
+
+// 18. Unity Consciousness Sphere (2997 Hz - Oneness Embodiment)
+const getUnityConsciousnessSpherePoints = (count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    
+    // Perfect sphere with unity consciousness pattern
+    for (let i = 0; i < count; i++) {
+        const theta = Math.acos(1 - 2 * (i / count)); // Uniform sphere distribution
+        const phi = Math.PI * (3 - Math.sqrt(5)) * i; // Golden angle
+        
+        const x = Math.sin(theta) * Math.cos(phi);
+        const y = Math.sin(theta) * Math.sin(phi);
+        const z = Math.cos(theta);
+        
+        // Add unity consciousness pulsing
+        const unityPulse = 1 + 0.1 * Math.sin(i * PHI);
+        
+        points.push({
+            x: x * scale * unityPulse,
+            y: y * scale * unityPulse,
+            z: z * scale * unityPulse
+        });
+    }
+    return points;
+};
+
+// === SEVENTH ORDER SACRED GEOMETRY (Master Creation Forms) ===
+
+// 19. Genesis Polytope (3108 Hz - Prime Creation Pattern)
+const getGenesisPolytopePoints = (count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    
+    // Multidimensional creation pattern
+    for (let i = 0; i < count; i++) {
+        const t = (i / count) * Math.PI * 21; // 21 = 3*7, sacred numbers
+        const r = scale * Math.pow(Math.E, t / (Math.PI * 7)) * 0.05; // Natural exponential growth
+        
+        // Genesis spiral with multiple dimensions
+        const x4 = Math.cos(t * PHI);
+        const y4 = Math.sin(t * PHI);
+        
+        points.push({
+            x: Math.cos(t) * r * (1 + x4 * 0.5),
+            y: Math.sin(t) * r * (1 + y4 * 0.5),
+            z: Math.sin(t * 0.618) * scale * 0.3
+        });
+    }
+    return points;
+};
+
+// 20. Divine Architecture Matrix (3351 Hz - Sacred Blueprint)
+const getDivineArchitectureMatrixPoints = (count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    
+    // Sacred architectural pattern combining all previous geometries
+    const geometryTypes = 7; // Use 7 different base geometries
+    const pointsPerType = Math.floor(count / geometryTypes);
+    
+    // Combine multiple sacred forms in architectural harmony
+    const smallScale = scale * 0.3;
+    
+    for (let type = 0; type < geometryTypes; type++) {
+        const offset = type * Math.PI * 2 / geometryTypes;
+        const radius = scale * (0.5 + type * 0.1);
+        
+        for (let i = 0; i < pointsPerType; i++) {
+            const t = (i / pointsPerType) * Math.PI * 2;
+            points.push({
+                x: Math.cos(t + offset) * radius + Math.cos(t * 3) * smallScale,
+                y: Math.sin(t + offset) * radius + Math.sin(t * 3) * smallScale,
+                z: Math.sin(t * PHI + offset) * scale * 0.2
+            });
+        }
+    }
+    
+    return points.slice(0, count);
+};
+
+// 21. Absolute Unity Hologram (3675 Hz - Complete Transcendence)
+const getAbsoluteUnityHologramPoints = (count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    
+    // The ultimate holographic pattern containing all possibilities
+    for (let i = 0; i < count; i++) {
+        const t = (i / count) * Math.PI * 24; // 24 = cosmic completion number
+        
+        // Holographic interference pattern
+        const wave1 = Math.sin(t * PHI);
+        const wave2 = Math.cos(t * Math.E);
+        const wave3 = Math.sin(t * Math.sqrt(5));
+        
+        const interference = (wave1 + wave2 + wave3) / 3;
+        const r = scale * (0.8 + interference * 0.4);
+        
+        points.push({
+            x: Math.cos(t) * r,
+            y: Math.sin(t) * r,
+            z: interference * scale * 0.5
+        });
+    }
+    return points;
+};
+
+// === 111Hz PATTERN SACRED GEOMETRY ===
+
+// Triangle-based patterns for 111Hz series
+const get111PatternPoints = (frequency: number, count: number, scale: number): Point3D[] => {
+    const points: Point3D[] = [];
+    const patternNumber = Math.round(frequency / 111);
+    
+    // Create pattern based on the 111Hz multiple
+    for (let i = 0; i < count; i++) {
+        const t = (i / count) * Math.PI * 2 * patternNumber;
+        const sides = Math.min(patternNumber, 12); // Max 12 sides
+        
+        // Polygonal pattern
+        const sideT = Math.floor(t / (Math.PI * 2 / sides)) % sides;
+        const localT = (t % (Math.PI * 2 / sides)) / (Math.PI * 2 / sides);
+        
+        const angle1 = sideT * Math.PI * 2 / sides;
+        const angle2 = (sideT + 1) * Math.PI * 2 / sides;
+        
+        points.push({
+            x: Math.cos(angle1 + (angle2 - angle1) * localT) * scale,
+            y: Math.sin(angle1 + (angle2 - angle1) * localT) * scale,
+            z: Math.sin(t * 0.1) * scale * 0.2
+        });
+    }
+    return points;
+};
+
 // Tree of Life Data
 const getTreeOfLife = (scale: number = 1): { nodes: TreeNode[], edges: [number, number][] } => {
     const rawNodes: TreeNode[] = [
@@ -396,25 +735,71 @@ const Visualizer: React.FC<VisualizerProps> = ({
     const scale = 250; 
     let newTargets: Point3D[] = [];
 
-    // SACRED GEOMETRY EQ MAPPING
-    if (selectedFrequency <= 180) {
-        newTargets = getCubePoints(pCount, scale);
+    // COMPREHENSIVE SACRED GEOMETRY FREQUENCY MAPPING
+    
+    // Check for 111Hz pattern frequencies first
+    if (selectedFrequency % 111 === 0 && selectedFrequency >= 111 && selectedFrequency <= 999) {
+        newTargets = get111PatternPoints(selectedFrequency, pCount, scale);
+    }
+    // First Order (Physical Foundation)
+    else if (selectedFrequency <= 180) {
+        newTargets = getCubePoints(pCount, scale); // 174Hz - Earth/Stability
     } else if (selectedFrequency <= 300) {
-        newTargets = getReikiPoints(pCount, scale);
-    } else if (selectedFrequency <= 400) {
-        newTargets = getTetrahedronPoints(pCount, scale);
+        newTargets = getReikiPoints(pCount, scale); // 285Hz - Healing Energy
+    }
+    // Second Order (Emotional & Energetic)
+    else if (selectedFrequency <= 400) {
+        newTargets = getTetrahedronPoints(pCount, scale); // 396Hz - Fire/Liberation
     } else if (selectedFrequency <= 450) {
-        newTargets = getIcosahedronPoints(pCount, scale);
+        newTargets = getIcosahedronPoints(pCount, scale); // 417Hz - Water/Change
     } else if (selectedFrequency <= 580) {
-        newTargets = getOctahedronPoints(pCount, scale);
+        newTargets = getOctahedronPoints(pCount, scale); // 528Hz - Air/DNA Transformation
     } else if (selectedFrequency <= 680) {
-        newTargets = getMerkabaPoints(pCount, scale);
-    } else if (selectedFrequency <= 780) {
-        newTargets = getDodecahedronPoints(pCount, scale);
+        newTargets = getMerkabaPoints(pCount, scale); // 639Hz - Connection/Integration
+    }
+    // Third Order (Mental & Spiritual)
+    else if (selectedFrequency <= 780) {
+        newTargets = getDodecahedronPoints(pCount, scale); // 741Hz - Expression/Ether
     } else if (selectedFrequency <= 900) {
-        newTargets = getTorusPoints(pCount, scale);
-    } else {
-        newTargets = getFibonacciSpherePoints(pCount, scale);
+        newTargets = getTorusPoints(pCount, scale); // 852Hz - Universal Flow
+    } else if (selectedFrequency <= 1000) {
+        newTargets = getFibonacciSpherePoints(pCount, scale); // 963Hz - Perfection/Completion
+    }
+    // Fourth Order (Higher Consciousness)
+    else if (selectedFrequency <= 1150) {
+        newTargets = getHypercubePoints(pCount, scale); // 1074Hz - 4D Transcendence
+    } else if (selectedFrequency <= 1400) {
+        newTargets = getFlowerOfLifePoints(pCount, scale); // 1317Hz - Universal Template
+    } else if (selectedFrequency <= 1700) {
+        newTargets = getMetatronsCubePoints(pCount, scale); // 1641Hz - Cosmic Order
+    }
+    // Fifth Order (Stellar & Galactic)
+    else if (selectedFrequency <= 1850) {
+        newTargets = getHyperdodecahedronPoints(pCount, scale); // 1752Hz - Stellar Consciousness
+    } else if (selectedFrequency <= 2100) {
+        newTargets = getGoldenSpiralGalaxyPoints(pCount, scale); // 1995Hz - Galactic Alignment
+    } else if (selectedFrequency <= 2400) {
+        newTargets = getIcosiDodecahedronPoints(pCount, scale); // 2319Hz - Multidimensional Access
+    }
+    // Sixth Order (Source Connection)
+    else if (selectedFrequency <= 2550) {
+        newTargets = getInfiniteTorusFieldPoints(pCount, scale); // 2430Hz - Universal Love Matrix
+    } else if (selectedFrequency <= 2800) {
+        newTargets = getSourceFractalMandalaPoints(pCount, scale); // 2673Hz - Divine Source Interface
+    } else if (selectedFrequency <= 3000) {
+        newTargets = getUnityConsciousnessSpherePoints(pCount, scale); // 2997Hz - Oneness Embodiment
+    }
+    // Seventh Order (Master Creation)
+    else if (selectedFrequency <= 3200) {
+        newTargets = getGenesisPolytopePoints(pCount, scale); // 3108Hz - Prime Creation
+    } else if (selectedFrequency <= 3500) {
+        newTargets = getDivineArchitectureMatrixPoints(pCount, scale); // 3351Hz - Sacred Blueprint
+    } else if (selectedFrequency <= 4000) {
+        newTargets = getAbsoluteUnityHologramPoints(pCount, scale); // 3675Hz - Complete Transcendence
+    }
+    // Beyond Seventh Order - return to Unity Sphere for ultra-high frequencies
+    else {
+        newTargets = getUnityConsciousnessSpherePoints(pCount, scale);
     }
 
     // Assign new targets smoothly
