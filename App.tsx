@@ -1320,81 +1320,47 @@ const App: React.FC = () => {
   };
 
   const generateDNAResonancePlaylist = () => {
-    // Enhanced DNA resonant playlist focusing on 528Hz and harmonic alignment
-    console.log('=== 528Hz DNA RESONANT PLAYLIST GENERATION ===');
+    // Strict 528Hz resonance filter - only the pure 528Hz frequency
+    console.log('=== STRICT 528Hz DNA RESONANCE FILTER ===');
     originalPlaylist.forEach(song => {
-      if (song.fractalAnalysis) {
-        const is528Hz = song.closestSolfeggio === 528;
+      if (song.fractalAnalysis && song.closestSolfeggio === 528) {
         const dnaScore = song.fractalAnalysis.dnaResonanceScore * 100;
-        console.log(`${song.name}: DNA=${dnaScore.toFixed(1)}% | 528Hz=${is528Hz} | Freq=${song.closestSolfeggio}Hz`);
-      } else {
-        console.log(`${song.name}: No fractal analysis data`);
+        console.log(`${song.name}: DNA=${dnaScore.toFixed(1)}% | 528Hz=true | Accuracy=${song.harmonicDeviation?.toFixed(1) || 'N/A'}Hz`);
       }
     });
 
-    // Priority filtering for 528Hz DNA resonance with harmonic alignment
-    const dnaResonantTracks = originalPlaylist
+    // STRICT filtering: ONLY 528Hz tracks with any level of DNA resonance
+    const pure528Tracks = originalPlaylist
       .filter(song => {
-        // Must have fractal analysis
+        // Must be exactly 528Hz frequency match
+        if (song.closestSolfeggio !== 528) return false;
+        
+        // Must have fractal analysis data
         if (!song.fractalAnalysis) return false;
         
-        // Primary criteria: 528Hz tracks (the DNA repair frequency)
-        if (song.closestSolfeggio === 528) {
-          return song.fractalAnalysis.dnaResonanceScore > 0.2; // Lower threshold for 528Hz
-        }
-        
-        // Secondary criteria: 528Hz harmonics (1056, 2112, etc.)
-        const freq = song.closestSolfeggio || 0;
-        const is528Harmonic = [1056, 2112, 4224].includes(freq) || 
-                             (freq > 100 && Math.abs((freq % 528) - 0) < 20);
-        if (is528Harmonic && song.fractalAnalysis.dnaResonanceScore > 0.25) {
-          return true;
-        }
-        
-        // Tertiary criteria: High DNA resonance with good harmonic alignment
-        if (song.fractalAnalysis.dnaResonanceScore > 0.4 && 
-            song.fractalAnalysis.goldenRatioAlignment > 0.3) {
-          return true;
-        }
-        
-        return false;
+        // Accept any level of DNA resonance (even minimal) for 528Hz tracks
+        return song.fractalAnalysis.dnaResonanceScore > 0;
       })
       .sort((a, b) => {
-        // Sorting priority: 528Hz first, then harmonics, then by DNA resonance score
-        const aIs528 = a.closestSolfeggio === 528;
-        const bIs528 = b.closestSolfeggio === 528;
-        
-        if (aIs528 && !bIs528) return -1;
-        if (!aIs528 && bIs528) return 1;
-        
-        // Check for 528Hz harmonics
-        const aFreq = a.closestSolfeggio || 0;
-        const bFreq = b.closestSolfeggio || 0;
-        const aIsHarmonic = [1056, 2112, 4224].includes(aFreq);
-        const bIsHarmonic = [1056, 2112, 4224].includes(bFreq);
-        
-        if (aIsHarmonic && !bIsHarmonic) return -1;
-        if (!aIsHarmonic && bIsHarmonic) return 1;
-        
-        // Then by DNA resonance score
+        // Sort by DNA resonance score (highest first)
         const aDNA = a.fractalAnalysis?.dnaResonanceScore || 0;
         const bDNA = b.fractalAnalysis?.dnaResonanceScore || 0;
         
-        if (Math.abs(aDNA - bDNA) > 0.05) {
+        if (Math.abs(aDNA - bDNA) > 0.01) {
           return bDNA - aDNA;
         }
         
-        // Finally by harmonic alignment
-        const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
-        const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
+        // Then by harmonic accuracy (closest to pure 528Hz)
+        const aAccuracy = a.harmonicDeviation || 999;
+        const bAccuracy = b.harmonicDeviation || 999;
         
-        return bGolden - aGolden;
+        return aAccuracy - bAccuracy;
       });
     
-    console.log(`Found ${dnaResonantTracks.length} tracks for 528Hz DNA resonant playlist`);
+    console.log(`Found ${pure528Tracks.length} pure 528Hz tracks for DNA resonance playlist`);
     
-    if (dnaResonantTracks.length > 0) {
-      setPlaylist(dnaResonantTracks);
+    if (pure528Tracks.length > 0) {
+      setPlaylist(pure528Tracks);
       setUseChakraOrder(false);
       setCurrentSongIndex(0);
       setSearchTerm('');
@@ -1402,40 +1368,51 @@ const App: React.FC = () => {
       // Auto-set to 528Hz for optimal DNA resonance
       setSelectedSolfeggio(528);
       
-      // Enable visualization features that complement DNA work
+      // Enable visualization features optimized for 528Hz DNA work
       setVizSettings(prev => ({ 
         ...prev, 
         morphEnabled: true,
         showTreeOfLife: true,
         colorMode: 'chakra',
-        enableFlow: true
+        enableFlow: true,
+        showHexagons: true,
+        hexOpacity: 0.7
       }));
       
-      // Provide user feedback
-      const primary528Tracks = dnaResonantTracks.filter(s => s.closestSolfeggio === 528).length;
-      const harmonicTracks = dnaResonantTracks.filter(s => [1056, 2112, 4224].includes(s.closestSolfeggio || 0)).length;
-      const highResonanceTracks = dnaResonantTracks.length - primary528Tracks - harmonicTracks;
+      // Calculate quality metrics for user feedback
+      const avgDNAScore = pure528Tracks.reduce((sum, song) => 
+        sum + (song.fractalAnalysis?.dnaResonanceScore || 0), 0) / pure528Tracks.length;
+      
+      const highQualityTracks = pure528Tracks.filter(s => 
+        (s.fractalAnalysis?.dnaResonanceScore || 0) > 0.3).length;
+      
+      const avgAccuracy = pure528Tracks.reduce((sum, song) => 
+        sum + (song.harmonicDeviation || 0), 0) / pure528Tracks.length;
       
       setTimeout(() => {
         setAnalysisNotification(
-          `528Hz DNA Resonant Playlist activated! ${primary528Tracks} core 528Hz tracks, ${harmonicTracks} harmonic tracks, ${highResonanceTracks} high-resonance tracks. Auto-tuned to 528Hz for optimal DNA repair.`
+          `Pure 528Hz DNA Resonance Filter activated! ${pure528Tracks.length} tracks found. Average DNA resonance: ${(avgDNAScore * 100).toFixed(1)}%, ${highQualityTracks} high-quality tracks, avg accuracy: ±${avgAccuracy.toFixed(1)}Hz from pure 528Hz.`
         );
-        setTimeout(() => setAnalysisNotification(null), 7000);
+        setTimeout(() => setAnalysisNotification(null), 8000);
       }, 500);
       
       if(window.innerWidth < 768) setShowSidebar(false);
     } else {
       const tracksWith528 = originalPlaylist.filter(s => s.closestSolfeggio === 528).length;
-      const tracksWithHarmonics = originalPlaylist.filter(s => [1056, 2112, 4224].includes(s.closestSolfeggio || 0)).length;
-      const tracksWithDNA = originalPlaylist.filter(s => s.fractalAnalysis && s.fractalAnalysis.dnaResonanceScore > 0.2).length;
+      const analyzedTracks = originalPlaylist.filter(s => s.fractalAnalysis).length;
+      const unanalyzedTracks = originalPlaylist.length - analyzedTracks;
       
-      alert(`No tracks qualify for 528Hz DNA resonant playlist.\n\n` +
-            `Analysis summary:\n` +
-            `• 528Hz tracks found: ${tracksWith528}\n` +
-            `• 528Hz harmonic tracks: ${tracksWithHarmonics}\n` +
-            `• Tracks with DNA resonance >20%: ${tracksWithDNA}\n` +
-            `• Total analyzed tracks: ${originalPlaylist.filter(s => s.fractalAnalysis).length}\n\n` +
-            `Try scanning your library with fractal analysis, or import music that contains 528Hz content.`);
+      alert(`No pure 528Hz tracks found for DNA resonance filter.\n\n` +
+            `Current library status:\n` +
+            `• Total tracks: ${originalPlaylist.length}\n` +
+            `• Analyzed tracks: ${analyzedTracks}\n` +
+            `• Unanalyzed tracks: ${unanalyzedTracks}\n` +
+            `• 528Hz frequency matches: ${tracksWith528}\n\n` +
+            `To use this filter:\n` +
+            `1. Import music containing 528Hz content\n` +
+            `2. Run "Deep Scan" to analyze harmonic frequencies\n` +
+            `3. This filter requires exact 528Hz frequency matches\n\n` +
+            `Note: This filter only shows tracks that are harmonically centered on pure 528Hz.`);
     }
   };
 
@@ -1974,7 +1951,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
