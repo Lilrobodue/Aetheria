@@ -1207,60 +1207,235 @@ const App: React.FC = () => {
   };
 
   const generate111PatternPlaylist = () => {
-    // Debug: Log 111 pattern values for all tracks
-    console.log('=== 111 PATTERN PLAYLIST DEBUG ===');
-    originalPlaylist.forEach(song => {
-      if (song.fractalAnalysis) {
-        console.log(`${song.name}: 111 Pattern = ${(song.fractalAnalysis.pattern111Presence * 100).toFixed(1)}%`);
+    // Composition of the first in sequence of each solfeggio order based on 111 Hz pattern presence
+    console.log('=== 111 PATTERN SOLFEGGIO SEQUENCE COMPOSITION ===');
+    
+    // Define the solfeggio orders and their first frequencies
+    const solfeggioOrders = [
+      { order: 'First', frequencies: [174, 285] },
+      { order: 'Second', frequencies: [396, 417, 528, 639] },
+      { order: 'Third', frequencies: [741, 852, 963] },
+      { order: 'Fourth', frequencies: [1074, 1317, 1641] },
+      { order: 'Fifth', frequencies: [1752, 1995, 2319] },
+      { order: 'Sixth', frequencies: [2430, 2673, 2997] },
+      { order: 'Seventh', frequencies: [3108, 3351, 3675] }
+    ];
+
+    const compositionPlaylist: Song[] = [];
+    const usedIds = new Set<string>();
+
+    // For each order, find the best song with the highest 111 pattern presence from the first frequency
+    solfeggioOrders.forEach(orderGroup => {
+      const firstFrequency = orderGroup.frequencies[0]; // Get the first frequency of each order
+      
+      // Find songs that match this frequency and have 111 pattern presence
+      const candidatesForOrder = originalPlaylist.filter(song => {
+        if (!song.fractalAnalysis || usedIds.has(song.id)) return false;
+        return song.closestSolfeggio === firstFrequency;
+      });
+
+      if (candidatesForOrder.length > 0) {
+        // Sort by 111 pattern presence, then by DNA resonance, then by harmonic accuracy
+        candidatesForOrder.sort((a, b) => {
+          const a111 = a.fractalAnalysis?.pattern111Presence || 0;
+          const b111 = b.fractalAnalysis?.pattern111Presence || 0;
+          
+          // Prioritize 111 pattern presence
+          if (Math.abs(a111 - b111) > 0.05) {
+            return b111 - a111;
+          }
+          
+          // Then DNA resonance as a tiebreaker
+          const aDNA = a.fractalAnalysis?.dnaResonanceScore || 0;
+          const bDNA = b.fractalAnalysis?.dnaResonanceScore || 0;
+          
+          if (Math.abs(aDNA - bDNA) > 0.05) {
+            return bDNA - aDNA;
+          }
+          
+          // Finally by harmonic accuracy
+          return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
+        });
+
+        const bestTrack = candidatesForOrder[0];
+        compositionPlaylist.push(bestTrack);
+        usedIds.add(bestTrack.id);
+        
+        const pattern111Strength = (bestTrack.fractalAnalysis?.pattern111Presence || 0) * 100;
+        console.log(`${orderGroup.order} Order (${firstFrequency}Hz): "${bestTrack.name}" - 111 Pattern: ${pattern111Strength.toFixed(1)}%`);
       } else {
-        console.log(`${song.name}: No fractal analysis data`);
+        console.log(`${orderGroup.order} Order (${firstFrequency}Hz): No suitable tracks found`);
       }
     });
 
-    // Lowered threshold from 0.5 to 0.2 (20%) for more realistic filtering
-    const pattern111Tracks = originalPlaylist
-      .filter(s => s.fractalAnalysis && s.fractalAnalysis.pattern111Presence > 0.2)
-      .sort((a, b) => (b.fractalAnalysis?.pattern111Presence || 0) - (a.fractalAnalysis?.pattern111Presence || 0));
+    console.log(`111 Pattern Composition: ${compositionPlaylist.length} tracks selected from ${solfeggioOrders.length} orders`);
     
-    console.log(`Found ${pattern111Tracks.length} tracks with 111 pattern > 20%`);
-    
-    if (pattern111Tracks.length > 0) {
-      setPlaylist(pattern111Tracks);
-      setUseChakraOrder(false);
+    if (compositionPlaylist.length > 0) {
+      setPlaylist(compositionPlaylist);
+      setUseChakraOrder(true); // Maintain order sequence
       setCurrentSongIndex(0);
       setSearchTerm('');
+      
+      // Auto-set to 111Hz for resonant pattern alignment
+      setSelectedSolfeggio(111);
+      
+      // Enable Tree of Life visualization for order progression
+      setVizSettings(prev => ({ 
+        ...prev, 
+        showTreeOfLife: true,
+        morphEnabled: true,
+        colorMode: 'chakra',
+        enableFlow: true,
+        autoRotate: true
+      }));
+      
+      // Provide detailed feedback about the composition
+      const ordersCovered = compositionPlaylist.length;
+      const avg111Pattern = compositionPlaylist.reduce((sum, song) => 
+        sum + (song.fractalAnalysis?.pattern111Presence || 0), 0) / compositionPlaylist.length * 100;
+      
+      setTimeout(() => {
+        setAnalysisNotification(
+          `111 Pattern Solfeggio Sequence activated! ${ordersCovered} orders represented (${compositionPlaylist.map((s, i) => `${solfeggioOrders[i]?.frequencies[0]}Hz`).join('→')}). Average 111 pattern strength: ${avg111Pattern.toFixed(1)}%. Playing first-in-sequence composition.`
+        );
+        setTimeout(() => setAnalysisNotification(null), 8000);
+      }, 500);
+      
       if(window.innerWidth < 768) setShowSidebar(false);
     } else {
-      alert(`No tracks with 111Hz patterns > 20% found.\n\nActual analysis results:\n${originalPlaylist.slice(0, 5).map(s => `• ${s.name}: ${s.fractalAnalysis ? (s.fractalAnalysis.pattern111Presence * 100).toFixed(1) : 'No analysis'}%`).join('\n')}\n\nTry scanning your library with fractal analysis first.`);
+      // Show diagnostic information
+      const analyzedTracks = originalPlaylist.filter(s => s.fractalAnalysis).length;
+      const orderAvailability = solfeggioOrders.map(order => {
+        const freq = order.frequencies[0];
+        const count = originalPlaylist.filter(s => s.closestSolfeggio === freq).length;
+        return `${order.order} (${freq}Hz): ${count} tracks`;
+      }).join('\n');
+      
+      alert(`Unable to create 111 Pattern Solfeggio Sequence.\n\n` +
+            `Requirements: At least one analyzed track from each order's first frequency:\n\n` +
+            `${orderAvailability}\n\n` +
+            `Total analyzed tracks: ${analyzedTracks}\n\n` +
+            `Try scanning your library with fractal analysis to enable this composition feature.`);
     }
   };
 
   const generateDNAResonancePlaylist = () => {
-    // Debug: Log DNA resonance values for all tracks
-    console.log('=== DNA RESONANCE PLAYLIST DEBUG ===');
+    // Enhanced DNA resonant playlist focusing on 528Hz and harmonic alignment
+    console.log('=== 528Hz DNA RESONANT PLAYLIST GENERATION ===');
     originalPlaylist.forEach(song => {
       if (song.fractalAnalysis) {
-        console.log(`${song.name}: DNA Resonance = ${(song.fractalAnalysis.dnaResonanceScore * 100).toFixed(1)}%`);
+        const is528Hz = song.closestSolfeggio === 528;
+        const dnaScore = song.fractalAnalysis.dnaResonanceScore * 100;
+        console.log(`${song.name}: DNA=${dnaScore.toFixed(1)}% | 528Hz=${is528Hz} | Freq=${song.closestSolfeggio}Hz`);
       } else {
         console.log(`${song.name}: No fractal analysis data`);
       }
     });
 
-    // Lowered threshold from 0.6 to 0.3 (30%) for more realistic filtering
+    // Priority filtering for 528Hz DNA resonance with harmonic alignment
     const dnaResonantTracks = originalPlaylist
-      .filter(s => s.fractalAnalysis && s.fractalAnalysis.dnaResonanceScore > 0.3)
-      .sort((a, b) => (b.fractalAnalysis?.dnaResonanceScore || 0) - (a.fractalAnalysis?.dnaResonanceScore || 0));
+      .filter(song => {
+        // Must have fractal analysis
+        if (!song.fractalAnalysis) return false;
+        
+        // Primary criteria: 528Hz tracks (the DNA repair frequency)
+        if (song.closestSolfeggio === 528) {
+          return song.fractalAnalysis.dnaResonanceScore > 0.2; // Lower threshold for 528Hz
+        }
+        
+        // Secondary criteria: 528Hz harmonics (1056, 2112, etc.)
+        const freq = song.closestSolfeggio || 0;
+        const is528Harmonic = [1056, 2112, 4224].includes(freq) || 
+                             (freq > 100 && Math.abs((freq % 528) - 0) < 20);
+        if (is528Harmonic && song.fractalAnalysis.dnaResonanceScore > 0.25) {
+          return true;
+        }
+        
+        // Tertiary criteria: High DNA resonance with good harmonic alignment
+        if (song.fractalAnalysis.dnaResonanceScore > 0.4 && 
+            song.fractalAnalysis.goldenRatioAlignment > 0.3) {
+          return true;
+        }
+        
+        return false;
+      })
+      .sort((a, b) => {
+        // Sorting priority: 528Hz first, then harmonics, then by DNA resonance score
+        const aIs528 = a.closestSolfeggio === 528;
+        const bIs528 = b.closestSolfeggio === 528;
+        
+        if (aIs528 && !bIs528) return -1;
+        if (!aIs528 && bIs528) return 1;
+        
+        // Check for 528Hz harmonics
+        const aFreq = a.closestSolfeggio || 0;
+        const bFreq = b.closestSolfeggio || 0;
+        const aIsHarmonic = [1056, 2112, 4224].includes(aFreq);
+        const bIsHarmonic = [1056, 2112, 4224].includes(bFreq);
+        
+        if (aIsHarmonic && !bIsHarmonic) return -1;
+        if (!aIsHarmonic && bIsHarmonic) return 1;
+        
+        // Then by DNA resonance score
+        const aDNA = a.fractalAnalysis?.dnaResonanceScore || 0;
+        const bDNA = b.fractalAnalysis?.dnaResonanceScore || 0;
+        
+        if (Math.abs(aDNA - bDNA) > 0.05) {
+          return bDNA - aDNA;
+        }
+        
+        // Finally by harmonic alignment
+        const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
+        const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
+        
+        return bGolden - aGolden;
+      });
     
-    console.log(`Found ${dnaResonantTracks.length} tracks with DNA resonance > 30%`);
+    console.log(`Found ${dnaResonantTracks.length} tracks for 528Hz DNA resonant playlist`);
     
     if (dnaResonantTracks.length > 0) {
       setPlaylist(dnaResonantTracks);
       setUseChakraOrder(false);
       setCurrentSongIndex(0);
       setSearchTerm('');
+      
+      // Auto-set to 528Hz for optimal DNA resonance
+      setSelectedSolfeggio(528);
+      
+      // Enable visualization features that complement DNA work
+      setVizSettings(prev => ({ 
+        ...prev, 
+        morphEnabled: true,
+        showTreeOfLife: true,
+        colorMode: 'chakra',
+        enableFlow: true
+      }));
+      
+      // Provide user feedback
+      const primary528Tracks = dnaResonantTracks.filter(s => s.closestSolfeggio === 528).length;
+      const harmonicTracks = dnaResonantTracks.filter(s => [1056, 2112, 4224].includes(s.closestSolfeggio || 0)).length;
+      const highResonanceTracks = dnaResonantTracks.length - primary528Tracks - harmonicTracks;
+      
+      setTimeout(() => {
+        setAnalysisNotification(
+          `528Hz DNA Resonant Playlist activated! ${primary528Tracks} core 528Hz tracks, ${harmonicTracks} harmonic tracks, ${highResonanceTracks} high-resonance tracks. Auto-tuned to 528Hz for optimal DNA repair.`
+        );
+        setTimeout(() => setAnalysisNotification(null), 7000);
+      }, 500);
+      
       if(window.innerWidth < 768) setShowSidebar(false);
     } else {
-      alert(`No tracks with DNA resonance > 30% found.\n\nActual analysis results:\n${originalPlaylist.slice(0, 5).map(s => `• ${s.name}: ${s.fractalAnalysis ? (s.fractalAnalysis.dnaResonanceScore * 100).toFixed(1) : 'No analysis'}%`).join('\n')}\n\nTry scanning your library with fractal analysis first.`);
+      const tracksWith528 = originalPlaylist.filter(s => s.closestSolfeggio === 528).length;
+      const tracksWithHarmonics = originalPlaylist.filter(s => [1056, 2112, 4224].includes(s.closestSolfeggio || 0)).length;
+      const tracksWithDNA = originalPlaylist.filter(s => s.fractalAnalysis && s.fractalAnalysis.dnaResonanceScore > 0.2).length;
+      
+      alert(`No tracks qualify for 528Hz DNA resonant playlist.\n\n` +
+            `Analysis summary:\n` +
+            `• 528Hz tracks found: ${tracksWith528}\n` +
+            `• 528Hz harmonic tracks: ${tracksWithHarmonics}\n` +
+            `• Tracks with DNA resonance >20%: ${tracksWithDNA}\n` +
+            `• Total analyzed tracks: ${originalPlaylist.filter(s => s.fractalAnalysis).length}\n\n` +
+            `Try scanning your library with fractal analysis, or import music that contains 528Hz content.`);
     }
   };
 
@@ -1760,7 +1935,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -2148,7 +2323,8 @@ const App: React.FC = () => {
                     className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-blue-400 hover:border-blue-500 transition-all active:scale-95"
                    >
                      <Activity size={16} className="mb-1 text-blue-500" />
-                     111 Pattern
+                     <span>111 Sequence</span>
+                     <span className="text-[8px] text-blue-400">Order Progression</span>
                    </button>
 
                    <button 
@@ -2156,7 +2332,8 @@ const App: React.FC = () => {
                     className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-green-400 hover:border-green-500 transition-all active:scale-95"
                    >
                      <Hexagon size={16} className="mb-1 text-green-500" />
-                     DNA Resonant
+                     <span>528Hz Filter</span>
+                     <span className="text-[8px] text-green-400">DNA Harmonic</span>
                    </button>
 
                    <button 
