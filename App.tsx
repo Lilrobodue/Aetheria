@@ -1951,7 +1951,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.4</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -2792,6 +2792,25 @@ const App: React.FC = () => {
                             ))}
                           </div>
                         </div>
+
+                        {/* Seventh Order */}
+                        <div className="mb-4">
+                          <div className="text-[10px] text-violet-400 mb-2 uppercase tracking-widest flex items-center gap-1">
+                            <AlertTriangle size={10} />
+                            Seventh Order (Master Level)
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Seventh').map((s) => (
+                              <button
+                                key={s.freq}
+                                onClick={() => setSelectedSolfeggio(s.freq)}
+                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-violet-600 text-white border-violet-600 shadow-lg shadow-violet-500/20' : 'border-violet-800 bg-violet-900/20 hover:border-violet-500 text-violet-300'}`}
+                              >
+                                {s.freq}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </>
                     )}
                     <div className="mt-4 bg-slate-900 p-4 rounded-xl border border-slate-800">
@@ -3121,6 +3140,27 @@ const App: React.FC = () => {
                                   setShowFrequencySelector(false);
                                 }}
                                 className="py-2 px-2 bg-red-900/30 hover:bg-red-600 text-red-300 hover:text-white rounded border border-red-600 transition-colors text-xs"
+                              >
+                                {s.freq}Hz
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="mb-4">
+                          <h4 className="text-sm font-bold text-violet-400 mb-2 flex items-center gap-1">
+                            <AlertTriangle size={14} />
+                            Seventh Order (Master)
+                          </h4>
+                          <div className="grid grid-cols-3 gap-2">
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Seventh').map((s) => (
+                              <button
+                                key={s.freq}
+                                onClick={() => {
+                                  setSelectedSolfeggio(s.freq);
+                                  setShowFrequencySelector(false);
+                                }}
+                                className="py-2 px-2 bg-violet-900/30 hover:bg-violet-600 text-violet-300 hover:text-white rounded border border-violet-600 transition-colors text-xs"
                               >
                                 {s.freq}Hz
                               </button>
