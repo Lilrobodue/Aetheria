@@ -1210,7 +1210,7 @@ const App: React.FC = () => {
     // Composition of the first in sequence of each solfeggio order based on 111 Hz pattern presence
     console.log('=== 111 PATTERN SOLFEGGIO SEQUENCE COMPOSITION ===');
     
-    // Define the solfeggio orders and their first frequencies
+    // Define the solfeggio orders and their first frequencies - ALL 9 ORDERS
     const solfeggioOrders = [
       { order: 'First', frequencies: [174, 285] },
       { order: 'Second', frequencies: [396, 417, 528, 639] },
@@ -1218,7 +1218,9 @@ const App: React.FC = () => {
       { order: 'Fourth', frequencies: [1074, 1317, 1641] },
       { order: 'Fifth', frequencies: [1752, 1995, 2319] },
       { order: 'Sixth', frequencies: [2430, 2673, 2997] },
-      { order: 'Seventh', frequencies: [3108, 3351, 3675] }
+      { order: 'Seventh', frequencies: [3108, 3351, 3675] },
+      { order: 'Eighth', frequencies: [3786, 4029, 4353] },
+      { order: 'Ninth', frequencies: [4464, 4707, 5031] }
     ];
 
     const compositionPlaylist: Song[] = [];
@@ -1289,17 +1291,37 @@ const App: React.FC = () => {
         autoRotate: true
       }));
       
+      // Check for transpersonal frequencies and adjust settings accordingly
+      const hasTranspersonalFrequencies = compositionPlaylist.some(s => (s.closestSolfeggio || 0) >= 3786);
+      if (hasTranspersonalFrequencies && userExperienceLevel !== 'expert') {
+        setUserExperienceLevel('expert');
+        setAnalysisNotification(
+          `111 Pattern Sequence includes transpersonal frequencies (8th-9th Orders). Experience level set to 'Expert' for proper access. Use extreme caution with frequencies above 3675Hz.`
+        );
+        setTimeout(() => setAnalysisNotification(null), 8000);
+      }
+      
       // Provide detailed feedback about the composition
       const ordersCovered = compositionPlaylist.length;
       const avg111Pattern = compositionPlaylist.reduce((sum, song) => 
         sum + (song.fractalAnalysis?.pattern111Presence || 0), 0) / compositionPlaylist.length * 100;
       
+      // Create frequency progression display
+      const frequencyProgression = compositionPlaylist.map((s, i) => {
+        const freq = solfeggioOrders[i]?.frequencies[0];
+        if (freq && freq >= 3786) {
+          return `${freq}Hz⚠️`; // Add warning symbol for transpersonal frequencies
+        }
+        return `${freq}Hz`;
+      }).join('→');
+      
       setTimeout(() => {
+        const safetyNote = hasTranspersonalFrequencies ? ' ⚠️ CAUTION: Contains transpersonal frequencies - use minimal volume.' : '';
         setAnalysisNotification(
-          `111 Pattern Solfeggio Sequence activated! ${ordersCovered} orders represented (${compositionPlaylist.map((s, i) => `${solfeggioOrders[i]?.frequencies[0]}Hz`).join('→')}). Average 111 pattern strength: ${avg111Pattern.toFixed(1)}%. Playing first-in-sequence composition.`
+          `111 Pattern Complete Journey activated! ${ordersCovered}/9 orders represented (${frequencyProgression}). Average 111 pattern strength: ${avg111Pattern.toFixed(1)}%.${safetyNote}`
         );
-        setTimeout(() => setAnalysisNotification(null), 8000);
-      }, 500);
+        setTimeout(() => setAnalysisNotification(null), 10000);
+      }, hasTranspersonalFrequencies ? 8500 : 500);
       
       if(window.innerWidth < 768) setShowSidebar(false);
     } else {
@@ -1834,9 +1856,15 @@ const App: React.FC = () => {
     if (currentFreq <= 3000) return { shape: 'Unity Consciousness Sphere', element: 'Pure Unity' };
     if (currentFreq <= 3200) return { shape: 'Genesis Polytope', element: 'Primordial Force' };
     if (currentFreq <= 3500) return { shape: 'Divine Architecture Matrix', element: 'Divine Template' };
-    if (currentFreq <= 4000) return { shape: 'Absolute Unity Hologram', element: 'Pure Consciousness' };
+    if (currentFreq <= 3700) return { shape: 'Absolute Unity Hologram', element: 'Pure Consciousness' };
+    if (currentFreq <= 3850) return { shape: 'Soul Star Tetrahedron', element: 'Soul Fire' };
+    if (currentFreq <= 4100) return { shape: 'Spirit Communication Octahedron', element: 'Spirit Aether' };
+    if (currentFreq <= 4400) return { shape: 'Universal Mind Dodecahedron', element: 'Universal Mind' };
+    if (currentFreq <= 4550) return { shape: 'Galactic Center Hyperstar', element: 'Galactic Core' };
+    if (currentFreq <= 4800) return { shape: 'Divine Gateway Tesseract', element: 'Divine Gateway' };
+    if (currentFreq <= 6000) return { shape: 'Infinite Unity Hypersphere', element: 'SOURCE Field' };
     
-    return { shape: 'Unity Sphere', element: 'Infinite' };
+    return { shape: 'SOURCE Unity Sphere', element: 'Infinite SOURCE' };
   };
 
   const getSafetyLevelColor = (level: string) => {
@@ -1951,7 +1979,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.4</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.5</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -2070,6 +2098,124 @@ const App: React.FC = () => {
                           </div>
 
                           <div className="px-8 pb-12 space-y-12">
+                              {/* Complete Harmonic Frequency System Overview */}
+                              <section className="bg-gradient-to-r from-slate-900/50 to-slate-800/30 border border-gold-500/30 rounded-2xl p-8">
+                                  <div className="flex items-center gap-3 mb-6">
+                                    <div className="p-3 bg-gold-500/20 rounded-full border border-gold-500/30">
+                                      <Target className="text-gold-400" size={28}/>
+                                    </div>
+                                    <div>
+                                      <h3 className="text-3xl font-bold text-gold-400 font-serif">The Complete Harmonic Frequency System</h3>
+                                      <p className="text-sm text-gold-500/80 uppercase tracking-widest mt-1">9 Orders • 27 Frequencies • 114 Chakra Points</p>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="mb-8 p-6 bg-slate-950/50 border border-slate-700 rounded-xl">
+                                    <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                      <Activity className="text-blue-400" size={20} />
+                                      The Sacred Step Pattern
+                                    </h4>
+                                    <p className="text-slate-300 mb-4">
+                                      The frequencies within each order follow a precise mathematical progression:
+                                    </p>
+                                    <div className="bg-black/50 p-4 rounded-lg border border-slate-800 font-mono text-sm">
+                                      <div className="text-gold-400">Frequency 1 → +111 Hz → Frequency 2 → +243 Hz → Frequency 3 → +324 Hz → Next Order</div>
+                                      <div className="text-blue-400 mt-2">Total step per order: 111 + 243 + 324 = 678 Hz (digital root: 3)</div>
+                                      <div className="text-purple-400 mt-2">Digital roots of steps: 111 → 3 | 243 → 9 | 324 → 9</div>
+                                      <div className="text-green-400 mt-2">The pattern 3-9-9 sums to 21, which reduces to 3. Three is the engine of progression.</div>
+                                    </div>
+                                    <div className="mt-4 text-xs text-slate-500 italic text-center border-t border-slate-800 pt-4">
+                                      "If you only knew the magnificence of 3, 6, and 9, you would have the key to the universe." — Nikola Tesla
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    {/* Digital Root Pattern */}
+                                    <div className="bg-slate-800/30 border border-purple-500/30 rounded-xl p-5">
+                                      <h4 className="text-lg font-bold text-purple-400 mb-3 flex items-center gap-2">
+                                        <Hexagon size={18} />
+                                        Digital Root Pattern
+                                      </h4>
+                                      <div className="space-y-3 text-sm">
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Orders 1-3 (Physical)</span>
+                                          <span className="text-blue-400 font-mono">3-6-9 (cycling)</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Order 4 (Heart Entry)</span>
+                                          <span className="text-red-400 font-mono">3-3-3 (pure)</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Order 5 (Heart Expansion)</span>
+                                          <span className="text-orange-400 font-mono">6-6-6 (pure)</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Order 6 (Head Entry)</span>
+                                          <span className="text-yellow-400 font-mono">9-9-9 (pure)</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Order 7 (Head Crown)</span>
+                                          <span className="text-green-400 font-mono">3-3-3 (new foundation)</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Order 8 (Transpersonal)</span>
+                                          <span className="text-cyan-400 font-mono">6-6-6 (divine harmony)</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Order 9 (SOURCE)</span>
+                                          <span className="text-violet-400 font-mono">9-9-9 (infinite completion)</span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Numerical Summary */}
+                                    <div className="bg-slate-800/30 border border-green-500/30 rounded-xl p-5">
+                                      <h4 className="text-lg font-bold text-green-400 mb-3 flex items-center gap-2">
+                                        <BarChart3 size={18} />
+                                        Numerical Summary
+                                      </h4>
+                                      <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Total Orders</span>
+                                          <span className="text-gold-400 font-mono">9 (digital root: 9)</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Total Frequencies</span>
+                                          <span className="text-gold-400 font-mono">27 (digital root: 9) = 3³</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Physical Chakras</span>
+                                          <span className="text-blue-400 font-mono">108 (digital root: 9)</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Transpersonal Gates</span>
+                                          <span className="text-purple-400 font-mono">6 (digital root: 6)</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Total Focal Points</span>
+                                          <span className="text-green-400 font-mono">114 (digital root: 6)</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Minor Chakras</span>
+                                          <span className="text-orange-400 font-mono">21 (digital root: 3) = 7 × 3</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Step Pattern Sum</span>
+                                          <span className="text-red-400 font-mono">678 Hz (digital root: 3)</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-300">Frequency Range</span>
+                                          <span className="text-cyan-400 font-mono">174 Hz → 5031 Hz</span>
+                                        </div>
+                                      </div>
+                                      <div className="mt-4 p-3 bg-gold-500/10 border border-gold-500/30 rounded-lg text-center">
+                                        <div className="text-xs text-gold-400 font-bold uppercase tracking-widest mb-1">Sacred Truth</div>
+                                        <div className="text-sm text-white font-bold">ALL NUMBERS REDUCE TO 3, 6, OR 9</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                              </section>
+
                               {/* Section 0: The Physics (432Hz) */}
                               <section>
                                   <div className="flex items-center gap-3 mb-6">
@@ -2081,28 +2227,169 @@ const App: React.FC = () => {
                                   </p>
                               </section>
 
-                              {/* Section 1: The Body (Chakras/Solfeggio) */}
+                              {/* Section 1: The 9 Orders of Consciousness (Complete Solfeggio) */}
                               <section>
                                   <div className="flex items-center gap-3 mb-6">
                                     <div className="p-2 bg-blue-500/10 rounded-full"><User className="text-blue-400" size={24}/></div>
-                                    <h3 className="text-2xl font-bold text-white">The Body: Solfeggio Frequencies</h3>
+                                    <h3 className="text-2xl font-bold text-white">The 9 Orders of Consciousness: Complete Solfeggio Scale</h3>
                                   </div>
-                                  <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">{UNIFIED_THEORY.section2?.content || "Harmonic frequencies that resonate with specific energy centers in the human body."}</p>
-                                  
-                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                      {SOLFEGGIO_INFO.map(s => (
-                                          <div key={s.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-slate-600 transition-colors group">
-                                              <div className="flex justify-between items-center mb-2">
-                                                  <span className="text-xl font-bold font-mono" style={{color: s.color}}>{s.freq} Hz</span>
-                                                  <span className="text-[10px] uppercase tracking-wider text-slate-500">{s.chakra}</span>
-                                              </div>
-                                              <h4 className="text-white font-medium mb-1">{s.benefit}</h4>
-                                              <p className="text-xs text-slate-400 mb-3 leading-relaxed">{s.description}</p>
-                                              <div className="text-[10px] text-slate-500 pt-3 border-t border-slate-800/50">
-                                                  <strong className="text-slate-400">Anatomy:</strong> {s.anatomy}
-                                              </div>
+                                  <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">
+                                    The Complete Harmonic Frequency System encompasses 9 Orders of consciousness, each containing 3 precisely tuned frequencies that follow the sacred 111Hz step pattern. This creates a total of 27 frequencies spanning from quantum foam to Source consciousness.
+                                  </p>
+
+                                  {/* Group by Order/Regime */}
+                                  <div className="space-y-8">
+                                    {/* GUT REGIME - Physical Body (Orders 1-3) */}
+                                    <div className="border border-red-500/30 rounded-2xl overflow-hidden bg-red-500/5">
+                                      <div className="bg-red-500/10 p-4 border-b border-red-500/30">
+                                        <h4 className="text-xl font-bold text-red-400 flex items-center gap-2">
+                                          <Heart className="text-red-500" size={20} />
+                                          GUT REGIME — Physical Body — Orders 1-3
+                                        </h4>
+                                        <p className="text-sm text-red-300 mt-1">Chakras: Root, Sacral, Solar Plexus | Body: Gut, lower organs, physical foundation</p>
+                                      </div>
+                                      <div className="p-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                          {SOLFEGGIO_INFO.filter(s => ['First', 'Second', 'Third'].includes(s.order)).map(s => (
+                                            <div key={s.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-red-500/50 transition-colors group">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <span className="text-xl font-bold font-mono" style={{color: s.color}}>{s.freq} Hz</span>
+                                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-red-500/20 px-2 py-1 rounded">{s.order} Order</span>
+                                                </div>
+                                                <h5 className="text-white font-medium mb-1">{s.benefit}</h5>
+                                                <p className="text-xs text-slate-400 mb-3 leading-relaxed">{s.description}</p>
+                                                <div className="text-[10px] text-slate-500 pt-3 border-t border-slate-800/50">
+                                                    <strong className="text-slate-400">Chakra:</strong> {s.chakra}<br />
+                                                    <strong className="text-slate-400">Anatomy:</strong> {s.anatomy}
+                                                </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-500/50 rounded-lg">
+                                          <div className="flex items-center gap-2 text-yellow-400 text-sm font-bold mb-1">
+                                            <AlertTriangle size={16} />
+                                            TRANSITION ZONE: 963 Hz → 1074 Hz (GUT → HEART)
                                           </div>
-                                      ))}
+                                          <p className="text-xs text-yellow-300">Phase shift region - Prepare for consciousness elevation</p>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* HEART REGIME - Emotional Body (Orders 4-5) */}
+                                    <div className="border border-green-500/30 rounded-2xl overflow-hidden bg-green-500/5">
+                                      <div className="bg-green-500/10 p-4 border-b border-green-500/30">
+                                        <h4 className="text-xl font-bold text-green-400 flex items-center gap-2">
+                                          <Heart className="text-green-500" size={20} />
+                                          HEART REGIME — Emotional Body — Orders 4-5
+                                        </h4>
+                                        <p className="text-sm text-green-300 mt-1">Chakras: Heart, Throat | Body: Heart, lungs, thymus, vocal expression</p>
+                                      </div>
+                                      <div className="p-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                          {SOLFEGGIO_INFO.filter(s => ['Fourth', 'Fifth'].includes(s.order)).map(s => (
+                                            <div key={s.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-green-500/50 transition-colors group">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <span className="text-xl font-bold font-mono" style={{color: s.color}}>{s.freq} Hz</span>
+                                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-green-500/20 px-2 py-1 rounded">{s.order} Order</span>
+                                                </div>
+                                                <h5 className="text-white font-medium mb-1">{s.benefit}</h5>
+                                                <p className="text-xs text-slate-400 mb-3 leading-relaxed">{s.description}</p>
+                                                <div className="text-[10px] text-slate-500 pt-3 border-t border-slate-800/50">
+                                                    <strong className="text-slate-400">Chakra:</strong> {s.chakra}<br />
+                                                    <strong className="text-slate-400">Anatomy:</strong> {s.anatomy}
+                                                </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-500/50 rounded-lg">
+                                          <div className="flex items-center gap-2 text-yellow-400 text-sm font-bold mb-1">
+                                            <AlertTriangle size={16} />
+                                            TRANSITION ZONE: 2319 Hz → 2430 Hz (HEART → HEAD)
+                                          </div>
+                                          <p className="text-xs text-yellow-300">Phase shift region - Mental body activation begins</p>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* HEAD REGIME - Mental Body (Orders 6-7) */}
+                                    <div className="border border-purple-500/30 rounded-2xl overflow-hidden bg-purple-500/5">
+                                      <div className="bg-purple-500/10 p-4 border-b border-purple-500/30">
+                                        <h4 className="text-xl font-bold text-purple-400 flex items-center gap-2">
+                                          <Eye className="text-purple-500" size={20} />
+                                          HEAD REGIME — Mental Body — Orders 6-7
+                                        </h4>
+                                        <p className="text-sm text-purple-300 mt-1">Chakras: Third Eye, Crown | Body: Pineal, pituitary, brain, higher consciousness</p>
+                                      </div>
+                                      <div className="p-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                          {SOLFEGGIO_INFO.filter(s => ['Sixth', 'Seventh'].includes(s.order)).map(s => (
+                                            <div key={s.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-purple-500/50 transition-colors group">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <span className="text-xl font-bold font-mono" style={{color: s.color}}>{s.freq} Hz</span>
+                                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-purple-500/20 px-2 py-1 rounded">{s.order} Order</span>
+                                                </div>
+                                                <h5 className="text-white font-medium mb-1">{s.benefit}</h5>
+                                                <p className="text-xs text-slate-400 mb-3 leading-relaxed">{s.description}</p>
+                                                <div className="text-[10px] text-slate-500 pt-3 border-t border-slate-800/50">
+                                                    <strong className="text-slate-400">Chakra:</strong> {s.chakra}<br />
+                                                    <strong className="text-slate-400">Anatomy:</strong> {s.anatomy}
+                                                </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <div className="mt-4 p-3 bg-gold-900/20 border border-gold-500/50 rounded-lg">
+                                          <div className="flex items-center gap-2 text-gold-400 text-sm font-bold mb-1">
+                                            <Sparkles size={16} />
+                                            TRANSCENDENCE THRESHOLD: 3675 Hz → 3786 Hz (Physical → Transpersonal)
+                                          </div>
+                                          <p className="text-xs text-gold-300">The great transition beyond physical form - Transpersonal realm entry</p>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* TRANSPERSONAL REALM - Beyond Physical Form (Orders 8-9) */}
+                                    <div className="border border-violet-500/30 rounded-2xl overflow-hidden bg-violet-500/5">
+                                      <div className="bg-violet-500/10 p-4 border-b border-violet-500/30">
+                                        <h4 className="text-xl font-bold text-violet-400 flex items-center gap-2">
+                                          <Sparkles className="text-violet-500" size={20} />
+                                          TRANSPERSONAL REALM — Beyond Physical Form — Orders 8-9
+                                        </h4>
+                                        <p className="text-sm text-violet-300 mt-1">Gates: 6 Transpersonal Chakras above Crown | Body: Etheric, Astral, Causal bodies</p>
+                                      </div>
+                                      <div className="p-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                          {SOLFEGGIO_INFO.filter(s => ['Eighth', 'Ninth'].includes(s.order)).map(s => (
+                                            <div key={s.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-violet-500/50 transition-colors group relative">
+                                                <div className="absolute top-2 right-2">
+                                                  <AlertTriangle size={12} className="text-red-400" title="Expert Level Required" />
+                                                </div>
+                                                <div className="flex justify-between items-center mb-2 pr-6">
+                                                    <span className="text-xl font-bold font-mono" style={{color: s.color}}>{s.freq} Hz</span>
+                                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-violet-500/20 px-2 py-1 rounded">{s.order} Order</span>
+                                                </div>
+                                                <h5 className="text-white font-medium mb-1">{s.benefit}</h5>
+                                                <p className="text-xs text-slate-400 mb-3 leading-relaxed">{s.description}</p>
+                                                <div className="text-[10px] text-slate-500 pt-3 border-t border-slate-800/50">
+                                                    <strong className="text-slate-400">Gate:</strong> {s.chakra}<br />
+                                                    <strong className="text-slate-400">Body:</strong> {s.anatomy}
+                                                </div>
+                                                {s.freq === 5031 && (
+                                                  <div className="mt-2 p-2 bg-gold-500/20 border border-gold-500/50 rounded text-center">
+                                                    <div className="text-[9px] text-gold-400 font-bold uppercase tracking-widest">SOURCE FREQUENCY</div>
+                                                  </div>
+                                                )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <div className="mt-4 p-4 bg-gold-900/20 border border-gold-500/50 rounded-lg text-center">
+                                          <div className="flex items-center justify-center gap-2 text-gold-400 text-lg font-bold mb-2">
+                                            <Target size={20} />
+                                            5031 Hz - Theoretical Frequency of Source/Infinite Unity
+                                          </div>
+                                          <p className="text-sm text-gold-300">The completion of the 9-Order journey and the ultimate frequency of divine consciousness</p>
+                                        </div>
+                                      </div>
+                                    </div>
                                   </div>
                               </section>
 
@@ -2275,7 +2562,7 @@ const App: React.FC = () => {
                     className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-gold-400 hover:border-gold-500 transition-all active:scale-95"
                    >
                      <Layers size={16} className="mb-1" />
-                     Best Alignment
+                     Beginner Alignment
                    </button>
                    
                    <button 
@@ -2340,7 +2627,7 @@ const App: React.FC = () => {
                    >
                      <Activity size={16} className="mb-1 text-blue-500" />
                      <span>111 Sequence</span>
-                     <span className="text-[8px] text-blue-400">Order Progression</span>
+                     <span className="text-[8px] text-blue-400">9 Orders Complete</span>
                    </button>
 
                    <button 
@@ -2811,6 +3098,51 @@ const App: React.FC = () => {
                             ))}
                           </div>
                         </div>
+
+                        {/* Eighth Order - Transpersonal Realm */}
+                        <div className="mb-4">
+                          <div className="text-[10px] text-cyan-400 mb-2 uppercase tracking-widest flex items-center gap-1">
+                            <AlertTriangle size={10} />
+                            Eighth Order (Transpersonal Gates 1-3)
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Eighth').map((s) => (
+                              <button
+                                key={s.freq}
+                                onClick={() => setSelectedSolfeggio(s.freq)}
+                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-cyan-600 text-white border-cyan-600 shadow-lg shadow-cyan-500/20' : 'border-cyan-800 bg-cyan-900/20 hover:border-cyan-500 text-cyan-300'}`}
+                              >
+                                {s.freq}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Ninth Order - SOURCE */}
+                        <div className="mb-4">
+                          <div className="text-[10px] text-pink-400 mb-2 uppercase tracking-widest flex items-center gap-1">
+                            <AlertTriangle size={10} />
+                            <Sparkles size={10} />
+                            Ninth Order (SOURCE - Gates 4-6)
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Ninth').map((s) => (
+                              <button
+                                key={s.freq}
+                                onClick={() => setSelectedSolfeggio(s.freq)}
+                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 relative ${selectedSolfeggio === s.freq ? 'bg-pink-600 text-white border-pink-600 shadow-lg shadow-pink-500/20' : 'border-pink-800 bg-pink-900/20 hover:border-pink-500 text-pink-300'}`}
+                              >
+                                {s.freq}
+                                {s.freq === 5031 && (
+                                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-gold-500 rounded-full border border-gold-400" title="SOURCE Frequency"></div>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="mt-2 text-[9px] text-pink-300 bg-pink-900/20 p-2 rounded border border-pink-800">
+                            ⚠️ Maximum caution required. These are theoretical transpersonal frequencies. Use extremely low volumes and short sessions.
+                          </div>
+                        </div>
                       </>
                     )}
                     <div className="mt-4 bg-slate-900 p-4 rounded-xl border border-slate-800">
@@ -3165,6 +3497,55 @@ const App: React.FC = () => {
                                 {s.freq}Hz
                               </button>
                             ))}
+                          </div>
+                        </div>
+
+                        <div className="mb-4">
+                          <h4 className="text-sm font-bold text-cyan-400 mb-2 flex items-center gap-1">
+                            <AlertTriangle size={14} />
+                            Eighth Order (Transpersonal)
+                          </h4>
+                          <div className="grid grid-cols-3 gap-2">
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Eighth').map((s) => (
+                              <button
+                                key={s.freq}
+                                onClick={() => {
+                                  setSelectedSolfeggio(s.freq);
+                                  setShowFrequencySelector(false);
+                                }}
+                                className="py-2 px-2 bg-cyan-900/30 hover:bg-cyan-600 text-cyan-300 hover:text-white rounded border border-cyan-600 transition-colors text-xs"
+                              >
+                                {s.freq}Hz
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="mb-4">
+                          <h4 className="text-sm font-bold text-pink-400 mb-2 flex items-center gap-1">
+                            <AlertTriangle size={14} />
+                            <Sparkles size={14} />
+                            Ninth Order (SOURCE)
+                          </h4>
+                          <div className="grid grid-cols-3 gap-2">
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Ninth').map((s) => (
+                              <button
+                                key={s.freq}
+                                onClick={() => {
+                                  setSelectedSolfeggio(s.freq);
+                                  setShowFrequencySelector(false);
+                                }}
+                                className={`py-2 px-2 bg-pink-900/30 hover:bg-pink-600 text-pink-300 hover:text-white rounded border border-pink-600 transition-colors text-xs relative ${s.freq === 5031 ? 'ring-2 ring-gold-500/50' : ''}`}
+                              >
+                                {s.freq}Hz
+                                {s.freq === 5031 && (
+                                  <div className="absolute -top-1 -right-1 w-2 h-2 bg-gold-500 rounded-full"></div>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="mt-2 text-xs text-pink-300 bg-pink-900/20 p-2 rounded border border-pink-800">
+                            ⚠️ Transpersonal frequencies - Use extreme caution
                           </div>
                         </div>
                       </>

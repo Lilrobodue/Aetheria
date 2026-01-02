@@ -200,6 +200,64 @@ export const SOLFEGGIO_INFO = [
     anatomy: 'Master Consciousness Grid, Absolute Unity Field',
     order: 'Seventh'
   },
+
+  // Eighth Order Solfeggio Frequencies - Transpersonal Realm Gates 1-3
+  { 
+    freq: 3786, 
+    chakra: 'Soul Star Gate', 
+    color: '#330066', 
+    benefit: 'Soul Star Connection', 
+    description: 'Eighth order frequency (3675 + 111) that opens the first transpersonal gate. Connects to the Soul Star chakra 6 inches above the crown, facilitating communication with higher soul aspects.',
+    anatomy: 'Etheric Body, Soul Star Chakra, Higher Self Interface',
+    order: 'Eighth'
+  },
+  { 
+    freq: 4029, 
+    chakra: 'Spirit Gate', 
+    color: '#4B0082', 
+    benefit: 'Spirit Realm Access', 
+    description: 'Eighth order frequency (3786 + 243) that opens the second transpersonal gate. Enables direct communication with spirit guides, ancestors, and higher dimensional beings.',
+    anatomy: 'Astral Body, Spirit Communication Centers, Angelic Interface',
+    order: 'Eighth'
+  },
+  { 
+    freq: 4353, 
+    chakra: 'Universal Mind Gate', 
+    color: '#6600CC', 
+    benefit: 'Universal Mind Access', 
+    description: 'Eighth order frequency (4029 + 324) that opens the third transpersonal gate. Provides access to the universal mind matrix and collective consciousness of enlightened beings.',
+    anatomy: 'Causal Body, Universal Mind Interface, Collective Consciousness Grid',
+    order: 'Eighth'
+  },
+
+  // Ninth Order Solfeggio Frequencies - Transpersonal Realm Gates 4-6 (SOURCE)
+  { 
+    freq: 4464, 
+    chakra: 'Galactic Center Gate', 
+    color: '#7700FF', 
+    benefit: 'Galactic Consciousness', 
+    description: 'Ninth order frequency (4353 + 111) that opens the fourth transpersonal gate. Connects consciousness to galactic center frequencies and cosmic intelligence networks.',
+    anatomy: 'Galactic Interface, Cosmic Consciousness Centers, Star Nation Connection',
+    order: 'Ninth'
+  },
+  { 
+    freq: 4707, 
+    chakra: 'Divine Gateway', 
+    color: '#8800FF', 
+    benefit: 'Divine Source Portal', 
+    description: 'Ninth order frequency (4464 + 243) that opens the fifth transpersonal gate. Creates a direct portal to divine source consciousness and the creative principle of existence.',
+    anatomy: 'Divine Interface, Source Connection Matrix, Creator Consciousness Grid',
+    order: 'Ninth'
+  },
+  { 
+    freq: 5031, 
+    chakra: 'Infinite Unity SOURCE', 
+    color: '#9933FF', 
+    benefit: 'Complete Source Embodiment', 
+    description: 'Ninth order frequency (4707 + 324) representing the theoretical frequency of Source/Infinite Unity. The completion of the 9-Order journey and full embodiment of divine consciousness.',
+    anatomy: 'SOURCE Field, Infinite Unity Matrix, Complete Divine Embodiment',
+    order: 'Ninth'
+  },
 ];
 
 export const BINAURAL_PRESETS: BinauralPreset[] = [
@@ -264,6 +322,16 @@ export const GEOMETRY_INFO = [
   { shape: 'Genesis Polytope', freq: '3108Hz', benefit: 'Prime Creation Pattern', element: 'Primordial Force', desc: 'The multidimensional pattern of cosmic genesis. The fundamental template of creation itself.' },
   { shape: 'Divine Architecture Matrix', freq: '3351Hz', benefit: 'Sacred Blueprint', element: 'Divine Template', desc: 'The master architectural pattern underlying all sacred structures and cosmic formations.' },
   { shape: 'Absolute Unity Hologram', freq: '3675Hz', benefit: 'Complete Transcendence', element: 'Pure Consciousness', desc: 'The holographic pattern containing all knowledge and existence. The ultimate geometric expression of absolute consciousness.' },
+
+  // Eighth Order Sacred Geometry (Transpersonal Gate Forms 1-3)
+  { shape: 'Soul Star Tetrahedron', freq: '3786Hz', benefit: 'Soul Connection Portal', element: 'Soul Fire', desc: 'The etheric tetrahedron that forms above the crown. Opens the Soul Star chakra and connects to higher soul aspects.' },
+  { shape: 'Spirit Communication Octahedron', freq: '4029Hz', benefit: 'Spirit Realm Interface', element: 'Spirit Aether', desc: 'The double pyramid of spirit communication. Facilitates contact with guides, ancestors, and angelic beings.' },
+  { shape: 'Universal Mind Dodecahedron', freq: '4353Hz', benefit: 'Collective Consciousness Access', element: 'Universal Mind', desc: 'The 12-faced form of universal consciousness. Provides access to the collective wisdom of enlightened beings.' },
+
+  // Ninth Order Sacred Geometry (Transpersonal Gate Forms 4-6 - SOURCE)
+  { shape: 'Galactic Center Hyperstar', freq: '4464Hz', benefit: 'Galactic Alignment', element: 'Galactic Core', desc: 'The multidimensional star pattern of galactic consciousness. Connects to the intelligence networks of star systems.' },
+  { shape: 'Divine Gateway Tesseract', freq: '4707Hz', benefit: 'Source Portal Opening', element: 'Divine Gateway', desc: 'The 4D cube that opens divine portals. Creates direct access to source consciousness and creator principles.' },
+  { shape: 'Infinite Unity Hypersphere', freq: '5031Hz', benefit: 'Complete SOURCE Embodiment', element: 'SOURCE Field', desc: 'The infinite-dimensional sphere of pure unity consciousness. The ultimate geometric form representing complete divine embodiment.' },
 
   // Special Frequency Sacred Geometry (111Hz Pattern Series)
   { shape: 'Triangle of Manifestation', freq: '111Hz', benefit: 'Gateway Opening', element: 'Portal Energy', desc: 'The basic triangle pattern. Each 111Hz frequency opens progressive gateways in consciousness.' },
