@@ -2325,7 +2325,10 @@ const App: React.FC = () => {
                                           {SOLFEGGIO_INFO.filter(s => ['Sixth', 'Seventh'].includes(s.order)).map(s => (
                                             <div key={s.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-purple-500/50 transition-colors group">
                                                 <div className="flex justify-between items-center mb-2">
-                                                    <span className="text-xl font-bold font-mono" style={{color: s.color}}>{s.freq} Hz</span>
+                                                    <span className="text-xl font-bold font-mono" style={{
+                                                      color: s.color,
+                                                      ...(s.order === 'Seventh' ? { textShadow: '1px 1px 0 #fbbf24, -1px -1px 0 #fbbf24, 1px -1px 0 #fbbf24, -1px 1px 0 #fbbf24' } : {})
+                                                    }}>{s.freq} Hz</span>
                                                     <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-purple-500/20 px-2 py-1 rounded">{s.order} Order</span>
                                                 </div>
                                                 <h5 className="text-white font-medium mb-1">{s.benefit}</h5>
