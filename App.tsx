@@ -818,12 +818,25 @@ const App: React.FC = () => {
     const fileList = (Array.from(files) as File[]).filter(f => f.type.includes('audio') || f.name.endsWith('.wav') || f.name.endsWith('.mp3'));
     
     // 1. Create Song objects immediately with 0 duration to unblock UI
-    const newSongs: Song[] = fileList.map(file => ({
-        file: file,
-        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        name: file.name.replace(/\.[^/.]+$/, ""),
-        duration: 0 // Will be filled in background
-    }));
+    const newSongs: Song[] = fileList.map(file => {
+        let displayName = file.name.replace(/\.[^/.]+$/, "");
+        
+        // Clean up Aetheria/WezClarke track names
+        if (file.name.includes('_Masterchannel_WezClarke_')) {
+            displayName = displayName
+                .replace(/_Masterchannel_WezClarke_\d{4}-\d{2}-\d{2}.*$/, '')
+                .replace(/_Masterchannel_WezClarke_\d{8}.*$/, '')
+                .replace(/\s*-\s*Copy$/, '')
+                .trim();
+        }
+        
+        return {
+            file: file,
+            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            name: displayName,
+            duration: 0 // Will be filled in background
+        };
+    });
 
     setPlaylist(prev => {
         const updated = [...prev, ...newSongs];
@@ -1548,6 +1561,230 @@ const App: React.FC = () => {
     }
   };
 
+  // Generate Complete Aetheria Journey through all 9 Orders
+  const generateAetheriaJourney = async () => {
+    // First check if we have Aetheria tracks
+    const aetheriaTracks = originalPlaylist.filter(song => 
+      song.name.includes('WezClarke') || 
+      song.file.name.includes('_Masterchannel_WezClarke_') ||
+      ['Chaotic Confusion', 'Chasing Horizons', 'Choices', 'Coming Home', 'Constellations', 
+       'Echoes of the Warden', 'Fractals', 'Garden of Eden', 'Golden Thread', 'Hands Out',
+       'Invisible Scars', 'Invocation', 'Magic in the Air', 'Man Scourned', 'Phosphenes',
+       'Red Alert', 'Safe to land', 'Simple Abundance', 'The Calling Within', 
+       'The Instruction Manual', 'The Running Song', 'THE SYMPHONIC GRID', 
+       'The Well Within', 'Up in Smoke', 'Waves', 'Wonder'].some(title => 
+         song.name.toLowerCase().includes(title.toLowerCase())
+       )
+    );
+
+    if (aetheriaTracks.length === 0) {
+      alert('No Aetheria Collection tracks found! Please import the "Music for Aetheria" folder first using the Import button above.');
+      return;
+    }
+
+    // All 9 Orders of Solfeggio frequencies in progression
+    const allNineOrders = [
+      174, 285, 396, 417, 528, 639, 741, 852, 963,
+      1074, 1317, 1641, 1752, 1995, 2319, 2430, 2673, 2997,
+      3108, 3351, 3675, 3786, 4029, 4353, 4464, 4707, 5031
+    ];
+
+    const journeyPlaylist: Song[] = [];
+    const usedIds = new Set<string>();
+
+    // For each frequency, find the best Aetheria track
+    allNineOrders.forEach(freq => {
+      const candidates = aetheriaTracks.filter(s => 
+        s.closestSolfeggio === freq && !usedIds.has(s.id)
+      );
+      
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => 
+          (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999)
+        );
+        
+        const bestMatch = candidates[0];
+        journeyPlaylist.push(bestMatch);
+        usedIds.add(bestMatch.id);
+      }
+    });
+
+    if (journeyPlaylist.length > 0) {
+      setPlaylist(journeyPlaylist);
+      setUseChakraOrder(true);
+      setCurrentSongIndex(0);
+      setSearchTerm('');
+      
+      setVizSettings(prev => ({ 
+        ...prev, 
+        showTreeOfLife: true,
+        morphEnabled: true,
+        colorMode: 'chakra'
+      }));
+
+      const hasHighFreqs = journeyPlaylist.some(s => (s.closestSolfeggio || 0) >= 3786);
+      if (hasHighFreqs && userExperienceLevel !== 'expert') {
+        setUserExperienceLevel('expert');
+      }
+
+      setAnalysisNotification(
+        `🌟 Aetheria Journey: ${journeyPlaylist.length} tracks across all 9 Orders! Complete progression 174Hz→5031Hz.`
+      );
+      setTimeout(() => setAnalysisNotification(null), 8000);
+
+      playTrackRef.current(0, journeyPlaylist);
+      if(window.innerWidth < 768) setShowSidebar(false);
+    } else {
+      alert('No analyzed Aetheria tracks found. Please scan your library first.');
+    }
+  };
+
+  // Auto-import Aetheria tracks function
+  const autoImportAetheriaCollection = useCallback(async () => {
+    try {
+      // Define the expected Aetheria track names
+      const aetheriaTrackNames = [
+        'Chaotic Confusion (Reggae)_Masterchannel_WezClarke_2025-12-13.wav',
+        'Chasing Horizons_Masterchannel_WezClarke_2025-11-17.wav',
+        'Choices_Masterchannel_WezClarke_2025-12-06.wav',
+        'Coming Home (Reggae)_Masterchannel_WezClarke_2025-12-26.wav',
+        'Coming Home!_Masterchannel_WezClarke_2025-12-25.wav',
+        'Constellations_Masterchannel_WezClarke_2025-12-16.wav',
+        'Echoes of the Warden_(Reggae)_Masterchannel_WezClarke_2025-12-26 - Copy.wav',
+        'Fractals_(APCZEN)_Masterchannel_WezClarke_2025-12-27.wav',
+        'Garden of Eden._Masterchannel_WezClarke_2025-12-20.wav',
+        'Golden Thread_Masterchannel_WezClarke_2025-12-22.wav',
+        'Hands Out_Masterchannel_WezClarke_2025-11-18.wav',
+        'Invisible Scars. (Edit)_Masterchannel_WezClarke_2025-12-15.wav',
+        'Invocation..._Masterchannel_WezClarke_2025-12-09.wav',
+        'Magic in the Air_Masterchannel_WezClarke_2025-11-16.wav',
+        'Man Scourned_Masterchannel_WezClarke_2025-12-03.wav',
+        'Phosphenes_Masterchannel_WezClarke_2025-12-20.wav',
+        'Red Alert_Masterchannel_WezClarke_2025-12-15.wav',
+        'Safe to land (hypnotic)_Masterchannel_WezClarke_2025-12-18.wav',
+        'Simple Abundance_Masterchannel_WezClarke_2025-11-19.wav',
+        'The Calling Within_Masterchannel_WezClarke_20250510.wav',
+        'The Instruction Manual._Masterchannel_WezClarke_2025-12-24.wav',
+        'The Running Song_Masterchannel_WezClarke_2026-01-03.wav',
+        'THE SYMPHONIC GRID_Masterchannel_WezClarke_2026-01-02.wav',
+        'The Well Within_Masterchannel_WezClarke_2025-11-18.wav',
+        'Up in Smoke_Masterchannel_WezClarke_2025-12-11.wav',
+        'Waves_Masterchannel_WezClarke_2025-12-26 - Copy.wav',
+        'Wonder_Masterchannel_WezClarke_2025-11-18.wav'
+      ];
+
+      // Check if we're running in a browser environment that supports File System Access API
+      if ((window as any).showDirectoryPicker) {
+        // Try to auto-import if we can access the file system
+        try {
+          // This won't work without user interaction, but we can prepare for it
+          console.log('File System Access API available');
+        } catch (e) {
+          console.log('File System Access API not supported or user denied');
+        }
+      }
+
+      // Check if files are already loaded to avoid re-importing
+      const existingAetheriaTracks = playlist.filter(song => 
+        song.file.name.includes('_Masterchannel_WezClarke_') ||
+        aetheriaTrackNames.some(name => 
+          song.file.name.toLowerCase().includes(name.toLowerCase().split('_')[0].toLowerCase())
+        )
+      );
+
+      if (existingAetheriaTracks.length > 0) {
+        console.log(`${existingAetheriaTracks.length} Aetheria tracks already loaded`);
+        return;
+      }
+
+      // If no tracks are loaded, show a helpful message
+      if (playlist.length === 0) {
+        setAnalysisNotification(
+          `Aetheria Collection Auto-Import: Please use the "Import Aetheria Tracks" button to load the 26 official tracks from the Music for Aetheria folder.`
+        );
+        setTimeout(() => setAnalysisNotification(null), 8000);
+      }
+
+    } catch (error) {
+      console.error('Auto-import error:', error);
+    }
+  }, [playlist]);
+
+  // Import the Aetheria Music Collection by prompting user to select the folder
+  const importAetheriaCollection = () => {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.setAttribute('webkitdirectory', '');
+    fileInput.setAttribute('directory', '');
+    fileInput.multiple = true;
+    fileInput.accept = 'audio/*';
+    
+    fileInput.onchange = (event) => {
+      const target = event.target as HTMLInputElement;
+      const files = target.files;
+      if (files && files.length > 0) {
+        // Check if this looks like the Aetheria collection
+        const aetheriaFiles = Array.from(files).filter(file => 
+          file.name.includes('_Masterchannel_WezClarke_') && 
+          (file.name.endsWith('.wav') || file.name.endsWith('.mp3'))
+        );
+        
+        if (aetheriaFiles.length > 0) {
+          setAnalysisNotification(
+            `Aetheria Collection detected! Found ${aetheriaFiles.length} tracks by WezClarke. Importing...`
+          );
+          setTimeout(() => setAnalysisNotification(null), 5000);
+          
+          // Use the existing file upload handler but with cleaned names
+          handleFileUpload({ target: { files: aetheriaFiles } } as any);
+          if(window.innerWidth < 768) setShowSidebar(false);
+        } else {
+          // If no Aetheria tracks found, import whatever was selected
+          handleFileUpload(event as any);
+          setAnalysisNotification(
+            `Imported ${files.length} files. Note: This doesn't appear to be the official Aetheria Collection by WezClarke.`
+          );
+          setTimeout(() => setAnalysisNotification(null), 5000);
+        }
+      }
+    };
+    
+    fileInput.click();
+  };
+
+  // Filter playlist to show only Aetheria collection tracks
+  const showAetheriaTracksOnly = () => {
+    const aetheriaTracks = originalPlaylist.filter(song => 
+      song.name.includes('WezClarke') || 
+      song.file.name.includes('_Masterchannel_WezClarke_') ||
+      ['Chaotic Confusion', 'Chasing Horizons', 'Choices', 'Coming Home', 'Constellations', 
+       'Echoes of the Warden', 'Fractals', 'Garden of Eden', 'Golden Thread', 'Hands Out',
+       'Invisible Scars', 'Invocation', 'Magic in the Air', 'Man Scourned', 'Phosphenes',
+       'Red Alert', 'Safe to land', 'Simple Abundance', 'The Calling Within', 
+       'The Instruction Manual', 'The Running Song', 'THE SYMPHONIC GRID', 
+       'The Well Within', 'Up in Smoke', 'Waves', 'Wonder'].some(title => 
+         song.name.toLowerCase().includes(title.toLowerCase())
+       )
+    );
+
+    if (aetheriaTracks.length > 0) {
+      setPlaylist(aetheriaTracks);
+      setCurrentSongIndex(0);
+      setSearchTerm('');
+      
+      setAnalysisNotification(
+        `Aetheria Collection playlist activated! ${aetheriaTracks.length} tracks by WezClarke ready for harmonic journey.`
+      );
+      setTimeout(() => setAnalysisNotification(null), 5000);
+      
+      if(window.innerWidth < 768) setShowSidebar(false);
+    } else {
+      alert('No Aetheria Collection tracks found in your library. Import the "Music for Aetheria" folder first.');
+    }
+  };
+
+
+
   const restoreLibrary = () => {
       if (originalPlaylist.length > 0) {
           setPlaylist(originalPlaylist);
@@ -1979,7 +2216,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.5</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.6</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -2471,6 +2708,33 @@ const App: React.FC = () => {
                  <span className="text-xs font-bold uppercase tracking-wider">The Guidebook</span>
                </button>
 
+               {/* AETHERIA COLLECTION BUTTONS - COMMENTED OUT FOR WEB DEPLOYMENT 
+               <div className="grid grid-cols-2 gap-2 mb-3">
+                 <button 
+                  onClick={importAetheriaCollection}
+                  disabled={isUploading}
+                  title="Import the official Aetheria Music Collection by WezClarke (26 tracks)"
+                  className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-blue-500/30 bg-blue-600/10 text-blue-400 hover:bg-blue-600/20 hover:border-blue-500/50 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                 >
+                   <Sparkles size={16} className={`mb-1 ${isUploading ? 'animate-spin' : ''}`} />
+                   <span className="font-bold">
+                     {isUploading ? `${uploadProgress}%` : 'Import'}
+                   </span>
+                   <span className="text-[8px] text-blue-300">Aetheria Tracks</span>
+                 </button>
+                 
+                 <button 
+                  onClick={showAetheriaTracksOnly}
+                  title="Filter library to show only Aetheria Collection tracks by WezClarke"
+                  className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-purple-500/30 bg-purple-600/10 text-purple-400 hover:bg-purple-600/20 hover:border-purple-500/50 transition-all active:scale-95"
+                 >
+                   <Wand2 size={16} className="mb-1" />
+                   <span className="font-bold">Show Only</span>
+                   <span className="text-[8px] text-purple-300">Aetheria Tracks</span>
+                 </button>
+               </div>
+               */}
+
                <div className="grid grid-cols-2 gap-2 mb-3">
                    <label className="flex items-center justify-center gap-2 p-3 border border-slate-700 rounded-lg cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all active:scale-95 group text-xs">
                       <Upload size={16} className="group-hover:animate-bounce" />
@@ -2651,6 +2915,17 @@ const App: React.FC = () => {
                      <span className="text-[8px] text-indigo-400">All Orders</span>
                    </button>
                </div>
+
+               {/* Full-width Aetheria Journey button - COMMENTED OUT FOR WEB DEPLOYMENT 
+               <button 
+                onClick={generateAetheriaJourney}
+                className="w-full flex items-center justify-center gap-2 mt-2 p-3 rounded-lg font-medium border border-blue-500/30 bg-blue-600/10 text-blue-400 hover:bg-blue-600/20 hover:border-blue-500/50 transition-all active:scale-95"
+               >
+                 <Sparkles size={16} className="text-blue-500" />
+                 <span className="font-bold text-xs uppercase tracking-wider">Aetheria Journey</span>
+                 <span className="text-[10px] text-blue-300 ml-1">(All 9 Orders: 174Hz → 5031Hz)</span>
+               </button>
+               */}
 
                <button 
                 onClick={restoreLibrary}
