@@ -2343,19 +2343,19 @@ const App: React.FC = () => {
                                     </div>
                                     <div>
                                       <h3 className="text-3xl font-bold text-gold-400 font-serif">THE MASTER FREQUENCY ARCHITECTURE v3.0</h3>
-                                      <p className="text-sm text-gold-500/80 uppercase tracking-widest mt-1">CORRECTED - Bi-Phasic System (Seed → Bloom)</p>
+                                      <p className="text-sm text-gold-500/80 uppercase tracking-widest mt-1">Bi-Phasic System (Seed → Bloom)</p>
                                     </div>
                                   </div>
                                   
-                                  {/* THE CRITICAL CORRECTION */}
-                                  <div className="mb-8 p-6 bg-gradient-to-r from-red-900/20 to-red-800/10 border border-red-500/50 rounded-xl">
-                                    <h4 className="text-xl font-bold text-red-400 mb-4 flex items-center gap-2 uppercase tracking-wider">
-                                      <AlertTriangle className="text-red-500" size={24} />
-                                      ═══ THE CRITICAL CORRECTION ═══
+                                  {/* CURRENT UNDERSTANDING */}
+                                  <div className="mb-8 p-6 bg-gradient-to-r from-blue-900/20 to-blue-800/10 border border-blue-500/50 rounded-xl">
+                                    <h4 className="text-xl font-bold text-blue-400 mb-4 flex items-center gap-2 uppercase tracking-wider">
+                                      <Info className="text-blue-500" size={24} />
+                                      ═══ CURRENT UNDERSTANDING ═══
                                     </h4>
                                     <p className="text-slate-200 text-lg mb-6 leading-relaxed">
                                       The 27 frequencies represent an <strong className="text-gold-400">EVOLUTION</strong> of the Solfeggio Scale, 
-                                      <strong className="text-red-400"> NOT</strong> a single uniform pattern.
+                                      rather than a single uniform pattern.
                                     </p>
                                   </div>
 
