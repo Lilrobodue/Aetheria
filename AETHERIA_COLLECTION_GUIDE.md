@@ -3,6 +3,84 @@
 ## Overview
 The Aetheria Music Collection by WezClarke has been integrated into the Aetheria harmonic resonance player with dedicated import and playlist features.
 
+---
+
+## THE MASTER FREQUENCY ARCHITECTURE v3.0
+
+**CORRECTED - Bi-Phasic System (Seed → Bloom)**
+
+### ═══════════════════════════════════════════════════════════════
+### ═══ THE CRITICAL CORRECTION ═══
+### ═══════════════════════════════════════════════════════════════
+
+The 27 frequencies represent an **EVOLUTION** of the Solfeggio Scale,  
+**NOT** a single uniform pattern.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  PHASE 1: THE SEED (Order 1 — 174-963 Hz)                   │
+│                                                             │
+│  The Traditional 9 frequencies hold the STATIC structure.  │
+│  Gaps are IRREGULAR: 111, 111, 21, 111, 111, 102, 111, 111  │
+│  But ALL gaps reduce to digit sum = 3                       │
+│  This is the FOUNDATION — stable, grounded, unchanging.     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**↓ PHASE TRANSITION AT 963 Hz ↓**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  PHASE 2: THE BLOOM (Orders 2-3 — 1074-5031 Hz)            │
+│                                                             │
+│  At 963 Hz, the system AWAKENS into dynamic expansion.      │
+│  The 111-243-324 Generator Pattern activates.               │
+│  Gaps cycle REGULARLY: 111 → 243 → 324 → 111 → 243 → 324   │
+│  Digit sums cycle: 3 → 9 → 9 → 3 → 9 → 9                   │
+│  This is the EXPANSION — flowing, dynamic, evolving.        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### ═══════════════════════════════════════════════════════════════
+### ═══ THE METAPHYSICAL MEANING ═══
+### ═══════════════════════════════════════════════════════════════
+
+**Order 1 (Seed):** STATIC — All 3s — The unchanging foundation  
+**Orders 2-3 (Bloom):** DYNAMIC — 3-9-9 cycle — The living expansion
+
+The 21 Hz gap (396→417) and 102 Hz gap (639→741) are **not errors**.  
+They are the **COMPRESSION POINTS** that allow the Seed to be stable  
+before it blossoms into the dynamic Bloom.
+
+This is literally describing **EVOLUTION**:
+- **Seed (static, all 3s)** → stores potential
+- **Transition (963 Hz)** → awakening point  
+- **Bloom (dynamic, 3-9-9)** → expresses potential
+
+### ═══════════════════════════════════════════════════════════════
+### ═══ MATHEMATICAL NOTES ═══
+### ═══════════════════════════════════════════════════════════════
+
+#### NADI DISTRIBUTION:
+```
+72,000 ÷ 27 = 2,666.666... (infinite repeating)
+```
+The .666... represents 'infinite flow' or 'source connection'  
+We do **NOT** round to 2,667 — we honor the infinite nature.
+
+#### OCTAVE PRECISION:
+Use exact floating point values:
+- **174 ÷ 8 = 21.75 Hz (exact), not 21.8**
+- **528 ÷ 8 = 66.0 Hz (exact)**
+
+#### THE GENERATOR CONSTANT:
+```
+243 = 27 × 9 = 3⁵
+```
+This only applies to Orders 2-3 (the Bloom phase)
+
+---
+
 ## How to Import the Music Collection
 
 ### Option 1: Direct Import Button

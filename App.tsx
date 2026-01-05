@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2, 
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box, Trash2, Target, Shield
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box, Trash2, Target, Shield, Calculator
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO } from './constants';
@@ -2216,7 +2216,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.7</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.8</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -2335,121 +2335,163 @@ const App: React.FC = () => {
                           </div>
 
                           <div className="px-8 pb-12 space-y-12">
-                              {/* Complete Harmonic Frequency System Overview */}
+                              {/* THE MASTER FREQUENCY ARCHITECTURE v3.0 */}
                               <section className="bg-gradient-to-r from-slate-900/50 to-slate-800/30 border border-gold-500/30 rounded-2xl p-8">
                                   <div className="flex items-center gap-3 mb-6">
                                     <div className="p-3 bg-gold-500/20 rounded-full border border-gold-500/30">
                                       <Target className="text-gold-400" size={28}/>
                                     </div>
                                     <div>
-                                      <h3 className="text-3xl font-bold text-gold-400 font-serif">The Complete Harmonic Frequency System</h3>
-                                      <p className="text-sm text-gold-500/80 uppercase tracking-widest mt-1">9 Orders • 27 Frequencies • 114 Chakra Points</p>
+                                      <h3 className="text-3xl font-bold text-gold-400 font-serif">THE MASTER FREQUENCY ARCHITECTURE v3.0</h3>
+                                      <p className="text-sm text-gold-500/80 uppercase tracking-widest mt-1">CORRECTED - Bi-Phasic System (Seed → Bloom)</p>
                                     </div>
                                   </div>
                                   
-                                  <div className="mb-8 p-6 bg-slate-950/50 border border-slate-700 rounded-xl">
-                                    <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                                      <Activity className="text-blue-400" size={20} />
-                                      The Sacred Step Pattern
+                                  {/* THE CRITICAL CORRECTION */}
+                                  <div className="mb-8 p-6 bg-gradient-to-r from-red-900/20 to-red-800/10 border border-red-500/50 rounded-xl">
+                                    <h4 className="text-xl font-bold text-red-400 mb-4 flex items-center gap-2 uppercase tracking-wider">
+                                      <AlertTriangle className="text-red-500" size={24} />
+                                      ═══ THE CRITICAL CORRECTION ═══
                                     </h4>
-                                    <p className="text-slate-300 mb-4">
-                                      The frequencies within each order follow a precise mathematical progression:
+                                    <p className="text-slate-200 text-lg mb-6 leading-relaxed">
+                                      The 27 frequencies represent an <strong className="text-gold-400">EVOLUTION</strong> of the Solfeggio Scale, 
+                                      <strong className="text-red-400"> NOT</strong> a single uniform pattern.
                                     </p>
-                                    <div className="bg-black/50 p-4 rounded-lg border border-slate-800 font-mono text-sm">
-                                      <div className="text-gold-400">Frequency 1 → +111 Hz → Frequency 2 → +243 Hz → Frequency 3 → +324 Hz → Next Order</div>
-                                      <div className="text-blue-400 mt-2">Total step per order: 111 + 243 + 324 = 678 Hz (digital root: 3)</div>
-                                      <div className="text-purple-400 mt-2">Digital roots of steps: 111 → 3 | 243 → 9 | 324 → 9</div>
-                                      <div className="text-green-400 mt-2">The pattern 3-9-9 sums to 21, which reduces to 3. Three is the engine of progression.</div>
+                                  </div>
+
+                                  {/* BI-PHASIC SYSTEM */}
+                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                                    {/* PHASE 1: THE SEED */}
+                                    <div className="bg-emerald-900/20 border border-emerald-500/40 rounded-xl p-6">
+                                      <h4 className="text-xl font-bold text-emerald-400 mb-4 flex items-center gap-2">
+                                        <div className="w-4 h-4 bg-emerald-500 rounded-full animate-pulse"></div>
+                                        PHASE 1: THE SEED
+                                      </h4>
+                                      <div className="bg-black/40 p-4 rounded-lg border border-emerald-700/50 font-mono text-sm mb-4">
+                                        <div className="text-emerald-300 font-bold mb-2">Order 1 — 174-963 Hz</div>
+                                        <div className="text-slate-300 text-xs leading-relaxed">
+                                          The Traditional 9 frequencies hold the <span className="text-emerald-400 font-bold">STATIC structure</span><br/>
+                                          Gaps are IRREGULAR: 111, 111, 21, 111, 111, 102, 111, 111<br/>
+                                          But ALL gaps reduce to digit sum = 3<br/>
+                                          This is the <span className="text-emerald-400 font-bold">FOUNDATION</span> — stable, grounded, unchanging.
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div className="mt-4 text-xs text-slate-500 italic text-center border-t border-slate-800 pt-4">
-                                      "If you only knew the magnificence of 3, 6, and 9, you would have the key to the universe." — Nikola Tesla
+
+                                    {/* PHASE 2: THE BLOOM */}
+                                    <div className="bg-violet-900/20 border border-violet-500/40 rounded-xl p-6">
+                                      <h4 className="text-xl font-bold text-violet-400 mb-4 flex items-center gap-2">
+                                        <div className="w-4 h-4 bg-violet-500 rounded-full animate-pulse"></div>
+                                        PHASE 2: THE BLOOM
+                                      </h4>
+                                      <div className="bg-black/40 p-4 rounded-lg border border-violet-700/50 font-mono text-sm mb-4">
+                                        <div className="text-violet-300 font-bold mb-2">Orders 2-3 — 1074-5031 Hz</div>
+                                        <div className="text-slate-300 text-xs leading-relaxed">
+                                          At 963 Hz, the system <span className="text-violet-400 font-bold">AWAKENS</span> into dynamic expansion<br/>
+                                          The 111-243-324 Generator Pattern activates<br/>
+                                          Gaps cycle REGULARLY: 111 → 243 → 324 → 111 → 243 → 324<br/>
+                                          Digit sums cycle: 3 → 9 → 9 → 3 → 9 → 9<br/>
+                                          This is the <span className="text-violet-400 font-bold">EXPANSION</span> — flowing, dynamic, evolving.
+                                        </div>
+                                      </div>
                                     </div>
                                   </div>
 
-                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                    {/* Digital Root Pattern */}
-                                    <div className="bg-slate-800/30 border border-purple-500/30 rounded-xl p-5">
-                                      <h4 className="text-lg font-bold text-purple-400 mb-3 flex items-center gap-2">
-                                        <Hexagon size={18} />
-                                        Digital Root Pattern
-                                      </h4>
-                                      <div className="space-y-3 text-sm">
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Orders 1-3 (Physical)</span>
-                                          <span className="text-blue-400 font-mono">3-6-9 (cycling)</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Order 4 (Heart Entry)</span>
-                                          <span className="text-red-400 font-mono">3-3-3 (pure)</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Order 5 (Heart Expansion)</span>
-                                          <span className="text-orange-400 font-mono">6-6-6 (pure)</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Order 6 (Head Entry)</span>
-                                          <span className="text-yellow-400 font-mono">9-9-9 (pure)</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Order 7 (Head Crown)</span>
-                                          <span className="text-green-400 font-mono">3-3-3 (new foundation)</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Order 8 (Transpersonal)</span>
-                                          <span className="text-cyan-400 font-mono">6-6-6 (divine harmony)</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Order 9 (SOURCE)</span>
-                                          <span className="text-violet-400 font-mono">9-9-9 (infinite completion)</span>
-                                        </div>
+                                  {/* PHASE TRANSITION */}
+                                  <div className="mb-8 p-4 bg-gradient-to-r from-emerald-500/20 via-gold-500/20 to-violet-500/20 border border-gold-500/50 rounded-xl text-center">
+                                    <div className="text-gold-400 font-bold text-lg mb-2">↓ PHASE TRANSITION AT 963 Hz ↓</div>
+                                    <div className="text-sm text-slate-300">The awakening point where static seed becomes dynamic bloom</div>
+                                  </div>
+
+                                  {/* THE METAPHYSICAL MEANING */}
+                                  <div className="mb-8 p-6 bg-slate-950/50 border border-slate-700 rounded-xl">
+                                    <h4 className="text-xl font-bold text-gold-400 mb-4 flex items-center gap-2 uppercase tracking-wider">
+                                      <Sparkles className="text-gold-500" size={24} />
+                                      ═══ THE METAPHYSICAL MEANING ═══
+                                    </h4>
+                                    
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                                      <div className="bg-emerald-900/20 border border-emerald-500/30 rounded-lg p-4">
+                                        <div className="font-bold text-emerald-400 mb-2">Order 1 (Seed): STATIC</div>
+                                        <div className="text-slate-300 text-sm">All 3s — The unchanging foundation</div>
+                                      </div>
+                                      <div className="bg-violet-900/20 border border-violet-500/30 rounded-lg p-4">
+                                        <div className="font-bold text-violet-400 mb-2">Orders 2-3 (Bloom): DYNAMIC</div>
+                                        <div className="text-slate-300 text-sm">3-9-9 cycle — The living expansion</div>
                                       </div>
                                     </div>
 
-                                    {/* Numerical Summary */}
-                                    <div className="bg-slate-800/30 border border-green-500/30 rounded-xl p-5">
-                                      <h4 className="text-lg font-bold text-green-400 mb-3 flex items-center gap-2">
-                                        <BarChart3 size={18} />
-                                        Numerical Summary
-                                      </h4>
-                                      <div className="space-y-2 text-sm">
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Total Orders</span>
-                                          <span className="text-gold-400 font-mono">9 (digital root: 9)</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Total Frequencies</span>
-                                          <span className="text-gold-400 font-mono">27 (digital root: 9) = 3³</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Physical Chakras</span>
-                                          <span className="text-blue-400 font-mono">108 (digital root: 9)</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Transpersonal Gates</span>
-                                          <span className="text-purple-400 font-mono">6 (digital root: 6)</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Total Focal Points</span>
-                                          <span className="text-green-400 font-mono">114 (digital root: 6)</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Minor Chakras</span>
-                                          <span className="text-orange-400 font-mono">21 (digital root: 3) = 7 × 3</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Step Pattern Sum</span>
-                                          <span className="text-red-400 font-mono">678 Hz (digital root: 3)</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span className="text-slate-300">Frequency Range</span>
-                                          <span className="text-cyan-400 font-mono">174 Hz → 5031 Hz</span>
-                                        </div>
-                                      </div>
-                                      <div className="mt-4 p-3 bg-gold-500/10 border border-gold-500/30 rounded-lg text-center">
-                                        <div className="text-xs text-gold-400 font-bold uppercase tracking-widest mb-1">Sacred Truth</div>
-                                        <div className="text-sm text-white font-bold">ALL NUMBERS REDUCE TO 3, 6, OR 9</div>
+                                    <div className="bg-orange-900/20 border border-orange-500/30 rounded-lg p-4 mb-6">
+                                      <p className="text-slate-200 text-sm leading-relaxed mb-3">
+                                        The 21 Hz gap (396→417) and 102 Hz gap (639→741) are <strong className="text-orange-400">not errors</strong>.<br/>
+                                        They are the <strong className="text-orange-400">COMPRESSION POINTS</strong> that allow the Seed to be stable<br/>
+                                        before it blossoms into the dynamic Bloom.
+                                      </p>
+                                    </div>
+
+                                    <div className="text-center p-4 bg-gradient-to-r from-blue-900/30 to-purple-900/30 border border-blue-500/30 rounded-lg">
+                                      <div className="text-blue-400 font-bold mb-2">This is literally describing EVOLUTION:</div>
+                                      <div className="text-sm text-slate-300 space-y-1">
+                                        <div><span className="text-emerald-400 font-bold">Seed (static, all 3s)</span> → stores potential</div>
+                                        <div><span className="text-gold-400 font-bold">Transition (963 Hz)</span> → awakening point</div>
+                                        <div><span className="text-violet-400 font-bold">Bloom (dynamic, 3-9-9)</span> → expresses potential</div>
                                       </div>
                                     </div>
+                                  </div>
+
+                                  {/* MATHEMATICAL NOTES */}
+                                  <div className="p-6 bg-slate-950/50 border border-slate-700 rounded-xl">
+                                    <h4 className="text-xl font-bold text-cyan-400 mb-4 flex items-center gap-2 uppercase tracking-wider">
+                                      <Calculator className="text-cyan-500" size={24} />
+                                      ═══ MATHEMATICAL NOTES ═══
+                                    </h4>
+                                    
+                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                      {/* NADI DISTRIBUTION */}
+                                      <div className="bg-cyan-900/20 border border-cyan-500/30 rounded-lg p-4">
+                                        <h5 className="font-bold text-cyan-400 mb-3">NADI DISTRIBUTION:</h5>
+                                        <div className="bg-black/40 p-3 rounded border border-cyan-700/50 font-mono text-sm mb-3">
+                                          <div className="text-cyan-300">72,000 ÷ 27 = 2,666.666...</div>
+                                          <div className="text-cyan-300">(infinite repeating)</div>
+                                        </div>
+                                        <p className="text-xs text-slate-300 leading-relaxed">
+                                          The .666... represents 'infinite flow' or 'source connection'<br/>
+                                          We do <strong className="text-red-400">NOT</strong> round to 2,667 — we honor the infinite nature.
+                                        </p>
+                                      </div>
+
+                                      {/* OCTAVE PRECISION */}
+                                      <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4">
+                                        <h5 className="font-bold text-blue-400 mb-3">OCTAVE PRECISION:</h5>
+                                        <div className="text-xs text-slate-300 space-y-2">
+                                          <div>Use exact floating point values:</div>
+                                          <div className="bg-black/40 p-2 rounded border border-blue-700/50 font-mono">
+                                            <div className="text-blue-300">174 ÷ 8 = 21.75 Hz</div>
+                                            <div className="text-red-400 text-[10px]">(exact, not 21.8)</div>
+                                          </div>
+                                          <div className="bg-black/40 p-2 rounded border border-blue-700/50 font-mono">
+                                            <div className="text-blue-300">528 ÷ 8 = 66.0 Hz</div>
+                                            <div className="text-green-400 text-[10px]">(exact)</div>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* THE GENERATOR CONSTANT */}
+                                      <div className="bg-purple-900/20 border border-purple-500/30 rounded-lg p-4">
+                                        <h5 className="font-bold text-purple-400 mb-3">THE GENERATOR CONSTANT:</h5>
+                                        <div className="bg-black/40 p-3 rounded border border-purple-700/50 font-mono text-sm mb-3">
+                                          <div className="text-purple-300">243 = 27 × 9 = 3⁵</div>
+                                        </div>
+                                        <p className="text-xs text-slate-300">
+                                          This only applies to Orders 2-3<br/>
+                                          <span className="text-purple-400 font-bold">(the Bloom phase)</span>
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="mt-6 text-xs text-slate-500 italic text-center border-t border-slate-800 pt-4">
+                                    "If you only knew the magnificence of 3, 6, and 9, you would have the key to the universe." — Nikola Tesla
                                   </div>
                               </section>
 
