@@ -1118,6 +1118,104 @@ const App: React.FC = () => {
       }
   };
 
+  // HEART Alignment Journey
+  const generateHeartAlignmentJourney = () => {
+      const heartOrder = [1074, 1185, 1296, 1407, 1518, 1629, 1740, 1851, 2997];
+      const heartPlaylist: Song[] = [];
+      const usedIds = new Set<string>();
+
+      heartOrder.forEach(freq => {
+          const candidates = originalPlaylist.filter(s => s.closestSolfeggio === freq && !usedIds.has(s.id));
+          if (candidates.length > 0) {
+              candidates.sort((a, b) => {
+                  const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
+                  const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
+                  
+                  if (Math.abs(aGolden - bGolden) > 0.1) {
+                      return bGolden - aGolden;
+                  }
+                  
+                  return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
+              });
+              
+              const bestMatch = candidates[0];
+              heartPlaylist.push(bestMatch);
+              usedIds.add(bestMatch.id);
+          }
+      });
+      
+      if (heartPlaylist.length > 0) {
+          setPlaylist(heartPlaylist);
+          setUseChakraOrder(true);
+          setCurrentSongIndex(0);
+          setSearchTerm('');
+          setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
+          
+          // Check if experience level is appropriate for HEART frequencies
+          if (userExperienceLevel === 'beginner') {
+              setUserExperienceLevel('intermediate');
+              setAnalysisNotification(
+                  `HEART Alignment activated. Experience level upgraded to 'Intermediate' for proper access to emotional frequency range.`
+              );
+              setTimeout(() => setAnalysisNotification(null), 5000);
+          }
+          
+          playTrackRef.current(0, heartPlaylist); 
+          if(window.innerWidth < 768) setShowSidebar(false);
+      } else {
+          alert("Not enough analyzed HEART frequency songs. Try scanning library first.");
+      }
+  };
+
+  // HEAD Alignment Journey
+  const generateHeadAlignmentJourney = () => {
+      const headOrder = [3108, 3219, 3330, 3441, 3552, 3663, 3774, 3885, 5031];
+      const headPlaylist: Song[] = [];
+      const usedIds = new Set<string>();
+
+      headOrder.forEach(freq => {
+          const candidates = originalPlaylist.filter(s => s.closestSolfeggio === freq && !usedIds.has(s.id));
+          if (candidates.length > 0) {
+              candidates.sort((a, b) => {
+                  const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
+                  const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
+                  
+                  if (Math.abs(aGolden - bGolden) > 0.1) {
+                      return bGolden - aGolden;
+                  }
+                  
+                  return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
+              });
+              
+              const bestMatch = candidates[0];
+              headPlaylist.push(bestMatch);
+              usedIds.add(bestMatch.id);
+          }
+      });
+      
+      if (headPlaylist.length > 0) {
+          setPlaylist(headPlaylist);
+          setUseChakraOrder(true);
+          setCurrentSongIndex(0);
+          setSearchTerm('');
+          setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
+          
+          // HEAD frequencies require expert level
+          if (userExperienceLevel !== 'expert') {
+              setUserExperienceLevel('expert');
+              setAnalysisNotification(
+                  `HEAD Alignment activated. Experience level upgraded to 'Expert' for access to transpersonal HEAD frequencies. Use extreme caution - these are master-level frequencies.`
+              );
+              setTimeout(() => setAnalysisNotification(null), 8000);
+          }
+          
+          playTrackRef.current(0, headPlaylist); 
+          if(window.innerWidth < 768) setShowSidebar(false);
+      } else {
+          alert("Not enough analyzed HEAD frequency songs. Try scanning library first or import specialized transpersonal frequency content.");
+      }
+  };
+
   // Generate full library alignment ordered by frequency
   const generateFullLibraryAlignment = () => {
       // Get all frequency values from SOLFEGGIO_INFO in order
@@ -2216,7 +2314,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v5.8</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -2506,156 +2604,165 @@ const App: React.FC = () => {
                                   </p>
                               </section>
 
-                              {/* Section 1: The 9 Orders of Consciousness (Complete Solfeggio) */}
+                              {/* Section 1: The 3 Regimes of Consciousness */}
                               <section>
                                   <div className="flex items-center gap-3 mb-6">
                                     <div className="p-2 bg-blue-500/10 rounded-full"><User className="text-blue-400" size={24}/></div>
-                                    <h3 className="text-2xl font-bold text-white">The 9 Orders of Consciousness: Complete Solfeggio Scale</h3>
+                                    <h3 className="text-2xl font-bold text-white">The 3 Regimes of Consciousness: Complete Harmonic System</h3>
                                   </div>
                                   <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">
-                                    The Complete Harmonic Frequency System encompasses 9 Orders of consciousness, each containing 3 precisely tuned frequencies that follow the sacred 111Hz step pattern. This creates a total of 27 frequencies spanning from quantum foam to Source consciousness.
+                                    The Complete Harmonic Frequency System encompasses 3 distinct regimes of consciousness, each containing 9 precisely tuned frequencies that create complete harmonic resonance patterns. These 27 frequencies span from physical foundation to divine consciousness.
                                   </p>
 
-                                  {/* Group by Order/Regime */}
+                                  {/* Group by Regime */}
                                   <div className="space-y-8">
-                                    {/* GUT REGIME - Physical Body (Orders 1-3) */}
+                                    {/* GUT REGIME - Physical Body */}
                                     <div className="border border-red-500/30 rounded-2xl overflow-hidden bg-red-500/5">
                                       <div className="bg-red-500/10 p-4 border-b border-red-500/30">
                                         <h4 className="text-xl font-bold text-red-400 flex items-center gap-2">
                                           <Heart className="text-red-500" size={20} />
-                                          GUT REGIME — Physical Body — Orders 1-3
+                                          GUT REGIME — Physical Foundation
                                         </h4>
-                                        <p className="text-sm text-red-300 mt-1">Chakras: Root, Sacral, Solar Plexus | Body: Gut, lower organs, physical foundation</p>
+                                        <p className="text-sm text-red-300 mt-1">Body Systems: Digestive, nervous, skeletal, reproductive | Focus: Grounding, healing, security</p>
                                       </div>
                                       <div className="p-4">
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                          {SOLFEGGIO_INFO.filter(s => ['First', 'Second', 'Third'].includes(s.order)).map(s => (
-                                            <div key={s.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-red-500/50 transition-colors group">
+                                          {[
+                                            { freq: 174, benefit: 'Foundation, pain relief', color: '#8B0000' },
+                                            { freq: 285, benefit: 'Tissue repair, quantum cognition', color: '#FF0000' },
+                                            { freq: 396, benefit: 'Liberating fear and guilt', color: '#FF4500' },
+                                            { freq: 417, benefit: 'Facilitating change, undoing situations', color: '#FF8C00' },
+                                            { freq: 528, benefit: 'Transformation, miracles, DNA repair', color: '#FFD700' },
+                                            { freq: 639, benefit: 'Connecting relationships, harmony', color: '#008000' },
+                                            { freq: 741, benefit: 'Awakening intuition, problem solving', color: '#00BFFF' },
+                                            { freq: 852, benefit: 'Returning to spiritual order', color: '#4B0082' },
+                                            { freq: 963, benefit: 'Divine consciousness, pineal activation', color: '#EE82EE' }
+                                          ].map(f => (
+                                            <div key={f.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-red-500/50 transition-colors group">
                                                 <div className="flex justify-between items-center mb-2">
-                                                    <span className="text-xl font-bold font-mono" style={{color: s.color}}>{s.freq} Hz</span>
-                                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-red-500/20 px-2 py-1 rounded">{s.order} Order</span>
+                                                    <span className="text-xl font-bold font-mono" style={{color: f.color}}>{f.freq} Hz</span>
+                                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-red-500/20 px-2 py-1 rounded">GUT</span>
                                                 </div>
-                                                <h5 className="text-white font-medium mb-1">{s.benefit}</h5>
-                                                <p className="text-xs text-slate-400 mb-3 leading-relaxed">{s.description}</p>
-                                                <div className="text-[10px] text-slate-500 pt-3 border-t border-slate-800/50">
-                                                    <strong className="text-slate-400">Chakra:</strong> {s.chakra}<br />
-                                                    <strong className="text-slate-400">Anatomy:</strong> {s.anatomy}
-                                                </div>
+                                                <h5 className="text-white font-medium mb-1">{f.benefit}</h5>
+                                                <p className="text-xs text-slate-400 mb-3 leading-relaxed">
+                                                  {f.freq === 174 && "Foundation frequency that acts as natural anesthetic and provides security to organs."}
+                                                  {f.freq === 285 && "Powerful tissue repair frequency with quantum cognition enhancement effects."}
+                                                  {f.freq === 396 && "Cleanses guilt and fear, enabling direct achievement of goals without obstacles."}
+                                                  {f.freq === 417 && "Facilitates major life changes and undoes negative situations and patterns."}
+                                                  {f.freq === 528 && "The miracle tone - repairs DNA and brings transformation into your life."}
+                                                  {f.freq === 639 && "Connects and harmonizes relationships with self, others, and community."}
+                                                  {f.freq === 741 && "Awakens intuition and helps solve problems through inner guidance."}
+                                                  {f.freq === 852 && "Returns consciousness to spiritual order and awakens inner strength."}
+                                                  {f.freq === 963 && "Activates pineal gland and connects to divine consciousness and unity."}
+                                                </p>
                                             </div>
                                           ))}
                                         </div>
                                         <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-500/50 rounded-lg">
                                           <div className="flex items-center gap-2 text-yellow-400 text-sm font-bold mb-1">
                                             <AlertTriangle size={16} />
-                                            TRANSITION ZONE: 963 Hz → 1074 Hz (GUT → HEART)
+                                            TRANSITION: 963 Hz → 1074 Hz (GUT → HEART Regime Activation)
                                           </div>
-                                          <p className="text-xs text-yellow-300">Phase shift region - Prepare for consciousness elevation</p>
+                                          <p className="text-xs text-yellow-300">Consciousness elevation threshold - prepare for emotional and energetic expansion</p>
                                         </div>
                                       </div>
                                     </div>
 
-                                    {/* HEART REGIME - Emotional Body (Orders 4-5) */}
+                                    {/* HEART REGIME - Emotional Body */}
                                     <div className="border border-green-500/30 rounded-2xl overflow-hidden bg-green-500/5">
                                       <div className="bg-green-500/10 p-4 border-b border-green-500/30">
                                         <h4 className="text-xl font-bold text-green-400 flex items-center gap-2">
                                           <Heart className="text-green-500" size={20} />
-                                          HEART REGIME — Emotional Body — Orders 4-5
+                                          HEART REGIME — Emotional & Energetic Body
                                         </h4>
-                                        <p className="text-sm text-green-300 mt-1">Chakras: Heart, Throat | Body: Heart, lungs, thymus, vocal expression</p>
+                                        <p className="text-sm text-green-300 mt-1">Body Systems: Cardiovascular, respiratory, immune | Focus: Love, compassion, connection, harmony</p>
                                       </div>
                                       <div className="p-4">
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                          {SOLFEGGIO_INFO.filter(s => ['Fourth', 'Fifth'].includes(s.order)).map(s => (
-                                            <div key={s.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-green-500/50 transition-colors group">
+                                          {[
+                                            { freq: 1074, benefit: 'Gateway integration', color: '#FF69B4' },
+                                            { freq: 1185, benefit: 'Harmonic bridging', color: '#FF1493' },
+                                            { freq: 1296, benefit: 'Unified field access', color: '#DC143C' },
+                                            { freq: 1407, benefit: 'Emotional alchemy', color: '#8A2BE2' },
+                                            { freq: 1518, benefit: 'Compassion activation', color: '#9370DB' },
+                                            { freq: 1629, benefit: 'Heart coherence', color: '#4B0082' },
+                                            { freq: 1740, benefit: 'Relational harmony', color: '#6A5ACD' },
+                                            { freq: 1851, benefit: 'Soul connection', color: '#483D8B' },
+                                            { freq: 2997, benefit: 'Heart completion', color: '#2E1B8B' }
+                                          ].map(f => (
+                                            <div key={f.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-green-500/50 transition-colors group">
                                                 <div className="flex justify-between items-center mb-2">
-                                                    <span className="text-xl font-bold font-mono" style={{color: s.color}}>{s.freq} Hz</span>
-                                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-green-500/20 px-2 py-1 rounded">{s.order} Order</span>
+                                                    <span className="text-xl font-bold font-mono" style={{color: f.color}}>{f.freq} Hz</span>
+                                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-green-500/20 px-2 py-1 rounded">HEART</span>
                                                 </div>
-                                                <h5 className="text-white font-medium mb-1">{s.benefit}</h5>
-                                                <p className="text-xs text-slate-400 mb-3 leading-relaxed">{s.description}</p>
-                                                <div className="text-[10px] text-slate-500 pt-3 border-t border-slate-800/50">
-                                                    <strong className="text-slate-400">Chakra:</strong> {s.chakra}<br />
-                                                    <strong className="text-slate-400">Anatomy:</strong> {s.anatomy}
-                                                </div>
+                                                <h5 className="text-white font-medium mb-1">{f.benefit}</h5>
+                                                <p className="text-xs text-slate-400 mb-3 leading-relaxed">
+                                                  {f.freq === 1074 && "Opens gateway between physical and emotional realms, integrating body-heart connection."}
+                                                  {f.freq === 1185 && "Creates harmonic bridges between different emotional states and experiences."}
+                                                  {f.freq === 1296 && "Provides access to unified field of heart-centered consciousness and love."}
+                                                  {f.freq === 1407 && "Transforms difficult emotions into wisdom through alchemical heart processes."}
+                                                  {f.freq === 1518 && "Activates natural compassion and empathy for self and all beings."}
+                                                  {f.freq === 1629 && "Creates coherence between heart rhythm and emotional states."}
+                                                  {f.freq === 1740 && "Harmonizes all relationships and interpersonal connections through love."}
+                                                  {f.freq === 1851 && "Establishes deep soul-to-soul connection and spiritual intimacy."}
+                                                  {f.freq === 2997 && "Completes the heart's journey to unconditional love and emotional mastery."}
+                                                </p>
                                             </div>
                                           ))}
                                         </div>
                                         <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-500/50 rounded-lg">
                                           <div className="flex items-center gap-2 text-yellow-400 text-sm font-bold mb-1">
                                             <AlertTriangle size={16} />
-                                            TRANSITION ZONE: 2319 Hz → 2430 Hz (HEART → HEAD)
+                                            TRANSITION: 2997 Hz → 3108 Hz (HEART → HEAD Regime Activation)
                                           </div>
-                                          <p className="text-xs text-yellow-300">Phase shift region - Mental body activation begins</p>
+                                          <p className="text-xs text-yellow-300">Mental body activation threshold - prepare for cognitive and consciousness expansion</p>
                                         </div>
                                       </div>
                                     </div>
 
-                                    {/* HEAD REGIME - Mental Body (Orders 6-7) */}
+                                    {/* HEAD REGIME - Mental & Spiritual Body */}
                                     <div className="border border-purple-500/30 rounded-2xl overflow-hidden bg-purple-500/5">
                                       <div className="bg-purple-500/10 p-4 border-b border-purple-500/30">
                                         <h4 className="text-xl font-bold text-purple-400 flex items-center gap-2">
                                           <Eye className="text-purple-500" size={20} />
-                                          HEAD REGIME — Mental Body — Orders 6-7
+                                          HEAD REGIME — Mental & Spiritual Body
                                         </h4>
-                                        <p className="text-sm text-purple-300 mt-1">Chakras: Third Eye, Crown | Body: Pineal, pituitary, brain, higher consciousness</p>
+                                        <p className="text-sm text-purple-300 mt-1">Body Systems: Neurological, endocrine, consciousness centers | Focus: Clarity, wisdom, transcendence</p>
                                       </div>
                                       <div className="p-4">
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                          {SOLFEGGIO_INFO.filter(s => ['Sixth', 'Seventh'].includes(s.order)).map(s => (
-                                            <div key={s.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-purple-500/50 transition-colors group">
-                                                <div className="flex justify-between items-center mb-2">
-                                                    <span className="text-xl font-bold font-mono" style={{
-                                                      color: s.color,
-                                                      ...(s.order === 'Seventh' ? { textShadow: '1px 1px 0 #fbbf24, -1px -1px 0 #fbbf24, 1px -1px 0 #fbbf24, -1px 1px 0 #fbbf24' } : {})
-                                                    }}>{s.freq} Hz</span>
-                                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-purple-500/20 px-2 py-1 rounded">{s.order} Order</span>
-                                                </div>
-                                                <h5 className="text-white font-medium mb-1">{s.benefit}</h5>
-                                                <p className="text-xs text-slate-400 mb-3 leading-relaxed">{s.description}</p>
-                                                <div className="text-[10px] text-slate-500 pt-3 border-t border-slate-800/50">
-                                                    <strong className="text-slate-400">Chakra:</strong> {s.chakra}<br />
-                                                    <strong className="text-slate-400">Anatomy:</strong> {s.anatomy}
-                                                </div>
-                                            </div>
-                                          ))}
-                                        </div>
-                                        <div className="mt-4 p-3 bg-gold-900/20 border border-gold-500/50 rounded-lg">
-                                          <div className="flex items-center gap-2 text-gold-400 text-sm font-bold mb-1">
-                                            <Sparkles size={16} />
-                                            TRANSCENDENCE THRESHOLD: 3675 Hz → 3786 Hz (Physical → Transpersonal)
-                                          </div>
-                                          <p className="text-xs text-gold-300">The great transition beyond physical form - Transpersonal realm entry</p>
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {/* TRANSPERSONAL REALM - Beyond Physical Form (Orders 8-9) */}
-                                    <div className="border border-violet-500/30 rounded-2xl overflow-hidden bg-violet-500/5">
-                                      <div className="bg-violet-500/10 p-4 border-b border-violet-500/30">
-                                        <h4 className="text-xl font-bold text-violet-400 flex items-center gap-2">
-                                          <Sparkles className="text-violet-500" size={20} />
-                                          TRANSPERSONAL REALM — Beyond Physical Form — Orders 8-9
-                                        </h4>
-                                        <p className="text-sm text-violet-300 mt-1">Gates: 6 Transpersonal Chakras above Crown | Body: Etheric, Astral, Causal bodies</p>
-                                      </div>
-                                      <div className="p-4">
-                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                          {SOLFEGGIO_INFO.filter(s => ['Eighth', 'Ninth'].includes(s.order)).map(s => (
-                                            <div key={s.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-violet-500/50 transition-colors group relative">
+                                          {[
+                                            { freq: 3108, benefit: 'Mental clarity', color: '#1E0066' },
+                                            { freq: 3219, benefit: 'Visionary access', color: '#0D0040' },
+                                            { freq: 3330, benefit: 'Third eye activation', color: '#000033' },
+                                            { freq: 3441, benefit: 'Intuitive knowing', color: '#330066' },
+                                            { freq: 3552, benefit: 'Expressive truth', color: '#4B0082' },
+                                            { freq: 3663, benefit: 'Cosmic perception', color: '#6600CC' },
+                                            { freq: 3774, benefit: 'Divine connection', color: '#7700FF' },
+                                            { freq: 3885, benefit: 'Unity consciousness', color: '#8800FF' },
+                                            { freq: 5031, benefit: 'Crown completion', color: '#9933FF' }
+                                          ].map(f => (
+                                            <div key={f.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-purple-500/50 transition-colors group relative">
                                                 <div className="absolute top-2 right-2">
                                                   <AlertTriangle size={12} className="text-red-400" title="Expert Level Required" />
                                                 </div>
                                                 <div className="flex justify-between items-center mb-2 pr-6">
-                                                    <span className="text-xl font-bold font-mono" style={{color: s.color}}>{s.freq} Hz</span>
-                                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-violet-500/20 px-2 py-1 rounded">{s.order} Order</span>
+                                                    <span className="text-xl font-bold font-mono" style={{color: f.color}}>{f.freq} Hz</span>
+                                                    <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-purple-500/20 px-2 py-1 rounded">HEAD</span>
                                                 </div>
-                                                <h5 className="text-white font-medium mb-1">{s.benefit}</h5>
-                                                <p className="text-xs text-slate-400 mb-3 leading-relaxed">{s.description}</p>
-                                                <div className="text-[10px] text-slate-500 pt-3 border-t border-slate-800/50">
-                                                    <strong className="text-slate-400">Gate:</strong> {s.chakra}<br />
-                                                    <strong className="text-slate-400">Body:</strong> {s.anatomy}
-                                                </div>
-                                                {s.freq === 5031 && (
+                                                <h5 className="text-white font-medium mb-1">{f.benefit}</h5>
+                                                <p className="text-xs text-slate-400 mb-3 leading-relaxed">
+                                                  {f.freq === 3108 && "Clears mental fog and confusion, bringing crystalline clarity to thoughts and perception."}
+                                                  {f.freq === 3219 && "Opens visionary perception and access to higher dimensional information."}
+                                                  {f.freq === 3330 && "Activates the third eye chakra and psychic perception abilities."}
+                                                  {f.freq === 3441 && "Develops intuitive knowing that transcends rational thought processes."}
+                                                  {f.freq === 3552 && "Enables expression of divine truth through voice and communication."}
+                                                  {f.freq === 3663 && "Expands perception to cosmic and galactic levels of awareness."}
+                                                  {f.freq === 3774 && "Establishes direct connection with divine consciousness and source energy."}
+                                                  {f.freq === 3885 && "Embodies unity consciousness and non-dual awareness states."}
+                                                  {f.freq === 5031 && "Completes the crown chakra journey to SOURCE consciousness and infinite unity."}
+                                                </p>
+                                                {f.freq === 5031 && (
                                                   <div className="mt-2 p-2 bg-gold-500/20 border border-gold-500/50 rounded text-center">
                                                     <div className="text-[9px] text-gold-400 font-bold uppercase tracking-widest">SOURCE FREQUENCY</div>
                                                   </div>
@@ -2666,9 +2773,9 @@ const App: React.FC = () => {
                                         <div className="mt-4 p-4 bg-gold-900/20 border border-gold-500/50 rounded-lg text-center">
                                           <div className="flex items-center justify-center gap-2 text-gold-400 text-lg font-bold mb-2">
                                             <Target size={20} />
-                                            5031 Hz - Theoretical Frequency of Source/Infinite Unity
+                                            5031 Hz - Ultimate SOURCE Frequency
                                           </div>
-                                          <p className="text-sm text-gold-300">The completion of the 9-Order journey and the ultimate frequency of divine consciousness</p>
+                                          <p className="text-sm text-gold-300">The completion of the 3-Regime journey and the ultimate frequency of infinite divine consciousness</p>
                                         </div>
                                       </div>
                                     </div>
@@ -2871,7 +2978,7 @@ const App: React.FC = () => {
                     className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-gold-400 hover:border-gold-500 transition-all active:scale-95"
                    >
                      <Layers size={16} className="mb-1" />
-                     Beginner Alignment
+                     GUT Alignment
                    </button>
                    
                    <button 
@@ -2880,6 +2987,22 @@ const App: React.FC = () => {
                    >
                      <Flower2 size={16} className="mb-1 text-purple-500" />
                      Full Alignment
+                   </button>
+
+                   <button 
+                    onClick={generateHeartAlignmentJourney}
+                    className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-green-400 hover:border-green-500 transition-all active:scale-95"
+                   >
+                     <Heart size={16} className="mb-1 text-green-500" />
+                     HEART Alignment
+                   </button>
+
+                   <button 
+                    onClick={generateHeadAlignmentJourney}
+                    className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-blue-400 hover:border-blue-500 transition-all active:scale-95"
+                   >
+                     <Eye size={16} className="mb-1 text-blue-500" />
+                     HEAD Alignment
                    </button>
 
                    <button 
