@@ -51,30 +51,29 @@ const getAudioDuration = (file: File): Promise<number> => {
   });
 };
 
-// Original frequency detection (moved outside App component)
-
+// Enhanced frequency detection with extended octave range analysis
 const detectDominantFrequency = async (buffer: AudioBuffer): Promise<number> => {
   return new Promise((resolve, reject) => {
-    // 5 second timeout for basic analysis
+    // 10 second timeout for enhanced analysis
     const timeout = setTimeout(() => {
-      reject(new Error('Basic frequency detection timeout'));
-    }, 5000);
+      reject(new Error('Enhanced frequency detection timeout'));
+    }, 10000);
 
     try {
-      const sampleDuration = Math.min(3, buffer.duration / 2); // Adaptive duration
+      const sampleDuration = Math.min(5, buffer.duration / 2); // Longer sampling for better accuracy
       const offlineCtx = new OfflineAudioContext(1, 44100 * sampleDuration, 44100); 
       const source = offlineCtx.createBufferSource();
       source.buffer = buffer;
       
       const analyser = offlineCtx.createAnalyser();
-      analyser.fftSize = 16384; // Reduced FFT size for speed
+      analyser.fftSize = 32768; // Larger FFT for better frequency resolution
       analyser.smoothingTimeConstant = 0.1;
       
       source.connect(analyser);
       analyser.connect(offlineCtx.destination);
       
-      // Sample from the middle of the track to avoid intro/outro silence
-      const startOffset = Math.min(buffer.duration / 2, 30);
+      // Sample from multiple points in the track for comprehensive analysis
+      const startOffset = Math.min(buffer.duration / 3, 15); // Start at 1/3 position
       source.start(0, startOffset, sampleDuration);
       
       offlineCtx.startRendering().then(() => {
@@ -83,60 +82,151 @@ const detectDominantFrequency = async (buffer: AudioBuffer): Promise<number> => 
         const data = new Float32Array(analyser.frequencyBinCount);
         analyser.getFloatFrequencyData(data);
         
-        let maxVal = -Infinity;
-        let maxIndex = -1;
+        // Enhanced frequency detection with extended octave range checking
+        const detectedFrequencies = analyzeExtendedOctaveRanges(data, 44100 / analyser.fftSize);
         
-        const binSize = 44100 / analyser.fftSize;
-        // Start analysis higher to skip sub-bass rumble
-        const startBin = Math.floor(60 / binSize);
-
-        for (let i = startBin; i < data.length; i++) {
-          let magnitude = data[i];
-          const freq = i * binSize;
-
-          // Weighting to favor mid-range (melody/harmony) over heavy bass
-          // Tuned: Aggressively penalize sub 250Hz to avoid 174/285 bias from kick drums
-          if (freq < 100) {
-              magnitude -= 40; 
-          } else if (freq < 250) {
-              magnitude -= 20;
-          } else if (freq > 3000) {
-              magnitude -= 15; // Penalize high hiss/air
-          } else {
-              magnitude += 5; // Slight boost to mid-range (vocals/synths)
-          }
-
-          if (magnitude > maxVal) {
-            maxVal = magnitude;
-            maxIndex = i;
+        // Find the most prominent frequency across all octave ranges
+        let bestFrequency = 440;
+        let bestScore = 0;
+        
+        for (const detection of detectedFrequencies) {
+          if (detection.score > bestScore) {
+            bestScore = detection.score;
+            bestFrequency = detection.frequency;
           }
         }
-
-        let freq = maxIndex * binSize;
         
-        // Quadratic interpolation for better precision
-        if (maxIndex > 0 && maxIndex < data.length - 1) {
-           const alpha = data[maxIndex - 1];
-           const beta = data[maxIndex];
-           const gamma = data[maxIndex + 1];
-           
-           const delta = 0.5 * (alpha - gamma) / (alpha - 2 * beta + gamma);
-           freq = (maxIndex + delta) * binSize;
-        }
+        console.log(`Enhanced detection found ${detectedFrequencies.length} frequency candidates, best: ${bestFrequency.toFixed(1)}Hz (score: ${bestScore.toFixed(3)})`);
         
-        resolve(freq || 440); // Fallback to A440 if no freq detected
+        resolve(bestFrequency);
       }).catch(error => {
         clearTimeout(timeout);
-        console.error("Analysis failed", error);
+        console.error("Enhanced analysis failed", error);
         resolve(440); // Fallback frequency
       });
       
     } catch (e) {
       clearTimeout(timeout);
-      console.error("Analysis setup failed", e);
+      console.error("Enhanced analysis setup failed", e);
       resolve(440); // Fallback frequency
     }
   });
+};
+
+// Extended octave range analysis function
+const analyzeExtendedOctaveRanges = (frequencyData: Float32Array, binSize: number): Array<{frequency: number, score: number, octaveRange: string}> => {
+  const detections: Array<{frequency: number, score: number, octaveRange: string}> = [];
+  
+  // Define extended frequency ranges for comprehensive scanning
+  const frequencyRanges = [
+    { name: 'Sub-Bass', min: 20, max: 60, weight: 0.3 },        // Very low frequencies
+    { name: 'Bass', min: 60, max: 250, weight: 0.5 },           // Bass fundamentals
+    { name: 'Low-Mid', min: 250, max: 500, weight: 1.0 },       // Important harmonic content
+    { name: 'Mid', min: 500, max: 2000, weight: 1.5 },          // Primary musical content
+    { name: 'High-Mid', min: 2000, max: 4000, weight: 1.2 },    // Harmonic richness
+    { name: 'Treble', min: 4000, max: 8000, weight: 0.8 },      // Upper harmonics
+    { name: 'Ultra-High', min: 8000, max: 20000, weight: 0.4 }  // Extended harmonics
+  ];
+  
+  // Analyze each frequency range
+  for (const range of frequencyRanges) {
+    const startBin = Math.floor(range.min / binSize);
+    const endBin = Math.min(frequencyData.length - 1, Math.floor(range.max / binSize));
+    
+    let maxMagnitude = -Infinity;
+    let peakBin = -1;
+    
+    // Find peak in this range
+    for (let bin = startBin; bin <= endBin; bin++) {
+      if (frequencyData[bin] > maxMagnitude) {
+        maxMagnitude = frequencyData[bin];
+        peakBin = bin;
+      }
+    }
+    
+    if (peakBin > 0 && maxMagnitude > -60) { // Only consider significant peaks (above -60dB)
+      const frequency = peakBin * binSize;
+      
+      // Enhanced scoring with harmonic analysis
+      let harmonicScore = 0;
+      
+      // Check for harmonic series (fundamental + integer multiples)
+      for (let harmonic = 2; harmonic <= 8; harmonic++) {
+        const harmonicFreq = frequency * harmonic;
+        const harmonicBin = Math.round(harmonicFreq / binSize);
+        
+        if (harmonicBin < frequencyData.length) {
+          const harmonicMagnitude = frequencyData[harmonicBin];
+          if (harmonicMagnitude > -80) { // Harmonic is present
+            harmonicScore += harmonicMagnitude / harmonic; // Weight lower harmonics more
+          }
+        }
+      }
+      
+      // Check for sub-harmonics (fundamental / integer divisors) 
+      for (let divisor = 2; divisor <= 4; divisor++) {
+        const subharmonicFreq = frequency / divisor;
+        const subharmonicBin = Math.round(subharmonicFreq / binSize);
+        
+        if (subharmonicBin >= 0 && subharmonicBin < frequencyData.length) {
+          const subharmonicMagnitude = frequencyData[subharmonicBin];
+          if (subharmonicMagnitude > -80) { // Sub-harmonic is present
+            harmonicScore += subharmonicMagnitude * 0.5; // Weight sub-harmonics less
+          }
+        }
+      }
+      
+      // Check for octave relationships (powers of 2)
+      for (let octave = 1; octave <= 6; octave++) {
+        const octaveUpFreq = frequency * Math.pow(2, octave);
+        const octaveDownFreq = frequency / Math.pow(2, octave);
+        
+        // Check octave up
+        const octaveUpBin = Math.round(octaveUpFreq / binSize);
+        if (octaveUpBin < frequencyData.length) {
+          const octaveUpMagnitude = frequencyData[octaveUpBin];
+          if (octaveUpMagnitude > -80) {
+            harmonicScore += octaveUpMagnitude * 0.3; // Octave relationships are strong indicators
+          }
+        }
+        
+        // Check octave down
+        const octaveDownBin = Math.round(octaveDownFreq / binSize);
+        if (octaveDownBin >= 0 && octaveDownBin < frequencyData.length) {
+          const octaveDownMagnitude = frequencyData[octaveDownBin];
+          if (octaveDownMagnitude > -80) {
+            harmonicScore += octaveDownMagnitude * 0.3;
+          }
+        }
+      }
+      
+      // Enhanced interpolation for sub-bin precision
+      let preciseFrequency = frequency;
+      if (peakBin > 0 && peakBin < frequencyData.length - 1) {
+        const leftMag = frequencyData[peakBin - 1];
+        const centerMag = frequencyData[peakBin];
+        const rightMag = frequencyData[peakBin + 1];
+        
+        // Parabolic interpolation for better frequency precision
+        const delta = 0.5 * (leftMag - rightMag) / (leftMag - 2 * centerMag + rightMag);
+        preciseFrequency = (peakBin + delta) * binSize;
+      }
+      
+      // Calculate final score combining magnitude, harmonic content, and range weighting
+      const finalScore = (maxMagnitude + 100) * range.weight * (1 + harmonicScore * 0.1); // Normalize dB range
+      
+      detections.push({
+        frequency: preciseFrequency,
+        score: finalScore,
+        octaveRange: range.name
+      });
+      
+      console.log(`${range.name} range: ${preciseFrequency.toFixed(1)}Hz, magnitude: ${maxMagnitude.toFixed(1)}dB, harmonicScore: ${harmonicScore.toFixed(2)}, finalScore: ${finalScore.toFixed(3)}`);
+    }
+  }
+  
+  // Sort by score and return top candidates
+  return detections.sort((a, b) => b.score - a.score);
 };
 
 
@@ -145,63 +235,232 @@ const getHarmonicSolfeggio = (detectedFreq: number): number => {
 
     // Define the 3-regime frequency sets for prioritized matching
     const gutFrequencies = [174, 285, 396, 417, 528, 639, 741, 852, 963];
-    const heartFrequencies = [1074, 1185, 1296, 1407, 1518, 1629, 1740, 1851, 2997];
-    const headFrequencies = [3108, 3219, 3330, 3441, 3552, 3663, 3774, 3885, 5031];
+    const heartFrequencies = [1074, 1317, 1641, 1752, 1995, 2319, 2430, 2673, 2997]; // Corrected mathematical progression
+    const headFrequencies = [3108, 3351, 3675, 3786, 4029, 4353, 4464, 4707, 5031]; // Corrected mathematical progression
 
     let bestMatch = 396;
     let minScore = Infinity;
 
-    // First pass: Try direct matching with wider tolerances for HEART/HEAD
+    console.log(`Analyzing frequency: ${detectedFreq.toFixed(1)}Hz for solfeggio matching`);
+
+    // Enhanced harmonic matching with extended octave range checking
     SOLFEGGIO_INFO.forEach(s => {
         const sFreq = s.freq;
+        
+        // Determine tolerance and harmonic checking strategy based on regime
         let tolerance = 50; // Default for GUT
+        let useExtendedHarmonics = false;
         
         if (headFrequencies.includes(sFreq)) {
             tolerance = 400; // Very wide tolerance for HEAD frequencies
+            useExtendedHarmonics = false; // Direct matching only for high frequencies
         } else if (heartFrequencies.includes(sFreq)) {
-            tolerance = 200; // Wide tolerance for HEART frequencies
+            tolerance = 200; // Wide tolerance for HEART frequencies  
+            useExtendedHarmonics = true; // Limited harmonic checking
+        } else if (gutFrequencies.includes(sFreq)) {
+            tolerance = 50; // Tighter tolerance for GUT frequencies
+            useExtendedHarmonics = true; // Full harmonic analysis
         }
         
-        const diff = Math.abs(detectedFreq - sFreq);
-        if (diff <= tolerance && diff < minScore) {
-            minScore = diff;
+        // Direct frequency matching
+        const directDiff = Math.abs(detectedFreq - sFreq);
+        if (directDiff <= tolerance && directDiff < minScore) {
+            minScore = directDiff;
             bestMatch = sFreq;
+            console.log(`Direct match found: ${detectedFreq.toFixed(1)}Hz ≈ ${sFreq}Hz (diff: ${directDiff.toFixed(1)}Hz)`);
+        }
+
+        // Extended harmonic matching with comprehensive octave checking
+        if (useExtendedHarmonics && minScore > 10) { // Only if no close direct match
+            const harmonicCandidates: number[] = [];
+            
+            // Traditional octave relationships (powers of 2)
+            for (let octave = -4; octave <= 6; octave++) {
+                if (octave !== 0) {
+                    const octaveFreq = sFreq * Math.pow(2, octave);
+                    if (octaveFreq >= 10 && octaveFreq <= 25000) {
+                        harmonicCandidates.push(octaveFreq);
+                    }
+                }
+            }
+            
+            // Integer harmonic series (for GUT frequencies only)
+            if (gutFrequencies.includes(sFreq)) {
+                // Fundamental and its harmonics
+                for (let harmonic = 1; harmonic <= 12; harmonic++) {
+                    harmonicCandidates.push(sFreq * harmonic);
+                }
+                
+                // Sub-harmonics (fundamental divided by integers)
+                for (let divisor = 2; divisor <= 8; divisor++) {
+                    const subharmonic = sFreq / divisor;
+                    if (subharmonic >= 10) {
+                        harmonicCandidates.push(subharmonic);
+                    }
+                }
+                
+                // Perfect fifth (3:2 ratio) and perfect fourth (4:3 ratio)
+                harmonicCandidates.push(sFreq * 1.5); // Perfect fifth up
+                harmonicCandidates.push(sFreq / 1.5); // Perfect fifth down
+                harmonicCandidates.push(sFreq * 4/3); // Perfect fourth up
+                harmonicCandidates.push(sFreq * 3/4); // Perfect fourth down
+            }
+            
+            // Check all harmonic candidates
+            harmonicCandidates.forEach(candidate => {
+                const harmonicDiff = Math.abs(detectedFreq - candidate);
+                if (harmonicDiff < minScore) {
+                    minScore = harmonicDiff;
+                    bestMatch = sFreq;
+                    console.log(`Harmonic match found: ${detectedFreq.toFixed(1)}Hz ≈ ${candidate.toFixed(1)}Hz (${sFreq}Hz harmonic, diff: ${harmonicDiff.toFixed(1)}Hz)`);
+                }
+            });
         }
     });
 
-    // If no direct match found, use harmonic matching but only for GUT frequencies
-    if (minScore === Infinity) {
-        SOLFEGGIO_INFO.forEach(s => {
-            const sFreq = s.freq;
-            
-            // Only use harmonic matching for GUT frequencies
-            if (gutFrequencies.includes(sFreq)) {
-                const candidates = [
-                    sFreq, 
-                    sFreq / 2, sFreq * 2, 
-                    sFreq / 4, sFreq * 4,
-                    sFreq / 8, sFreq * 8
-                ];
-                
-                candidates.forEach(c => {
-                    const diff = Math.abs(detectedFreq - c);
-                    if (diff < minScore) {
-                        minScore = diff;
-                        bestMatch = sFreq;
-                    }
-                });
-            } else {
-                // For HEART/HEAD, only direct matching
-                const diff = Math.abs(detectedFreq - sFreq);
-                if (diff < minScore) {
-                    minScore = diff;
-                    bestMatch = sFreq;
+    // Special case: If detected frequency is very high and no match found, try to find the fundamental
+    if (minScore > 100 && detectedFreq > 1000) {
+        console.log(`High frequency detected (${detectedFreq.toFixed(1)}Hz), searching for fundamental...`);
+        
+        // Try to find the fundamental by dividing by common harmonic ratios
+        const possibleFundamentals = [
+            detectedFreq / 2,   // Octave down
+            detectedFreq / 3,   // Third harmonic
+            detectedFreq / 4,   // Fourth harmonic (two octaves down)
+            detectedFreq / 5,   // Fifth harmonic
+            detectedFreq / 6,   // Sixth harmonic
+            detectedFreq / 8,   // Eighth harmonic (three octaves down)
+            detectedFreq * 2/3, // Perfect fifth down
+            detectedFreq * 3/4, // Perfect fourth down
+        ];
+        
+        for (const fundamental of possibleFundamentals) {
+            if (fundamental >= 50 && fundamental <= 1000) {
+                const recursiveMatch = getHarmonicSolfeggio(fundamental);
+                // Check if this fundamental gives us a better match
+                const fundamentalDiff = Math.abs(fundamental - recursiveMatch);
+                if (fundamentalDiff < minScore * 0.5) { // Significantly better match
+                    console.log(`Found fundamental: ${detectedFreq.toFixed(1)}Hz → ${fundamental.toFixed(1)}Hz → ${recursiveMatch}Hz`);
+                    return recursiveMatch;
                 }
             }
-        });
+        }
+    }
+
+    console.log(`Final solfeggio match: ${detectedFreq.toFixed(1)}Hz → ${bestMatch}Hz (deviation: ${minScore.toFixed(1)}Hz)`);
+    return bestMatch;
+};
+
+// Enhanced analysis reporting function
+const getFrequencyAnalysisReport = (detectedFreq: number, solfeggioMatch: number, deviation: number): string => {
+    const octaveRange = getOctaveRange(detectedFreq);
+    const harmonicRelationship = getHarmonicRelationship(detectedFreq, solfeggioMatch);
+    const regime = getFrequencyRegime(solfeggioMatch);
+    
+    let report = `🎵 FREQUENCY ANALYSIS REPORT\n\n`;
+    report += `📊 Detected: ${detectedFreq.toFixed(1)}Hz (${octaveRange})\n`;
+    report += `🎯 Matched: ${solfeggioMatch}Hz (${regime} regime)\n`;
+    report += `📏 Deviation: ±${deviation.toFixed(1)}Hz\n`;
+    report += `🔗 Relationship: ${harmonicRelationship}\n\n`;
+    
+    // Add accuracy assessment
+    if (deviation < 5) {
+        report += `✅ EXCELLENT match - Near perfect alignment\n`;
+    } else if (deviation < 20) {
+        report += `✅ GOOD match - Strong harmonic relationship\n`;
+    } else if (deviation < 50) {
+        report += `⚠️ FAIR match - Moderate alignment\n`;
+    } else {
+        report += `❌ WEAK match - Consider manual adjustment\n`;
     }
     
-    return bestMatch;
+    return report;
+};
+
+const getOctaveRange = (frequency: number): string => {
+    if (frequency < 60) return "Sub-Bass";
+    if (frequency < 250) return "Bass";
+    if (frequency < 500) return "Low-Mid";
+    if (frequency < 2000) return "Mid";
+    if (frequency < 4000) return "High-Mid";
+    if (frequency < 8000) return "Treble";
+    return "Ultra-High";
+};
+
+const getHarmonicRelationship = (detected: number, matched: number): string => {
+    const ratio = detected / matched;
+    
+    if (Math.abs(ratio - 1) < 0.05) return "Fundamental";
+    if (Math.abs(ratio - 2) < 0.1) return "Octave up";
+    if (Math.abs(ratio - 0.5) < 0.1) return "Octave down";
+    if (Math.abs(ratio - 3) < 0.15) return "Perfect fifth up (octave)";
+    if (Math.abs(ratio - 1.5) < 0.1) return "Perfect fifth up";
+    if (Math.abs(ratio - 4) < 0.2) return "Two octaves up";
+    if (Math.abs(ratio - 0.25) < 0.05) return "Two octaves down";
+    if (Math.abs(ratio - 1.333) < 0.1) return "Perfect fourth up";
+    if (Math.abs(ratio - 0.75) < 0.1) return "Perfect fourth down";
+    
+    return `${ratio.toFixed(2)}:1 ratio`;
+};
+
+const getFrequencyRegime = (frequency: number): string => {
+    if (frequency <= 963) return "GUT";
+    if (frequency <= 2997) return "HEART";
+    return "HEAD";
+};
+
+// Statistics functions for analysis reporting
+const getOctaveRangeStatistics = (analyzedSongs: Song[]): string => {
+    const ranges = {
+        'Sub-Bass (20-60Hz)': 0,
+        'Bass (60-250Hz)': 0,
+        'Low-Mid (250-500Hz)': 0,
+        'Mid (500-2kHz)': 0,
+        'High-Mid (2-4kHz)': 0,
+        'Treble (4-8kHz)': 0,
+        'Ultra-High (8kHz+)': 0
+    };
+    
+    analyzedSongs.forEach(song => {
+        if (song.harmonicFreq) {
+            const freq = song.harmonicFreq;
+            if (freq < 60) ranges['Sub-Bass (20-60Hz)']++;
+            else if (freq < 250) ranges['Bass (60-250Hz)']++;
+            else if (freq < 500) ranges['Low-Mid (250-500Hz)']++;
+            else if (freq < 2000) ranges['Mid (500-2kHz)']++;
+            else if (freq < 4000) ranges['High-Mid (2-4kHz)']++;
+            else if (freq < 8000) ranges['Treble (4-8kHz)']++;
+            else ranges['Ultra-High (8kHz+)']++;
+        }
+    });
+    
+    return Object.entries(ranges)
+        .filter(([_, count]) => count > 0)
+        .map(([range, count]) => `  • ${range}: ${count} tracks`)
+        .join('\n');
+};
+
+const getRegimeStatistics = (analyzedSongs: Song[]): string => {
+    const regimes = {
+        'GUT (174-963Hz)': 0,
+        'HEART (1074-2997Hz)': 0,
+        'HEAD (3108-5031Hz)': 0
+    };
+    
+    analyzedSongs.forEach(song => {
+        if (song.closestSolfeggio) {
+            const freq = song.closestSolfeggio;
+            if (freq <= 963) regimes['GUT (174-963Hz)']++;
+            else if (freq <= 2997) regimes['HEART (1074-2997Hz)']++;
+            else regimes['HEAD (3108-5031Hz)']++;
+        }
+    });
+    
+    const total = Object.values(regimes).reduce((sum, count) => sum + count, 0);
+    
+    return Object.entries(regimes)
+        .map(([regime, count]) => `  • ${regime}: ${count} tracks (${total > 0 ? Math.round(count/total*100) : 0}%)`)
+        .join('\n');
 };
 
 // Special function for evenly distributing songs across all 27 frequencies for testing
@@ -1060,9 +1319,19 @@ const App: React.FC = () => {
       console.log(`Analysis complete: ${processedCount}/${newPlaylist.length} files processed in ${totalTime} minutes`);
       
       if (processedCount > 0) {
-        const successMsg = `Analysis complete! Processed ${processedCount}/${newPlaylist.length} files in ${totalTime} minutes.`;
+        // Generate detailed analysis summary
+        const analyzedSongs = newPlaylist.filter(s => s.harmonicFreq);
+        const octaveRangeStats = getOctaveRangeStatistics(analyzedSongs);
+        const regimeStats = getRegimeStatistics(analyzedSongs);
+        
+        const successMsg = `📊 Extended Octave Range Analysis Complete!\n\n` +
+          `⏱️ Processed: ${processedCount}/${newPlaylist.length} files in ${totalTime} minutes\n` +
+          `🎵 Frequency Distribution:\n${octaveRangeStats}\n\n` +
+          `🧘 Regime Distribution:\n${regimeStats}\n\n` +
+          `✨ Ready for harmonic alignment journeys!`;
+          
         setAnalysisNotification(successMsg);
-        setTimeout(() => setAnalysisNotification(null), 5000);
+        setTimeout(() => setAnalysisNotification(null), 8000);
       }
     }
   };
@@ -1626,6 +1895,74 @@ const App: React.FC = () => {
             `3. This filter requires exact 528Hz frequency matches\n\n` +
             `Note: This filter only shows tracks that are harmonically centered on pure 528Hz.`);
     }
+  };
+
+  // Show detailed frequency analysis for current track
+  const showCurrentTrackAnalysis = () => {
+    const currentSong = playlist[currentSongIndex];
+    
+    if (!currentSong) {
+      alert('No track currently selected for analysis.');
+      return;
+    }
+    
+    let analysisInfo = `🎵 EXTENDED OCTAVE RANGE ANALYSIS\n\n`;
+    analysisInfo += `📀 Track: "${currentSong.name}"\n\n`;
+    
+    if (currentSong.harmonicFreq) {
+      const report = getFrequencyAnalysisReport(
+        currentSong.harmonicFreq,
+        currentSong.closestSolfeggio || 396,
+        currentSong.harmonicDeviation || 0
+      );
+      analysisInfo += report;
+      
+      // Add fractal analysis if available
+      if (currentSong.fractalAnalysis) {
+        analysisInfo += `\n🧬 ADVANCED FRACTAL ANALYSIS:\n`;
+        analysisInfo += `• Golden Ratio Alignment: ${Math.round(currentSong.fractalAnalysis.goldenRatioAlignment * 100)}%\n`;
+        analysisInfo += `• 111Hz Pattern Presence: ${Math.round(currentSong.fractalAnalysis.pattern111Presence * 100)}%\n`;
+        analysisInfo += `• DNA Resonance Score: ${Math.round(currentSong.fractalAnalysis.dnaResonanceScore * 100)}%\n`;
+        analysisInfo += `• Safety Level: ${currentSong.fractalAnalysis.safetyLevel}\n`;
+        analysisInfo += `• Recommended Volume: ${Math.round(currentSong.fractalAnalysis.recommendedVolume * 100)}%\n`;
+        analysisInfo += `• Sacred Geometry Alignment: ${Math.round(currentSong.fractalAnalysis.sacredGeometryAlignment * 100)}%\n`;
+        analysisInfo += `• Schumann Resonance Harmony: ${Math.round(currentSong.fractalAnalysis.schumannResonanceHarmony * 100)}%\n`;
+        
+        if (currentSong.fractalAnalysis.infiniteOrderHarmonics.length > 0) {
+          analysisInfo += `\n🌀 DETECTED HARMONICS (first 10):\n`;
+          const harmonics = currentSong.fractalAnalysis.infiniteOrderHarmonics.slice(0, 10);
+          analysisInfo += harmonics.map(h => `${h.toFixed(1)}Hz`).join(', ') + '\n';
+        }
+      }
+      
+      // Add recommendations
+      analysisInfo += `\n💡 RECOMMENDATIONS:\n`;
+      const regime = getFrequencyRegime(currentSong.closestSolfeggio || 396);
+      
+      if (regime === 'GUT') {
+        analysisInfo += `• Safe for extended listening\n`;
+        analysisInfo += `• Good for meditation and healing\n`;
+        analysisInfo += `• Can be used at comfortable volume\n`;
+      } else if (regime === 'HEART') {
+        analysisInfo += `• Use subtle resonance mode\n`;
+        analysisInfo += `• Keep volume low (feeling vs hearing)\n`;
+        analysisInfo += `• Limit sessions to 20-30 minutes\n`;
+        analysisInfo += `• Good for emotional and energetic work\n`;
+      } else {
+        analysisInfo += `⚠️ EXPERT LEVEL FREQUENCY\n`;
+        analysisInfo += `• Requires advanced experience\n`;
+        analysisInfo += `• Use minimal volume (5-10%)\n`;
+        analysisInfo += `• Limit to 5-15 minute sessions\n`;
+        analysisInfo += `• Stop if any discomfort occurs\n`;
+      }
+    } else {
+      analysisInfo += `❌ This track has not been analyzed yet.\n\n`;
+      analysisInfo += `To analyze this track:\n`;
+      analysisInfo += `1. Use the "Deep Scan" button to analyze your library\n`;
+      analysisInfo += `2. Or wait for background analysis to complete\n`;
+    }
+    
+    alert(analysisInfo);
   };
 
   // Diagnostic function to show fractal analysis status
@@ -2408,7 +2745,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -3037,14 +3374,26 @@ const App: React.FC = () => {
                    )}
                </div>
                
-               {/* Diagnostic Button */}
-               <button 
-                onClick={showPlaylistDiagnostics}
-                className={`mb-2 w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg font-medium tracking-wide transition-all active:scale-95 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-slate-600`}
-               >
-                 <Activity size={14} />
-                 Playlist Diagnostics
-               </button>
+               {/* Diagnostic Buttons */}
+               <div className="grid grid-cols-2 gap-2 mb-2">
+                 <button 
+                  onClick={showCurrentTrackAnalysis}
+                  className={`flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border transition-all active:scale-95 bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-600`}
+                 >
+                   <BarChart3 size={14} className="mb-1" />
+                   <span>Current Track</span>
+                   <span className="text-[8px] text-slate-500">Analysis</span>
+                 </button>
+                 
+                 <button 
+                  onClick={showPlaylistDiagnostics}
+                  className={`flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border transition-all active:scale-95 bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-600`}
+                 >
+                   <Activity size={14} className="mb-1" />
+                   <span>Library</span>
+                   <span className="text-[8px] text-slate-500">Diagnostics</span>
+                 </button>
+               </div>
 
                {/* Distribute All 27 Frequencies Button */}
                <button 
