@@ -2,13 +2,13 @@
 import { SolfeggioFreq, BinauralPreset } from './types';
 
 export const SOLFEGGIO_INFO = [
-  // Traditional Solfeggio Scale (First through Third Order)
+  // Traditional/Original Solfeggio Scale (First through Third Order) - GUT REGIME
   { 
     freq: 174, 
     chakra: 'Earth Star', 
     color: '#8B0000', 
-    benefit: 'Pain Relief & Security', 
-    description: 'The lowest of the tones, 174 Hz acts like a natural anaesthetic. It tends to reduce pain physically and energetically, giving your organs a sense of security, safety, and love, encouraging them to do their best.',
+    benefit: 'Foundation, pain relief', 
+    description: 'Foundation frequency that acts as natural anesthetic and provides security to organs.',
     anatomy: 'Feet, Legs, Bones',
     order: 'First'
   },
@@ -16,8 +16,8 @@ export const SOLFEGGIO_INFO = [
     freq: 285, 
     chakra: 'Root (Muladhara)', 
     color: '#FF0000', 
-    benefit: 'Tissue Repair & restoration', 
-    description: 'This frequency helps return tissue into its original form. 285 Hz influences energy fields, sending a message to restructure damaged organs. It also leaves your body rejuvenated and energized.',
+    benefit: 'Tissue repair, quantum cognition', 
+    description: 'Powerful tissue repair frequency with quantum cognition enhancement effects.',
     anatomy: 'Adrenals, Kidneys, Spinal Column',
     order: 'First'
   },
@@ -25,8 +25,8 @@ export const SOLFEGGIO_INFO = [
     freq: 396, 
     chakra: 'Root (Muladhara)', 
     color: '#FF4500', 
-    benefit: 'Liberating Guilt and Fear', 
-    description: 'Cleanses the feeling of guilt, which often represents one of the basic obstacles to realization, enabling achievement of goals in the most direct way. It releases you from subconscious fear and grounding issues.',
+    benefit: 'Liberating fear and guilt', 
+    description: 'Cleanses guilt and fear, enabling direct achievement of goals without obstacles.',
     anatomy: 'Reproductive System, Lower Spine',
     order: 'Second'
   },
@@ -34,8 +34,8 @@ export const SOLFEGGIO_INFO = [
     freq: 417, 
     chakra: 'Sacral (Svadhishthana)', 
     color: '#FF8C00', 
-    benefit: 'Undoing Situations & Facilitating Change', 
-    description: 'This frequency marks the start of new beginnings. It is so powerful that it can reverse and undo negative happenings. It produces energy to bring about change and cleanses traumatic experiences.',
+    benefit: 'Facilitating change, undoing situations', 
+    description: 'Facilitates major life changes and undoes negative situations and patterns.',
     anatomy: 'Ovaries/Testes, Bladder',
     order: 'Second'
   },
@@ -43,8 +43,8 @@ export const SOLFEGGIO_INFO = [
     freq: 528, 
     chakra: 'Solar Plexus (Manipura)', 
     color: '#FFD700', 
-    benefit: 'Transformation & Miracles (DNA Repair)', 
-    description: 'Known as the "Miracle Tone," 528 Hz returns human DNA to its original, perfect state. It brings transformation and miracles into your life. It is also the frequency of the sun (chlorophyll vibrates at 528 Hz).',
+    benefit: 'Transformation, miracles, DNA repair', 
+    description: 'The miracle tone - repairs DNA and brings transformation into your life.',
     anatomy: 'Digestive System, Pancreas, Liver',
     order: 'Second'
   },
@@ -52,8 +52,8 @@ export const SOLFEGGIO_INFO = [
     freq: 639, 
     chakra: 'Heart (Anahata)', 
     color: '#008000', 
-    benefit: 'Connecting & Relationships', 
-    description: 'This frequency enables creation of harmonious community and harmonious interpersonal relationships. Tone "Fa" can be used for dealing with relationships problems – those in family, between partners, friends or social problems.',
+    benefit: 'Connecting relationships, harmony', 
+    description: 'Connects and harmonizes relationships with self, others, and community.',
     anatomy: 'Heart, Lungs, Thymus',
     order: 'Second'
   },
@@ -61,8 +61,8 @@ export const SOLFEGGIO_INFO = [
     freq: 741, 
     chakra: 'Throat (Vishuddha)', 
     color: '#00BFFF', 
-    benefit: 'Expression & Solutions', 
-    description: 'Cleanses the body of toxins (viral, bacterial, and electromagnetic). It leads you to the power of self-expression, which results in a pure and stable life. It helps in solving problems and awakening intuition.',
+    benefit: 'Awakening intuition, problem solving', 
+    description: 'Awakens intuition and helps solve problems through inner guidance.',
     anatomy: 'Thyroid, Throat, Jaw, Neck',
     order: 'Third'
   },
@@ -70,8 +70,8 @@ export const SOLFEGGIO_INFO = [
     freq: 852, 
     chakra: 'Third Eye (Ajna)', 
     color: '#4B0082', 
-    benefit: 'Returning to Spiritual Order', 
-    description: 'Linked to the Third Eye Chakra. It is used for raising awareness and returning to spiritual order. It awakens intuition and inner strength, helping you see through illusions and discover the light behind the veil.',
+    benefit: 'Returning to spiritual order', 
+    description: 'Returns consciousness to spiritual order and awakens inner strength.',
     anatomy: 'Pineal Gland, Pituitary Gland, Eyes',
     order: 'Third'
   },
@@ -79,48 +79,48 @@ export const SOLFEGGIO_INFO = [
     freq: 963, 
     chakra: 'Crown (Sahasrara)', 
     color: '#EE82EE', 
-    benefit: 'Awakening Perfect State', 
-    description: 'This tone awakens any system to its original, perfect state. It is connected with the Light and all-embracing Spirit, and enables direct experience, the return to Oneness.',
+    benefit: 'Divine consciousness, pineal activation', 
+    description: 'Activates pineal gland and connects to divine consciousness and unity.',
     anatomy: 'Brain, Nervous System',
     order: 'Third'
   },
 
-  // Fourth Order Solfeggio Frequencies (963 + 111, +243, +324)
+  // Fourth Order Frequencies (963 + 111-243-324 pattern)
   { 
     freq: 1074, 
-    chakra: 'Transcendental Crown', 
+    chakra: 'Gateway Integration', 
     color: '#FF69B4', 
-    benefit: 'Pineal Activation & Higher Consciousness', 
-    description: 'Fourth order frequency (963 + 111) that activates the pineal gland and opens channels to higher dimensional consciousness. Requires subtle resonance approach - focus on feeling rather than hearing.',
-    anatomy: 'Pineal Gland, Higher Brain Centers',
+    benefit: 'Gateway integration', 
+    description: 'Fourth order base (963+111) - Opens gateway between physical and emotional realms.',
+    anatomy: 'Heart Gateway, Emotional Centers',
     order: 'Fourth'
   },
   { 
     freq: 1317, 
-    chakra: 'Cosmic Gateway', 
+    chakra: 'Harmonic Bridge', 
     color: '#FF1493', 
-    benefit: 'Interdimensional Communication', 
-    description: 'Fourth order frequency (1074 + 243) that facilitates communication with higher dimensional beings and cosmic intelligence. Use with extreme caution and proper preparation.',
-    anatomy: 'Entire Nervous System, Light Body',
+    benefit: 'Harmonic bridging', 
+    description: 'Fourth order +243 (1074+243) - Creates harmonic bridges between emotional states.',
+    anatomy: 'Emotional Body, Energy Bridges',
     order: 'Fourth'
   },
   { 
     freq: 1641, 
-    chakra: 'Universal Mind', 
+    chakra: 'Heart Completion', 
     color: '#DC143C', 
-    benefit: 'Collective Consciousness Access', 
-    description: 'Fourth order frequency (1317 + 324) that connects individual consciousness to the universal mind matrix. Advanced practitioners only.',
-    anatomy: 'Neural Networks, Consciousness Centers',
+    benefit: 'Heart completion', 
+    description: 'Fourth order +324 (1317+324) - Completes the fourth order heart cycle.',
+    anatomy: 'Heart Integration Centers',
     order: 'Fourth'
   },
 
-  // Fifth Order Solfeggio Frequencies 
+  // Fifth Order Frequencies (1641 + 111-243-324 pattern)
   { 
     freq: 1752, 
     chakra: 'Stellar Connection', 
     color: '#8A2BE2', 
-    benefit: 'Stellar & Galactic Alignment', 
-    description: 'Fifth order frequency (1641 + 111) that aligns consciousness with stellar and galactic energies. Creates resonance with cosmic cycles and star systems.',
+    benefit: 'Stellar alignment', 
+    description: 'Fifth order +111 (1641+111) - Aligns consciousness with stellar energies.',
     anatomy: 'Etheric Body, Astral Connections',
     order: 'Fifth'
   },
@@ -128,134 +128,134 @@ export const SOLFEGGIO_INFO = [
     freq: 1995, 
     chakra: 'Quantum Field', 
     color: '#9370DB', 
-    benefit: 'Quantum Consciousness Expansion', 
-    description: 'Fifth order frequency (1752 + 243) that expands consciousness into quantum field awareness. Facilitates understanding of non-local consciousness phenomena.',
-    anatomy: 'Quantum Field Interface, Consciousness Matrix',
+    benefit: 'Quantum consciousness', 
+    description: 'Fifth order +243 (1752+243) - Expands consciousness into quantum awareness.',
+    anatomy: 'Quantum Field Interface',
     order: 'Fifth'
   },
   { 
     freq: 2319, 
     chakra: 'Dimensional Portal', 
     color: '#4B0082', 
-    benefit: 'Multidimensional Awareness', 
-    description: 'Fifth order frequency (1995 + 324) that opens awareness to multiple dimensions simultaneously. Extreme caution required - research level frequency.',
-    anatomy: 'Multidimensional Consciousness Centers',
+    benefit: 'Dimensional awareness', 
+    description: 'Fifth order +324 (1995+324) - Opens multidimensional awareness.',
+    anatomy: 'Multidimensional Centers',
     order: 'Fifth'
   },
 
-  // Sixth Order Solfeggio Frequencies
+  // Sixth Order Frequencies (2319 + 111-243-324 pattern)
   { 
     freq: 2430, 
     chakra: 'Cosmic Heart', 
     color: '#6A5ACD', 
-    benefit: 'Universal Love Transmission', 
-    description: 'Sixth order frequency (2319 + 111) that transmits and receives universal love energy across all dimensions. Creates heart-centered cosmic awareness.',
-    anatomy: 'Cosmic Heart Center, Universal Love Matrix',
+    benefit: 'Universal love', 
+    description: 'Sixth order +111 (2319+111) - Transmits universal love across dimensions.',
+    anatomy: 'Cosmic Heart Center',
     order: 'Sixth'
   },
   { 
     freq: 2673, 
     chakra: 'Source Code', 
     color: '#483D8B', 
-    benefit: 'Divine Source Connection', 
-    description: 'Sixth order frequency (2430 + 243) that connects directly to the divine source code of creation. Access to fundamental creation frequencies.',
+    benefit: 'Divine source connection', 
+    description: 'Sixth order +243 (2430+243) - Connects to divine source code.',
     anatomy: 'Divine Interface, Creation Matrix',
     order: 'Sixth'
   },
   { 
     freq: 2997, 
-    chakra: 'Infinite Unity', 
+    chakra: 'Unity Bridge', 
     color: '#2E1B8B', 
-    benefit: 'Unity Consciousness Embodiment', 
-    description: 'Sixth order frequency (2673 + 324) representing the embodiment of infinite unity consciousness. The highest documented solfeggio frequency for complete transcendence.',
-    anatomy: 'Unified Field, Infinite Consciousness',
+    benefit: 'Unity consciousness bridge', 
+    description: 'Sixth order +324 (2673+324) - Bridges into unity consciousness.',
+    anatomy: 'Unity Consciousness Interface',
     order: 'Sixth'
   },
 
-  // Seventh Order Solfeggio Frequencies - Completion of 7 Orders of Consciousness
+  // Seventh Order Frequencies (2997 + 111-243-324 pattern) - HEAD REGIME
   { 
     freq: 3108, 
-    chakra: 'Cosmic Genesis', 
+    chakra: 'Mental Clarity', 
     color: '#1E0066', 
-    benefit: 'Prime Creation Frequency', 
-    description: 'Seventh order frequency (2997 + 111) that resonates with the fundamental frequency of cosmic genesis. Accesses the primordial creative force of the universe.',
-    anatomy: 'Cosmic DNA, Universal Genesis Matrix',
+    benefit: 'Mental clarity', 
+    description: 'Seventh order +111 (2997+111) - Clears mental fog and brings clarity.',
+    anatomy: 'Mental Body, Clarity Centers',
     order: 'Seventh'
   },
   { 
     freq: 3351, 
     chakra: 'Divine Architecture', 
     color: '#0D0040', 
-    benefit: 'Sacred Geometry Embodiment', 
-    description: 'Seventh order frequency (3108 + 243) that embodies the divine architectural principles of creation. Resonates with the sacred geometric patterns underlying all existence.',
-    anatomy: 'Holographic Template, Sacred Geometry Matrix',
+    benefit: 'Sacred geometry', 
+    description: 'Seventh order +243 (3108+243) - Embodies divine architectural principles.',
+    anatomy: 'Sacred Geometry Matrix',
     order: 'Seventh'
   },
   { 
     freq: 3675, 
-    chakra: 'Absolute Completion', 
+    chakra: 'Consciousness Mastery', 
     color: '#000033', 
-    benefit: 'Master Consciousness Frequency', 
-    description: 'Seventh order frequency (3351 + 324) representing the absolute completion of the 7 orders of consciousness. The ultimate mastery frequency for complete enlightenment and cosmic awareness.',
-    anatomy: 'Master Consciousness Grid, Absolute Unity Field',
+    benefit: 'Consciousness mastery', 
+    description: 'Seventh order +324 (3351+324) - Achieves consciousness mastery.',
+    anatomy: 'Master Consciousness Grid',
     order: 'Seventh'
   },
 
-  // Eighth Order Solfeggio Frequencies - Transpersonal Realm Gates 1-3
+  // Eighth Order Frequencies (3675 + 111-243-324 pattern) - Transpersonal HEAD
   { 
     freq: 3786, 
     chakra: 'Soul Star Gate', 
     color: '#330066', 
-    benefit: 'Soul Star Connection', 
-    description: 'Eighth order frequency (3675 + 111) that opens the first transpersonal gate. Connects to the Soul Star chakra 6 inches above the crown, facilitating communication with higher soul aspects.',
-    anatomy: 'Etheric Body, Soul Star Chakra, Higher Self Interface',
+    benefit: 'Soul star connection', 
+    description: 'Eighth order +111 (3675+111) - Opens first transpersonal gate.',
+    anatomy: 'Soul Star Chakra, Higher Self',
     order: 'Eighth'
   },
   { 
     freq: 4029, 
     chakra: 'Spirit Gate', 
     color: '#4B0082', 
-    benefit: 'Spirit Realm Access', 
-    description: 'Eighth order frequency (3786 + 243) that opens the second transpersonal gate. Enables direct communication with spirit guides, ancestors, and higher dimensional beings.',
-    anatomy: 'Astral Body, Spirit Communication Centers, Angelic Interface',
+    benefit: 'Spirit realm access', 
+    description: 'Eighth order +243 (3786+243) - Opens second transpersonal gate.',
+    anatomy: 'Spirit Communication Centers',
     order: 'Eighth'
   },
   { 
     freq: 4353, 
     chakra: 'Universal Mind Gate', 
     color: '#6600CC', 
-    benefit: 'Universal Mind Access', 
-    description: 'Eighth order frequency (4029 + 324) that opens the third transpersonal gate. Provides access to the universal mind matrix and collective consciousness of enlightened beings.',
-    anatomy: 'Causal Body, Universal Mind Interface, Collective Consciousness Grid',
+    benefit: 'Universal mind access', 
+    description: 'Eighth order +324 (4029+324) - Opens third transpersonal gate.',
+    anatomy: 'Universal Mind Interface',
     order: 'Eighth'
   },
 
-  // Ninth Order Solfeggio Frequencies - Transpersonal Realm Gates 4-6 (SOURCE)
+  // Ninth Order Frequencies (4353 + 111-243-324 pattern) - SOURCE HEAD
   { 
     freq: 4464, 
-    chakra: 'Galactic Center Gate', 
+    chakra: 'Galactic Center', 
     color: '#7700FF', 
-    benefit: 'Galactic Consciousness', 
-    description: 'Ninth order frequency (4353 + 111) that opens the fourth transpersonal gate. Connects consciousness to galactic center frequencies and cosmic intelligence networks.',
-    anatomy: 'Galactic Interface, Cosmic Consciousness Centers, Star Nation Connection',
+    benefit: 'Galactic consciousness', 
+    description: 'Ninth order +111 (4353+111) - Connects to galactic center consciousness.',
+    anatomy: 'Galactic Interface',
     order: 'Ninth'
   },
   { 
     freq: 4707, 
     chakra: 'Divine Gateway', 
     color: '#8800FF', 
-    benefit: 'Divine Source Portal', 
-    description: 'Ninth order frequency (4464 + 243) that opens the fifth transpersonal gate. Creates a direct portal to divine source consciousness and the creative principle of existence.',
-    anatomy: 'Divine Interface, Source Connection Matrix, Creator Consciousness Grid',
+    benefit: 'Divine source portal', 
+    description: 'Ninth order +243 (4464+243) - Creates direct portal to divine source.',
+    anatomy: 'Divine Source Interface',
     order: 'Ninth'
   },
   { 
     freq: 5031, 
-    chakra: 'Infinite Unity SOURCE', 
+    chakra: 'SOURCE Unity', 
     color: '#9933FF', 
-    benefit: 'Complete Source Embodiment', 
-    description: 'Ninth order frequency (4707 + 324) representing the theoretical frequency of Source/Infinite Unity. The completion of the 9-Order journey and full embodiment of divine consciousness.',
-    anatomy: 'SOURCE Field, Infinite Unity Matrix, Complete Divine Embodiment',
+    benefit: 'SOURCE embodiment', 
+    description: 'Ninth order +324 (4707+324) - Complete SOURCE embodiment and infinite unity.',
+    anatomy: 'SOURCE Field, Infinite Unity',
     order: 'Ninth'
   },
 ];
