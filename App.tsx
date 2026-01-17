@@ -682,6 +682,17 @@ const distributeAcrossAllFrequencies = (songs: Song[]): Song[] => {
     console.log(`HEAD Regime (3108-5031Hz): ${headCount} songs`);
     console.log(`Total distributed: ${result.length} songs across ${allFrequencies.length} frequencies`);
     
+    // Show specific frequency assignments for verification
+    console.log('Frequency assignments:');
+    allFrequencies.forEach(freq => {
+        if (distribution[freq] > 0) {
+            const assignedSongs = result.filter(s => s.closestSolfeggio === freq);
+            console.log(`  ${freq}Hz: ${assignedSongs.map(s => s.name).join(', ')}`);
+        }
+    });
+    
+    console.log('✅ Frequencies are now assigned and will be used during playback!');
+    
     return result;
 };
 
@@ -2589,11 +2600,21 @@ const App: React.FC = () => {
         console.log('Using stored fractal analysis for:', song.name);
     }
     
-    const autoFreq = getHarmonicSolfeggio(freq || 0);
-    setSelectedSolfeggio(autoFreq);
+    // Use pre-assigned frequency from harmonic distribution if available
+    let targetFreq: number;
+    if (song.closestSolfeggio) {
+        targetFreq = song.closestSolfeggio;
+        console.log(`Using pre-assigned harmonic frequency: ${targetFreq}Hz for "${song.name}"`);
+    } else {
+        // Fallback to dynamic calculation for unprocessed songs
+        targetFreq = getHarmonicSolfeggio(freq || 0);
+        console.log(`Calculating harmonic frequency: ${targetFreq}Hz for "${song.name}"`);
+    }
+    
+    setSelectedSolfeggio(targetFreq);
     
     // Check if this is a high frequency track but don't interrupt playback
-    if (autoFreq >= 1074) {
+    if (targetFreq >= 1074) {
         setSubtleResonanceMode(true);
         // Don't automatically show safety protocols during playlist playback
         // Only show if manually selected
