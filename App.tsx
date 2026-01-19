@@ -598,29 +598,63 @@ const distributeUsingHarmonicOctaves = (songs: Song[], targetFrequencies: number
         }
     }
     
-    // For larger libraries, cycle through frequencies to ensure even distribution
+    // For larger libraries, sort by harmonic compatibility and assign to best matches first
     if (songs.length > targetFrequencies.length) {
-        // Sort songs by their strongest harmonic preferences
+        // Sort songs by their natural harmonic affinity to their best frequency match
         const sortedSongs = songAnalysis.sort((a, b) => {
-            const aMinScore = Math.min(...Object.values(a.compatibilityScores));
-            const bMinScore = Math.min(...Object.values(b.compatibilityScores));
-            return aMinScore - bMinScore;
+            // Find each song's best frequency match
+            const aBestFreq = targetFrequencies.reduce((best, freq) => 
+                a.compatibilityScores[freq] < a.compatibilityScores[best] ? freq : best
+            );
+            const bBestFreq = targetFrequencies.reduce((best, freq) => 
+                b.compatibilityScores[freq] < b.compatibilityScores[best] ? freq : best
+            );
+            
+            // Primary sort: by target frequency (groups songs by their harmonic destination)
+            if (aBestFreq !== bBestFreq) {
+                return aBestFreq - bBestFreq;
+            }
+            
+            // Secondary sort: by harmonic compatibility strength
+            const aScore = a.compatibilityScores[aBestFreq];
+            const bScore = b.compatibilityScores[bBestFreq];
+            if (Math.abs(aScore - bScore) > 0.1) {
+                return aScore - bScore;
+            }
+            
+            // Tertiary sort: by filename for consistent results across sessions
+            return a.song.name.localeCompare(b.song.name);
         });
         
-        // Assign in cycles to ensure even distribution
+        // Assign in harmonic cycles - songs naturally group around their best frequencies
         for (let i = 0; i < sortedSongs.length; i++) {
             const songData = sortedSongs[i];
-            const freqIndex = i % targetFrequencies.length;
-            const assignedFreq = targetFrequencies[freqIndex];
+            
+            // Find the best available frequency for this song
+            let bestFreq = targetFrequencies[i % targetFrequencies.length];
+            let bestScore = songData.compatibilityScores[bestFreq];
+            
+            // Try to find a harmonically better match if available
+            for (const freq of targetFrequencies) {
+                const score = songData.compatibilityScores[freq];
+                const freqAssignmentCount = assignments.filter(a => a.frequency === freq).length;
+                const maxAssignments = Math.ceil(sortedSongs.length / targetFrequencies.length);
+                
+                // Prefer harmonically better matches that aren't oversaturated
+                if (score < bestScore && freqAssignmentCount < maxAssignments) {
+                    bestFreq = freq;
+                    bestScore = score;
+                }
+            }
             
             assignments.push({
                 song: songData.song,
-                frequency: assignedFreq,
+                frequency: bestFreq,
                 detectedFreq: songData.detectedFreq,
-                deviation: songData.compatibilityScores[assignedFreq]
+                deviation: bestScore
             });
             
-            console.log(`Cyclic assignment: "${songData.song.name}" (${songData.detectedFreq.toFixed(1)}Hz) → ${assignedFreq}Hz (cycle ${Math.floor(i/targetFrequencies.length) + 1})`);
+            console.log(`Harmonic assignment: "${songData.song.name}" (${songData.detectedFreq.toFixed(1)}Hz → ${songData.bestMatch.toFixed(1)}Hz harmonic) → ${bestFreq}Hz (deviation: ${bestScore.toFixed(1)})`);
         }
     }
     
@@ -648,22 +682,13 @@ const distributeUsingHarmonicOctaves = (songs: Song[], targetFrequencies: number
     return result;
 };
 
-// Special function for evenly distributing songs across all 27 frequencies using harmonic analysis
-const distributeAcrossAllFrequencies = (songs: Song[]): Song[] => {
-    const allFrequencies = [
-        // GUT (9) - Orders 1-3
-        174, 285, 396, 417, 528, 639, 741, 852, 963,
-        // HEART (9) - Orders 4-6 following correct 111-243-324 pattern
-        1074, 1317, 1641, 1752, 1995, 2319, 2430, 2673, 2997,
-        // HEAD (9) - Orders 7-9 following correct 111-243-324 pattern  
-        3108, 3351, 3675, 3786, 4029, 4353, 4464, 4707, 5031
-    ];
-    
-    const result = distributeUsingHarmonicOctaves(songs, allFrequencies);
+// Consolidated harmonic distribution function with detailed logging
+const distributeUsingHarmonicOctavesMaster = (songs: Song[], targetFrequencies: number[]): Song[] => {
+    const result = distributeUsingHarmonicOctaves(songs, targetFrequencies);
     
     // Log distribution summary
     const distribution: { [key: number]: number } = {};
-    allFrequencies.forEach(freq => distribution[freq] = 0);
+    targetFrequencies.forEach(freq => distribution[freq] = 0);
     
     result.forEach(song => {
         const freq = song.closestSolfeggio;
@@ -672,26 +697,26 @@ const distributeAcrossAllFrequencies = (songs: Song[]): Song[] => {
         }
     });
     
-    console.log('=== HARMONIC OCTAVE DISTRIBUTION SUMMARY ===');
-    const gutCount = allFrequencies.slice(0, 9).reduce((sum, freq) => sum + (distribution[freq] || 0), 0);
-    const heartCount = allFrequencies.slice(9, 18).reduce((sum, freq) => sum + (distribution[freq] || 0), 0);
-    const headCount = allFrequencies.slice(18, 27).reduce((sum, freq) => sum + (distribution[freq] || 0), 0);
+    console.log('=== HARMONIC DISTRIBUTION SUMMARY ===');
+    const gutCount = targetFrequencies.slice(0, 9).reduce((sum, freq) => sum + (distribution[freq] || 0), 0);
+    const heartCount = targetFrequencies.slice(9, 18).reduce((sum, freq) => sum + (distribution[freq] || 0), 0);
+    const headCount = targetFrequencies.slice(18, 27).reduce((sum, freq) => sum + (distribution[freq] || 0), 0);
     
     console.log(`GUT Regime (174-963Hz): ${gutCount} songs`);
     console.log(`HEART Regime (1074-2997Hz): ${heartCount} songs`);
     console.log(`HEAD Regime (3108-5031Hz): ${headCount} songs`);
-    console.log(`Total distributed: ${result.length} songs across ${allFrequencies.length} frequencies`);
+    console.log(`Total distributed: ${result.length} songs across ${targetFrequencies.length} frequencies`);
     
     // Show specific frequency assignments for verification
     console.log('Frequency assignments:');
-    allFrequencies.forEach(freq => {
+    targetFrequencies.forEach(freq => {
         if (distribution[freq] > 0) {
             const assignedSongs = result.filter(s => s.closestSolfeggio === freq);
             console.log(`  ${freq}Hz: ${assignedSongs.map(s => s.name).join(', ')}`);
         }
     });
     
-    console.log('✅ Frequencies are now assigned and will be used during playback!');
+    console.log('✅ Songs distributed by harmonic affinity - consistent results guaranteed!');
     
     return result;
 };
@@ -2964,7 +2989,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.4</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -3614,69 +3639,17 @@ const App: React.FC = () => {
                  </button>
                </div>
 
-               {/* Distribute All 27 Frequencies Button */}
+               {/* Smart Harmonic Distribution - Single Reliable Method */}
                <button 
                 onClick={() => {
                   if (playlist.length >= 27) {
-                    const distributed = distributeAcrossAllFrequencies(playlist);
-                    setPlaylist(distributed);
-                    setOriginalPlaylist(distributed);
-                    setAnalysisNotification(`Harmonic Distribution Complete: ${distributed.length} songs assigned to all 27 frequencies based on harmonic octave analysis and mathematical resonance matching.`);
-                    setTimeout(() => setAnalysisNotification(null), 6000);
-                  } else {
-                    alert(`Need at least 27 tracks for frequency distribution. Current library has ${playlist.length} tracks.`);
-                  }
-                }}
-                className={`mb-2 w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg font-medium tracking-wide transition-all active:scale-95 bg-slate-900 hover:bg-slate-700 border border-slate-800 hover:border-slate-600`}
-               >
-                 <Target size={14} className="text-blue-400" />
-                 <span className="text-blue-400">Harmonic 27-Frequency Distribution</span>
-               </button>
-
-               {/* Force 3-Regime Distribution Button */}
-               <button 
-                onClick={() => {
-                  if (playlist.length >= 9) {
-                    // Distribute songs across 3 regimes using harmonic octave analysis
-                    const gutFreqs = [174, 285, 396, 417, 528, 639, 741, 852, 963];
-                    const heartFreqs = [1074, 1317, 1641, 1752, 1995, 2319, 2430, 2673, 2997];
-                    const headFreqs = [3108, 3351, 3675, 3786, 4029, 4353, 4464, 4707, 5031];
-                    const allRegimeFreqs = [...gutFreqs, ...heartFreqs, ...headFreqs];
-                    
-                    const redistributed = distributeUsingHarmonicOctaves(playlist, allRegimeFreqs);
-                    
-                    setPlaylist(redistributed);
-                    setOriginalPlaylist(redistributed);
-                    
-                    const gutCount = redistributed.filter(s => gutFreqs.includes((s.closestSolfeggio as number) || 0)).length;
-                    const heartCount = redistributed.filter(s => heartFreqs.includes((s.closestSolfeggio as number) || 0)).length;
-                    const headCount = redistributed.filter(s => headFreqs.includes((s.closestSolfeggio as number) || 0)).length;
-                    
-                    setAnalysisNotification(`3-Regime Harmonic Distribution: ${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD tracks assigned based on harmonic octave analysis.`);
-                    setTimeout(() => setAnalysisNotification(null), 6000);
-                  } else {
-                    alert(`Need at least 9 tracks for 3-regime distribution. Current library has ${playlist.length} tracks.`);
-                  }
-                }}
-                className={`mb-2 w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg font-medium tracking-wide transition-all active:scale-95 bg-slate-900 hover:bg-slate-700 border border-slate-800 hover:border-slate-600`}
-               >
-                 <Layers size={14} className="text-purple-400" />
-                 <span className="text-purple-400">Harmonic 3-Regime Distribution</span>
-               </button>
-
-               {/* Smart Large Library Distribution */}
-               <button 
-                onClick={() => {
-                  if (playlist.length >= 54) {
-                    // For large libraries, use harmonic octave analysis for smart distribution
+                    // Use the proven smart harmonic distribution for all libraries 27+ songs
                     const gutFreqs = [174, 285, 396, 417, 528, 639, 741, 852, 963];
                     const heartFreqs = [1074, 1317, 1641, 1752, 1995, 2319, 2430, 2673, 2997];
                     const headFreqs = [3108, 3351, 3675, 3786, 4029, 4353, 4464, 4707, 5031];
                     const allFreqs = [...gutFreqs, ...heartFreqs, ...headFreqs];
                     
-                    // Create a balanced distribution with harmonic octave analysis
-                    const songsPerFreq = Math.floor(playlist.length / 27);
-                    const redistributed = distributeUsingHarmonicOctaves(playlist, allFreqs);
+                    const redistributed = distributeUsingHarmonicOctavesMaster(playlist, allFreqs);
                     
                     setPlaylist(redistributed);
                     setOriginalPlaylist(redistributed);
@@ -3685,16 +3658,16 @@ const App: React.FC = () => {
                     const heartCount = redistributed.filter(s => heartFreqs.includes((s.closestSolfeggio as number) || 0)).length;
                     const headCount = redistributed.filter(s => headFreqs.includes((s.closestSolfeggio as number) || 0)).length;
                     
-                    setAnalysisNotification(`Smart Harmonic Distribution: ~${songsPerFreq} songs per frequency (${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD) based on harmonic octave matching. Full Alignment ready!`);
-                    setTimeout(() => setAnalysisNotification(null), 8000);
+                    setAnalysisNotification(`Harmonic Distribution Complete: ${redistributed.length} songs distributed across all 27 frequencies. ${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD. Consistent harmonic alignment achieved!`);
+                    setTimeout(() => setAnalysisNotification(null), 7000);
                   } else {
-                    alert(`Smart Distribution requires at least 54 tracks (2 per frequency). Current library has ${playlist.length} tracks.`);
+                    alert(`Harmonic Distribution requires at least 27 tracks for optimal frequency coverage. Current library has ${playlist.length} tracks.`);
                   }
                 }}
-                className={`mb-3 w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg font-medium tracking-wide transition-all active:scale-95 bg-slate-900 hover:bg-slate-700 border border-slate-800 hover:border-slate-600`}
+                className={`mb-3 w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg font-medium tracking-wide transition-all active:scale-95 bg-gold-900/20 hover:bg-gold-800/30 border border-gold-500/30 hover:border-gold-500/50`}
                >
-                 <Sparkles size={14} className="text-green-400" />
-                 <span className="text-green-400">Smart Harmonic Distribution</span>
+                 <Target size={14} className="text-gold-400" />
+                 <span className="text-gold-400 font-bold">Auto-Distribute Frequencies</span>
                </button>
 
                {/* Tools Section */}
