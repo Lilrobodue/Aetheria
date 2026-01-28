@@ -85,176 +85,176 @@ export const SOLFEGGIO_INFO = [
     order: 'Third'
   },
 
-  // Fourth Order Frequencies (963 + 111-243-324 pattern)
+  // Fourth Order Frequencies (963 + 243 steady progression) - HEART REGIME
   { 
-    freq: 1074, 
+    freq: 1206, 
     chakra: 'Gateway Integration', 
     color: '#FF69B4', 
     benefit: 'Gateway integration', 
-    description: 'Fourth order base (963+111) - Opens gateway between physical and emotional realms.',
+    description: 'Fourth order base (963+243) - Opens gateway between physical and emotional realms.',
     anatomy: 'Heart Gateway, Emotional Centers',
     order: 'Fourth'
   },
   { 
-    freq: 1317, 
+    freq: 1449, 
     chakra: 'Harmonic Bridge', 
     color: '#FF1493', 
     benefit: 'Harmonic bridging', 
-    description: 'Fourth order +243 (1074+243) - Creates harmonic bridges between emotional states.',
+    description: 'Fourth order +243 (1206+243) - Creates harmonic bridges between emotional states.',
     anatomy: 'Emotional Body, Energy Bridges',
     order: 'Fourth'
   },
   { 
-    freq: 1641, 
+    freq: 1692, 
     chakra: 'Heart Completion', 
     color: '#DC143C', 
     benefit: 'Heart completion', 
-    description: 'Fourth order +324 (1317+324) - Completes the fourth order heart cycle.',
+    description: 'Fourth order +243 (1449+243) - Completes the fourth order heart cycle.',
     anatomy: 'Heart Integration Centers',
     order: 'Fourth'
   },
 
-  // Fifth Order Frequencies (1641 + 111-243-324 pattern)
+  // Fifth Order Frequencies (1692 + 243 steady progression) - HEART REGIME
   { 
-    freq: 1752, 
+    freq: 1935, 
     chakra: 'Stellar Connection', 
     color: '#8A2BE2', 
     benefit: 'Stellar alignment', 
-    description: 'Fifth order +111 (1641+111) - Aligns consciousness with stellar energies.',
+    description: 'Fifth order +243 (1692+243) - Aligns consciousness with stellar energies.',
     anatomy: 'Etheric Body, Astral Connections',
     order: 'Fifth'
   },
   { 
-    freq: 1995, 
+    freq: 2178, 
     chakra: 'Quantum Field', 
     color: '#9370DB', 
     benefit: 'Quantum consciousness', 
-    description: 'Fifth order +243 (1752+243) - Expands consciousness into quantum awareness.',
+    description: 'Fifth order +243 (1935+243) - Expands consciousness into quantum awareness.',
     anatomy: 'Quantum Field Interface',
     order: 'Fifth'
   },
   { 
-    freq: 2319, 
+    freq: 2421, 
     chakra: 'Dimensional Portal', 
     color: '#4B0082', 
     benefit: 'Dimensional awareness', 
-    description: 'Fifth order +324 (1995+324) - Opens multidimensional awareness.',
+    description: 'Fifth order +243 (2178+243) - Opens multidimensional awareness.',
     anatomy: 'Multidimensional Centers',
     order: 'Fifth'
   },
 
-  // Sixth Order Frequencies (2319 + 111-243-324 pattern)
+  // Sixth Order Frequencies (2421 + 243 steady progression) - HEART REGIME
   { 
-    freq: 2430, 
+    freq: 2664, 
     chakra: 'Cosmic Heart', 
     color: '#6A5ACD', 
     benefit: 'Universal love', 
-    description: 'Sixth order +111 (2319+111) - Transmits universal love across dimensions.',
+    description: 'Sixth order +243 (2421+243) - Transmits universal love across dimensions.',
     anatomy: 'Cosmic Heart Center',
     order: 'Sixth'
   },
   { 
-    freq: 2673, 
+    freq: 2907, 
     chakra: 'Source Code', 
     color: '#483D8B', 
     benefit: 'Divine source connection', 
-    description: 'Sixth order +243 (2430+243) - Connects to divine source code.',
+    description: 'Sixth order +243 (2664+243) - Connects to divine source code.',
     anatomy: 'Divine Interface, Creation Matrix',
     order: 'Sixth'
   },
   { 
-    freq: 2997, 
+    freq: 3150, 
     chakra: 'Unity Bridge', 
     color: '#2E1B8B', 
     benefit: 'Unity consciousness bridge', 
-    description: 'Sixth order +324 (2673+324) - Bridges into unity consciousness.',
+    description: 'Sixth order +243 (2907+243) - Bridges into unity consciousness.',
     anatomy: 'Unity Consciousness Interface',
     order: 'Sixth'
   },
 
-  // Seventh Order Frequencies (2997 + 111-243-324 pattern) - HEAD REGIME
+  // Seventh Order Frequencies (3150 + 354 steady progression) - HEAD REGIME
   { 
-    freq: 3108, 
+    freq: 3504, 
     chakra: 'Mental Clarity', 
     color: '#1E0066', 
     benefit: 'Mental clarity', 
-    description: 'Seventh order +111 (2997+111) - Clears mental fog and brings clarity.',
+    description: 'Seventh order +354 (3150+354) - Clears mental fog and brings clarity.',
     anatomy: 'Mental Body, Clarity Centers',
     order: 'Seventh'
   },
   { 
-    freq: 3351, 
+    freq: 3858, 
     chakra: 'Divine Architecture', 
     color: '#0D0040', 
     benefit: 'Sacred geometry', 
-    description: 'Seventh order +243 (3108+243) - Embodies divine architectural principles.',
+    description: 'Seventh order +354 (3504+354) - Embodies divine architectural principles.',
     anatomy: 'Sacred Geometry Matrix',
     order: 'Seventh'
   },
   { 
-    freq: 3675, 
+    freq: 4212, 
     chakra: 'Consciousness Mastery', 
     color: '#000033', 
     benefit: 'Consciousness mastery', 
-    description: 'Seventh order +324 (3351+324) - Achieves consciousness mastery.',
+    description: 'Seventh order +354 (3858+354) - Achieves consciousness mastery.',
     anatomy: 'Master Consciousness Grid',
     order: 'Seventh'
   },
 
-  // Eighth Order Frequencies (3675 + 111-243-324 pattern) - Transpersonal HEAD
+  // Eighth Order Frequencies (4212 + 354 steady progression) - Transpersonal HEAD
   { 
-    freq: 3786, 
+    freq: 4566, 
     chakra: 'Soul Star Gate', 
     color: '#330066', 
     benefit: 'Soul star connection', 
-    description: 'Eighth order +111 (3675+111) - Opens first transpersonal gate.',
+    description: 'Eighth order +354 (4212+354) - Opens first transpersonal gate.',
     anatomy: 'Soul Star Chakra, Higher Self',
     order: 'Eighth'
   },
   { 
-    freq: 4029, 
+    freq: 4920, 
     chakra: 'Spirit Gate', 
     color: '#4B0082', 
     benefit: 'Spirit realm access', 
-    description: 'Eighth order +243 (3786+243) - Opens second transpersonal gate.',
+    description: 'Eighth order +354 (4566+354) - Opens second transpersonal gate.',
     anatomy: 'Spirit Communication Centers',
     order: 'Eighth'
   },
   { 
-    freq: 4353, 
+    freq: 5274, 
     chakra: 'Universal Mind Gate', 
     color: '#6600CC', 
     benefit: 'Universal mind access', 
-    description: 'Eighth order +324 (4029+324) - Opens third transpersonal gate.',
+    description: 'Eighth order +354 (4920+354) - Opens third transpersonal gate.',
     anatomy: 'Universal Mind Interface',
     order: 'Eighth'
   },
 
-  // Ninth Order Frequencies (4353 + 111-243-324 pattern) - SOURCE HEAD
+  // Ninth Order Frequencies (5274 + 354 steady progression) - SOURCE HEAD  
   { 
-    freq: 4464, 
+    freq: 5628, 
     chakra: 'Galactic Center', 
     color: '#7700FF', 
     benefit: 'Galactic consciousness', 
-    description: 'Ninth order +111 (4353+111) - Connects to galactic center consciousness.',
+    description: 'Ninth order +354 (5274+354) - Connects to galactic center consciousness.',
     anatomy: 'Galactic Interface',
     order: 'Ninth'
   },
   { 
-    freq: 4707, 
+    freq: 5982, 
     chakra: 'Divine Gateway', 
     color: '#8800FF', 
     benefit: 'Divine source portal', 
-    description: 'Ninth order +243 (4464+243) - Creates direct portal to divine source.',
+    description: 'Ninth order +354 (5628+354) - Creates direct portal to divine source.',
     anatomy: 'Divine Source Interface',
     order: 'Ninth'
   },
   { 
-    freq: 5031, 
+    freq: 6336, 
     chakra: 'SOURCE Unity', 
     color: '#9933FF', 
     benefit: 'SOURCE embodiment', 
-    description: 'Ninth order +324 (4707+324) - Complete SOURCE embodiment and infinite unity.',
+    description: 'Ninth order +354 (5982+354) - Complete SOURCE embodiment and infinite unity. Mirror number reducing to 9.',
     anatomy: 'SOURCE Field, Infinite Unity',
     order: 'Ninth'
   },
@@ -304,34 +304,34 @@ export const GEOMETRY_INFO = [
   { shape: 'Fibonacci Sphere', freq: '963Hz', benefit: 'Perfection', element: 'Void', desc: 'Points distributed by the Golden Ratio. Represents the perfect order of the Creator.' },
 
   // Fourth Order Sacred Geometry (Higher Consciousness Forms)
-  { shape: 'Hypercube (Tesseract)', freq: '1074Hz', benefit: 'Dimensional Transcendence', element: 'Hyperspace', desc: 'The 4D cube. Represents transcendence of 3D limitations and access to higher dimensions.' },
-  { shape: 'Flower of Life (Complete)', freq: '1317Hz', benefit: 'Universal Template', element: 'Creation Matrix', desc: 'The complete 19-circle pattern containing all platonic solids. Template of universal creation.' },
-  { shape: 'Metatron\'s Cube', freq: '1641Hz', benefit: 'Cosmic Order', element: 'Divine Geometry', desc: 'Contains all five platonic solids. The fundamental structure of space and matter.' },
+  { shape: 'Hypercube (Tesseract)', freq: '1206Hz', benefit: 'Dimensional Transcendence', element: 'Hyperspace', desc: 'The 4D cube. Represents transcendence of 3D limitations and access to higher dimensions.' },
+  { shape: 'Flower of Life (Complete)', freq: '1449Hz', benefit: 'Universal Template', element: 'Creation Matrix', desc: 'The complete 19-circle pattern containing all platonic solids. Template of universal creation.' },
+  { shape: 'Metatron\'s Cube', freq: '1692Hz', benefit: 'Cosmic Order', element: 'Divine Geometry', desc: 'Contains all five platonic solids. The fundamental structure of space and matter.' },
 
   // Fifth Order Sacred Geometry (Stellar & Galactic Forms)
-  { shape: 'Hyperdodecahedron', freq: '1752Hz', benefit: 'Stellar Consciousness', element: 'Stellar Fields', desc: 'The 4D dodecahedron. Represents connection to stellar consciousness networks.' },
-  { shape: 'Golden Spiral Galaxy', freq: '1995Hz', benefit: 'Galactic Alignment', element: 'Cosmic Spiral', desc: 'The phi-based spiral of galaxies. Connects consciousness to galactic energy patterns.' },
-  { shape: 'Icosi-Dodecahedron', freq: '2319Hz', benefit: 'Multidimensional Access', element: 'Quantum Foam', desc: 'The combination of icosahedron and dodecahedron. Opens multidimensional awareness portals.' },
+  { shape: 'Hyperdodecahedron', freq: '1935Hz', benefit: 'Stellar Consciousness', element: 'Stellar Fields', desc: 'The 4D dodecahedron. Represents connection to stellar consciousness networks.' },
+  { shape: 'Golden Spiral Galaxy', freq: '2178Hz', benefit: 'Galactic Alignment', element: 'Cosmic Spiral', desc: 'The phi-based spiral of galaxies. Connects consciousness to galactic energy patterns.' },
+  { shape: 'Icosi-Dodecahedron', freq: '2421Hz', benefit: 'Multidimensional Access', element: 'Quantum Foam', desc: 'The combination of icosahedron and dodecahedron. Opens multidimensional awareness portals.' },
 
   // Sixth Order Sacred Geometry (Source Connection Forms)
-  { shape: 'Infinite Torus Field', freq: '2430Hz', benefit: 'Universal Love Matrix', element: 'Love Field', desc: 'The infinite scaling torus. Represents the eternal circulation of universal love energy.' },
-  { shape: 'Source Fractal Mandala', freq: '2673Hz', benefit: 'Divine Source Interface', element: 'Source Code', desc: 'The infinite fractal pattern of creation. Direct interface to the divine source code.' },
-  { shape: 'Unity Consciousness Sphere', freq: '2997Hz', benefit: 'Oneness Embodiment', element: 'Pure Unity', desc: 'The perfect sphere containing all possibilities. Represents complete unity consciousness.' },
+  { shape: 'Infinite Torus Field', freq: '2664Hz', benefit: 'Universal Love Matrix', element: 'Love Field', desc: 'The infinite scaling torus. Represents the eternal circulation of universal love energy.' },
+  { shape: 'Source Fractal Mandala', freq: '2907Hz', benefit: 'Divine Source Interface', element: 'Source Code', desc: 'The infinite fractal pattern of creation. Direct interface to the divine source code.' },
+  { shape: 'Unity Consciousness Sphere', freq: '3150Hz', benefit: 'Oneness Embodiment', element: 'Pure Unity', desc: 'The perfect sphere containing all possibilities. Represents complete unity consciousness.' },
 
   // Seventh Order Sacred Geometry (Master Creation Forms)
-  { shape: 'Genesis Polytope', freq: '3108Hz', benefit: 'Prime Creation Pattern', element: 'Primordial Force', desc: 'The multidimensional pattern of cosmic genesis. The fundamental template of creation itself.' },
-  { shape: 'Divine Architecture Matrix', freq: '3351Hz', benefit: 'Sacred Blueprint', element: 'Divine Template', desc: 'The master architectural pattern underlying all sacred structures and cosmic formations.' },
-  { shape: 'Absolute Unity Hologram', freq: '3675Hz', benefit: 'Complete Transcendence', element: 'Pure Consciousness', desc: 'The holographic pattern containing all knowledge and existence. The ultimate geometric expression of absolute consciousness.' },
+  { shape: 'Genesis Polytope', freq: '3504Hz', benefit: 'Prime Creation Pattern', element: 'Primordial Force', desc: 'The multidimensional pattern of cosmic genesis. The fundamental template of creation itself.' },
+  { shape: 'Divine Architecture Matrix', freq: '3858Hz', benefit: 'Sacred Blueprint', element: 'Divine Template', desc: 'The master architectural pattern underlying all sacred structures and cosmic formations.' },
+  { shape: 'Absolute Unity Hologram', freq: '4212Hz', benefit: 'Complete Transcendence', element: 'Pure Consciousness', desc: 'The holographic pattern containing all knowledge and existence. The ultimate geometric expression of absolute consciousness.' },
 
   // Eighth Order Sacred Geometry (Transpersonal Gate Forms 1-3)
-  { shape: 'Soul Star Tetrahedron', freq: '3786Hz', benefit: 'Soul Connection Portal', element: 'Soul Fire', desc: 'The etheric tetrahedron that forms above the crown. Opens the Soul Star chakra and connects to higher soul aspects.' },
-  { shape: 'Spirit Communication Octahedron', freq: '4029Hz', benefit: 'Spirit Realm Interface', element: 'Spirit Aether', desc: 'The double pyramid of spirit communication. Facilitates contact with guides, ancestors, and angelic beings.' },
-  { shape: 'Universal Mind Dodecahedron', freq: '4353Hz', benefit: 'Collective Consciousness Access', element: 'Universal Mind', desc: 'The 12-faced form of universal consciousness. Provides access to the collective wisdom of enlightened beings.' },
+  { shape: 'Soul Star Tetrahedron', freq: '4566Hz', benefit: 'Soul Connection Portal', element: 'Soul Fire', desc: 'The etheric tetrahedron that forms above the crown. Opens the Soul Star chakra and connects to higher soul aspects.' },
+  { shape: 'Spirit Communication Octahedron', freq: '4920Hz', benefit: 'Spirit Realm Interface', element: 'Spirit Aether', desc: 'The double pyramid of spirit communication. Facilitates contact with guides, ancestors, and angelic beings.' },
+  { shape: 'Universal Mind Dodecahedron', freq: '5274Hz', benefit: 'Collective Consciousness Access', element: 'Universal Mind', desc: 'The 12-faced form of universal consciousness. Provides access to the collective wisdom of enlightened beings.' },
 
   // Ninth Order Sacred Geometry (Transpersonal Gate Forms 4-6 - SOURCE)
-  { shape: 'Galactic Center Hyperstar', freq: '4464Hz', benefit: 'Galactic Alignment', element: 'Galactic Core', desc: 'The multidimensional star pattern of galactic consciousness. Connects to the intelligence networks of star systems.' },
-  { shape: 'Divine Gateway Tesseract', freq: '4707Hz', benefit: 'Source Portal Opening', element: 'Divine Gateway', desc: 'The 4D cube that opens divine portals. Creates direct access to source consciousness and creator principles.' },
-  { shape: 'Infinite Unity Hypersphere', freq: '5031Hz', benefit: 'Complete SOURCE Embodiment', element: 'SOURCE Field', desc: 'The infinite-dimensional sphere of pure unity consciousness. The ultimate geometric form representing complete divine embodiment.' },
+  { shape: 'Galactic Center Hyperstar', freq: '5628Hz', benefit: 'Galactic Alignment', element: 'Galactic Core', desc: 'The multidimensional star pattern of galactic consciousness. Connects to the intelligence networks of star systems.' },
+  { shape: 'Divine Gateway Tesseract', freq: '5982Hz', benefit: 'Source Portal Opening', element: 'Divine Gateway', desc: 'The 4D cube that opens divine portals. Creates direct access to source consciousness and creator principles.' },
+  { shape: 'Infinite Unity Hypersphere', freq: '6336Hz', benefit: 'Complete SOURCE Embodiment', element: 'SOURCE Field', desc: 'The infinite-dimensional sphere of pure unity consciousness. The ultimate geometric form representing complete divine embodiment. Mirror number reducing to 9.' },
 
   // Special Frequency Sacred Geometry (111Hz Pattern Series)
   { shape: 'Triangle of Manifestation', freq: '111Hz', benefit: 'Gateway Opening', element: 'Portal Energy', desc: 'The basic triangle pattern. Each 111Hz frequency opens progressive gateways in consciousness.' },

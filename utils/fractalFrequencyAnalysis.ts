@@ -40,33 +40,37 @@ export const EXTENDED_SOLFEGGIO = {
   ULTRA_HIGH: [2112, 2244, 2376, 2556, 2964, 3168, 3408, 3852],
   
   // Higher Order Solfeggio Progressions
-  FOURTH_ORDER: [1074, 1317, 1641], // 963 + (111, 243, 324)
-  FIFTH_ORDER: [1752, 1995, 2319],  // Fourth + (111, 243, 324)
-  SIXTH_ORDER: [2430, 2673, 2997],  // Fifth + (111, 243, 324)
+  FOURTH_ORDER: [1206, 1449, 1692], // 963 + 243 steady progression
+  FIFTH_ORDER: [1935, 2178, 2421],  // 1692 + 243 steady progression
+  SIXTH_ORDER: [2664, 2907, 3150],  // 2421 + 243 steady progression
   
   // Specialized Series
   DNA_ACTIVATION: [528, 1056, 2112, 4224], // 528Hz and its octaves
   CELLULAR_REPAIR: [285, 570, 1140, 2280], // 285Hz cellular regeneration series
   PINEAL_ACTIVATION: [963, 1926, 3852, 7704], // Crown chakra activation series
-  CONSCIOUSNESS_EXPANSION: [1074, 1641, 1995, 2319], // Higher order consciousness frequencies
-  DIMENSIONAL_ACCESS: [1317, 1752, 2430, 2673], // Interdimensional communication frequencies
-  UNITY_CONSCIOUSNESS: [2997], // Ultimate unity frequency
+  CONSCIOUSNESS_EXPANSION: [1206, 1692, 2178, 2421], // Higher order consciousness frequencies
+  DIMENSIONAL_ACCESS: [1449, 1935, 2664, 2907], // Interdimensional communication frequencies
+  UNITY_CONSCIOUSNESS: [3150], // Ultimate unity frequency
 };
 
 // Safety frequency ranges with protection protocols
 export const SAFETY_PROTOCOLS = {
-  SAFE_RANGE: { min: 20, max: 1073 }, // General safe listening range
-  CAUTION_RANGE: { min: 1074, max: 2000 }, // Requires subtle resonance mode
-  EXPERT_RANGE: { min: 2001, max: 8000 }, // Advanced practitioners only
+  SAFE_RANGE: { min: 20, max: 1205 }, // General safe listening range (up to GUT regime)
+  CAUTION_RANGE: { min: 1206, max: 3150 }, // HEART regime - requires subtle resonance mode
+  EXPERT_RANGE: { min: 3504, max: 8000 }, // HEAD regime - advanced practitioners only
   RESEARCH_RANGE: { min: 8001, max: 20000 }, // Research/documentation only
   
   // Volume reduction curves for higher frequencies
   VOLUME_CURVES: {
-    1074: 0.3, // 30% of normal volume
-    1500: 0.2, // 20% of normal volume
-    2000: 0.15, // 15% of normal volume
-    3000: 0.1, // 10% of normal volume
+    1206: 0.3, // 30% of normal volume (HEART start)
+    1500: 0.25, // 25% of normal volume
+    2000: 0.2, // 20% of normal volume
+    2500: 0.15, // 15% of normal volume
+    3150: 0.12, // 12% of normal volume (HEART end)
+    3504: 0.1, // 10% of normal volume (HEAD start)
+    4000: 0.08, // 8% of normal volume
     5000: 0.05, // 5% of normal volume
+    6336: 0.03, // 3% of normal volume (SOURCE frequency)
     8000: 0.02, // 2% of normal volume (barely perceptible)
   }
 };
@@ -596,13 +600,13 @@ export const getFrequencyByIntention = (intention: string): number[] => {
     'consciousness_expansion': EXTENDED_SOLFEGGIO.CONSCIOUSNESS_EXPANSION,
     'dimensional_access': EXTENDED_SOLFEGGIO.DIMENSIONAL_ACCESS,
     'unity_consciousness': EXTENDED_SOLFEGGIO.UNITY_CONSCIOUSNESS,
-    'pineal_activation': [963, 1074, 1641, 1995],
-    'quantum_awareness': [1995, 2319, 2673],
-    'transcendence': [2997],
-    'interdimensional': [1317, 1752, 2430],
-    'cosmic_alignment': [1641, 1995, 2319, 2673],
-    'source_connection': [2673, 2997],
-    'galactic_resonance': [1752, 2430, 2997]
+    'pineal_activation': [963, 1206, 1692, 2178],
+    'quantum_awareness': [2178, 2421, 2907],
+    'transcendence': [3150],
+    'interdimensional': [1449, 1935, 2664],
+    'cosmic_alignment': [1692, 2178, 2421, 2907],
+    'source_connection': [2907, 3150],
+    'galactic_resonance': [1935, 2664, 3150]
   };
   
   return intentionMap[intention.toLowerCase()] || [528, 741, 852];

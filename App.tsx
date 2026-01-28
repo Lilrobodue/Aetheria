@@ -235,8 +235,8 @@ const getHarmonicSolfeggio = (detectedFreq: number): number => {
 
     // Define the 3-regime frequency sets for prioritized matching
     const gutFrequencies = [174, 285, 396, 417, 528, 639, 741, 852, 963];
-    const heartFrequencies = [1074, 1317, 1641, 1752, 1995, 2319, 2430, 2673, 2997]; // Corrected mathematical progression
-    const headFrequencies = [3108, 3351, 3675, 3786, 4029, 4353, 4464, 4707, 5031]; // Corrected mathematical progression
+    const heartFrequencies = [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150]; // HEART regime with 243 steady progression
+    const headFrequencies = [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336]; // HEAD regime with 354 steady progression
 
     let bestMatch = 396;
     let minScore = Infinity;
@@ -405,7 +405,7 @@ const getHarmonicRelationship = (detected: number, matched: number): string => {
 
 const getFrequencyRegime = (frequency: number): string => {
     if (frequency <= 963) return "GUT";
-    if (frequency <= 2997) return "HEART";
+    if (frequency <= 3150) return "HEART";
     return "HEAD";
 };
 
@@ -443,16 +443,16 @@ const getOctaveRangeStatistics = (analyzedSongs: Song[]): string => {
 const getRegimeStatistics = (analyzedSongs: Song[]): string => {
     const regimes = {
         'GUT (174-963Hz)': 0,
-        'HEART (1074-2997Hz)': 0,
-        'HEAD (3108-5031Hz)': 0
+        'HEART (1206-3150Hz)': 0,
+        'HEAD (3504-6336Hz)': 0
     };
     
     analyzedSongs.forEach(song => {
         if (song.closestSolfeggio) {
             const freq = song.closestSolfeggio;
             if (freq <= 963) regimes['GUT (174-963Hz)']++;
-            else if (freq <= 2997) regimes['HEART (1074-2997Hz)']++;
-            else regimes['HEAD (3108-5031Hz)']++;
+            else if (freq <= 3150) regimes['HEART (1206-3150Hz)']++;
+            else regimes['HEAD (3504-6336Hz)']++;
         }
     });
     
@@ -703,8 +703,8 @@ const distributeUsingHarmonicOctavesMaster = (songs: Song[], targetFrequencies: 
     const headCount = targetFrequencies.slice(18, 27).reduce((sum, freq) => sum + (distribution[freq] || 0), 0);
     
     console.log(`GUT Regime (174-963Hz): ${gutCount} songs`);
-    console.log(`HEART Regime (1074-2997Hz): ${heartCount} songs`);
-    console.log(`HEAD Regime (3108-5031Hz): ${headCount} songs`);
+    console.log(`HEART Regime (1206-3150Hz): ${heartCount} songs`);
+    console.log(`HEAD Regime (3504-6336Hz): ${headCount} songs`);
     console.log(`Total distributed: ${result.length} songs across ${targetFrequencies.length} frequencies`);
     
     // Show specific frequency assignments for verification
@@ -1025,7 +1025,7 @@ const App: React.FC = () => {
       
       // Update safety state based on analysis
       const safetyAssessment = assessFrequencySafety(result.dominantFrequency);
-      if (result.dominantFrequency >= 1074) {
+      if (result.dominantFrequency >= 1206) {
         setSubtleResonanceMode(true);
         setShowSafetyProtocols(true);
         
@@ -1735,7 +1735,7 @@ const App: React.FC = () => {
           if(window.innerWidth < 768) setShowSidebar(false);
       } else {
           // Show diagnostic info for HEART frequencies
-          const heartMatches = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 1000 && (s.closestSolfeggio || 0) < 3000);
+          const heartMatches = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 1206 && (s.closestSolfeggio || 0) <= 3150);
           const foundFreqs = [...new Set(heartMatches.map(s => s.closestSolfeggio).filter(f => f !== undefined) as number[])].sort((a, b) => a - b);
           alert(`HEART Alignment: Found ${heartMatches.length} matching songs.\n\nHEART frequencies detected:\n${foundFreqs.map(f => `${f}Hz: ${originalPlaylist.filter(s => s.closestSolfeggio === f).length} songs`).join('\n')}\n\nTry scanning library first or use the test distribution mode.`);
       }
@@ -1792,7 +1792,7 @@ const App: React.FC = () => {
           if(window.innerWidth < 768) setShowSidebar(false);
       } else {
           // Show diagnostic info for HEAD frequencies
-          const headMatches = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 3000);
+          const headMatches = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 3504);
           const foundFreqs = [...new Set(headMatches.map(s => s.closestSolfeggio).filter(f => f !== undefined) as number[])].sort((a, b) => a - b);
           alert(`HEAD Alignment: Found ${headMatches.length} matching songs.\n\nHEAD frequencies detected:\n${foundFreqs.map(f => `${f}Hz: ${originalPlaylist.filter(s => s.closestSolfeggio === f).length} songs`).join('\n')}\n\nTry scanning library first or use the test distribution mode.`);
       }
@@ -1821,7 +1821,7 @@ const App: React.FC = () => {
           setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
           
           // Check if we have high frequency tracks and adjust settings accordingly
-          const hasHighFrequencies = alignedPlaylist.some(s => (s.closestSolfeggio || 0) >= 1074);
+          const hasHighFrequencies = alignedPlaylist.some(s => (s.closestSolfeggio || 0) >= 1206);
           if (hasHighFrequencies && userExperienceLevel === 'beginner') {
               setUserExperienceLevel('intermediate');
               setAnalysisNotification(
@@ -1908,12 +1908,12 @@ const App: React.FC = () => {
       { order: 'First', frequencies: [174, 285] },
       { order: 'Second', frequencies: [396, 417, 528, 639] },
       { order: 'Third', frequencies: [741, 852, 963] },
-      { order: 'Fourth', frequencies: [1074, 1317, 1641] },
-      { order: 'Fifth', frequencies: [1752, 1995, 2319] },
-      { order: 'Sixth', frequencies: [2430, 2673, 2997] },
-      { order: 'Seventh', frequencies: [3108, 3351, 3675] },
-      { order: 'Eighth', frequencies: [3786, 4029, 4353] },
-      { order: 'Ninth', frequencies: [4464, 4707, 5031] }
+      { order: 'Fourth', frequencies: [1206, 1449, 1692] },
+      { order: 'Fifth', frequencies: [1935, 2178, 2421] },
+      { order: 'Sixth', frequencies: [2664, 2907, 3150] },
+      { order: 'Seventh', frequencies: [3504, 3858, 4212] },
+      { order: 'Eighth', frequencies: [4566, 4920, 5274] },
+      { order: 'Ninth', frequencies: [5628, 5982, 6336] }
     ];
 
     const compositionPlaylist: Song[] = [];
@@ -2207,8 +2207,8 @@ const App: React.FC = () => {
     
     // Count tracks by regime
     const gutTracks = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 174 && (s.closestSolfeggio || 0) <= 963).length;
-    const heartTracks = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 1000 && (s.closestSolfeggio || 0) < 3000).length;
-    const headTracks = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 3000).length;
+    const heartTracks = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 1206 && (s.closestSolfeggio || 0) <= 3150).length;
+    const headTracks = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 3504).length;
     
     // Get frequency distribution
     const frequencies = originalPlaylist.map(s => s.closestSolfeggio).filter(f => typeof f === 'number') as number[];
@@ -2296,7 +2296,7 @@ const App: React.FC = () => {
       }));
       
       // For higher frequencies, set appropriate experience level to prevent interruptions
-      const hasHighFrequencies = ultimatePlaylist.some(s => (s.closestSolfeggio || 0) >= 1074);
+      const hasHighFrequencies = ultimatePlaylist.some(s => (s.closestSolfeggio || 0) >= 1206);
       if (hasHighFrequencies && userExperienceLevel === 'beginner') {
         setUserExperienceLevel('advanced');
         setAnalysisNotification(
@@ -2348,8 +2348,8 @@ const App: React.FC = () => {
     // All 9 Orders of Solfeggio frequencies in progression
     const allNineOrders = [
       174, 285, 396, 417, 528, 639, 741, 852, 963,
-      1074, 1317, 1641, 1752, 1995, 2319, 2430, 2673, 2997,
-      3108, 3351, 3675, 3786, 4029, 4353, 4464, 4707, 5031
+      1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150,
+      3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336
     ];
 
     const journeyPlaylist: Song[] = [];
@@ -2639,7 +2639,7 @@ const App: React.FC = () => {
     setSelectedSolfeggio(targetFreq);
     
     // Check if this is a high frequency track but don't interrupt playback
-    if (targetFreq >= 1074) {
+    if (targetFreq >= 1206) {
         setSubtleResonanceMode(true);
         // Don't automatically show safety protocols during playlist playback
         // Only show if manually selected
@@ -2989,7 +2989,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.4</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.5</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -3158,12 +3158,12 @@ const App: React.FC = () => {
                                         PHASE 2: THE BLOOM
                                       </h4>
                                       <div className="bg-black/40 p-4 rounded-lg border border-violet-700/50 font-mono text-sm mb-4">
-                                        <div className="text-violet-300 font-bold mb-2">Orders 2-3 — 1074-5031 Hz</div>
+                                        <div className="text-violet-300 font-bold mb-2">Orders 4-9 — 1206-6336 Hz</div>
                                         <div className="text-slate-300 text-xs leading-relaxed">
                                           At 963 Hz, the system <span className="text-violet-400 font-bold">AWAKENS</span> into dynamic expansion<br/>
-                                          The 111-243-324 Generator Pattern activates<br/>
-                                          Gaps cycle REGULARLY: 111 → 243 → 324 → 111 → 243 → 324<br/>
-                                          Digit sums cycle: 3 → 9 → 9 → 3 → 9 → 9<br/>
+                                          The Dual Generator Pattern activates: 243 (HEART) + 354 (HEAD)<br/>
+                                          HEART regime: Steady 243 progression (digit sum = 9)<br/>
+                                          HEAD regime: Steady 354 progression (digit sum = 3)<br/>
                                           This is the <span className="text-violet-400 font-bold">EXPANSION</span> — flowing, dynamic, evolving.
                                         </div>
                                       </div>
@@ -3185,12 +3185,12 @@ const App: React.FC = () => {
                                     
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                                       <div className="bg-emerald-900/20 border border-emerald-500/30 rounded-lg p-4">
-                                        <div className="font-bold text-emerald-400 mb-2">Order 1 (Seed): STATIC</div>
+                                        <div className="font-bold text-emerald-400 mb-2">Orders 1-3 (Seed): STATIC</div>
                                         <div className="text-slate-300 text-sm">All 3s — The unchanging foundation</div>
                                       </div>
                                       <div className="bg-violet-900/20 border border-violet-500/30 rounded-lg p-4">
-                                        <div className="font-bold text-violet-400 mb-2">Orders 2-3 (Bloom): DYNAMIC</div>
-                                        <div className="text-slate-300 text-sm">3-9-9 cycle — The living expansion</div>
+                                        <div className="font-bold text-violet-400 mb-2">Orders 4-9 (Bloom): DYNAMIC</div>
+                                        <div className="text-slate-300 text-sm">9-3 cycle — The living expansion</div>
                                       </div>
                                     </div>
 
@@ -3207,7 +3207,7 @@ const App: React.FC = () => {
                                       <div className="text-sm text-slate-300 space-y-1">
                                         <div><span className="text-emerald-400 font-bold">Seed (static, all 3s)</span> → stores potential</div>
                                         <div><span className="text-gold-400 font-bold">Transition (963 Hz)</span> → awakening point</div>
-                                        <div><span className="text-violet-400 font-bold">Bloom (dynamic, 3-9-9)</span> → expresses potential</div>
+                                        <div><span className="text-violet-400 font-bold">Bloom (dynamic, 9-3 cycle)</span> → expresses potential</div>
                                       </div>
                                     </div>
                                   </div>
@@ -3249,15 +3249,17 @@ const App: React.FC = () => {
                                         </div>
                                       </div>
 
-                                      {/* THE GENERATOR CONSTANT */}
+                                      {/* THE GENERATOR CONSTANTS */}
                                       <div className="bg-purple-900/20 border border-purple-500/30 rounded-lg p-4">
-                                        <h5 className="font-bold text-purple-400 mb-3">THE GENERATOR CONSTANT:</h5>
-                                        <div className="bg-black/40 p-3 rounded border border-purple-700/50 font-mono text-sm mb-3">
-                                          <div className="text-purple-300">243 = 27 × 9 = 3⁵</div>
+                                        <h5 className="font-bold text-purple-400 mb-3">THE GENERATOR CONSTANTS:</h5>
+                                        <div className="bg-black/40 p-3 rounded border border-purple-700/50 font-mono text-sm mb-3 space-y-2">
+                                          <div className="text-green-400">243 = 27 × 9 = 3⁵ (HEART regime)</div>
+                                          <div className="text-blue-400">354 = 3 + 5 + 4 = 12 → 3 (HEAD regime)</div>
                                         </div>
                                         <p className="text-xs text-slate-300">
-                                          This only applies to Orders 2-3<br/>
-                                          <span className="text-purple-400 font-bold">(the Bloom phase)</span>
+                                          243 applies to Orders 4-6 (HEART)<br/>
+                                          354 applies to Orders 7-9 (HEAD)<br/>
+                                          <span className="text-purple-400 font-bold">(the Bloom phase expansion)</span>
                                         </p>
                                       </div>
                                     </div>
@@ -3286,7 +3288,7 @@ const App: React.FC = () => {
                                     <h3 className="text-2xl font-bold text-white">The 3 Regimes of Consciousness: Complete Harmonic System</h3>
                                   </div>
                                   <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">
-                                    The Complete Harmonic Frequency System encompasses 3 distinct regimes of consciousness following the sacred 111-243-324 mathematical pattern. Orders 4-9 expand from the traditional solfeggio foundation through precise mathematical intervals, creating 27 frequencies that span from physical foundation to SOURCE consciousness.
+                                    The Complete Harmonic Frequency System encompasses 3 distinct regimes of consciousness following the sacred 111-243-354 mathematical pattern. Orders 4-9 expand from the traditional solfeggio foundation through precise mathematical intervals, creating 27 frequencies that span from physical foundation to SOURCE consciousness.
                                   </p>
 
                                   {/* Group by Regime */}
@@ -3336,7 +3338,7 @@ const App: React.FC = () => {
                                         <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-500/50 rounded-lg">
                                           <div className="flex items-center gap-2 text-yellow-400 text-sm font-bold mb-1">
                                             <AlertTriangle size={16} />
-                                            TRANSITION: 963 Hz → 1074 Hz (GUT → HEART Regime Activation)
+                                            TRANSITION: 963 Hz → 1206 Hz (GUT → HEART Regime Activation)
                                           </div>
                                           <p className="text-xs text-yellow-300">Consciousness elevation threshold - prepare for emotional and energetic expansion</p>
                                         </div>
@@ -3355,15 +3357,15 @@ const App: React.FC = () => {
                                       <div className="p-4">
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                           {[
-                                            { freq: 1074, benefit: 'Gateway integration', color: '#FF69B4', order: '4th', step: '+111' },
-                                            { freq: 1317, benefit: 'Harmonic bridging', color: '#FF1493', order: '4th', step: '+243' },
-                                            { freq: 1641, benefit: 'Heart completion', color: '#DC143C', order: '4th', step: '+324' },
-                                            { freq: 1752, benefit: 'Stellar alignment', color: '#8A2BE2', order: '5th', step: '+111' },
-                                            { freq: 1995, benefit: 'Quantum consciousness', color: '#9370DB', order: '5th', step: '+243' },
-                                            { freq: 2319, benefit: 'Dimensional awareness', color: '#4B0082', order: '5th', step: '+324' },
-                                            { freq: 2430, benefit: 'Universal love', color: '#6A5ACD', order: '6th', step: '+111' },
-                                            { freq: 2673, benefit: 'Divine source connection', color: '#483D8B', order: '6th', step: '+243' },
-                                            { freq: 2997, benefit: 'Unity consciousness bridge', color: '#2E1B8B', order: '6th', step: '+324' }
+                                            { freq: 1206, benefit: 'Gateway integration', color: '#FF69B4', order: '4th', step: '+243' },
+                                            { freq: 1449, benefit: 'Harmonic bridging', color: '#FF1493', order: '4th', step: '+243' },
+                                            { freq: 1692, benefit: 'Heart completion', color: '#DC143C', order: '4th', step: '+243' },
+                                            { freq: 1935, benefit: 'Stellar alignment', color: '#8A2BE2', order: '5th', step: '+243' },
+                                            { freq: 2178, benefit: 'Quantum consciousness', color: '#9370DB', order: '5th', step: '+243' },
+                                            { freq: 2421, benefit: 'Dimensional awareness', color: '#4B0082', order: '5th', step: '+243' },
+                                            { freq: 2664, benefit: 'Universal love', color: '#6A5ACD', order: '6th', step: '+243' },
+                                            { freq: 2907, benefit: 'Divine source connection', color: '#483D8B', order: '6th', step: '+243' },
+                                            { freq: 3150, benefit: 'Unity consciousness bridge', color: '#2E1B8B', order: '6th', step: '+243' }
                                           ].map(f => (
                                             <div key={f.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-green-500/50 transition-colors group">
                                                 <div className="flex justify-between items-center mb-2">
@@ -3372,15 +3374,15 @@ const App: React.FC = () => {
                                                 </div>
                                                 <h5 className="text-white font-medium mb-1">{f.benefit}</h5>
                                                 <p className="text-xs text-slate-400 mb-3 leading-relaxed">
-                                                  {f.freq === 1074 && "Fourth Order +111 (963+111) - Opens gateway between physical and emotional realms."}
-                                                  {f.freq === 1317 && "Fourth Order +243 (1074+243) - Creates harmonic bridges between emotional states."}
-                                                  {f.freq === 1641 && "Fourth Order +324 (1317+324) - Completes the fourth order heart integration cycle."}
-                                                  {f.freq === 1752 && "Fifth Order +111 (1641+111) - Aligns consciousness with stellar and galactic energies."}
-                                                  {f.freq === 1995 && "Fifth Order +243 (1752+243) - Expands consciousness into quantum field awareness."}
-                                                  {f.freq === 2319 && "Fifth Order +324 (1995+324) - Opens awareness to multiple dimensions simultaneously."}
-                                                  {f.freq === 2430 && "Sixth Order +111 (2319+111) - Transmits universal love energy across dimensions."}
-                                                  {f.freq === 2673 && "Sixth Order +243 (2430+243) - Connects to divine source code of creation."}
-                                                  {f.freq === 2997 && "Sixth Order +324 (2673+324) - Bridges into unity consciousness and mental clarity."}
+                                                  {f.freq === 1206 && "Fourth Order +243 (963+243) - Opens gateway between physical and emotional realms."}
+                                                  {f.freq === 1449 && "Fourth Order +243 (1206+243) - Creates harmonic bridges between emotional states."}
+                                                  {f.freq === 1692 && "Fourth Order +243 (1449+243) - Completes the fourth order heart integration cycle."}
+                                                  {f.freq === 1935 && "Fifth Order +243 (1692+243) - Aligns consciousness with stellar and galactic energies."}
+                                                  {f.freq === 2178 && "Fifth Order +243 (1935+243) - Expands consciousness into quantum field awareness."}
+                                                  {f.freq === 2421 && "Fifth Order +243 (2178+243) - Opens awareness to multiple dimensions simultaneously."}
+                                                  {f.freq === 2664 && "Sixth Order +243 (2421+243) - Transmits universal love energy across dimensions."}
+                                                  {f.freq === 2907 && "Sixth Order +243 (2664+243) - Connects to divine source code of creation."}
+                                                  {f.freq === 3150 && "Sixth Order +243 (2907+243) - Bridges into unity consciousness and mental clarity."}
                                                 </p>
                                             </div>
                                           ))}
@@ -3388,14 +3390,14 @@ const App: React.FC = () => {
                                         <div className="mt-4 p-3 bg-blue-900/20 border border-blue-500/50 rounded-lg">
                                           <div className="flex items-center gap-2 text-blue-400 text-sm font-bold mb-1">
                                             <Calculator size={16} />
-                                            MATHEMATICAL PATTERN: Orders 4-6 follow 111-243-324 progression
+                                            MATHEMATICAL PATTERN: Orders 4-6 follow 243 steady progression
                                           </div>
-                                          <p className="text-xs text-blue-300">Order 4: 1074→1317→1641 | Order 5: 1752→1995→2319 | Order 6: 2430→2673→2997</p>
+                                          <p className="text-xs text-blue-300">Order 4: 1206→1449→1692 | Order 5: 1935→2178→2421 | Order 6: 2664→2907→3150</p>
                                         </div>
                                         <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-500/50 rounded-lg">
                                           <div className="flex items-center gap-2 text-yellow-400 text-sm font-bold mb-1">
                                             <AlertTriangle size={16} />
-                                            TRANSITION: 3108 Hz → 3219 Hz (HEART → HEAD Regime Activation)
+                                            TRANSITION: 3150 Hz → 3504 Hz (HEART → HEAD Regime Activation)
                                           </div>
                                           <p className="text-xs text-yellow-300">Mental body activation threshold - prepare for cognitive and consciousness expansion</p>
                                         </div>
@@ -3414,15 +3416,15 @@ const App: React.FC = () => {
                                       <div className="p-4">
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                           {[
-                                            { freq: 3108, benefit: 'Mental clarity', color: '#1E0066', order: '7th', step: '+111' },
-                                            { freq: 3351, benefit: 'Sacred geometry', color: '#0D0040', order: '7th', step: '+243' },
-                                            { freq: 3675, benefit: 'Consciousness mastery', color: '#000033', order: '7th', step: '+324' },
-                                            { freq: 3786, benefit: 'Soul star connection', color: '#330066', order: '8th', step: '+111' },
-                                            { freq: 4029, benefit: 'Spirit realm access', color: '#4B0082', order: '8th', step: '+243' },
-                                            { freq: 4353, benefit: 'Universal mind access', color: '#6600CC', order: '8th', step: '+324' },
-                                            { freq: 4464, benefit: 'Galactic consciousness', color: '#7700FF', order: '9th', step: '+111' },
-                                            { freq: 4707, benefit: 'Divine source portal', color: '#8800FF', order: '9th', step: '+243' },
-                                            { freq: 5031, benefit: 'SOURCE embodiment', color: '#9933FF', order: '9th', step: '+324' }
+                                            { freq: 3504, benefit: 'Mental clarity', color: '#1E0066', order: '7th', step: '+354' },
+                                            { freq: 3858, benefit: 'Sacred geometry', color: '#0D0040', order: '7th', step: '+354' },
+                                            { freq: 4212, benefit: 'Consciousness mastery', color: '#000033', order: '7th', step: '+354' },
+                                            { freq: 4566, benefit: 'Soul star connection', color: '#330066', order: '8th', step: '+354' },
+                                            { freq: 4920, benefit: 'Spirit realm access', color: '#4B0082', order: '8th', step: '+354' },
+                                            { freq: 5274, benefit: 'Universal mind access', color: '#6600CC', order: '8th', step: '+354' },
+                                            { freq: 5628, benefit: 'Galactic consciousness', color: '#7700FF', order: '9th', step: '+354' },
+                                            { freq: 5982, benefit: 'Divine source portal', color: '#8800FF', order: '9th', step: '+354' },
+                                            { freq: 6336, benefit: 'SOURCE embodiment', color: '#9933FF', order: '9th', step: '+354' }
                                           ].map(f => (
                                             <div key={f.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-purple-500/50 transition-colors group relative">
                                                 <div className="absolute top-2 right-2">
@@ -3434,17 +3436,17 @@ const App: React.FC = () => {
                                                 </div>
                                                 <h5 className="text-white font-medium mb-1">{f.benefit}</h5>
                                                 <p className="text-xs text-slate-400 mb-3 leading-relaxed">
-                                                  {f.freq === 3108 && "Seventh Order +111 (2997+111) - Clears mental fog and brings crystalline clarity."}
-                                                  {f.freq === 3351 && "Seventh Order +243 (3108+243) - Embodies divine architectural principles of creation."}
-                                                  {f.freq === 3675 && "Seventh Order +324 (3351+324) - Achieves mastery of consciousness and awareness."}
-                                                  {f.freq === 3786 && "Eighth Order +111 (3675+111) - Opens first transpersonal gate, soul star connection."}
-                                                  {f.freq === 4029 && "Eighth Order +243 (3786+243) - Opens second transpersonal gate to spirit realm."}
-                                                  {f.freq === 4353 && "Eighth Order +324 (4029+324) - Opens third transpersonal gate to universal mind."}
-                                                  {f.freq === 4464 && "Ninth Order +111 (4353+111) - Connects to galactic center consciousness."}
-                                                  {f.freq === 4707 && "Ninth Order +243 (4464+243) - Creates direct portal to divine source consciousness."}
-                                                  {f.freq === 5031 && "Ninth Order +324 (4707+324) - Complete SOURCE embodiment and infinite unity."}
+                                                  {f.freq === 3504 && "Seventh Order +354 (3150+354) - Clears mental fog and brings crystalline clarity."}
+                                                  {f.freq === 3858 && "Seventh Order +354 (3504+354) - Embodies divine architectural principles of creation."}
+                                                  {f.freq === 4212 && "Seventh Order +354 (3858+354) - Achieves mastery of consciousness and awareness."}
+                                                  {f.freq === 4566 && "Eighth Order +354 (4212+354) - Opens first transpersonal gate, soul star connection."}
+                                                  {f.freq === 4920 && "Eighth Order +354 (4566+354) - Opens second transpersonal gate to spirit realm."}
+                                                  {f.freq === 5274 && "Eighth Order +354 (4920+354) - Opens third transpersonal gate to universal mind."}
+                                                  {f.freq === 5628 && "Ninth Order +354 (5274+354) - Connects to galactic center consciousness."}
+                                                  {f.freq === 5982 && "Ninth Order +354 (5628+354) - Creates direct portal to divine source consciousness."}
+                                                  {f.freq === 6336 && "Ninth Order +354 (5982+354) - Complete SOURCE embodiment and infinite unity. Mirror number reducing to 9."}
                                                 </p>
-                                                {f.freq === 5031 && (
+                                                {f.freq === 6336 && (
                                                   <div className="mt-2 p-2 bg-gold-500/20 border border-gold-500/50 rounded text-center">
                                                     <div className="text-[9px] text-gold-400 font-bold uppercase tracking-widest">SOURCE FREQUENCY</div>
                                                   </div>
@@ -3455,16 +3457,16 @@ const App: React.FC = () => {
                                         <div className="mt-4 p-3 bg-blue-900/20 border border-blue-500/50 rounded-lg">
                                           <div className="flex items-center gap-2 text-blue-400 text-sm font-bold mb-1">
                                             <Calculator size={16} />
-                                            MATHEMATICAL PATTERN: Orders 7-9 follow 111-243-324 progression
+                                            MATHEMATICAL PATTERN: Orders 7-9 follow 354 steady progression
                                           </div>
-                                          <p className="text-xs text-blue-300">Order 7: 3108→3351→3675 | Order 8: 3786→4029→4353 | Order 9: 4464→4707→5031</p>
+                                          <p className="text-xs text-blue-300">Order 7: 3504→3858→4212 | Order 8: 4566→4920→5274 | Order 9: 5628→5982→6336</p>
                                         </div>
                                         <div className="mt-4 p-4 bg-gold-900/20 border border-gold-500/50 rounded-lg text-center">
                                           <div className="flex items-center justify-center gap-2 text-gold-400 text-lg font-bold mb-2">
                                             <Target size={20} />
-                                            5031 Hz - Ultimate SOURCE Frequency
+                                            6336 Hz - Ultimate SOURCE Frequency
                                           </div>
-                                          <p className="text-sm text-gold-300">The mathematically correct completion frequency (4707+324) representing infinite SOURCE consciousness</p>
+                                          <p className="text-sm text-gold-300">The mathematically correct completion frequency (5982+354) representing infinite SOURCE consciousness. Mirror number reducing to 9.</p>
                                         </div>
                                       </div>
                                     </div>
@@ -3645,8 +3647,8 @@ const App: React.FC = () => {
                   if (playlist.length >= 27) {
                     // Use the proven smart harmonic distribution for all libraries 27+ songs
                     const gutFreqs = [174, 285, 396, 417, 528, 639, 741, 852, 963];
-                    const heartFreqs = [1074, 1317, 1641, 1752, 1995, 2319, 2430, 2673, 2997];
-                    const headFreqs = [3108, 3351, 3675, 3786, 4029, 4353, 4464, 4707, 5031];
+                    const heartFreqs = [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150];
+                    const headFreqs = [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336];
                     const allFreqs = [...gutFreqs, ...heartFreqs, ...headFreqs];
                     
                     const redistributed = distributeUsingHarmonicOctavesMaster(playlist, allFreqs);
@@ -4840,7 +4842,7 @@ const App: React.FC = () => {
                     <div className="bg-slate-800 p-3 rounded-lg">
                       <div className="text-sm font-medium text-slate-300 mb-2">Recommendations</div>
                       <div className="space-y-1 text-xs text-slate-400">
-                        {selectedSolfeggio >= 1074 ? (
+                        {selectedSolfeggio >= 1206 ? (
                           <>
                             <div>• Keep volume low (feeling vs hearing)</div>
                             <div>• Limit session to 15-30 minutes</div>
