@@ -2244,7 +2244,7 @@ const App: React.FC = () => {
   };
 
   const generateUltimateAlignmentPlaylist = () => {
-    // Get all solfeggio frequencies in order from First through Sixth order
+    // Get all solfeggio frequencies in order from all Nine orders (1-9)
     const ultimateFrequencyOrder = SOLFEGGIO_INFO.map(info => info.freq);
     const ultimatePlaylist: Song[] = [];
     const usedIds = new Set<string>();
@@ -2989,7 +2989,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.5</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.6</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
