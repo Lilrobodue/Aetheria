@@ -626,36 +626,58 @@ const distributeUsingHarmonicOctaves = (songs: Song[], targetFrequencies: number
             return a.song.name.localeCompare(b.song.name);
         });
         
-        // Assign in harmonic cycles - songs naturally group around their best frequencies
-        for (let i = 0; i < sortedSongs.length; i++) {
+        // PHASE 1: Ensure every frequency gets at least one song (guaranteed coverage)
+        const frequencyCoverage = new Set<number>();
+        const reservedAssignments: typeof assignments = [];
+        
+        // First pass: assign one song to each frequency
+        for (let freqIndex = 0; freqIndex < targetFrequencies.length && freqIndex < sortedSongs.length; freqIndex++) {
+            const freq = targetFrequencies[freqIndex];
+            const songData = sortedSongs[freqIndex];
+            
+            reservedAssignments.push({
+                song: songData.song,
+                frequency: freq,
+                detectedFreq: songData.detectedFreq,
+                deviation: songData.compatibilityScores[freq]
+            });
+            
+            frequencyCoverage.add(freq);
+            console.log(`🎯 GUARANTEED coverage: "${songData.song.name}" → ${freq}Hz`);
+        }
+        
+        // PHASE 2: Distribute remaining songs with harmonic optimization
+        for (let i = targetFrequencies.length; i < sortedSongs.length; i++) {
             const songData = sortedSongs[i];
             
-            // Find the best available frequency for this song
-            let bestFreq = targetFrequencies[i % targetFrequencies.length];
+            // Find the best frequency for this song, considering current assignments
+            let bestFreq = targetFrequencies[0];
             let bestScore = songData.compatibilityScores[bestFreq];
             
-            // Try to find a harmonically better match if available
             for (const freq of targetFrequencies) {
                 const score = songData.compatibilityScores[freq];
-                const freqAssignmentCount = assignments.filter(a => a.frequency === freq).length;
+                const currentAssignments = reservedAssignments.filter(a => a.frequency === freq).length;
                 const maxAssignments = Math.ceil(sortedSongs.length / targetFrequencies.length);
                 
-                // Prefer harmonically better matches that aren't oversaturated
-                if (score < bestScore && freqAssignmentCount < maxAssignments) {
+                // Prefer better harmonic matches that aren't oversaturated
+                if (score < bestScore && currentAssignments < maxAssignments) {
                     bestFreq = freq;
                     bestScore = score;
                 }
             }
             
-            assignments.push({
+            reservedAssignments.push({
                 song: songData.song,
                 frequency: bestFreq,
                 detectedFreq: songData.detectedFreq,
                 deviation: bestScore
             });
             
-            console.log(`Harmonic assignment: "${songData.song.name}" (${songData.detectedFreq.toFixed(1)}Hz → ${songData.bestMatch.toFixed(1)}Hz harmonic) → ${bestFreq}Hz (deviation: ${bestScore.toFixed(1)})`);
+            console.log(`🎵 Optimized assignment: "${songData.song.name}" → ${bestFreq}Hz`);
         }
+        
+        // Use the reserved assignments
+        assignments.push(...reservedAssignments);
     }
     
     // Step 3: Create the final result array maintaining original order
@@ -713,8 +735,16 @@ const distributeUsingHarmonicOctavesMaster = (songs: Song[], targetFrequencies: 
         if (distribution[freq] > 0) {
             const assignedSongs = result.filter(s => s.closestSolfeggio === freq);
             console.log(`  ${freq}Hz: ${assignedSongs.map(s => s.name).join(', ')}`);
+        } else if (freq === 4566) {
+            console.warn(`🚨 4566 Hz has NO assignments! This is the missing frequency.`);
         }
     });
+    
+    // Additional debug for missing frequencies
+    const missingFrequencies = targetFrequencies.filter(freq => distribution[freq] === 0);
+    if (missingFrequencies.length > 0) {
+        console.warn(`⚠️ MISSING FREQUENCIES:`, missingFrequencies);
+    }
     
     console.log('✅ Songs distributed by harmonic affinity - consistent results guaranteed!');
     
@@ -3660,7 +3690,25 @@ const App: React.FC = () => {
                     const heartCount = redistributed.filter(s => heartFreqs.includes((s.closestSolfeggio as number) || 0)).length;
                     const headCount = redistributed.filter(s => headFreqs.includes((s.closestSolfeggio as number) || 0)).length;
                     
-                    setAnalysisNotification(`Harmonic Distribution Complete: ${redistributed.length} songs distributed across all 27 frequencies. ${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD. Consistent harmonic alignment achieved!`);
+                    // Debug: Check specifically for 4566 Hz
+                    const freq4566Count = redistributed.filter(s => s.closestSolfeggio === 4566).length;
+                    console.log(`🔍 DEBUG: 4566 Hz assignments: ${freq4566Count}`);
+                    
+                    // Log all frequency assignments for debugging
+                    const frequencyDistribution: { [key: number]: number } = {};
+                    allFreqs.forEach(freq => frequencyDistribution[freq] = 0);
+                    redistributed.forEach(song => {
+                      if (song.closestSolfeggio) {
+                        frequencyDistribution[song.closestSolfeggio] = (frequencyDistribution[song.closestSolfeggio] || 0) + 1;
+                      }
+                    });
+                    
+                    const missingFreqs = allFreqs.filter(freq => frequencyDistribution[freq] === 0);
+                    if (missingFreqs.length > 0) {
+                      console.warn(`⚠️ Missing frequency assignments:`, missingFreqs);
+                    }
+                    
+                    setAnalysisNotification(`Harmonic Distribution Complete: ${redistributed.length} songs distributed across all 27 frequencies. ${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD. ${missingFreqs.length > 0 ? `Missing: ${missingFreqs.join(', ')}Hz` : 'All frequencies covered!'}`);
                     setTimeout(() => setAnalysisNotification(null), 7000);
                   } else {
                     alert(`Harmonic Distribution requires at least 27 tracks for optimal frequency coverage. Current library has ${playlist.length} tracks.`);
