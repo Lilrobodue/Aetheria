@@ -2861,7 +2861,9 @@ const App: React.FC = () => {
         mainAudioRef.current.crossOrigin = 'anonymous';
         mainAudioRef.current.preload = 'auto';
         
-        // Don't set volume on the element - all volume control through Web Audio
+        // CRITICAL: Mute the audio element itself to get pure Web Audio output
+        mainAudioRef.current.muted = true;
+        mainAudioRef.current.volume = 0; // Belt and suspenders
         
         // Set up audio element events
         mainAudioRef.current.addEventListener('ended', () => {
@@ -2885,6 +2887,8 @@ const App: React.FC = () => {
       mainAudioRef.current.src = audioUrl;
 
       // Connect audio element to Web Audio API
+      // IMPORTANT: The audio element is muted and only serves as a media source
+      // All sound output comes through the Web Audio processing chain
       if (!mediaSourceRef.current && audioCtxRef.current) {
         mediaSourceRef.current = audioCtxRef.current.createMediaElementSource(mainAudioRef.current);
         mediaSourceRef.current.connect(gainNodeRef.current!);
@@ -2937,7 +2941,7 @@ const App: React.FC = () => {
       // Play the audio element (this will make Chrome show the speaker icon)
       mainAudioRef.current.playbackRate = PITCH_SHIFT_FACTOR;
       // Set a conservative volume on the element itself as additional safety
-      mainAudioRef.current.volume = 0.7;
+      // Don't set volume on the element - we want pure Web Audio output only
       await mainAudioRef.current.play();
       
       setIsPlaying(true);
@@ -3340,7 +3344,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
