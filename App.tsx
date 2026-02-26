@@ -1255,56 +1255,36 @@ const App: React.FC = () => {
         // Register with stability manager
         stabilityManager.registerAudioContext(audioCtxRef.current);
         
-        // Create a multi-stage audio processing chain to prevent distortion
+        // SIMPLIFIED AUDIO CHAIN FOR PURE SOUND
+        // Create minimal processing chain to eliminate distortion
+        
+        // Single, gentle compressor for dynamic control
         compressorRef.current = audioCtxRef.current.createDynamicsCompressor();
-        // More aggressive compression for sustained high notes
-        compressorRef.current.threshold.value = -18; // Much lower threshold
-        compressorRef.current.knee.value = 10.0; // Softer knee for gradual compression
-        compressorRef.current.ratio.value = 12.0; // Higher ratio for more control
-        compressorRef.current.attack.value = 0.001; // Faster attack for sustained notes
-        compressorRef.current.release.value = 0.25; // Slower release to handle sustained notes
+        compressorRef.current.threshold.value = -24; // Higher threshold, less compression
+        compressorRef.current.knee.value = 30.0; // Very soft knee for transparent compression  
+        compressorRef.current.ratio.value = 3.0; // Gentle 3:1 ratio
+        compressorRef.current.attack.value = 0.003; // Slightly slower attack
+        compressorRef.current.release.value = 0.1; // Moderate release
         
-        // Add multi-stage filtering to prevent high-frequency distortion
-        // First: Low-pass filter to remove ultra-high frequencies
-        const lowPassFilter = audioCtxRef.current.createBiquadFilter();
-        lowPassFilter.type = 'lowpass';
-        lowPassFilter.frequency.value = 16000; // Cut off above 16kHz
-        lowPassFilter.Q.value = 0.7; // Gentle slope
-        
-        // Second: High-shelf filter to tame high frequencies
+        // Single gentle high-frequency shelf to prevent harshness
         const highShelfFilter = audioCtxRef.current.createBiquadFilter();
         highShelfFilter.type = 'highshelf';
-        highShelfFilter.frequency.value = 4000; // Start reducing at 4kHz (much lower threshold)
-        highShelfFilter.gain.value = -9; // Very aggressive 9dB reduction
+        highShelfFilter.frequency.value = 10000; // Only affect very high frequencies
+        highShelfFilter.gain.value = -3; // Gentle 3dB reduction
         
-        // Third: Notch filter for problematic frequencies
-        const notchFilter = audioCtxRef.current.createBiquadFilter();
-        notchFilter.type = 'peaking';
-        notchFilter.frequency.value = 3500; // Common distortion frequency
-        notchFilter.Q.value = 2.0; // Narrow band
-        notchFilter.gain.value = -3; // Reduce by 3dB
-        
-        // Fourth: De-esser for sibilant frequencies (5-8kHz range)
-        const deEsserFilter = audioCtxRef.current.createBiquadFilter();
-        deEsserFilter.type = 'peaking';
-        deEsserFilter.frequency.value = 7000; // Target sibilance
-        deEsserFilter.Q.value = 1.5; // Moderate width
-        deEsserFilter.gain.value = -6; // Reduce by 6dB (more aggressive)
-        
-        // Fifth: Additional filter for sustained vocal frequencies
-        const vocalFilter = audioCtxRef.current.createBiquadFilter();
-        vocalFilter.type = 'peaking';
-        vocalFilter.frequency.value = 2500; // Common sustained vocal frequency
-        vocalFilter.Q.value = 0.8; // Wide band
-        vocalFilter.gain.value = -4; // Reduce by 4dB
-        
-        // Add a final limiter to catch any remaining peaks
+        // Safety limiter only - should rarely engage
         const limiter = audioCtxRef.current.createDynamicsCompressor();
-        limiter.threshold.value = -1; // Catch peaks at -1dB
+        limiter.threshold.value = -0.5; // Only catch true peaks
         limiter.knee.value = 0; // Hard knee for brick-wall limiting
         limiter.ratio.value = 20.0; // High ratio for limiting
         limiter.attack.value = 0.0; // Instant attack
-        limiter.release.value = 0.05; // Fast release
+        limiter.release.value = 0.01; // Very fast release
+        
+        // Create placeholder filters (disconnected) for compatibility
+        const lowPassFilter = audioCtxRef.current.createBiquadFilter();
+        const notchFilter = audioCtxRef.current.createBiquadFilter();
+        const deEsserFilter = audioCtxRef.current.createBiquadFilter();
+        const vocalFilter = audioCtxRef.current.createBiquadFilter();
         
         // Store references for cleanup
         (audioCtxRef.current as any).lowPassFilter = lowPassFilter;
@@ -1314,19 +1294,23 @@ const App: React.FC = () => {
         (audioCtxRef.current as any).limiter = limiter;
         
         gainNodeRef.current = audioCtxRef.current.createGain();
-        // Ultra-conservative gain to prevent any distortion on sustained notes
-        gainNodeRef.current.gain.value = 0.18; // 18% initial gain (reduced from 25%)
+        // Normal gain for dry signal
+        gainNodeRef.current.gain.value = 0.7; // 70% gain - standard level
         
-        // Enhanced audio chain with multi-stage filtering
-        // source -> gain -> compressor -> lowPass -> notch -> vocal -> deEsser -> highShelf -> limiter -> destination
-        gainNodeRef.current.connect(compressorRef.current);
-        compressorRef.current.connect(lowPassFilter);
-        lowPassFilter.connect(notchFilter);
-        notchFilter.connect(vocalFilter);
-        vocalFilter.connect(deEsserFilter);
-        deEsserFilter.connect(highShelfFilter);
-        highShelfFilter.connect(limiter);
-        limiter.connect(audioCtxRef.current.destination);
+        // COMPLETELY DRY SIGNAL PATH FOR TESTING
+        // Option 1: Direct connection (bypass everything)
+        // mediaSourceRef will connect directly to destination when created
+        
+        // Option 2: Only gain control (comment out Option 1 and uncomment below)
+        gainNodeRef.current.connect(audioCtxRef.current.destination);
+        
+        // Store nodes but don't connect them yet
+        // gainNodeRef.current.connect(limiter);
+        // limiter.connect(audioCtxRef.current.destination);
+        
+        // Keep compressor connected to nothing for now (we can re-enable later)
+        // compressorRef.current.connect(highShelfFilter);
+        // highShelfFilter.connect(limiter);
 
         // Create separate gain for visualizer to boost signal without affecting audio
         visualizerGainRef.current = audioCtxRef.current.createGain();
@@ -2861,9 +2845,8 @@ const App: React.FC = () => {
         mainAudioRef.current.crossOrigin = 'anonymous';
         mainAudioRef.current.preload = 'auto';
         
-        // CRITICAL: Mute the audio element itself to get pure Web Audio output
-        mainAudioRef.current.muted = true;
-        mainAudioRef.current.volume = 0; // Belt and suspenders
+        // DON'T mute the element - createMediaElementSource will redirect all audio through Web Audio
+        // The element needs to play normally to feed the Web Audio graph
         
         // Set up audio element events
         mainAudioRef.current.addEventListener('ended', () => {
@@ -2939,7 +2922,8 @@ const App: React.FC = () => {
       setIsAnalyzing(false);
 
       // Play the audio element (this will make Chrome show the speaker icon)
-      mainAudioRef.current.playbackRate = PITCH_SHIFT_FACTOR;
+      // TEST: Temporarily disable pitch shifting to isolate distortion source
+      mainAudioRef.current.playbackRate = 1.0; // was PITCH_SHIFT_FACTOR (0.981818)
       // Set a conservative volume on the element itself as additional safety
       // Don't set volume on the element - we want pure Web Audio output only
       await mainAudioRef.current.play();
