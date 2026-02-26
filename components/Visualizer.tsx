@@ -625,26 +625,38 @@ const get111PatternPoints = (frequency: number, count: number, scale: number): P
     return points;
 };
 
-// Tree of Life Data
+// Tree of Life Data - Enhanced 12-Node Configuration for Complete Energy Circuit
 const getTreeOfLife = (scale: number = 1): { nodes: TreeNode[], edges: [number, number][] } => {
     const rawNodes: TreeNode[] = [
-        { x: 0 * scale, y: -4.5 * scale, z: 0 * scale, name: 'Malkuth', colorHex: '#FF0000', freqRange: [20, 80], currentEnergy: 0 }, 
-        { x: 0 * scale, y: -1.5 * scale, z: 0 * scale, name: 'Yesod', colorHex: '#FF8C00', freqRange: [80, 200], currentEnergy: 0 },   
-        { x: 0 * scale, y: 1.0 * scale, z: 0 * scale, name: 'Tiferet', colorHex: '#008000', freqRange: [200, 500], currentEnergy: 0 }, 
-        { x: 0 * scale, y: 3.5 * scale, z: 0 * scale, name: 'Daat', colorHex: '#4B0082', freqRange: [2000, 4000], currentEnergy: 0 },    
-        { x: 0 * scale, y: 5.5 * scale, z: 0 * scale, name: 'Keter', colorHex: '#EE82EE', freqRange: [8000, 20000], currentEnergy: 0 }, 
-        { x: 2.0 * scale, y: -2.5 * scale, z: 0 * scale, name: 'Netzach', colorHex: '#FFD700', freqRange: [150, 300], currentEnergy: 0 }, 
-        { x: 2.0 * scale, y: 0.0 * scale, z: 0 * scale, name: 'Chesed', colorHex: '#00BFFF', freqRange: [500, 1000], currentEnergy: 0 },  
-        { x: 2.0 * scale, y: 4.0 * scale, z: 0 * scale, name: 'Chokhmah', colorHex: '#4B0082', freqRange: [4000, 8000], currentEnergy: 0 }, 
-        { x: -2.0 * scale, y: -2.5 * scale, z: 0 * scale, name: 'Hod', colorHex: '#FFD700', freqRange: [150, 300], currentEnergy: 0 },
-        { x: -2.0 * scale, y: 0.0 * scale, z: 0 * scale, name: 'Gevurah', colorHex: '#00BFFF', freqRange: [500, 1000], currentEnergy: 0 },
-        { x: -2.0 * scale, y: 4.0 * scale, z: 0 * scale, name: 'Binah', colorHex: '#4B0082', freqRange: [2000, 4000], currentEnergy: 0 },
+        // Traditional 10 Sephirot - Recentered for 12-node symmetry
+        { x: 0 * scale, y: -3.5 * scale, z: 0 * scale, name: 'Malkuth', colorHex: '#FF0000', freqRange: [20, 80], currentEnergy: 0 }, 
+        { x: 0 * scale, y: -0.5 * scale, z: 0 * scale, name: 'Yesod', colorHex: '#FF8C00', freqRange: [80, 200], currentEnergy: 0 },   
+        { x: 0 * scale, y: 2.0 * scale, z: 0 * scale, name: 'Tiferet', colorHex: '#008000', freqRange: [200, 500], currentEnergy: 0 }, 
+        { x: 0 * scale, y: 4.5 * scale, z: 0 * scale, name: 'Daat', colorHex: '#4B0082', freqRange: [2000, 4000], currentEnergy: 0 },    
+        { x: 0 * scale, y: 6.5 * scale, z: 0 * scale, name: 'Keter', colorHex: '#EE82EE', freqRange: [8000, 20000], currentEnergy: 0 }, 
+        { x: 2.0 * scale, y: -1.5 * scale, z: 0 * scale, name: 'Netzach', colorHex: '#FFD700', freqRange: [150, 300], currentEnergy: 0 }, 
+        { x: 2.0 * scale, y: 1.0 * scale, z: 0 * scale, name: 'Chesed', colorHex: '#00BFFF', freqRange: [500, 1000], currentEnergy: 0 },  
+        { x: 2.0 * scale, y: 5.0 * scale, z: 0 * scale, name: 'Chokhmah', colorHex: '#4B0082', freqRange: [4000, 8000], currentEnergy: 0 }, 
+        { x: -2.0 * scale, y: -1.5 * scale, z: 0 * scale, name: 'Hod', colorHex: '#FFD700', freqRange: [150, 300], currentEnergy: 0 },
+        { x: -2.0 * scale, y: 1.0 * scale, z: 0 * scale, name: 'Gevurah', colorHex: '#00BFFF', freqRange: [500, 1000], currentEnergy: 0 },
+        { x: -2.0 * scale, y: 5.0 * scale, z: 0 * scale, name: 'Binah', colorHex: '#4B0082', freqRange: [2000, 4000], currentEnergy: 0 },
+        
+        // Additional 12th Node - SOURCE Connection (completing the energy circuit) - Perfectly positioned
+        { x: 0 * scale, y: 8.0 * scale, z: 0 * scale, name: 'Ain Soph', colorHex: '#FFFFFF', freqRange: [12000, 22000], currentEnergy: 0 }
     ];
 
+    // Enhanced edge connections for complete 12-node energy circuit
     const edges: [number, number][] = [
+        // Original Tree connections
         [0, 1], [1, 5], [1, 8], [1, 2], [8, 5], [8, 2], [8, 9], [5, 2], [5, 6], 
         [2, 9], [2, 6], [2, 3], [9, 6], [9, 3], [9, 10], [6, 3], [6, 7], 
-        [10, 7], [10, 3], [10, 4], [7, 3], [7, 4], [3, 4]
+        [10, 7], [10, 3], [10, 4], [7, 3], [7, 4], [3, 4],
+        
+        // Additional SOURCE connections to complete the circuit
+        [4, 11], // Keter to Ain Soph
+        [7, 11], // Chokhmah to Ain Soph  
+        [10, 11], // Binah to Ain Soph
+        [3, 11]   // Daat to Ain Soph (hidden bridge completion)
     ];
 
     return { nodes: rawNodes, edges };
@@ -976,12 +988,16 @@ const Visualizer: React.FC<VisualizerProps> = ({
       // --- LAYER 3: TREE OF LIFE (3D Sephirot + High-Vis SUPERCHARGED Flow) ---
       if (settings.showTreeOfLife) {
         ctx.save();
-        ctx.translate(cx, cy);
-        const availableHeight = h - 180;
-        const scaleUnit = Math.min(50, availableHeight / 11); 
-        const breathing = Math.sin(timeRef.current * 0.5) * 5;
+        const availableHeight = h - 160; // Reduced margin for better fit
+        const treeHeight = 11.5; // Total height span from Malkuth (-3.5) to Ain Soph (8.0) 
+        const scaleUnit = Math.min(35, availableHeight / treeHeight); // Proper scaling for 12 nodes
+        const breathing = Math.sin(timeRef.current * 0.5) * 3; // Reduced breathing for better visibility
         
-        // Use addtive blending for energy feel
+        // Adjust tree position - move center down to ensure top node is visible
+        const treeOffsetY = cy + (scaleUnit * 1.5); // Move tree center down by 1.5 scale units
+        ctx.translate(cx, treeOffsetY);
+        
+        // Use additive blending for energy feel
         ctx.globalCompositeOperation = 'lighter';
 
         // 1. Edges with Supercharged Energy Flow

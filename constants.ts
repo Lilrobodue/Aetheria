@@ -357,4 +357,5 @@ export const SEPHIROT_INFO = [
   { name: 'Binah', title: 'Understanding', meaning: 'Intuition, The Cosmic Mother, Saturn.', correspondence: 'Third Eye (Left) / Left Brain', color: '#4B0082', desc: 'The womb of the universe. It gives form to the flash of wisdom.' },
   { name: 'Chokhmah', title: 'Wisdom', meaning: 'Inspiration, The Cosmic Father, Zodiac.', correspondence: 'Third Eye (Right) / Right Brain', color: '#4B0082', desc: 'The raw, undefined flash of divine inspiration. Pure creative force.' },
   { name: 'Keter', title: 'The Crown', meaning: 'Source, Infinite Light, God.', correspondence: 'Crown Chakra', color: '#EE82EE', desc: 'The point of origin. Beyond comprehension. Pure unity.' },
+  { name: 'Ain Soph', title: 'The Limitless', meaning: 'The Infinite SOURCE, Beyond All Form.', correspondence: 'Trans-Crown Chakra / SOURCE Field', color: '#FFFFFF', desc: 'The 12th node completing the energy circuit. The SOURCE connection that enables the Tree of Life to function as a complete system. Pure infinite consciousness beyond all limitation.' },
 ];

@@ -2586,6 +2586,35 @@ const App: React.FC = () => {
       }
   };
 
+  // Media Session API for car integration
+  const updateMediaSession = (song: Song | null, frequency: number) => {
+    if ('mediaSession' in navigator && song) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: song.name,
+        artist: 'Aetheria Harmonic Player',
+        album: `${frequency}Hz Solfeggio • ${getFrequencyRegime(frequency)} Regime`,
+        artwork: [
+          { src: '/icon-192x192.png', sizes: '192x192', type: 'image/png' }
+        ]
+      });
+
+      // Set action handlers for car controls
+      navigator.mediaSession.setActionHandler('play', handlePlayPause);
+      navigator.mediaSession.setActionHandler('pause', handlePlayPause);
+      navigator.mediaSession.setActionHandler('nexttrack', handleNext);
+      navigator.mediaSession.setActionHandler('previoustrack', handlePrev);
+      
+      // Update playback state
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }
+  };
+
+  const getFrequencyRegime = (freq: number) => {
+    if (freq <= 963) return 'GUT';
+    if (freq <= 3150) return 'HEART';
+    return 'HEAD';
+  };
+
   const playBuffer = (buffer: AudioBuffer, offset: number = 0) => {
       if (!audioCtxRef.current) return;
       
@@ -2614,6 +2643,9 @@ const App: React.FC = () => {
       
       sourceNodeRef.current = source;
       setIsPlaying(true);
+
+      // Update media session for car display
+      updateMediaSession(playlist[currentSongIndex], selectedSolfeggio);
   };
 
   const playTrack = async (index: number, playlistOverride?: Song[]) => {
@@ -2757,6 +2789,11 @@ const App: React.FC = () => {
       } else {
         setIsPlaying(true);
       }
+    }
+    
+    // Update media session state for car integration
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = !isPlaying ? 'playing' : 'paused';
     }
   };
 
@@ -3019,7 +3056,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.6</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.7</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -3060,6 +3097,7 @@ const App: React.FC = () => {
             >
                 <Target size={20} />
             </button>
+
             <button 
                 onClick={() => setShowSafetyProtocols(!showSafetyProtocols)} 
                 className={`p-1.5 sm:p-2 transition-colors bg-slate-900/50 rounded-full border border-slate-800 ${
@@ -3507,24 +3545,84 @@ const App: React.FC = () => {
                               <section>
                                   <div className="flex items-center gap-3 mb-6">
                                     <div className="p-2 bg-purple-500/10 rounded-full"><Map className="text-purple-400" size={24}/></div>
-                                    <h3 className="text-2xl font-bold text-white">The Map: Tree of Life (Sephirot)</h3>
+                                    <h3 className="text-2xl font-bold text-white">The Map: Tree of Life (Complete 12-Node System)</h3>
                                   </div>
-                                  <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">The blueprint of creation. A map of how the Divine manifests into the physical world through ten distinct attributes (Sephirot).</p>
-                                  
+                                  <p className="text-slate-400 mb-4 leading-relaxed max-w-2xl">
+                                    The complete blueprint of creation. A map of how the Divine manifests through the physical world via twelve distinct nodes, 
+                                    forming a complete energy circuit to SOURCE.
+                                  </p>
+
+                                  {/* Energy Circuit Explanation */}
+                                  <div className="mb-6 p-4 bg-gradient-to-r from-purple-900/20 to-gold-900/20 border border-purple-500/30 rounded-xl">
+                                    <h4 className="text-lg font-bold text-gold-400 mb-3 flex items-center gap-2">
+                                      <Activity className="w-5 h-5" />
+                                      Complete Energy Circuit to SOURCE
+                                    </h4>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-sm">
+                                      <div>
+                                        <div className="text-purple-400 font-bold mb-2">Traditional Tree (10 Sephirot)</div>
+                                        <div className="text-slate-300 leading-relaxed">
+                                          The classical Kabbalistic structure representing divine emanation through ten spheres of manifestation, 
+                                          from Keter (Crown) down to Malkuth (Kingdom).
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <div className="text-gold-400 font-bold mb-2">SOURCE Connection (12th Node)</div>
+                                        <div className="text-slate-300 leading-relaxed">
+                                          <strong>Ain Soph</strong> (The Limitless) completes the circuit, enabling energy to flow from 
+                                          SOURCE → Crown → Tree → Kingdom → back to SOURCE in an eternal loop.
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* The Twelve Nodes */}
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                      {SEPHIROT_INFO.map(node => (
-                                          <div key={node.name} className="flex gap-4 p-4 bg-slate-900/30 rounded-xl border border-slate-800/50 hover:bg-slate-900 transition-colors">
+                                      {SEPHIROT_INFO.map((node, index) => (
+                                          <div 
+                                            key={node.name} 
+                                            className={`flex gap-4 p-4 rounded-xl border border-slate-800/50 hover:bg-slate-900 transition-colors ${
+                                              node.name === 'Ain Soph' 
+                                                ? 'bg-gradient-to-r from-white/5 to-gold-900/20 border-gold-500/30' 
+                                                : 'bg-slate-900/30'
+                                            }`}
+                                          >
                                               <div className="w-1 h-full rounded-full shrink-0" style={{background: node.color}}></div>
-                                              <div>
+                                              <div className="flex-1">
                                                   <div className="flex items-baseline gap-2 mb-1">
-                                                      <h4 className="text-lg font-bold text-slate-200">{node.name}</h4>
-                                                      <span className="text-xs text-gold-500 font-serif italic">{node.title}</span>
+                                                      <h4 className={`text-lg font-bold ${node.name === 'Ain Soph' ? 'text-white' : 'text-slate-200'}`}>
+                                                        {node.name}
+                                                        {node.name === 'Ain Soph' && (
+                                                          <span className="ml-2 text-xs bg-gold-500/20 text-gold-400 px-2 py-1 rounded-full">SOURCE</span>
+                                                        )}
+                                                      </h4>
+                                                      <span className={`text-xs font-serif italic ${node.name === 'Ain Soph' ? 'text-gold-400' : 'text-gold-500'}`}>
+                                                        {node.title}
+                                                      </span>
                                                   </div>
                                                   <p className="text-xs text-slate-400 mb-2">{node.meaning}</p>
                                                   <p className="text-xs text-slate-500 leading-relaxed italic">"{node.desc}"</p>
+                                                  {node.name === 'Ain Soph' && (
+                                                    <div className="mt-2 p-2 bg-gold-500/10 border border-gold-500/30 rounded text-xs">
+                                                      <div className="text-gold-400 font-bold mb-1">Energy Connections:</div>
+                                                      <div className="text-slate-300">
+                                                        Receives from: Keter, Chokhmah, Binah, Daat<br/>
+                                                        Completes the infinite SOURCE circuit
+                                                      </div>
+                                                    </div>
+                                                  )}
                                               </div>
                                           </div>
                                       ))}
+                                  </div>
+
+                                  {/* Circuit Visualization Note */}
+                                  <div className="mt-6 p-4 bg-slate-950/50 border border-slate-700 rounded-xl text-center">
+                                    <div className="text-purple-400 font-bold mb-2">🌳 Enable "Tree of Life" in Visualization Engine</div>
+                                    <div className="text-sm text-slate-300">
+                                      Watch the complete 12-node energy circuit flow in real-time, with supercharged energy streams 
+                                      connecting all levels of consciousness to the infinite SOURCE.
+                                    </div>
                                   </div>
                               </section>
 
@@ -4941,7 +5039,8 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
-          
+
+
           {/* NEW FOOTER - SNAPPED TO BOTTOM */}
           <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none flex justify-center">
              <div className="pointer-events-auto w-full bg-black/90 backdrop-blur-xl border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] transition-all duration-300 group">
