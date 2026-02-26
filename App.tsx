@@ -1103,7 +1103,8 @@ const App: React.FC = () => {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const destNodeRef = useRef<MediaStreamAudioDestinationNode | null>(null);
-  const backgroundAudioRef = useRef<HTMLAudioElement | null>(null);
+  const mainAudioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   const stateRef = useRef({
     playlist,
@@ -1160,12 +1161,17 @@ const App: React.FC = () => {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      // Clean up audio resources
-      if (sourceNodeRef.current) {
-        try {
-          sourceNodeRef.current.stop();
-          sourceNodeRef.current.disconnect();
-        } catch (e) {}
+      // Clean up audio element
+      if (mainAudioRef.current) {
+        mainAudioRef.current.pause();
+        mainAudioRef.current.src = '';
+        mainAudioRef.current = null;
+      }
+      
+      // Clean up media source
+      if (mediaSourceRef.current) {
+        mediaSourceRef.current.disconnect();
+        mediaSourceRef.current = null;
       }
       
       // Stop all oscillators
@@ -1483,123 +1489,20 @@ const App: React.FC = () => {
     }
   }, [isPlaying]);
 
-  // Enable media session on mobile with background audio element
-  const enableMobileMediaSession = useCallback(async () => {
-    // Try to get the audio element from the DOM first
-    let audio = document.getElementById('media-session-audio') as HTMLAudioElement;
-    
-    if (!audio && !backgroundAudioRef.current) {
-      // Create if it doesn't exist
-      audio = document.createElement('audio');
-      audio.id = 'media-session-audio';
-      audio.style.display = 'none';
-      document.body.appendChild(audio);
-    }
-    
-    if (audio && !backgroundAudioRef.current) {
-      // Configure the audio element
-      audio.src = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn9rrvmMhBSuBzvLZiTQIG2m98OScTgwOUarm7blmFgU7k9n1unEiBC13yO/eizEIHWq+8+OWTA';
-      audio.loop = true;
-      audio.volume = 0.001; // Very quiet but not muted
-      audio.muted = false; // Ensure not muted
-      audio.autoplay = true; // Try autoplay
-      (audio as any).playsInline = true; // Important for iOS
-      
-      backgroundAudioRef.current = audio;
-      
-      // iOS specific: need to load before playing
-      if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
-        audio.load();
-      }
-    }
-    
-    const audioEl = backgroundAudioRef.current;
-    if (!audioEl) return;
-    
-    // Play/pause based on state
-    if (isPlaying) {
-      try {
-        // For iOS, we need to ensure we're in a user gesture context
-        const playPromise = audioEl.play();
-        if (playPromise !== undefined) {
-          await playPromise;
-          console.log('Background audio started for media session');
-          
-          // Force media session update
-          if ('mediaSession' in navigator && navigator.mediaSession.metadata) {
-            // Re-set metadata to ensure it's active
-            const currentMetadata = navigator.mediaSession.metadata;
-            navigator.mediaSession.metadata = new MediaMetadata({
-              title: currentMetadata.title,
-              artist: currentMetadata.artist,
-              album: currentMetadata.album,
-              artwork: [...currentMetadata.artwork]
-            });
-          }
-        }
-      } catch (err) {
-        console.log('Media session audio play failed:', err);
-        
-        // Setup interaction handler for iOS/mobile
-        const handleInteraction = async () => {
-          try {
-            if (backgroundAudioRef.current && isPlaying) {
-              await backgroundAudioRef.current.play();
-              console.log('Background audio started after user interaction');
-            }
-          } catch (e) {
-            console.error('Failed to start background audio:', e);
-          }
-          // Remove listeners after first interaction
-          document.removeEventListener('touchstart', handleInteraction);
-          document.removeEventListener('click', handleInteraction);
-        };
-        
-        document.addEventListener('touchstart', handleInteraction, { once: true });
-        document.addEventListener('click', handleInteraction, { once: true });
-      }
-    } else {
-      audioEl.pause();
-    }
-  }, [isPlaying]);
 
-  // Initialize and manage mobile media session
-  useEffect(() => {
-    // Initial setup
-    enableMobileMediaSession();
-    
-    // Also set up visibility change handler
-    const handleVisibilityChange = () => {
-      if (!document.hidden && isPlaying) {
-        // Re-enable when app comes back to foreground
-        enableMobileMediaSession();
-      }
-    };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (backgroundAudioRef.current) {
-        backgroundAudioRef.current.pause();
-        backgroundAudioRef.current = null;
-      }
-    };
-  }, [isPlaying, enableMobileMediaSession]);
 
   useEffect(() => {
     const updateTime = () => {
-      if (isPlaying && audioCtxRef.current) {
-        const elapsed = audioCtxRef.current.currentTime - startTimeRef.current;
-        let actualTime = pausedAtRef.current + (elapsed * PITCH_SHIFT_FACTOR);
-        if (actualTime > currDuration) actualTime = currDuration;
+      if (isPlaying && mainAudioRef.current) {
+        // Use the audio element's currentTime directly
+        const actualTime = mainAudioRef.current.currentTime;
         setCurrTime(actualTime);
         rafRef.current = requestAnimationFrame(updateTime);
       }
     };
     if (isPlaying) rafRef.current = requestAnimationFrame(updateTime);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [isPlaying, currDuration]);
+  }, [isPlaying]);
 
 
   // BACKGROUND DURATION ANALYZER
@@ -2840,40 +2743,7 @@ const App: React.FC = () => {
     return 'HEAD';
   };
 
-  const playBuffer = (buffer: AudioBuffer, offset: number = 0) => {
-      if (!audioCtxRef.current) return;
-      
-      if (sourceNodeRef.current) {
-        sourceNodeRef.current.onended = null;
-        try { sourceNodeRef.current.stop(); } catch(e) {}
-        sourceNodeRef.current.disconnect();
-      }
 
-      const source = audioCtxRef.current.createBufferSource();
-      source.buffer = buffer;
-      source.playbackRate.value = PITCH_SHIFT_FACTOR; 
-      source.connect(gainNodeRef.current!);
-      
-      source.onended = () => {
-          setIsPlaying(false);
-          const expectedWallDuration = buffer.duration / PITCH_SHIFT_FACTOR;
-          if (audioCtxRef.current && Math.abs(audioCtxRef.current.currentTime - startTimeRef.current - expectedWallDuration) < 0.5) {
-             playNextRef.current();
-          }
-      };
-
-      source.start(0, offset);
-      startTimeRef.current = audioCtxRef.current.currentTime;
-      pausedAtRef.current = offset; 
-      
-      sourceNodeRef.current = source;
-      setIsPlaying(true);
-      
-      // Force update media session playback state
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'playing';
-      }
-  };
 
   const playTrack = async (index: number, playlistOverride?: Song[]) => {
     initAudio();
@@ -2897,49 +2767,108 @@ const App: React.FC = () => {
     const song = tracks[index];
     if (!song) return;
 
-    const arrayBuffer = await song.file.arrayBuffer();
-    const audioBuffer = await audioCtxRef.current!.decodeAudioData(arrayBuffer);
-    audioBufferRef.current = audioBuffer;
-    setCurrDuration(audioBuffer.duration / PITCH_SHIFT_FACTOR);
+    try {
+      // Stop previous audio element if exists
+      if (mainAudioRef.current) {
+        mainAudioRef.current.pause();
+        mainAudioRef.current.currentTime = 0;
+      }
 
-    let freq = song.harmonicFreq;
-    let existingFractalAnalysis = song.fractalAnalysis;
-    
-    if (!freq) {
-        // Try advanced analysis first, fallback to basic if needed
-        freq = await detectDominantFrequencyAdvanced(audioBuffer);
-    } else if (existingFractalAnalysis) {
-        // Use stored fractal analysis
-        setFractalAnalysis(existingFractalAnalysis);
-        console.log('Using stored fractal analysis for:', song.name);
-    }
-    
-    // Use pre-assigned frequency from harmonic distribution if available
-    let targetFreq: number;
-    if (song.closestSolfeggio) {
-        targetFreq = song.closestSolfeggio;
-        console.log(`Using pre-assigned harmonic frequency: ${targetFreq}Hz for "${song.name}"`);
-    } else {
-        // Fallback to dynamic calculation for unprocessed songs
-        targetFreq = getHarmonicSolfeggio(freq || 0);
-        console.log(`Calculating harmonic frequency: ${targetFreq}Hz for "${song.name}"`);
-    }
-    
-    setSelectedSolfeggio(targetFreq);
-    
-    // Check if this is a high frequency track but don't interrupt playback
-    if (targetFreq >= 1206) {
-        setSubtleResonanceMode(true);
-        // Don't automatically show safety protocols during playlist playback
-        // Only show if manually selected
-    } else {
-        setSubtleResonanceMode(false);
-    }
-    
-    setIsAnalyzing(false);
+      // Create or reuse audio element
+      if (!mainAudioRef.current) {
+        mainAudioRef.current = new Audio();
+        mainAudioRef.current.crossOrigin = 'anonymous';
+        mainAudioRef.current.preload = 'auto';
+        
+        // Set up audio element events
+        mainAudioRef.current.addEventListener('ended', () => {
+          setIsPlaying(false);
+          playNextRef.current();
+        });
+        
+        mainAudioRef.current.addEventListener('error', (e) => {
+          console.error('Audio element error:', e);
+          setIsPlaying(false);
+        });
+        
+        mainAudioRef.current.addEventListener('loadedmetadata', () => {
+          const duration = mainAudioRef.current!.duration;
+          setCurrDuration(duration / PITCH_SHIFT_FACTOR);
+        });
+      }
 
-    playBuffer(audioBuffer, 0);
-    setCurrentSongIndex(index);
+      // Create object URL for the audio file
+      const audioUrl = URL.createObjectURL(song.file);
+      mainAudioRef.current.src = audioUrl;
+
+      // Connect audio element to Web Audio API
+      if (!mediaSourceRef.current && audioCtxRef.current) {
+        mediaSourceRef.current = audioCtxRef.current.createMediaElementSource(mainAudioRef.current);
+        mediaSourceRef.current.connect(gainNodeRef.current!);
+      }
+
+      // Load and analyze the audio
+      await mainAudioRef.current.load();
+      
+      // For frequency analysis, we still need the buffer
+      const arrayBuffer = await song.file.arrayBuffer();
+      const audioBuffer = await audioCtxRef.current!.decodeAudioData(arrayBuffer);
+      audioBufferRef.current = audioBuffer;
+
+      let freq = song.harmonicFreq;
+      let existingFractalAnalysis = song.fractalAnalysis;
+      
+      if (!freq) {
+          // Try advanced analysis first, fallback to basic if needed
+          freq = await detectDominantFrequencyAdvanced(audioBuffer);
+      } else if (existingFractalAnalysis) {
+          // Use stored fractal analysis
+          setFractalAnalysis(existingFractalAnalysis);
+          console.log('Using stored fractal analysis for:', song.name);
+      }
+      
+      // Use pre-assigned frequency from harmonic distribution if available
+      let targetFreq: number;
+      if (song.closestSolfeggio) {
+          targetFreq = song.closestSolfeggio;
+          console.log(`Using pre-assigned harmonic frequency: ${targetFreq}Hz for "${song.name}"`);
+      } else {
+          // Fallback to dynamic calculation for unprocessed songs
+          targetFreq = getHarmonicSolfeggio(freq || 0);
+          console.log(`Calculating harmonic frequency: ${targetFreq}Hz for "${song.name}"`);
+      }
+      
+      setSelectedSolfeggio(targetFreq);
+      
+      // Check if this is a high frequency track but don't interrupt playback
+      if (targetFreq >= 1206) {
+          setSubtleResonanceMode(true);
+          // Don't automatically show safety protocols during playlist playback
+          // Only show if manually selected
+      } else {
+          setSubtleResonanceMode(false);
+      }
+      
+      setIsAnalyzing(false);
+
+      // Play the audio element (this will make Chrome show the speaker icon)
+      mainAudioRef.current.playbackRate = PITCH_SHIFT_FACTOR;
+      await mainAudioRef.current.play();
+      
+      setIsPlaying(true);
+      setCurrentSongIndex(index);
+      
+      // Clean up the object URL after a delay
+      setTimeout(() => {
+        URL.revokeObjectURL(audioUrl);
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Playback error:', error);
+      setIsAnalyzing(false);
+      setIsPlaying(false);
+      alert('Failed to play track. Please try again.');
+    }
   };
 
   useEffect(() => {
@@ -3004,38 +2933,56 @@ const App: React.FC = () => {
       playNextRef.current = playNext;
   }, [playNext]);
 
-  const handlePlayPause = () => {
+  const handlePlayPause = async () => {
     initAudio();
     if (isPlaying) {
-      if (audioCtxRef.current) audioCtxRef.current.suspend();
+      // Pause the audio element
+      if (mainAudioRef.current) {
+        mainAudioRef.current.pause();
+      }
+      if (audioCtxRef.current) {
+        await audioCtxRef.current.suspend();
+      }
       setIsPlaying(false);
       // Update media session state
       if ('mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'paused';
       }
     } else {
-      if (audioCtxRef.current) audioCtxRef.current.resume();
-      if (!sourceNodeRef.current && playlist.length > 0) {
-        playTrack(currentSongIndex >= 0 ? currentSongIndex : 0);
-      } else {
-        setIsPlaying(true);
+      if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+        await audioCtxRef.current.resume();
       }
-      // Update media session state
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'playing';
+      
+      if (!mainAudioRef.current || !mainAudioRef.current.src) {
+        // No audio loaded yet, play first track
+        if (playlist.length > 0) {
+          playTrack(currentSongIndex >= 0 ? currentSongIndex : 0);
+        }
+      } else {
+        // Resume the audio element
+        try {
+          await mainAudioRef.current.play();
+          setIsPlaying(true);
+          // Update media session state
+          if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+          }
+        } catch (error) {
+          console.error('Failed to resume playback:', error);
+        }
       }
     }
   };
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!audioBufferRef.current || !audioCtxRef.current) return;
+      if (!mainAudioRef.current) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const percent = Math.min(1, Math.max(0, x / rect.width));
       const seekTime = percent * currDuration;
       
+      mainAudioRef.current.currentTime = seekTime;
       setCurrTime(seekTime);
-      playBuffer(audioBufferRef.current, seekTime);
   };
 
   const handleNext = () => {
@@ -3308,7 +3255,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.9</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.0</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
