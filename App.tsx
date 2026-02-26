@@ -953,7 +953,7 @@ const App: React.FC = () => {
   };
 
   const [vizSettings, setVizSettings] = useState<VizSettings>({
-    speed: 1.0,
+    speed: 2.5,
     sensitivity: 1.0,
     particleDensity: 'medium',
     particleBaseSize: 3.5, 
@@ -1088,6 +1088,8 @@ const App: React.FC = () => {
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const compressorRef = useRef<DynamicsCompressorNode | null>(null);
+  const visualizerGainRef = useRef<GainNode | null>(null);
   
   const startTimeRef = useRef<number>(0);
   const pausedAtRef = useRef<number>(0);
@@ -1253,19 +1255,95 @@ const App: React.FC = () => {
         // Register with stability manager
         stabilityManager.registerAudioContext(audioCtxRef.current);
         
-        gainNodeRef.current = audioCtxRef.current.createGain();
-        gainNodeRef.current.connect(audioCtxRef.current.destination);
-
-        analyserRef.current = audioCtxRef.current.createAnalyser();
-        analyserRef.current.fftSize = 16384; 
-        analyserRef.current.smoothingTimeConstant = 0.85; 
+        // Create a multi-stage audio processing chain to prevent distortion
+        compressorRef.current = audioCtxRef.current.createDynamicsCompressor();
+        // More aggressive compression for sustained high notes
+        compressorRef.current.threshold.value = -18; // Much lower threshold
+        compressorRef.current.knee.value = 10.0; // Softer knee for gradual compression
+        compressorRef.current.ratio.value = 12.0; // Higher ratio for more control
+        compressorRef.current.attack.value = 0.001; // Faster attack for sustained notes
+        compressorRef.current.release.value = 0.25; // Slower release to handle sustained notes
         
-        gainNodeRef.current.connect(analyserRef.current);
+        // Add multi-stage filtering to prevent high-frequency distortion
+        // First: Low-pass filter to remove ultra-high frequencies
+        const lowPassFilter = audioCtxRef.current.createBiquadFilter();
+        lowPassFilter.type = 'lowpass';
+        lowPassFilter.frequency.value = 16000; // Cut off above 16kHz
+        lowPassFilter.Q.value = 0.7; // Gentle slope
+        
+        // Second: High-shelf filter to tame high frequencies
+        const highShelfFilter = audioCtxRef.current.createBiquadFilter();
+        highShelfFilter.type = 'highshelf';
+        highShelfFilter.frequency.value = 4000; // Start reducing at 4kHz (much lower threshold)
+        highShelfFilter.gain.value = -9; // Very aggressive 9dB reduction
+        
+        // Third: Notch filter for problematic frequencies
+        const notchFilter = audioCtxRef.current.createBiquadFilter();
+        notchFilter.type = 'peaking';
+        notchFilter.frequency.value = 3500; // Common distortion frequency
+        notchFilter.Q.value = 2.0; // Narrow band
+        notchFilter.gain.value = -3; // Reduce by 3dB
+        
+        // Fourth: De-esser for sibilant frequencies (5-8kHz range)
+        const deEsserFilter = audioCtxRef.current.createBiquadFilter();
+        deEsserFilter.type = 'peaking';
+        deEsserFilter.frequency.value = 7000; // Target sibilance
+        deEsserFilter.Q.value = 1.5; // Moderate width
+        deEsserFilter.gain.value = -6; // Reduce by 6dB (more aggressive)
+        
+        // Fifth: Additional filter for sustained vocal frequencies
+        const vocalFilter = audioCtxRef.current.createBiquadFilter();
+        vocalFilter.type = 'peaking';
+        vocalFilter.frequency.value = 2500; // Common sustained vocal frequency
+        vocalFilter.Q.value = 0.8; // Wide band
+        vocalFilter.gain.value = -4; // Reduce by 4dB
+        
+        // Add a final limiter to catch any remaining peaks
+        const limiter = audioCtxRef.current.createDynamicsCompressor();
+        limiter.threshold.value = -1; // Catch peaks at -1dB
+        limiter.knee.value = 0; // Hard knee for brick-wall limiting
+        limiter.ratio.value = 20.0; // High ratio for limiting
+        limiter.attack.value = 0.0; // Instant attack
+        limiter.release.value = 0.05; // Fast release
+        
+        // Store references for cleanup
+        (audioCtxRef.current as any).lowPassFilter = lowPassFilter;
+        (audioCtxRef.current as any).highShelfFilter = highShelfFilter;
+        (audioCtxRef.current as any).notchFilter = notchFilter;
+        (audioCtxRef.current as any).deEsserFilter = deEsserFilter;
+        (audioCtxRef.current as any).limiter = limiter;
+        
+        gainNodeRef.current = audioCtxRef.current.createGain();
+        // Ultra-conservative gain to prevent any distortion on sustained notes
+        gainNodeRef.current.gain.value = 0.18; // 18% initial gain (reduced from 25%)
+        
+        // Enhanced audio chain with multi-stage filtering
+        // source -> gain -> compressor -> lowPass -> notch -> vocal -> deEsser -> highShelf -> limiter -> destination
+        gainNodeRef.current.connect(compressorRef.current);
+        compressorRef.current.connect(lowPassFilter);
+        lowPassFilter.connect(notchFilter);
+        notchFilter.connect(vocalFilter);
+        vocalFilter.connect(deEsserFilter);
+        deEsserFilter.connect(highShelfFilter);
+        highShelfFilter.connect(limiter);
+        limiter.connect(audioCtxRef.current.destination);
+
+        // Create separate gain for visualizer to boost signal without affecting audio
+        visualizerGainRef.current = audioCtxRef.current.createGain();
+        visualizerGainRef.current.gain.value = 2.0; // Moderate boost for smoother visuals
+        
+        analyserRef.current = audioCtxRef.current.createAnalyser();
+        analyserRef.current.fftSize = 512; // Smallest practical FFT for best performance
+        analyserRef.current.smoothingTimeConstant = 0.92; // More smoothing to reduce jitter
+        
+        // Connect gain -> visualizer gain -> analyser (separate path for visuals)
+        gainNodeRef.current.connect(visualizerGainRef.current);
+        visualizerGainRef.current.connect(analyserRef.current);
         
         setAnalyserNode(analyserRef.current);
         
         destNodeRef.current = audioCtxRef.current.createMediaStreamDestination();
-        gainNodeRef.current.connect(destNodeRef.current);
+        limiter.connect(destNodeRef.current);
       }
       if (audioCtxRef.current.state === 'suspended') {
         audioCtxRef.current.resume().catch(err => {
@@ -1298,6 +1376,7 @@ const App: React.FC = () => {
     osc.frequency.setValueAtTime(selectedSolfeggio, now);
     
     gain.gain.setValueAtTime(0, now);
+    // Solfeggio volume scaled appropriately
     gain.gain.linearRampToValueAtTime(solfeggioVolume * 0.05, now + 1);
 
     osc.connect(gain);
@@ -1360,7 +1439,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if(gainNodeRef.current && audioCtxRef.current) {
-        gainNodeRef.current.gain.setTargetAtTime(volume, audioCtxRef.current.currentTime, 0.1);
+        // Ultra-conservative volume scaling to prevent any distortion
+        const safeVolume = volume * 0.18; // Match the initial gain setting
+        gainNodeRef.current.gain.setTargetAtTime(safeVolume, audioCtxRef.current.currentTime, 0.1);
     }
   }, [volume]);
 
@@ -2780,6 +2861,8 @@ const App: React.FC = () => {
         mainAudioRef.current.crossOrigin = 'anonymous';
         mainAudioRef.current.preload = 'auto';
         
+        // Don't set volume on the element - all volume control through Web Audio
+        
         // Set up audio element events
         mainAudioRef.current.addEventListener('ended', () => {
           setIsPlaying(false);
@@ -2853,6 +2936,8 @@ const App: React.FC = () => {
 
       // Play the audio element (this will make Chrome show the speaker icon)
       mainAudioRef.current.playbackRate = PITCH_SHIFT_FACTOR;
+      // Set a conservative volume on the element itself as additional safety
+      mainAudioRef.current.volume = 0.7;
       await mainAudioRef.current.play();
       
       setIsPlaying(true);
@@ -3255,7 +3340,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.0</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

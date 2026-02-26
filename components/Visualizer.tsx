@@ -683,9 +683,14 @@ const Visualizer: React.FC<VisualizerProps> = ({
   const prevBassRef = useRef(0);
   const prevHighRef = useRef(0);
   
-  // Initialize Particles
+  // Performance optimization: Frame timing
+  const lastFrameTimeRef = useRef(0);
+  const frameCountRef = useRef(0);
+  const targetFPSRef = useRef(60);
+  
+  // Initialize Particles - Reduced counts for better performance
   useEffect(() => {
-    const pCount = settings.particleDensity === 'low' ? 400 : settings.particleDensity === 'medium' ? 800 : 1600;
+    const pCount = settings.particleDensity === 'low' ? 200 : settings.particleDensity === 'medium' ? 400 : 800;
     const newParticles: Particle[] = [];
     
     // Initial: Fibonacci Sphere
@@ -708,11 +713,11 @@ const Visualizer: React.FC<VisualizerProps> = ({
     }
     particlesRef.current = newParticles;
 
-    // Initialize Hex Grid
+    // Initialize Hex Grid - Reduced for better performance
     const hexCells: HexCell[] = [];
-    const size = 40;
-    const cols = 30; 
-    const rows = 20;
+    const size = 50; // Larger cells = fewer to render
+    const cols = 20; // Reduced from 30
+    const rows = 15; // Reduced from 20
     const hexWidth = Math.sqrt(3) * size;
     const hexHeight = 2 * size;
     const xOffset = hexWidth;
@@ -840,7 +845,28 @@ const Visualizer: React.FC<VisualizerProps> = ({
     const shade1Str = `hsla(${baseHSL.h}, ${Math.min(100, baseHSL.s + 15)}%, ${Math.max(10, baseHSL.l - 25)}%,`;
     const shade2Str = `hsla(${baseHSL.h}, ${Math.max(0, baseHSL.s - 15)}%, ${Math.min(95, baseHSL.l + 30)}%,`;
 
-    const render = () => {
+    const render = (timestamp?: number) => {
+      // Performance optimization: Stable frame rate limiting
+      if (timestamp) {
+        const deltaTime = timestamp - lastFrameTimeRef.current;
+        
+        // Fixed 30 FPS for smoother performance (33.33ms per frame)
+        const targetFrameTime = 33.33;
+        
+        // Skip frame if we're running too fast
+        if (deltaTime < targetFrameTime) {
+          rafRef.current = requestAnimationFrame(render);
+          return;
+        }
+        
+        // Account for multiple frames if we're running slow
+        const framesToCatch = Math.floor(deltaTime / targetFrameTime);
+        lastFrameTimeRef.current = timestamp - (deltaTime % targetFrameTime);
+        
+        // Increment time based on actual frames rendered
+        timeRef.current += (0.01 * settings.speed) * framesToCatch;
+      }
+      
       // 1. Resize Handling
       if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
         canvas.width = window.innerWidth;
@@ -851,18 +877,34 @@ const Visualizer: React.FC<VisualizerProps> = ({
       const cx = w / 2;
       const cy = h / 2;
 
-      // 2. Audio Data Analysis
+      // 2. Audio Data Analysis - Optimized
       const bufferLength = analyser ? analyser.frequencyBinCount : 0;
       const dataArray = new Uint8Array(bufferLength);
       if (analyser) analyser.getByteFrequencyData(dataArray);
 
       let bassEnergy = 0, highEnergy = 0;
-      if (bufferLength > 0) {
-          for(let i=0; i<10; i++) bassEnergy += dataArray[i];
-          bassEnergy = Math.min(1, (bassEnergy / 10) / 255 * 2.5);
-          const highStart = Math.min(100, bufferLength - 20);
-          for(let i=highStart; i<highStart+20; i++) highEnergy += dataArray[i];
-          highEnergy = Math.min(1, (highEnergy / 20) / 255 * 2.5);
+      if (bufferLength > 0 && isPlaying) {
+          // Bass energy calculation - focus on kick drum frequencies (60-150Hz)
+          // With 512 FFT size and 44.1kHz, each bin = ~86Hz
+          const bassStart = 0;
+          const bassEnd = Math.min(4, bufferLength); // ~0-344Hz range
+          
+          // Find the peak bass value
+          let peakBass = 0;
+          for(let i = bassStart; i < bassEnd; i++) {
+              const value = dataArray[i];
+              if (value > peakBass) peakBass = value;
+              bassEnergy += value;
+          }
+          
+          // Use peak detection for bass hits
+          bassEnergy = peakBass / 255; // Use peak instead of average
+          
+          // High frequency energy - for rain effect
+          const highStart = Math.floor(bufferLength * 0.5);
+          const highEnd = Math.min(highStart + 30, bufferLength);
+          for(let i=highStart; i<highEnd; i++) highEnergy += dataArray[i];
+          highEnergy = Math.min(1, (highEnergy / (highEnd - highStart)) / 255 * 2.5);
       }
 
       // 3. Tree of Life Energy Updates
@@ -890,20 +932,77 @@ const Visualizer: React.FC<VisualizerProps> = ({
          }
       });
 
-      // 5. Water Ripples Logic with Natural Scaling (0-100 Non-Linear)
+      // 5. Water Ripples Logic - Highly sensitive for 50% intensity
       if (settings.showWaterRipples && isPlaying) {
            const rawInput = settings.hydroIntensity || 0;
-           const normalizedCurve = Math.pow(rawInput / 100, 1.5); // 0 to 1 curved
-           const physicalIntensity = normalizedCurve * 2.5; 
+           // Linear scaling for predictable behavior
+           const normalizedLinear = rawInput / 100; // 0 to 1 linear
            
-           if ((bassEnergy * physicalIntensity) > 0.3 && bassEnergy > prevBassRef.current + 0.05) {
-              ripplesRef.current.push({ x: cx, y: cy, radius: 10, maxRadius: Math.max(w, h) * 0.9, alpha: 1.0, speed: 6 * settings.speed, color: primaryStr, type: 'bass' });
+           // Bass ripples - Responsive wave effect on bass hits
+           // Dynamic threshold based on intensity (lower = more sensitive)
+           const bassThreshold = 0.3 - (normalizedLinear * 0.25); // At 50%: 0.175
+           
+           // Peak detection - looking for sudden increases
+           const bassDelta = 0.08; // Clear jump required
+           
+           // Cooldown between ripples
+           const now = Date.now();
+           const lastBassRipple = (window as any).lastBassRipple || 0;
+           const cooldown = 250 - (normalizedLinear * 100); // At 50%: 200ms
+           
+           // Trigger on bass peaks
+           const bassIncreased = bassEnergy > prevBassRef.current + bassDelta;
+           const aboveThreshold = bassEnergy > bassThreshold;
+           const cooldownMet = (now - lastBassRipple) > cooldown;
+           
+           if (bassIncreased && aboveThreshold && cooldownMet) {
+              (window as any).lastBassRipple = now;
+              
+              // Create expanding wave ripple
+              ripplesRef.current.push({ 
+                  x: cx, 
+                  y: cy, 
+                  radius: 20, // Start slightly bigger
+                  maxRadius: Math.max(w, h) * 0.7, // Expand to 70% of screen
+                  alpha: 0.7, // Good starting visibility
+                  speed: 3.5 * settings.speed, // Smooth expansion
+                  color: primaryStr, 
+                  type: 'bass' 
+              });
+              
+              // Add inner ripple for more impact
+              setTimeout(() => {
+                  ripplesRef.current.push({ 
+                      x: cx, 
+                      y: cy, 
+                      radius: 10, 
+                      maxRadius: Math.max(w, h) * 0.5, 
+                      alpha: 0.5, 
+                      speed: 3 * settings.speed, 
+                      color: primaryStr, 
+                      type: 'bass' 
+                  });
+              }, 50);
            }
            
-           const rainThreshold = 0.9 - (normalizedCurve * 0.7); 
+           // Rain ripples - continuous at 50% and above
+           const rainThreshold = 0.3 - normalizedLinear * 0.25; // Very low threshold
            
-           if (highEnergy > rainThreshold && Math.random() < normalizedCurve * 0.6) {
-              ripplesRef.current.push({ x: Math.random() * w, y: Math.random() * h, radius: 0, maxRadius: 150 + (normalizedCurve * 200), alpha: 0.6 + (normalizedCurve * 0.4), speed: 3 * settings.speed, color: Math.random() > 0.5 ? shade2Str : shade1Str, type: 'rain' });
+           // At 50%, create rain effect continuously
+           if (normalizedLinear >= 0.5 || (highEnergy > rainThreshold && Math.random() < normalizedLinear)) {
+              const numDrops = 1 + Math.floor(normalizedLinear * 2); // 1-3 drops
+              for (let i = 0; i < numDrops; i++) {
+                  ripplesRef.current.push({ 
+                      x: Math.random() * w, 
+                      y: Math.random() * h, 
+                      radius: 0, 
+                      maxRadius: 80 + (normalizedLinear * 120), 
+                      alpha: 0.3 + (normalizedLinear * 0.4), 
+                      speed: 2 * settings.speed, 
+                      color: Math.random() > 0.5 ? shade2Str : shade1Str, 
+                      type: 'rain' 
+                  });
+              }
            }
       }
       prevBassRef.current = bassEnergy;
@@ -919,7 +1018,16 @@ const Visualizer: React.FC<VisualizerProps> = ({
       if (settings.showHexagons) {
           ctx.save();
           ctx.translate(cx, cy);
-          hexGridRef.current.forEach(hex => {
+          
+          // Performance optimization: Only render visible hexagons
+          const visibleHexagons = hexGridRef.current.filter(hex => {
+              const screenX = cx + hex.x;
+              const screenY = cy + hex.y;
+              return screenX > -hex.size && screenX < w + hex.size && 
+                     screenY > -hex.size && screenY < h + hex.size;
+          });
+          
+          visibleHexagons.forEach(hex => {
               let active = 0;
               if (isPlaying && bufferLength > 0) {
                   if (settings.hexVisualMode === 'spectrum') active = (dataArray[hex.freqIndex % bufferLength] / 255) * 1.5;
@@ -963,7 +1071,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
                 ctx.fill();
               }
           });
-          ctx.restore();
+        ctx.restore();
       }
 
       // --- LAYER 2: RIPPLES ---
@@ -972,7 +1080,12 @@ const Visualizer: React.FC<VisualizerProps> = ({
           for (let i = ripplesRef.current.length - 1; i >= 0; i--) {
               const r = ripplesRef.current[i];
               r.radius += r.speed;
-              r.alpha -= 0.005; 
+              // Different fade rates for different ripple types
+              if (r.type === 'bass') {
+                  r.alpha -= 0.006; // Moderate fade for proper wave effect
+              } else {
+                  r.alpha -= 0.004; // Slower fade for rain ripples
+              }
               if (r.alpha <= 0 || r.radius > r.maxRadius) { ripplesRef.current.splice(i, 1); continue; }
               ctx.strokeStyle = r.color + r.alpha + ')';
               ctx.lineWidth = r.type === 'bass' ? 4 : 2; 
@@ -1142,7 +1255,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
       }
 
       // --- LAYER 4: SACRED GEOMETRY PARTICLES ---
-      if (settings.particleDensity !== 'low') {
+      if (settings.particleDensity !== 'off') {
         ctx.save();
         ctx.translate(cx, cy);
         
@@ -1153,8 +1266,16 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
         const morphSpeed = 0.15 * settings.speed; 
         const particleBaseSize = settings.particleBaseSize || 2.5;
+        
+        // Performance optimization based on FPS
+        let skipFactor = 1;
+        if (targetFPSRef.current < 30) skipFactor = 4;
+        else if (targetFPSRef.current < 40) skipFactor = 3;
+        else if (targetFPSRef.current < 50) skipFactor = 2;
 
         particlesRef.current.forEach((p, index) => {
+            // Skip particles based on performance
+            if (skipFactor > 1 && index % skipFactor !== 0) return;
             
             // 1. Target Position Logic
             let targetX = p.tx;
@@ -1231,18 +1352,18 @@ const Visualizer: React.FC<VisualizerProps> = ({
                 const size = Math.max(0.5, p.size * particleBaseSize * scale);
                 const depthAlpha = Math.min(1, Math.max(0, (finalZ + 800) / 1000));
                 
+                // Draw circles with optimized rendering
                 ctx.beginPath();
                 ctx.arc(px, py, size, 0, Math.PI * 2);
                 ctx.fillStyle = p.color;
-                ctx.globalAlpha = depthAlpha * 0.6; 
+                ctx.globalAlpha = depthAlpha * 0.6;
                 ctx.fill();
             }
         });
         ctx.restore();
       }
 
-      // Add bass energy to global time accumulator for acceleration effects
-      timeRef.current += (0.01 * settings.speed) + (bassEnergy * 0.03); 
+      // Time increment is now handled above based on actual frame timing
       rafRef.current = requestAnimationFrame(render);
     };
 
