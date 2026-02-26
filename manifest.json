@@ -18,7 +18,7 @@
       "purpose": "any maskable"
     }
   ],
-  "categories": ["music", "entertainment", "multimedia"],
+  "categories": ["music", "entertainment", "multimedia", "audio"],
   "shortcuts": [
     {
       "name": "Open Player",

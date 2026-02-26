@@ -1103,6 +1103,7 @@ const App: React.FC = () => {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const destNodeRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const backgroundAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const stateRef = useRef({
     playlist,
@@ -1481,6 +1482,110 @@ const App: React.FC = () => {
       wakeLockManager.releaseWakeLock();
     }
   }, [isPlaying]);
+
+  // Enable media session on mobile with background audio element
+  const enableMobileMediaSession = useCallback(async () => {
+    // Try to get the audio element from the DOM first
+    let audio = document.getElementById('media-session-audio') as HTMLAudioElement;
+    
+    if (!audio && !backgroundAudioRef.current) {
+      // Create if it doesn't exist
+      audio = document.createElement('audio');
+      audio.id = 'media-session-audio';
+      audio.style.display = 'none';
+      document.body.appendChild(audio);
+    }
+    
+    if (audio && !backgroundAudioRef.current) {
+      // Configure the audio element
+      audio.src = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn9rrvmMhBSuBzvLZiTQIG2m98OScTgwOUarm7blmFgU7k9n1unEiBC13yO/eizEIHWq+8+OWTA';
+      audio.loop = true;
+      audio.volume = 0.001; // Very quiet but not muted
+      audio.muted = false; // Ensure not muted
+      audio.autoplay = true; // Try autoplay
+      (audio as any).playsInline = true; // Important for iOS
+      
+      backgroundAudioRef.current = audio;
+      
+      // iOS specific: need to load before playing
+      if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+        audio.load();
+      }
+    }
+    
+    const audioEl = backgroundAudioRef.current;
+    if (!audioEl) return;
+    
+    // Play/pause based on state
+    if (isPlaying) {
+      try {
+        // For iOS, we need to ensure we're in a user gesture context
+        const playPromise = audioEl.play();
+        if (playPromise !== undefined) {
+          await playPromise;
+          console.log('Background audio started for media session');
+          
+          // Force media session update
+          if ('mediaSession' in navigator && navigator.mediaSession.metadata) {
+            // Re-set metadata to ensure it's active
+            const currentMetadata = navigator.mediaSession.metadata;
+            navigator.mediaSession.metadata = new MediaMetadata({
+              title: currentMetadata.title,
+              artist: currentMetadata.artist,
+              album: currentMetadata.album,
+              artwork: [...currentMetadata.artwork]
+            });
+          }
+        }
+      } catch (err) {
+        console.log('Media session audio play failed:', err);
+        
+        // Setup interaction handler for iOS/mobile
+        const handleInteraction = async () => {
+          try {
+            if (backgroundAudioRef.current && isPlaying) {
+              await backgroundAudioRef.current.play();
+              console.log('Background audio started after user interaction');
+            }
+          } catch (e) {
+            console.error('Failed to start background audio:', e);
+          }
+          // Remove listeners after first interaction
+          document.removeEventListener('touchstart', handleInteraction);
+          document.removeEventListener('click', handleInteraction);
+        };
+        
+        document.addEventListener('touchstart', handleInteraction, { once: true });
+        document.addEventListener('click', handleInteraction, { once: true });
+      }
+    } else {
+      audioEl.pause();
+    }
+  }, [isPlaying]);
+
+  // Initialize and manage mobile media session
+  useEffect(() => {
+    // Initial setup
+    enableMobileMediaSession();
+    
+    // Also set up visibility change handler
+    const handleVisibilityChange = () => {
+      if (!document.hidden && isPlaying) {
+        // Re-enable when app comes back to foreground
+        enableMobileMediaSession();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (backgroundAudioRef.current) {
+        backgroundAudioRef.current.pause();
+        backgroundAudioRef.current = null;
+      }
+    };
+  }, [isPlaying, enableMobileMediaSession]);
 
   useEffect(() => {
     const updateTime = () => {
@@ -2763,6 +2868,11 @@ const App: React.FC = () => {
       
       sourceNodeRef.current = source;
       setIsPlaying(true);
+      
+      // Force update media session playback state
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'playing';
+      }
   };
 
   const playTrack = async (index: number, playlistOverride?: Song[]) => {
@@ -2899,12 +3009,20 @@ const App: React.FC = () => {
     if (isPlaying) {
       if (audioCtxRef.current) audioCtxRef.current.suspend();
       setIsPlaying(false);
+      // Update media session state
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
+      }
     } else {
       if (audioCtxRef.current) audioCtxRef.current.resume();
       if (!sourceNodeRef.current && playlist.length > 0) {
         playTrack(currentSongIndex >= 0 ? currentSongIndex : 0);
       } else {
         setIsPlaying(true);
+      }
+      // Update media session state
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'playing';
       }
     }
   };
@@ -3190,7 +3308,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.8</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.9</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
