@@ -1,4 +1,4 @@
-const CACHE_NAME = 'aetheria-v1';
+const CACHE_NAME = 'aetheria-v2';
 const OFFLINE_URL = '/';
 
 // Files to cache for offline support
@@ -250,6 +250,33 @@ self.addEventListener('notificationclick', (event) => {
     // Default action - open app
     event.waitUntil(
       clients.openWindow('/')
+    );
+  }
+});
+
+// Message handling for background audio control
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+  
+  // Handle background audio state
+  if (event.data && event.data.type === 'AUDIO_STATE') {
+    // Store audio state for recovery
+    self.audioState = event.data.state;
+  }
+});
+
+// Periodic background sync for keeping audio alive
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag === 'keep-audio-alive') {
+    event.waitUntil(
+      // Send message to all clients to keep audio context alive
+      self.clients.matchAll().then(clients => {
+        clients.forEach(client => {
+          client.postMessage({ type: 'KEEP_ALIVE' });
+        });
+      })
     );
   }
 });

@@ -10,6 +10,7 @@ import Visualizer from './components/Visualizer';
 import FrequencySelector from './components/FrequencySelector';
 import SafetyProtocols from './components/SafetyProtocols';
 import ExperienceTracker from './components/ExperienceTracker';
+import OfflineIndicator from './components/OfflineIndicator';
 import { 
   analyzeFractalFrequencies, 
   assessFrequencySafety, 
@@ -20,6 +21,8 @@ import {
   experienceTracker, 
   type FrequencyEffect 
 } from './utils/effectsDocumentation';
+import { useMediaSession, type Track } from './hooks/useMediaSession';
+import { stabilityManager, wakeLockManager } from './utils/stabilityManager';
 
 // --- Helpers ---
 const formatDuration = (seconds: number) => {
@@ -930,6 +933,7 @@ const App: React.FC = () => {
   const [isVizPanelOpen, setIsVizPanelOpen] = useState(true);
 
   // Disclaimer & Tutorial State
+  
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
 
@@ -1152,6 +1156,40 @@ const App: React.FC = () => {
     }
   }, [playlist, currentSongIndex]);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Clean up audio resources
+      if (sourceNodeRef.current) {
+        try {
+          sourceNodeRef.current.stop();
+          sourceNodeRef.current.disconnect();
+        } catch (e) {}
+      }
+      
+      // Stop all oscillators
+      [solfeggioOscRef, binauralLeftOscRef, binauralRightOscRef].forEach(ref => {
+        if (ref.current) {
+          try {
+            ref.current.stop();
+            ref.current.disconnect();
+          } catch (e) {}
+        }
+      });
+      
+      // Close audio context
+      if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+        audioCtxRef.current.close();
+      }
+      
+      // Clean up wake lock
+      wakeLockManager.releaseWakeLock();
+      
+      // Clean up stability manager
+      stabilityManager.cleanup();
+    };
+  }, []);
+
   // Handle Zen Mode Mouse tracking
   useEffect(() => {
     if (!isZenMode) {
@@ -1200,26 +1238,36 @@ const App: React.FC = () => {
 
   // --- Audio Initialization ---
   const initAudio = useCallback(() => {
-    if (!audioCtxRef.current) {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      audioCtxRef.current = new AudioContextClass();
-      
-      gainNodeRef.current = audioCtxRef.current.createGain();
-      gainNodeRef.current.connect(audioCtxRef.current.destination);
+    try {
+      if (!audioCtxRef.current) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        audioCtxRef.current = new AudioContextClass();
+        
+        // Register with stability manager
+        stabilityManager.registerAudioContext(audioCtxRef.current);
+        
+        gainNodeRef.current = audioCtxRef.current.createGain();
+        gainNodeRef.current.connect(audioCtxRef.current.destination);
 
-      analyserRef.current = audioCtxRef.current.createAnalyser();
-      analyserRef.current.fftSize = 16384; 
-      analyserRef.current.smoothingTimeConstant = 0.85; 
-      
-      gainNodeRef.current.connect(analyserRef.current);
-      
-      setAnalyserNode(analyserRef.current);
-      
-      destNodeRef.current = audioCtxRef.current.createMediaStreamDestination();
-      gainNodeRef.current.connect(destNodeRef.current);
-    }
-    if (audioCtxRef.current.state === 'suspended') {
-        audioCtxRef.current.resume();
+        analyserRef.current = audioCtxRef.current.createAnalyser();
+        analyserRef.current.fftSize = 16384; 
+        analyserRef.current.smoothingTimeConstant = 0.85; 
+        
+        gainNodeRef.current.connect(analyserRef.current);
+        
+        setAnalyserNode(analyserRef.current);
+        
+        destNodeRef.current = audioCtxRef.current.createMediaStreamDestination();
+        gainNodeRef.current.connect(destNodeRef.current);
+      }
+      if (audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().catch(err => {
+          console.error('Failed to resume audio context:', err);
+        });
+      }
+    } catch (error) {
+      console.error('Audio initialization failed:', error);
+      alert('Audio initialization failed. Please reload the app.');
     }
   }, []);
 
@@ -1338,6 +1386,101 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [isAdaptiveBinaural, isPlaying, analyserNode, selectedBinaural]);
 
+  // Initialize stability management on mount
+  useEffect(() => {
+    // Register service worker for background audio
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then(registration => {
+        console.log('Service Worker ready for background audio');
+        
+        // Request periodic sync for keeping audio alive
+        if ('periodicSync' in registration) {
+          (registration as any).periodicSync.register('keep-audio-alive', {
+            minInterval: 60 * 1000 // 1 minute
+          }).catch((err: any) => console.log('Periodic sync not available:', err));
+        }
+      });
+    }
+
+    // Listen for stability manager messages
+    const handleStabilityMessage = (event: MessageEvent) => {
+      if (event.data.source !== 'stability-manager') return;
+      
+      switch (event.data.type) {
+        case 'REDUCE_QUALITY':
+          // Reduce visualizer quality to save memory
+          setVizSettings(prev => ({
+            ...prev,
+            particleDensity: 'low',
+            particleBaseSize: Math.min(prev.particleBaseSize, 2),
+            showWaterRipples: false,
+            showTreeOfLife: false
+          }));
+          break;
+          
+        case 'OPTIMIZE_BUFFERS':
+          // Clear audio buffer cache if needed
+          audioBufferRef.current = null;
+          break;
+          
+        case 'REDUCE_MEMORY':
+          // Reduce playlist display if too large
+          if (playlist.length > 100) {
+            console.log('Reducing playlist display for memory optimization');
+          }
+          break;
+          
+        case 'SUSPEND_HEAVY_OPS':
+          // Pause heavy operations when app is backgrounded
+          setVizSettings(prev => ({ ...prev, autoRotate: false }));
+          break;
+          
+        case 'RESUME_OPS':
+          // Resume operations when app is foregrounded
+          break;
+          
+        case 'RESTORE_STATE':
+          // Restore from checkpoint after crash
+          const { state } = event.data;
+          if (state && state.currentSongIndex !== undefined) {
+            console.log('Restoring from checkpoint:', state);
+            if (state.currentSongIndex >= 0 && state.currentSongIndex < playlist.length) {
+              setCurrentSongIndex(state.currentSongIndex);
+            }
+          }
+          break;
+      }
+    };
+    
+    window.addEventListener('message', handleStabilityMessage);
+    
+    // Save checkpoint periodically
+    const checkpointInterval = setInterval(() => {
+      if (isPlaying) {
+        stabilityManager.saveCheckpoint({
+          currentSongIndex,
+          isPlaying,
+          volume,
+          selectedFrequency: selectedSolfeggio,
+          playlist: playlist.slice(0, 10) // Save only first 10 songs to avoid storage issues
+        });
+      }
+    }, 30000); // Every 30 seconds
+    
+    return () => {
+      window.removeEventListener('message', handleStabilityMessage);
+      clearInterval(checkpointInterval);
+    };
+  }, [currentSongIndex, isPlaying, volume, selectedSolfeggio, playlist]);
+
+  // Wake lock management for playback
+  useEffect(() => {
+    if (isPlaying) {
+      wakeLockManager.requestWakeLock();
+    } else {
+      wakeLockManager.releaseWakeLock();
+    }
+  }, [isPlaying]);
 
   useEffect(() => {
     const updateTime = () => {
@@ -2586,29 +2729,6 @@ const App: React.FC = () => {
       }
   };
 
-  // Media Session API for car integration
-  const updateMediaSession = (song: Song | null, frequency: number) => {
-    if ('mediaSession' in navigator && song) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: song.name,
-        artist: 'Aetheria Harmonic Player',
-        album: `${frequency}Hz Solfeggio • ${getFrequencyRegime(frequency)} Regime`,
-        artwork: [
-          { src: '/icon-192x192.png', sizes: '192x192', type: 'image/png' }
-        ]
-      });
-
-      // Set action handlers for car controls
-      navigator.mediaSession.setActionHandler('play', handlePlayPause);
-      navigator.mediaSession.setActionHandler('pause', handlePlayPause);
-      navigator.mediaSession.setActionHandler('nexttrack', handleNext);
-      navigator.mediaSession.setActionHandler('previoustrack', handlePrev);
-      
-      // Update playback state
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-    }
-  };
-
   const getFrequencyRegime = (freq: number) => {
     if (freq <= 963) return 'GUT';
     if (freq <= 3150) return 'HEART';
@@ -2643,9 +2763,6 @@ const App: React.FC = () => {
       
       sourceNodeRef.current = source;
       setIsPlaying(true);
-
-      // Update media session for car display
-      updateMediaSession(playlist[currentSongIndex], selectedSolfeggio);
   };
 
   const playTrack = async (index: number, playlistOverride?: Song[]) => {
@@ -2789,11 +2906,6 @@ const App: React.FC = () => {
       } else {
         setIsPlaying(true);
       }
-    }
-    
-    // Update media session state for car integration
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.playbackState = !isPlaying ? 'playing' : 'paused';
     }
   };
 
@@ -2969,6 +3081,25 @@ const App: React.FC = () => {
     return formatDuration(totalSeconds);
   };
 
+  // Media Session Integration for Vehicle Controls
+  const currentTrack: Track | null = currentSongIndex >= 0 && playlist[currentSongIndex]
+    ? {
+        title: playlist[currentSongIndex].name,
+        artist: 'Aetheria Harmonic Player',
+        album: `${playlist[currentSongIndex].closestSolfeggio || selectedSolfeggio}Hz • ${getFrequencyRegime(playlist[currentSongIndex].closestSolfeggio || selectedSolfeggio)} Regime`,
+        artworkUrl: '/icon-192x192.png'
+      }
+    : null;
+
+  useMediaSession({
+    track: currentTrack,
+    isPlaying,
+    onPlay: handlePlayPause,
+    onPause: handlePlayPause,
+    onNext: handleNext,
+    onPrevious: handlePrev
+  });
+
   return (
     <div className={`relative min-h-screen bg-black text-slate-200 font-sans overflow-hidden ${isFullScreen ? 'h-screen' : ''}`}>
       
@@ -3004,6 +3135,9 @@ const App: React.FC = () => {
 
           {/* Tutorial Modal */}
           {showTutorial && <TutorialModal onClose={closeTutorial} />}
+          
+          {/* Offline Indicator */}
+          <OfflineIndicator showWhenOnline={true} />
 
           {/* Analysis Notification */}
           {analysisNotification && (
@@ -3056,7 +3190,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.7</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v6.8</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

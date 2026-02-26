@@ -36,7 +36,11 @@
   ],
   "related_applications": [],
   "offline_enabled": true,
-  "permissions": ["microphone"],
+  "permissions": ["microphone", "notifications"],
+  "handle_links": "preferred",
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
   "protocol_handlers": [
     {
       "protocol": "web+aetheria",
