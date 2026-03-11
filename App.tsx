@@ -23,6 +23,20 @@ import {
 } from './utils/effectsDocumentation';
 import { useMediaSession, type Track } from './hooks/useMediaSession';
 import { stabilityManager, wakeLockManager } from './utils/stabilityManager';
+import { 
+  calculatePhiVolumeRatios,
+  getBinauralPhaseOffset,
+  getPhiTimingMarkers,
+  getPhiEnvelopeVolume,
+  getPhiIntensityMultiplier,
+  createPhiOscillator,
+  logPhiRelationships,
+  integratePhiVolumes,
+  GOLDEN_ANGLE_RAD,
+  PHI,
+  INV_PHI,
+  INV_PHI_SQUARED
+} from './utils/phiIntegration';
 
 // --- Helpers ---
 const formatDuration = (seconds: number) => {
@@ -995,6 +1009,10 @@ const App: React.FC = () => {
   const [subtleResonanceMode, setSubtleResonanceMode] = useState(false);
   const [analysisNotification, setAnalysisNotification] = useState<string | null>(null);
   const [showExperienceHistory, setShowExperienceHistory] = useState(false);
+  
+  // Phi integration state
+  const [enablePhiMode, setEnablePhiMode] = useState(true); // Enable phi mode by default
+  const [phiTimingEnabled, setPhiTimingEnabled] = useState(true); // Enable phi timing by default
 
   // Session duration tracking
   useEffect(() => {
@@ -1360,8 +1378,13 @@ const App: React.FC = () => {
     osc.frequency.setValueAtTime(selectedSolfeggio, now);
     
     gain.gain.setValueAtTime(0, now);
-    // Solfeggio volume scaled appropriately
-    gain.gain.linearRampToValueAtTime(solfeggioVolume * 0.05, now + 1);
+    // CHANGE 1: Apply phi-based volume relationship for solfeggio layer
+    const phiVolumes = enablePhiMode 
+      ? integratePhiVolumes(volume, binauralVolume, solfeggioVolume, true)
+      : { music: volume, binaural: binauralVolume, solfeggio: solfeggioVolume };
+    
+    // Solfeggio volume with phi ratio applied
+    gain.gain.linearRampToValueAtTime(phiVolumes.solfeggio, now + 1);
 
     osc.connect(gain);
     gain.connect(gainNodeRef.current!); 
@@ -1370,13 +1393,18 @@ const App: React.FC = () => {
 
     solfeggioOscRef.current = osc;
     solfeggioGainRef.current = gain;
-  }, [isPlaying, selectedSolfeggio, solfeggioVolume]);
+  }, [isPlaying, selectedSolfeggio, solfeggioVolume, enablePhiMode, volume, binauralVolume]);
 
   useEffect(() => {
       if (binauralGainRef.current && audioCtxRef.current) {
-          binauralGainRef.current.gain.setTargetAtTime(binauralVolume, audioCtxRef.current.currentTime, 0.1);
+          // CHANGE 1: Apply phi-based volume relationship for binaural layer
+          const phiVolumes = enablePhiMode 
+            ? integratePhiVolumes(volume, binauralVolume, solfeggioVolume, true)
+            : { music: volume, binaural: binauralVolume, solfeggio: solfeggioVolume };
+          
+          binauralGainRef.current.gain.setTargetAtTime(phiVolumes.binaural, audioCtxRef.current.currentTime, 0.1);
       }
-  }, [binauralVolume]);
+  }, [binauralVolume, volume, enablePhiMode, solfeggioVolume]);
 
   const updateBinaural = useCallback(() => {
     if (!audioCtxRef.current) return;
@@ -1398,36 +1426,62 @@ const App: React.FC = () => {
     const merger = ctx.createChannelMerger(2);
     const mainGain = ctx.createGain();
 
+    // CHANGE 2: Apply golden angle phase offset for binaural beats
     leftOsc.frequency.value = carrier;
     rightOsc.frequency.value = carrier + diff;
-
+    
+    // Create constant sources for phase modulation
+    const leftPhaseNode = ctx.createConstantSource();
+    const rightPhaseNode = ctx.createConstantSource();
+    
+    // Set phase offsets: left at 0°, right at golden angle (137.5°)
+    leftPhaseNode.offset.value = 0;
+    rightPhaseNode.offset.value = enablePhiMode ? GOLDEN_ANGLE_RAD : 0;
+    
+    leftPhaseNode.start();
+    rightPhaseNode.start();
+    
     leftOsc.connect(merger, 0, 0); 
     rightOsc.connect(merger, 0, 1); 
 
     merger.connect(mainGain);
     mainGain.connect(gainNodeRef.current!);
 
-    mainGain.gain.value = binauralVolume;
+    // Apply phi-based volume if enabled
+    const phiVolumes = enablePhiMode 
+      ? integratePhiVolumes(volume, binauralVolume, solfeggioVolume, true)
+      : { music: volume, binaural: binauralVolume, solfeggio: solfeggioVolume };
+      
+    mainGain.gain.value = phiVolumes.binaural;
 
-    leftOsc.start();
-    rightOsc.start();
+    // Start oscillators with phase offset timing
+    const now = ctx.currentTime;
+    leftOsc.start(now);
+    // Right oscillator starts with golden angle phase offset
+    const phaseOffsetTime = enablePhiMode ? GOLDEN_ANGLE_RAD / (2 * Math.PI * carrier) : 0;
+    rightOsc.start(now + phaseOffsetTime);
 
     binauralLeftOscRef.current = leftOsc;
     binauralRightOscRef.current = rightOsc;
     binauralMergerRef.current = merger;
     binauralGainRef.current = mainGain;
-  }, [isPlaying, selectedBinaural]); 
+  }, [isPlaying, selectedBinaural, enablePhiMode, volume, binauralVolume, solfeggioVolume]); 
 
   useEffect(() => { updateSolfeggio(); }, [updateSolfeggio]);
   useEffect(() => { updateBinaural(); }, [updateBinaural]);
 
   useEffect(() => {
     if(gainNodeRef.current && audioCtxRef.current) {
+        // Apply phi relationships if enabled
+        const volumes = enablePhiMode 
+          ? calculatePhiVolumeRatios(volume) 
+          : { music: volume, binaural: binauralVolume, solfeggio: solfeggioVolume };
+        
         // Ultra-conservative volume scaling to prevent any distortion
-        const safeVolume = volume * 0.18; // Match the initial gain setting
+        const safeVolume = volumes.music * 0.18; // Match the initial gain setting
         gainNodeRef.current.gain.setTargetAtTime(safeVolume, audioCtxRef.current.currentTime, 0.1);
     }
-  }, [volume]);
+  }, [volume, enablePhiMode]);
 
   useEffect(() => {
     if (!isAdaptiveBinaural || !isPlaying || !analyserNode) return;
@@ -1458,6 +1512,14 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [isAdaptiveBinaural, isPlaying, analyserNode, selectedBinaural]);
 
+  // Log phi integration on mount
+  useEffect(() => {
+    if (enablePhiMode) {
+      console.log('🌀 Aetheria Phi Integration Active');
+      logPhiRelationships(1.0, 300); // Log example for 5 minute track
+    }
+  }, [enablePhiMode]);
+  
   // Initialize stability management on mount
   useEffect(() => {
     // Register service worker for background audio
@@ -1562,12 +1624,38 @@ const App: React.FC = () => {
         // Use the audio element's currentTime directly
         const actualTime = mainAudioRef.current.currentTime;
         setCurrTime(actualTime);
+        
+        // CHANGE 3: Apply phi-based temporal structure for dynamic volume
+        if (enablePhiMode && phiTimingEnabled && currDuration > 0 && audioCtxRef.current) {
+          const phiVolumes = integratePhiVolumes(volume, binauralVolume, solfeggioVolume, true);
+          
+          // Get phi-based intensity for current track position
+          const phiIntensity = getPhiIntensityMultiplier(actualTime, currDuration);
+          
+          // Apply dynamic volume adjustments for binaural and solfeggio layers
+          if (binauralGainRef.current) {
+            binauralGainRef.current.gain.setTargetAtTime(
+              phiVolumes.binaural * phiIntensity,
+              audioCtxRef.current.currentTime,
+              0.3
+            );
+          }
+          
+          if (solfeggioGainRef.current) {
+            solfeggioGainRef.current.gain.setTargetAtTime(
+              phiVolumes.solfeggio * phiIntensity,
+              audioCtxRef.current.currentTime,
+              0.3
+            );
+          }
+        }
+        
         rafRef.current = requestAnimationFrame(updateTime);
       }
     };
     if (isPlaying) rafRef.current = requestAnimationFrame(updateTime);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [isPlaying]);
+  }, [isPlaying, enablePhiMode, phiTimingEnabled, currDuration, volume, binauralVolume, solfeggioVolume]);
 
 
   // BACKGROUND DURATION ANALYZER
@@ -3328,7 +3416,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -4359,6 +4447,57 @@ const App: React.FC = () => {
                 
                 <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar pb-32">
                    
+                   {/* Phi Integration Panel */}
+                   <div className="border border-purple-500/30 rounded-xl overflow-hidden bg-slate-900/50 shadow-[0_0_15px_rgba(147,51,234,0.1)]">
+                      <div className="p-4 bg-purple-900/20">
+                          <div className="flex justify-between items-center">
+                              <div className="flex items-center gap-2">
+                                  <Target className="text-purple-400 w-5 h-5" />
+                                  <h4 className="text-purple-400 font-bold uppercase tracking-widest text-xs">
+                                      PHI (φ) INTEGRATION
+                                  </h4>
+                              </div>
+                              <button 
+                                  onClick={() => setEnablePhiMode(!enablePhiMode)}
+                                  className={`w-10 h-5 rounded-full relative transition-colors ${enablePhiMode ? 'bg-purple-500' : 'bg-slate-700'}`}
+                              >
+                                  <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-transform ${enablePhiMode ? 'left-6' : 'left-1'}`}></div>
+                              </button>
+                          </div>
+                          {enablePhiMode && (
+                              <div className="mt-3 space-y-2 text-xs text-purple-200">
+                                  <div className="flex items-center gap-2">
+                                      <div className="w-2 h-2 rounded-full bg-purple-400"></div>
+                                      <span>Volume Ratios: 1.0 : {INV_PHI.toFixed(3)} : {INV_PHI_SQUARED.toFixed(3)}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                      <div className="w-2 h-2 rounded-full bg-purple-400"></div>
+                                      <span>Binaural Phase: 137.5° golden angle offset</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 justify-between">
+                                      <div className="flex items-center gap-2">
+                                          <div className="w-2 h-2 rounded-full bg-purple-400"></div>
+                                          <span>Track Timing: Phi-proportioned</span>
+                                      </div>
+                                      <button 
+                                          onClick={() => setPhiTimingEnabled(!phiTimingEnabled)}
+                                          className={`w-8 h-4 rounded-full relative transition-colors ${phiTimingEnabled ? 'bg-purple-500' : 'bg-slate-700'}`}
+                                      >
+                                          <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${phiTimingEnabled ? 'left-4.5' : 'left-0.5'}`}></div>
+                                      </button>
+                                  </div>
+                                  {phiTimingEnabled && currDuration > 0 && (
+                                      <div className="mt-2 p-2 bg-purple-900/30 rounded border border-purple-700/30">
+                                          <div className="text-[10px] text-purple-300">
+                                              Track Peak: {formatDuration(currDuration * INV_PHI)} ({(INV_PHI * 100).toFixed(1)}%)
+                                          </div>
+                                      </div>
+                                  )}
+                              </div>
+                          )}
+                      </div>
+                   </div>
+                   
                    <div className="border border-gold-500/30 rounded-xl overflow-hidden bg-slate-900/50 shadow-[0_0_15px_rgba(234,179,8,0.1)]">
                       <button 
                           onClick={() => setIsVizPanelOpen(!isVizPanelOpen)}
@@ -5317,12 +5456,33 @@ const App: React.FC = () => {
           <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none flex justify-center">
              <div className="pointer-events-auto w-full bg-black/90 backdrop-blur-xl border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] transition-all duration-300 group">
                 
-                {/* Seek Bar */}
+                {/* Seek Bar with Phi Timing Markers */}
                 <div 
                     className="w-full h-1 hover:h-2 bg-slate-800/50 cursor-pointer relative transition-all group-hover:h-2"
                     onClick={handleSeek}
                 >
                     <div className="absolute inset-y-0 left-0 bg-gold-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]" style={{width: `${(currTime / (currDuration || 1)) * 100}%`}}></div>
+                    
+                    {/* Phi timing markers */}
+                    {enablePhiMode && phiTimingEnabled && currDuration > 0 && (
+                      <>
+                        {/* Build phase end marker (38.2%) */}
+                        <div 
+                          className="absolute top-0 bottom-0 w-0.5 bg-purple-400/50"
+                          style={{left: `${INV_PHI_SQUARED * 100}%`}}
+                          title="Build Phase End (38.2%)"
+                        />
+                        
+                        {/* Peak moment marker (61.8%) */}
+                        <div 
+                          className="absolute top-0 bottom-0 w-1 bg-purple-400"
+                          style={{left: `${INV_PHI * 100}%`}}
+                          title="Golden Moment Peak (61.8%)"
+                        >
+                          <div className="absolute -top-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
+                        </div>
+                      </>
+                    )}
                 </div>
 
                 <div className="px-3 py-3 flex flex-col items-center gap-2">
@@ -5380,6 +5540,19 @@ const App: React.FC = () => {
                          <span className="font-mono text-slate-600 ml-1">
                             {formatDuration(currTime)} / {formatDuration(currDuration)}
                          </span>
+                         
+                         {/* Phi timing phase indicator */}
+                         {enablePhiMode && phiTimingEnabled && currDuration > 0 && (
+                           <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 ml-2">
+                             <Sparkles size={8} />
+                             {(() => {
+                               const progress = currTime / currDuration;
+                               if (progress <= INV_PHI_SQUARED) return "Build";
+                               else if (progress <= INV_PHI) return "Peak";
+                               else return "Resolve";
+                             })()}
+                           </span>
+                         )}
                         </div>
                     </div>
 
