@@ -683,6 +683,12 @@ const Visualizer: React.FC<VisualizerProps> = ({
   const prevBassRef = useRef(0);
   const prevHighRef = useRef(0);
   
+  // Tempo Detection
+  const beatHistoryRef = useRef<number[]>([]);
+  const lastBeatTimeRef = useRef(0);
+  const detectedBPMRef = useRef(120); // Default 120 BPM
+  const smoothedBPMRef = useRef(120);
+  
   // Performance optimization: Frame timing
   const lastFrameTimeRef = useRef(0);
   const frameCountRef = useRef(0);
@@ -846,6 +852,9 @@ const Visualizer: React.FC<VisualizerProps> = ({
     const shade2Str = `hsla(${baseHSL.h}, ${Math.max(0, baseHSL.s - 15)}%, ${Math.min(95, baseHSL.l + 30)}%,`;
 
     const render = (timestamp?: number) => {
+      // Initialize dynamic speed variable
+      let dynamicSpeed = settings.speed;
+      
       // Performance optimization: Stable frame rate limiting
       if (timestamp) {
         const deltaTime = timestamp - lastFrameTimeRef.current;
@@ -863,8 +872,10 @@ const Visualizer: React.FC<VisualizerProps> = ({
         const framesToCatch = Math.floor(deltaTime / targetFrameTime);
         lastFrameTimeRef.current = timestamp - (deltaTime % targetFrameTime);
         
-        // Increment time based on actual frames rendered
-        timeRef.current += (0.01 * settings.speed) * framesToCatch;
+        // Increment time based on actual frames rendered and music tempo
+        // Base speed scaled up by 2.5x so that 1.0 = old 2.5
+        const tempoSpeed = isPlaying ? dynamicSpeed : settings.speed;
+        timeRef.current += (0.025 * tempoSpeed) * framesToCatch; // Changed from 0.01 to 0.025 (2.5x)
       }
       
       // 1. Resize Handling
@@ -877,37 +888,103 @@ const Visualizer: React.FC<VisualizerProps> = ({
       const cx = w / 2;
       const cy = h / 2;
 
-      // 2. Audio Data Analysis - Optimized
+      // 2. Audio Data Analysis - Enhanced for Musical Responsiveness
       const bufferLength = analyser ? analyser.frequencyBinCount : 0;
       const dataArray = new Uint8Array(bufferLength);
       if (analyser) analyser.getByteFrequencyData(dataArray);
 
-      let bassEnergy = 0, highEnergy = 0;
+      // More detailed frequency band analysis
+      let bassEnergy = 0, midEnergy = 0, highEnergy = 0, subBassEnergy = 0;
+      let peakFreqIndex = 0, peakValue = 0;
+      
       if (bufferLength > 0 && isPlaying) {
-          // Bass energy calculation - focus on kick drum frequencies (60-150Hz)
-          // With 512 FFT size and 44.1kHz, each bin = ~86Hz
-          const bassStart = 0;
-          const bassEnd = Math.min(4, bufferLength); // ~0-344Hz range
+          // Enhanced frequency band calculations
+          const nyquist = 22050; // Half of 44.1kHz sample rate
+          const binSize = nyquist / bufferLength;
           
-          // Find the peak bass value
-          let peakBass = 0;
-          for(let i = bassStart; i < bassEnd; i++) {
-              const value = dataArray[i];
-              if (value > peakBass) peakBass = value;
-              bassEnergy += value;
+          // Sub-bass: 20-60Hz (feel more than hear)
+          const subBassStart = Math.floor(20 / binSize);
+          const subBassEnd = Math.floor(60 / binSize);
+          
+          // Bass: 60-250Hz (kick drums, bass lines)
+          const bassStart = Math.floor(60 / binSize);
+          const bassEnd = Math.floor(250 / binSize);
+          
+          // Mid: 250-2000Hz (most melodic content, vocals)
+          const midStart = Math.floor(250 / binSize);
+          const midEnd = Math.floor(2000 / binSize);
+          
+          // High: 2000-8000Hz (harmonics, cymbals, clarity)
+          const highStart = Math.floor(2000 / binSize);
+          const highEnd = Math.floor(8000 / binSize);
+          
+          // Calculate energies with better averaging
+          let subBassSum = 0, subBassCount = 0;
+          for(let i = subBassStart; i < subBassEnd && i < bufferLength; i++) {
+              subBassSum += dataArray[i];
+              subBassCount++;
           }
+          subBassEnergy = subBassCount > 0 ? (subBassSum / subBassCount) / 255 : 0;
           
-          // Use peak detection for bass hits
-          bassEnergy = peakBass / 255; // Use peak instead of average
+          let bassSum = 0, bassCount = 0, peakBass = 0;
+          for(let i = bassStart; i < bassEnd && i < bufferLength; i++) {
+              const value = dataArray[i];
+              bassSum += value;
+              bassCount++;
+              if (value > peakBass) peakBass = value;
+          }
+          // Combine average and peak for punch
+          const avgBass = bassCount > 0 ? (bassSum / bassCount) / 255 : 0;
+          bassEnergy = (peakBass / 255) * 0.7 + avgBass * 0.3;
           
-          // High frequency energy - for rain effect
-          const highStart = Math.floor(bufferLength * 0.5);
-          const highEnd = Math.min(highStart + 30, bufferLength);
-          for(let i=highStart; i<highEnd; i++) highEnergy += dataArray[i];
-          highEnergy = Math.min(1, (highEnergy / (highEnd - highStart)) / 255 * 2.5);
+          let midSum = 0, midCount = 0;
+          for(let i = midStart; i < midEnd && i < bufferLength; i++) {
+              const value = dataArray[i];
+              midSum += value;
+              midCount++;
+              // Track overall peak frequency
+              if (value > peakValue) {
+                  peakValue = value;
+                  peakFreqIndex = i;
+              }
+          }
+          midEnergy = midCount > 0 ? (midSum / midCount) / 255 : 0;
+          
+          let highSum = 0, highCount = 0;
+          for(let i = highStart; i < highEnd && i < bufferLength; i++) {
+              highSum += dataArray[i];
+              highCount++;
+          }
+          highEnergy = highCount > 0 ? (highSum / highCount) / 255 : 0;
+          
+          // Apply sensitivity multipliers
+          bassEnergy *= settings.sensitivity * 1.2;
+          midEnergy *= settings.sensitivity;
+          highEnergy *= settings.sensitivity * 0.8;
+          subBassEnergy *= settings.sensitivity * 1.5;
+          
+          // Clamp values
+          bassEnergy = Math.min(1, bassEnergy);
+          midEnergy = Math.min(1, midEnergy);
+          highEnergy = Math.min(1, highEnergy);
+          subBassEnergy = Math.min(1, subBassEnergy);
+      }
+      
+      // Calculate spectral centroid for brightness detection
+      let spectralCentroid = 0;
+      if (bufferLength > 0 && isPlaying) {
+          let weightedSum = 0, magnitudeSum = 0;
+          for (let i = 0; i < bufferLength; i++) {
+              const magnitude = dataArray[i];
+              weightedSum += i * magnitude;
+              magnitudeSum += magnitude;
+          }
+          if (magnitudeSum > 0) {
+              spectralCentroid = (weightedSum / magnitudeSum) / bufferLength;
+          }
       }
 
-      // 3. Tree of Life Energy Updates
+      // 3. Tree of Life Energy Updates - Enhanced frequency analysis
       let activeNodeColor: string | null = null;
       let highestNodeEnergy = 0;
       
@@ -918,15 +995,39 @@ const Visualizer: React.FC<VisualizerProps> = ({
             const binSize = nyquist / bufferLength;
             const startBin = Math.floor(node.freqRange[0] / binSize);
             const endBin = Math.ceil(node.freqRange[1] / binSize);
-            let sum = 0, count = 0;
-            for(let b = startBin; b < endBin && b < bufferLength; b++) { sum += dataArray[b]; count++; }
-            nodeEnergy = count > 0 ? (sum / count) / 255 : 0;
-            nodeEnergy *= 2.5; // Boost
+            
+            // Enhanced energy calculation with peak detection
+            let sum = 0, peakValue = 0, count = 0;
+            for(let b = startBin; b < endBin && b < bufferLength; b++) { 
+                const value = dataArray[b];
+                sum += value; 
+                if (value > peakValue) peakValue = value;
+                count++; 
+            }
+            
+            // Combine average and peak for better responsiveness
+            const avgEnergy = count > 0 ? (sum / count) / 255 : 0;
+            const peakEnergy = peakValue / 255;
+            nodeEnergy = (avgEnergy * 0.4 + peakEnergy * 0.6); // Favor peaks
+            
+            // Apply different boosts based on frequency range
+            if (node.freqRange[1] < 200) {
+                nodeEnergy *= 3.0; // More boost for bass frequencies (harder to detect)
+            } else if (node.freqRange[1] < 1000) {
+                nodeEnergy *= 2.5; // Good boost for mids
+            } else if (node.freqRange[1] < 4000) {
+                nodeEnergy *= 2.0; // Moderate boost for high-mids
+            } else {
+                nodeEnergy *= 1.5; // Less boost for highs (already prominent)
+            }
          }
-         // Smooth decay
-         node.currentEnergy = Math.max(0, (node.currentEnergy || 0) * 0.9 + nodeEnergy * 0.1);
+         
+         // More responsive decay with frequency-based rates
+         const decayRate = node.freqRange[1] < 500 ? 0.85 : 0.92; // Bass decays faster
+         node.currentEnergy = Math.max(0, (node.currentEnergy || 0) * decayRate + nodeEnergy * (1 - decayRate));
 
-         if (node.currentEnergy > 0.4 && node.currentEnergy > highestNodeEnergy) {
+         // Lower threshold for activation to make nodes more responsive
+         if (node.currentEnergy > 0.25 && node.currentEnergy > highestNodeEnergy) {
              highestNodeEnergy = node.currentEnergy;
              activeNodeColor = node.colorHex;
          }
@@ -950,23 +1051,27 @@ const Visualizer: React.FC<VisualizerProps> = ({
            const lastBassRipple = (window as any).lastBassRipple || 0;
            const cooldown = 250 - (normalizedLinear * 100); // At 50%: 200ms
            
-           // Trigger on bass peaks
+           // Enhanced ripple triggering with multiple frequency responses
            const bassIncreased = bassEnergy > prevBassRef.current + bassDelta;
+           const subBassHit = subBassEnergy > 0.6; // Deep bass creates center ripples
            const aboveThreshold = bassEnergy > bassThreshold;
            const cooldownMet = (now - lastBassRipple) > cooldown;
            
-           if (bassIncreased && aboveThreshold && cooldownMet) {
+           if ((bassIncreased && aboveThreshold && cooldownMet) || (subBassHit && cooldownMet)) {
               (window as any).lastBassRipple = now;
               
-              // Create expanding wave ripple
+              // Create expanding wave ripple with frequency-based characteristics
+              const rippleStrength = subBassHit ? subBassEnergy : bassEnergy;
+              const rippleSize = subBassHit ? 0.9 : 0.7;
+              
               ripplesRef.current.push({ 
-                  x: cx, 
-                  y: cy, 
-                  radius: 20, // Start slightly bigger
-                  maxRadius: Math.max(w, h) * 0.7, // Expand to 70% of screen
-                  alpha: 0.7, // Good starting visibility
-                  speed: 3.5 * settings.speed, // Smooth expansion
-                  color: primaryStr, 
+                  x: cx + (subBassHit ? 0 : (Math.random() - 0.5) * 100), // Sub-bass always center
+                  y: cy + (subBassHit ? 0 : (Math.random() - 0.5) * 100), 
+                  radius: 20 * (1 + rippleStrength), 
+                  maxRadius: Math.max(w, h) * rippleSize, 
+                  alpha: 0.5 + rippleStrength * 0.3, 
+                  speed: 8.75 * settings.speed * (1 + rippleStrength * 0.5), // 3.5 * 2.5 = 8.75
+                  color: subBassHit ? shade1Str : primaryStr, 
                   type: 'bass' 
               });
               
@@ -977,12 +1082,26 @@ const Visualizer: React.FC<VisualizerProps> = ({
                       y: cy, 
                       radius: 10, 
                       maxRadius: Math.max(w, h) * 0.5, 
-                      alpha: 0.5, 
-                      speed: 3 * settings.speed, 
+                      alpha: 0.3 + rippleStrength * 0.2, 
+                      speed: 7.5 * settings.speed, // 3 * 2.5 = 7.5
                       color: primaryStr, 
                       type: 'bass' 
                   });
               }, 50);
+           }
+           
+           // Mid-frequency ripples at random positions
+           if (midEnergy > 0.5 && Math.random() < midEnergy * normalizedLinear) {
+              ripplesRef.current.push({ 
+                  x: cx + (Math.random() - 0.5) * w * 0.6, 
+                  y: cy + (Math.random() - 0.5) * h * 0.6, 
+                  radius: 5, 
+                  maxRadius: 150 + midEnergy * 100, 
+                  alpha: 0.4 + midEnergy * 0.3, 
+                  speed: 6.25 * settings.speed, // 2.5 * 2.5 = 6.25
+                  color: shade2Str, 
+                  type: 'rain' 
+              });
            }
            
            // Rain ripples - continuous at 50% and above
@@ -998,13 +1117,52 @@ const Visualizer: React.FC<VisualizerProps> = ({
                       radius: 0, 
                       maxRadius: 80 + (normalizedLinear * 120), 
                       alpha: 0.3 + (normalizedLinear * 0.4), 
-                      speed: 2 * settings.speed, 
+                      speed: 5 * settings.speed, // 2 * 2.5 = 5
                       color: Math.random() > 0.5 ? shade2Str : shade1Str, 
                       type: 'rain' 
                   });
               }
            }
       }
+      // Tempo Detection - Beat tracking
+      const currentTime = performance.now();
+      
+      // Detect beats based on bass energy peaks
+      const beatThreshold = 0.6;
+      const beatDetected = bassEnergy > beatThreshold && bassEnergy > prevBassRef.current + 0.1;
+      
+      if (beatDetected && currentTime - lastBeatTimeRef.current > 200) { // Min 200ms between beats
+        const timeSinceLastBeat = currentTime - lastBeatTimeRef.current;
+        lastBeatTimeRef.current = currentTime;
+        
+        if (timeSinceLastBeat < 2000) { // Only consider beats within 2 seconds
+          beatHistoryRef.current.push(timeSinceLastBeat);
+          
+          // Keep only last 8 beats
+          if (beatHistoryRef.current.length > 8) {
+            beatHistoryRef.current.shift();
+          }
+          
+          // Calculate BPM from beat intervals
+          if (beatHistoryRef.current.length >= 4) {
+            const avgInterval = beatHistoryRef.current.reduce((a, b) => a + b) / beatHistoryRef.current.length;
+            const bpm = 60000 / avgInterval; // Convert ms interval to BPM
+            
+            // Clamp BPM to reasonable range
+            if (bpm >= 60 && bpm <= 200) {
+              detectedBPMRef.current = bpm;
+            }
+          }
+        }
+      }
+      
+      // Smooth BPM changes
+      smoothedBPMRef.current = smoothedBPMRef.current * 0.9 + detectedBPMRef.current * 0.1;
+      
+      // Calculate tempo-based speed multiplier
+      const tempoMultiplier = smoothedBPMRef.current / 120; // Normalized to 120 BPM baseline
+      dynamicSpeed = settings.speed * tempoMultiplier; // Update the existing variable
+      
       prevBassRef.current = bassEnergy;
       prevHighRef.current = highEnergy;
 
@@ -1030,9 +1188,32 @@ const Visualizer: React.FC<VisualizerProps> = ({
           visibleHexagons.forEach(hex => {
               let active = 0;
               if (isPlaying && bufferLength > 0) {
-                  if (settings.hexVisualMode === 'spectrum') active = (dataArray[hex.freqIndex % bufferLength] / 255) * 1.5;
-                  else if (settings.hexVisualMode === 'pulse') active = (Math.sin(timeRef.current * 2 - hex.dist * 0.01) > 0.8) ? bassEnergy : 0;
-                  else active = Math.max(0, Math.sin(hex.x * 0.01 + timeRef.current) * Math.cos(hex.y * 0.01 + timeRef.current) * bassEnergy);
+                  if (settings.hexVisualMode === 'spectrum') {
+                      // Enhanced spectrum mode with frequency mapping
+                      const freqBin = Math.min(hex.freqIndex % bufferLength, bufferLength - 1);
+                      const rawValue = dataArray[freqBin] / 255;
+                      // Apply spectral weighting based on position
+                      const distanceFactor = 1 - (hex.dist / 1000);
+                      active = rawValue * 1.5 * distanceFactor;
+                  }
+                  else if (settings.hexVisualMode === 'pulse') {
+                      // Enhanced pulse mode responding to multiple frequency bands
+                      const radialWave = Math.sin(timeRef.current * 2 - hex.dist * 0.01);
+                      if (radialWave > 0.7) {
+                          // Different rings respond to different frequencies
+                          const ringZone = hex.dist / 200; // Which ring zone
+                          if (ringZone < 1) active = subBassEnergy; // Inner ring: sub-bass
+                          else if (ringZone < 2) active = bassEnergy; // Second ring: bass
+                          else if (ringZone < 3) active = midEnergy; // Third ring: mids
+                          else active = highEnergy; // Outer rings: highs
+                      }
+                  }
+                  else { // Wave mode
+                      // Enhanced wave with frequency-reactive flow
+                      const waveX = Math.sin(hex.x * 0.01 + timeRef.current * (1 + bassEnergy));
+                      const waveY = Math.cos(hex.y * 0.01 + timeRef.current * (1 + midEnergy));
+                      active = Math.max(0, waveX * waveY * (bassEnergy * 0.5 + midEnergy * 0.3 + highEnergy * 0.2));
+                  }
               }
               if (hex.colorType !== 'primary' && isPlaying) active = Math.max(0, Math.min(1, active + (Math.random() - 0.5) * 0.3 * settings.sensitivity));
               
@@ -1135,25 +1316,26 @@ const Visualizer: React.FC<VisualizerProps> = ({
             ctx.lineWidth = 2 + boost; 
             ctx.stroke();
 
-            // Supercharged Comet
+            // Supercharged Comet - Calmer flow
             const baseIntensity = 0.2;
             // Total intensity determines visibility
             const flowIntensity = baseIntensity + (boost * 1.5);
             
             if (flowIntensity > 0.1) {
-                // PHYSICS: Calming flow independent of bass acceleration
-                const flowSpeed = 0.0002 * settings.speed;
+                // PHYSICS: Flow speed responds to music tempo but stays relatively calm
+                const flowSpeed = 0.0003 * dynamicSpeed; // Tempo-based but still meditative (0.00012 * 2.5 = 0.0003)
                 const steadyTime = Date.now() * flowSpeed; 
-                const phase = (steadyTime + (i * 0.7)) % 1;
+                const phase = ((steadyTime + (i * 0.7)) % 1);
                 
                 const px = sx + (ex - sx) * phase;
                 const py = sy + (ey - sy) * phase;
 
                 const tailLength = 0.4 + (boost * 0.2); // Tail grows with energy
                 
-                // Color Logic: Turns white/bright when supercharged
+                // Color Logic: Responds to frequency content
                 const isSupercharged = boost > 0.8;
-                const headColor = isSupercharged ? '#ffffff' : sn.colorHex;
+                const isHighFreq = highEnergy > 0.5;
+                const headColor = isSupercharged ? '#ffffff' : (isHighFreq ? en.colorHex : sn.colorHex);
 
                 const cometGrad = ctx.createLinearGradient(
                     sx + (ex-sx) * (phase - tailLength), 
@@ -1171,22 +1353,24 @@ const Visualizer: React.FC<VisualizerProps> = ({
                     ctx.moveTo(sx + (ex-sx)*t0, sy + (ey-sy)*t0);
                     ctx.lineTo(px, py);
                     ctx.strokeStyle = cometGrad;
-                    // Thickness pulses with music
-                    ctx.lineWidth = 4 + (boost * 8); 
+                    // Thickness responds to energy but more subtly
+                    const thickness = 4 + (boost * 8); // Simpler calculation
+                    ctx.lineWidth = thickness;
                     ctx.lineCap = 'round';
-                    // Glow effect
-                    ctx.shadowBlur = 10 + (boost * 30);
-                    ctx.shadowColor = sn.colorHex;
+                    // Glow effect varies with energy
+                    ctx.shadowBlur = 10 + (boost * 25);
+                    ctx.shadowColor = isSupercharged ? headColor : sn.colorHex;
                     ctx.stroke();
                 }
 
                 // Draw Comet Head (The "Spark")
                 ctx.beginPath();
-                // Size grows significantly with energy
-                ctx.arc(px, py, 3 + (boost * 6), 0, Math.PI * 2);
-                ctx.fillStyle = '#ffffff';
-                ctx.shadowBlur = 20 + (boost * 40); // Intense electrical glow
-                ctx.shadowColor = isSupercharged ? '#ffffff' : sn.colorHex;
+                // Size responds to energy but more subtly
+                const headSize = 3 + (boost * 5);
+                ctx.arc(px, py, headSize, 0, Math.PI * 2);
+                ctx.fillStyle = headColor;
+                ctx.shadowBlur = 20 + (boost * 30);
+                ctx.shadowColor = isSupercharged ? '#ffffff' : headColor;
                 ctx.fill();
                 
                 // Reset shadow
@@ -1264,14 +1448,20 @@ const Visualizer: React.FC<VisualizerProps> = ({
         
         ctx.globalCompositeOperation = 'lighter';
 
-        const morphSpeed = 0.15 * settings.speed; 
+        const morphSpeed = 0.375 * dynamicSpeed; // Use tempo-based speed (0.15 * 2.5 = 0.375)
         const particleBaseSize = settings.particleBaseSize || 2.5;
         
-        // Performance optimization based on FPS
-        let skipFactor = 1;
-        if (targetFPSRef.current < 30) skipFactor = 4;
-        else if (targetFPSRef.current < 40) skipFactor = 3;
-        else if (targetFPSRef.current < 50) skipFactor = 2;
+      // Update dynamic speed based on tempo
+      if (isPlaying) {
+        const tempoMultiplier = smoothedBPMRef.current / 120; // Normalized to 120 BPM baseline
+        dynamicSpeed = settings.speed * tempoMultiplier;
+      }
+      
+      // Performance optimization based on FPS
+      let skipFactor = 1;
+      if (targetFPSRef.current < 30) skipFactor = 4;
+      else if (targetFPSRef.current < 40) skipFactor = 3;
+      else if (targetFPSRef.current < 50) skipFactor = 2;
 
         particlesRef.current.forEach((p, index) => {
             // Skip particles based on performance
@@ -1299,12 +1489,12 @@ const Visualizer: React.FC<VisualizerProps> = ({
             if (settings.enableFlow) {
                 const direction = settings.invertPerspective ? -1 : 1;
                 const zRange = 2000;
-                const flowSpeed = 80 * settings.speed;
+                const flowSpeed = 200 * dynamicSpeed; // Tempo-based flow (80 * 2.5 = 200)
                 const timeOffset = (timeRef.current * flowSpeed * direction) + (p.noise.z * zRange);
                 let flowZ = (timeOffset % zRange);
                 if (flowZ < 0) flowZ += zRange;
                 mz += flowZ - (zRange / 2);
-            } 
+            }
             
             if (settings.enableFloat) {
                 mx += Math.sin(timeRef.current * 0.5 + p.noise.x * 10) * 30;
@@ -1313,50 +1503,85 @@ const Visualizer: React.FC<VisualizerProps> = ({
             } 
             
             if (settings.enablePulse) {
-                const pulse = 1 + Math.sin(timeRef.current * 3 + index * 0.1) * 0.4 * bassEnergy;
-                mx += p.x * (pulse - 1);
-                my += p.y * (pulse - 1);
-                mz += p.z * (pulse - 1);
+                // Multi-frequency pulsing
+                const bassPulse = 1 + Math.sin(timeRef.current * 3 + index * 0.1) * 0.4 * bassEnergy;
+                const midPulse = 1 + Math.cos(timeRef.current * 5 + index * 0.15) * 0.2 * midEnergy;
+                const highPulse = 1 + Math.sin(timeRef.current * 8 + index * 0.2) * 0.1 * highEnergy;
+                const combinedPulse = (bassPulse * 0.5 + midPulse * 0.3 + highPulse * 0.2);
+                
+                mx += p.x * (combinedPulse - 1);
+                my += p.y * (combinedPulse - 1);
+                mz += p.z * (combinedPulse - 1);
             }
 
-            // 3. Color Logic
+            // 3. Enhanced Color Logic with frequency response
             if (settings.colorMode === 'cycle') {
                 const cycleSpeed = 50 * settings.speed;
                 const baseHue = (timeRef.current * cycleSpeed + (index / particlesRef.current.length) * 360) % 360;
-                const hue = (baseHue + bassEnergy * 60) % 360;
-                const sat = 80;
-                const lit = 60 + highEnergy * 20; 
+                // Color shifts based on spectral content
+                const hueShift = bassEnergy * 30 + midEnergy * 20 + highEnergy * 10;
+                const hue = (baseHue + hueShift + spectralCentroid * 60) % 360;
+                const sat = 70 + midEnergy * 20 + highEnergy * 10;
+                const lit = 50 + bassEnergy * 10 + midEnergy * 15 + highEnergy * 25; 
                 p.color = `hsl(${hue}, ${sat}%, ${lit}%)`;
             } else if (settings.colorMode === 'chakra') {
-                 const phiResidue = (index * PHI) % 1;
-                 if (activeNodeColor && isPlaying && phiResidue < 0.2) {
-                     p.color = activeNodeColor;
-                 } else {
-                     p.color = primaryColor;
-                 }
+                const phiResidue = (index * PHI) % 1;
+                if (activeNodeColor && isPlaying) {
+                    // More particles react to active tree nodes based on energy
+                    const energyThreshold = 0.2 - (highestNodeEnergy * 0.15);
+                    if (phiResidue < energyThreshold) {
+                        p.color = activeNodeColor;
+                    } else {
+                        // Blend between primary and active color based on energy
+                        const blend = highestNodeEnergy * 0.3;
+                        if (Math.random() < blend) {
+                            p.color = activeNodeColor;
+                        } else {
+                            p.color = primaryColor;
+                        }
+                    }
+                } else {
+                    p.color = primaryColor;
+                }
             } else {
                 p.color = primaryColor;
             }
 
-            // 3D Projection
-            const fov = 400; 
+            // 3D Projection with audio-reactive depth
+            const fov = 400 - spectralCentroid * 100; // FOV changes with brightness
             const finalX = p.x + mx;
             const finalY = p.y + my;
-            const finalZ = p.z + mz;
-
+            const finalZ = p.z + mz + (subBassEnergy * 100); // Sub-bass pushes particles forward
+            
             const scale = fov / (fov + finalZ + 200);
             
             if (scale > 0 && scale < 20) {
                 const px = finalX * scale;
                 const py = finalY * scale;
-                const size = Math.max(0.5, p.size * particleBaseSize * scale);
-                const depthAlpha = Math.min(1, Math.max(0, (finalZ + 800) / 1000));
                 
-                // Draw circles with optimized rendering
+                // Size responds to frequency content
+                const audioSizeBoost = 1 + (bassEnergy * 0.3 + midEnergy * 0.2 + highEnergy * 0.1);
+                const size = Math.max(0.5, p.size * particleBaseSize * scale * audioSizeBoost);
+                
+                // Depth alpha with audio brightness
+                const depthAlpha = Math.min(1, Math.max(0, (finalZ + 800) / 1000));
+                const audioAlpha = 0.4 + (midEnergy * 0.3 + highEnergy * 0.3);
+                
+                // Draw particles with glow effect for bright sounds
+                if (highEnergy > 0.5) {
+                    // Add glow for high frequencies
+                    ctx.beginPath();
+                    ctx.arc(px, py, size * 2, 0, Math.PI * 2);
+                    ctx.fillStyle = p.color;
+                    ctx.globalAlpha = depthAlpha * audioAlpha * 0.2;
+                    ctx.fill();
+                }
+                
+                // Main particle
                 ctx.beginPath();
                 ctx.arc(px, py, size, 0, Math.PI * 2);
                 ctx.fillStyle = p.color;
-                ctx.globalAlpha = depthAlpha * 0.6;
+                ctx.globalAlpha = depthAlpha * audioAlpha;
                 ctx.fill();
             }
         });
@@ -1364,6 +1589,16 @@ const Visualizer: React.FC<VisualizerProps> = ({
       }
 
       // Time increment is now handled above based on actual frame timing
+      // Draw BPM indicator when music is playing
+      if (isPlaying && settings.speed > 0) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(`${Math.round(smoothedBPMRef.current)} BPM`, w - 10, h - 10);
+        ctx.restore();
+      }
+      
       rafRef.current = requestAnimationFrame(render);
     };
 

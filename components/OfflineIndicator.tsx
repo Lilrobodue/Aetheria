@@ -53,7 +53,7 @@ export const OfflineIndicator: React.FC<OfflineIndicatorProps> = ({
 
   return (
     <div
-      className={`fixed top-4 right-4 z-50 px-4 py-2 rounded-lg shadow-lg transition-all duration-300 ${
+      className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 rounded-lg shadow-lg transition-all duration-300 ${
         isOnline 
           ? 'bg-green-600 text-white' 
           : 'bg-orange-600 text-white'

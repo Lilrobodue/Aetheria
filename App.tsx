@@ -967,7 +967,7 @@ const App: React.FC = () => {
   };
 
   const [vizSettings, setVizSettings] = useState<VizSettings>({
-    speed: 2.5,
+    speed: 1.0, // Changed from 2.5 to 1.0 for normal speed default
     sensitivity: 1.0,
     particleDensity: 'medium',
     particleBaseSize: 3.5, 
@@ -1113,6 +1113,8 @@ const App: React.FC = () => {
   const pausedAtRef = useRef<number>(0);
   const rafRef = useRef<number>(0);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
+  const audioKeepAliveRef = useRef<number | null>(null);
+  const blobUrlsRef = useRef<{ [key: string]: string }>({});
 
   const solfeggioOscRef = useRef<OscillatorNode | null>(null);
   const solfeggioGainRef = useRef<GainNode | null>(null);
@@ -1181,6 +1183,19 @@ const App: React.FC = () => {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      // Clean up audio keep-alive timer
+      if (audioKeepAliveRef.current) {
+        clearInterval(audioKeepAliveRef.current);
+      }
+      
+      // Clean up blob URLs
+      Object.values(blobUrlsRef.current).forEach((url) => {
+        if (typeof url === 'string') {
+          URL.revokeObjectURL(url);
+        }
+      });
+      blobUrlsRef.current = {};
+      
       // Clean up audio element
       if (mainAudioRef.current) {
         mainAudioRef.current.pause();
@@ -1611,8 +1626,33 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isPlaying) {
       wakeLockManager.requestWakeLock();
+      
+      // Start audio context keep-alive timer
+      if (audioKeepAliveRef.current) {
+        clearInterval(audioKeepAliveRef.current);
+      }
+      
+      // Keep audio context alive by periodically creating a silent oscillator
+      audioKeepAliveRef.current = window.setInterval(() => {
+        if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
+          // Create a silent oscillator to keep context active
+          const silentOsc = audioCtxRef.current.createOscillator();
+          const silentGain = audioCtxRef.current.createGain();
+          silentGain.gain.value = 0;
+          silentOsc.connect(silentGain);
+          silentGain.connect(audioCtxRef.current.destination);
+          silentOsc.start();
+          silentOsc.stop(audioCtxRef.current.currentTime + 0.01);
+        }
+      }, 20000); // Every 20 seconds
     } else {
       wakeLockManager.releaseWakeLock();
+      
+      // Clear keep-alive timer when not playing
+      if (audioKeepAliveRef.current) {
+        clearInterval(audioKeepAliveRef.current);
+        audioKeepAliveRef.current = null;
+      }
     }
   }, [isPlaying]);
 
@@ -2943,8 +2983,36 @@ const App: React.FC = () => {
         });
         
         mainAudioRef.current.addEventListener('error', (e) => {
+          const audio = e.target as HTMLAudioElement;
           console.error('Audio element error:', e);
+          console.error('Error details:', {
+            error: audio.error,
+            code: audio.error?.code,
+            message: audio.error?.message,
+            networkState: audio.networkState,
+            readyState: audio.readyState,
+            currentSrc: audio.currentSrc
+          });
+          
           setIsPlaying(false);
+          
+          // Auto-recovery attempt for common errors
+          if (audio.error?.code === 2) { // MEDIA_ERR_NETWORK
+            console.log('Network/Blob error detected - marking for reload');
+            // Mark that we need to reload on next play attempt
+            (mainAudioRef.current as any).needsReload = true;
+            // Clear the source to prevent further errors
+            if (mainAudioRef.current) {
+              mainAudioRef.current.src = '';
+            }
+          } else if (audio.error?.code === 4) { // MEDIA_ERR_SRC_NOT_SUPPORTED
+            console.log('Source not supported - likely expired blob URL');
+            (mainAudioRef.current as any).needsReload = true;
+            // Clear the reference so next play will reload
+            if (mainAudioRef.current) {
+              mainAudioRef.current.src = '';
+            }
+          }
         });
         
         mainAudioRef.current.addEventListener('loadedmetadata', () => {
@@ -2953,8 +3021,25 @@ const App: React.FC = () => {
         });
       }
 
-      // Create object URL for the audio file
-      const audioUrl = URL.createObjectURL(song.file);
+      // Create or reuse blob URL for the audio file
+      let audioUrl = blobUrlsRef.current[song.id];
+      
+      // If we don't have a blob URL or it might be expired, create a new one
+      if (!audioUrl) {
+        // Clean up any old URL for this song
+        const oldUrl = blobUrlsRef.current[song.id];
+        if (oldUrl) {
+          URL.revokeObjectURL(oldUrl);
+        }
+        
+        // Create new blob URL
+        audioUrl = URL.createObjectURL(song.file);
+        blobUrlsRef.current[song.id] = audioUrl;
+        console.log('Created new blob URL for:', song.name);
+      } else {
+        console.log('Reusing existing blob URL for:', song.name);
+      }
+      
       mainAudioRef.current.src = audioUrl;
 
       // Connect audio element to Web Audio API
@@ -3019,10 +3104,8 @@ const App: React.FC = () => {
       setIsPlaying(true);
       setCurrentSongIndex(index);
       
-      // Clean up the object URL after a delay
-      setTimeout(() => {
-        URL.revokeObjectURL(audioUrl);
-      }, 1000);
+      // Don't revoke blob URLs immediately - they need to stay valid
+      // We'll clean them up when creating new ones or on unmount
       
     } catch (error) {
       console.error('Playback error:', error);
@@ -3122,14 +3205,167 @@ const App: React.FC = () => {
       } else {
         // Resume the audio element
         try {
-          await mainAudioRef.current.play();
-          setIsPlaying(true);
-          // Update media session state
-          if ('mediaSession' in navigator) {
-            navigator.mediaSession.playbackState = 'playing';
+          // Check if the audio source is still valid before playing
+          const audioElement = mainAudioRef.current;
+          console.log('Resume attempt - readyState:', audioElement.readyState, 'error:', audioElement.error);
+          
+          // More aggressive recovery checks
+          const needsReload = (audioElement as any).needsReload;
+          if (needsReload ||
+              audioElement.error || 
+              audioElement.readyState < 2 || 
+              audioElement.networkState === 3 || // NETWORK_NO_SOURCE
+              !audioElement.src ||
+              audioElement.src === '' ||
+              audioElement.src === 'about:blank') {
+            console.log('Audio source needs reload. Reason:', {
+              needsReload,
+              error: audioElement.error,
+              readyState: audioElement.readyState,
+              networkState: audioElement.networkState,
+              src: audioElement.src
+            });
+            
+            // Clear the needsReload flag
+            delete (audioElement as any).needsReload;
+            
+            // Store current position
+            const currentTime = audioElement.currentTime || 0;
+            
+            // Force complete reload
+            setIsPlaying(false);
+            await playTrack(currentSongIndex);
+            
+            // Restore position after reload
+            if (mainAudioRef.current && currentTime > 0) {
+              // Wait for metadata to load before seeking
+              mainAudioRef.current.addEventListener('loadedmetadata', () => {
+                if (mainAudioRef.current) {
+                  mainAudioRef.current.currentTime = currentTime;
+                }
+              }, { once: true });
+            }
+          } else {
+            // Try to wake up the audio context first
+            if (audioCtxRef.current) {
+              console.log('Audio context state:', audioCtxRef.current.state);
+              if (audioCtxRef.current.state === 'suspended') {
+                console.log('Resuming suspended audio context...');
+                await audioCtxRef.current.resume();
+              }
+              
+              // Create a silent buffer to "kick" the audio context
+              const silentBuffer = audioCtxRef.current.createBuffer(1, 1, audioCtxRef.current.sampleRate);
+              const silentSource = audioCtxRef.current.createBufferSource();
+              silentSource.buffer = silentBuffer;
+              silentSource.connect(audioCtxRef.current.destination);
+              silentSource.start();
+              console.log('Kicked audio context with silent buffer');
+            }
+            
+            // Small delay to ensure audio context is ready
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Log the current state before attempting play
+            console.log('Pre-play state:', {
+              paused: audioElement.paused,
+              currentTime: audioElement.currentTime,
+              duration: audioElement.duration,
+              volume: audioElement.volume,
+              muted: audioElement.muted,
+              audioContextState: audioCtxRef.current?.state
+            });
+            
+            try {
+              const playPromise = audioElement.play();
+              console.log('Play promise created');
+              
+              await playPromise;
+              console.log('Play promise resolved successfully');
+              
+              setIsPlaying(true);
+              // Update media session state
+              if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'playing';
+              }
+            } catch (playError) {
+              console.error('Play promise rejected:', playError);
+              
+              // Try one more recovery strategy: restart from beginning then seek
+              console.log('Attempting restart-and-seek recovery...');
+              const savedTime = audioElement.currentTime;
+              audioElement.currentTime = 0;
+              
+              try {
+                await audioElement.play();
+                console.log('Restart successful, seeking to:', savedTime);
+                audioElement.currentTime = savedTime;
+                setIsPlaying(true);
+                
+                if ('mediaSession' in navigator) {
+                  navigator.mediaSession.playbackState = 'playing';
+                }
+              } catch (restartError) {
+                console.error('Restart also failed:', restartError);
+                throw playError; // Throw original error
+              }
+            }
           }
         } catch (error) {
           console.error('Failed to resume playback:', error);
+          
+          // Different recovery strategies based on error type
+          if (error instanceof DOMException) {
+            if (error.name === 'NotAllowedError') {
+              // User interaction required
+              console.log('User interaction required for playback');
+              alert('Please click play again to resume playback.');
+            } else if (error.name === 'NotSupportedError' || error.name === 'AbortError') {
+              // Source is likely corrupted or expired - reload
+              console.log('Source error detected, reloading track...');
+              const currentTime = mainAudioRef.current?.currentTime || 0;
+              await playTrack(currentSongIndex);
+              if (mainAudioRef.current && currentTime > 0) {
+                mainAudioRef.current.currentTime = currentTime;
+              }
+            } else {
+              // Unknown DOMException - try reloading
+              console.log('Unknown playback error, attempting recovery...');
+              const currentTime = mainAudioRef.current?.currentTime || 0;
+              // Force cleanup first
+              if (mainAudioRef.current) {
+                mainAudioRef.current.pause();
+                mainAudioRef.current.src = '';
+                mainAudioRef.current.load();
+              }
+              
+              // If media source exists, disconnect it
+              if (mediaSourceRef.current) {
+                try {
+                  mediaSourceRef.current.disconnect();
+                  mediaSourceRef.current = null;
+                } catch (e) {
+                  console.log('Error disconnecting media source:', e);
+                }
+              }
+              
+              // Clear the audio element reference to force recreation
+              mainAudioRef.current = null;
+              
+              // Wait a moment then reload
+              setTimeout(async () => {
+                console.log('Attempting full track reload after error...');
+                await playTrack(currentSongIndex);
+                if (mainAudioRef.current && currentTime > 0) {
+                  mainAudioRef.current.currentTime = currentTime;
+                }
+              }, 100);
+            }
+          } else {
+            // Non-DOM error - log and try to recover
+            console.error('Unexpected error type:', error);
+            alert('Audio playback error. Please try selecting the track again.');
+          }
         }
       }
     }
@@ -3416,7 +3652,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.4</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
