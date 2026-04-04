@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
-  Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2, 
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box, Trash2, Target, Shield, Calculator
+  Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2,
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO } from './constants';
@@ -931,7 +931,8 @@ const App: React.FC = () => {
 
   const [isRecording, setIsRecording] = useState(false);
   const [showRecordOptions, setShowRecordOptions] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(true); 
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [showLinks, setShowLinks] = useState(false);
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
   
   const [currTime, setCurrTime] = useState(0);
@@ -3652,7 +3653,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.4</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.5</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -5687,6 +5688,214 @@ const App: React.FC = () => {
             </div>
           )}
 
+
+          {/* Links & Resources Pull-out Tab */}
+          <button
+            onClick={() => setShowLinks(!showLinks)}
+            className={`fixed right-0 top-1/2 -translate-y-1/2 z-[55] flex items-center gap-1 px-1.5 py-4 rounded-l-lg border border-r-0 transition-all duration-300 ${
+              showLinks
+                ? 'bg-gold-500/20 border-gold-500/40 text-gold-400 right-[340px] sm:right-[380px]'
+                : 'bg-black/80 border-slate-700 text-slate-400 hover:text-gold-400 hover:border-gold-500/30 hover:bg-black/90'
+            } backdrop-blur-md`}
+            style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
+            title="Links & Resources"
+          >
+            <ExternalLink size={14} className="rotate-90" />
+            <span className="text-[10px] font-bold tracking-widest uppercase">Links</span>
+          </button>
+
+          {/* Links & Resources Panel */}
+          <div className={`fixed inset-y-0 right-0 z-[54] w-[340px] sm:w-[380px] bg-black/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shadow-2xl transition-transform duration-300 ${
+            showLinks ? 'translate-x-0' : 'translate-x-full'
+          }`}>
+            <div className="flex justify-between items-center p-5 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full border border-gold-500/40 flex items-center justify-center">
+                  <span className="text-gold-400 font-serif text-lg">A</span>
+                </div>
+                <div>
+                  <h3 className="text-gold-400 font-serif text-lg tracking-wide">AETHERIA</h3>
+                  <p className="text-[10px] text-slate-500 italic">Healing the world heART</p>
+                </div>
+              </div>
+              <button onClick={() => setShowLinks(false)} className="p-2 hover:bg-slate-800 rounded-full">
+                <X className="text-slate-500 hover:text-white" size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-5 pb-32">
+
+              {/* Apps & Tools */}
+              <div>
+                <div className="text-[9px] text-slate-600 tracking-[.2em] uppercase text-center mb-3">Apps & Tools</div>
+                <div className="space-y-2">
+                  <a href="https://aetheria432.com" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-gold-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-gold-500/10 border border-gold-500/20 flex items-center justify-center shrink-0">
+                      <Music size={16} className="text-gold-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-gold-400 transition-colors">Aetheria 432Hz Player</h4>
+                      <p className="text-[10px] text-slate-500">27-frequency harmonic healing system</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-gold-500 transition-colors shrink-0" />
+                  </a>
+                  <a href="https://aetheriarct.com" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-purple-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0">
+                      <Brain size={16} className="text-purple-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-purple-400 transition-colors">Aetheria RCT</h4>
+                      <p className="text-[10px] text-slate-500">Muse 2 EEG neuro-adaptive coherence training</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-purple-500 transition-colors shrink-0" />
+                  </a>
+                </div>
+              </div>
+
+              {/* Books */}
+              <div>
+                <div className="text-[9px] text-slate-600 tracking-[.2em] uppercase text-center mb-3">Books</div>
+                <div className="space-y-2">
+                  <a href="https://a.co/d/079tM297" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-pink-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-pink-500/10 border border-pink-500/20 flex items-center justify-center shrink-0">
+                      <BookMarked size={16} className="text-pink-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-pink-400 transition-colors">Aetheria</h4>
+                      <p className="text-[10px] text-slate-500">The frequency healing system — foundational text</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-pink-500 transition-colors shrink-0" />
+                  </a>
+                  <a href="https://a.co/d/0c83ZGEu" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-blue-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+                      <BookOpen size={16} className="text-blue-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-blue-400 transition-colors">The Golden Thread</h4>
+                      <p className="text-[10px] text-slate-500">One equation across all scales — E=hf as universal key</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-blue-500 transition-colors shrink-0" />
+                  </a>
+                  <a href="https://a.co/d/0ckEN0Qs" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-orange-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">
+                      <Globe size={16} className="text-orange-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-orange-400 transition-colors">Cosmic Rhythms</h4>
+                      <p className="text-[10px] text-slate-500">How sun, moon & earth shape your biology</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-orange-500 transition-colors shrink-0" />
+                  </a>
+                  <a href="https://a.co/d/04Y1pUtE" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-red-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                      <Heart size={16} className="text-red-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-red-400 transition-colors">SFB — A TBI Guide</h4>
+                      <p className="text-[10px] text-slate-500">Navigating traumatic brain injury recovery</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-red-500 transition-colors shrink-0" />
+                  </a>
+                </div>
+              </div>
+
+              {/* Music */}
+              <div>
+                <div className="text-[9px] text-slate-600 tracking-[.2em] uppercase text-center mb-3">Music</div>
+                <a href="https://open.spotify.com/artist/4CXB2ctrUCvInDQkKDhw4q" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-green-500/40 transition-all group">
+                  <div className="w-9 h-9 rounded-lg bg-green-500/10 border border-green-500/20 flex items-center justify-center shrink-0">
+                    <Music size={16} className="text-green-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-medium text-slate-200 group-hover:text-green-400 transition-colors">Aetheria on Spotify</h4>
+                    <p className="text-[10px] text-slate-500">Frequency-tuned healing music — 432Hz</p>
+                  </div>
+                  <ChevronRight size={14} className="text-slate-700 group-hover:text-green-500 transition-colors shrink-0" />
+                </a>
+              </div>
+
+              {/* Simulations */}
+              <div>
+                <div className="text-[9px] text-slate-600 tracking-[.2em] uppercase text-center mb-3">Interactive Simulations</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { href: 'https://lilrobodue.github.io/Lewis-Vortex-Model/', icon: '🌀', title: 'Lewis Vortex Model', sub: 'Formation Theory' },
+                    { href: 'https://lilrobodue.github.io/Unified-Scale-Navigator/', icon: '🔬', title: 'Unified Scale Navigator', sub: 'Quantum to cosmic' },
+                    { href: 'https://lilrobodue.github.io/HRV-Coherence-Visualizer/', icon: '💓', title: 'HRV Coherence Visualizer', sub: 'Heart rate variability' },
+                    { href: 'https://lilrobodue.github.io/Schumann-Biology-Simulator/', icon: '🌍', title: 'Schumann Biology Simulator', sub: "Earth's resonance" },
+                    { href: 'https://lilrobodue.github.io/Cellular-Voltage-Frequency-Model/', icon: '⚡', title: 'Cellular Voltage Model', sub: 'Frequency & cell health' },
+                    { href: 'https://lilrobodue.github.io/Galactic-Scale-Vortex-Formation/', icon: '🌌', title: 'Galactic Vortex Formation', sub: 'Cosmic scale structure' },
+                  ].map((sim) => (
+                    <a key={sim.href} href={sim.href} target="_blank" rel="noopener noreferrer" className="p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-blue-500/30 transition-all text-center group">
+                      <div className="text-xl mb-1">{sim.icon}</div>
+                      <h4 className="text-[11px] font-medium text-slate-300 group-hover:text-blue-400 transition-colors leading-tight">{sim.title}</h4>
+                      <p className="text-[9px] text-slate-600 mt-1">{sim.sub}</p>
+                    </a>
+                  ))}
+                </div>
+              </div>
+
+              {/* Community & Social */}
+              <div>
+                <div className="text-[9px] text-slate-600 tracking-[.2em] uppercase text-center mb-3">Community & Social</div>
+                <div className="space-y-2">
+                  <a href="https://discord.gg/ddR3MfgCsM" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-indigo-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0">
+                      <MessageCircle size={16} className="text-indigo-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-indigo-400 transition-colors">Th3 L0unG3 — Discord</h4>
+                      <p className="text-[10px] text-slate-500">365+ healing frequency songs · community</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-indigo-500 transition-colors shrink-0" />
+                  </a>
+                  <a href="https://www.youtube.com/@Aetheria432" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-red-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                      <Play size={16} className="text-red-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-red-400 transition-colors">YouTube</h4>
+                      <p className="text-[10px] text-slate-500">Aetheria content, demos, and explorations</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-red-500 transition-colors shrink-0" />
+                  </a>
+                  <a href="https://x.com/TheyCallmeJobo" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-orange-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">
+                      <ExternalLink size={16} className="text-orange-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-orange-400 transition-colors">X / Twitter</h4>
+                      <p className="text-[10px] text-slate-500">@TheyCallmeJobo — thoughts, updates, frequencies</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-orange-500 transition-colors shrink-0" />
+                  </a>
+                </div>
+              </div>
+
+              {/* Contact */}
+              <div>
+                <div className="text-[9px] text-slate-600 tracking-[.2em] uppercase text-center mb-3">Contact</div>
+                <a href="mailto:Aetheria432@pm.me" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-gold-500/40 transition-all group">
+                  <div className="w-9 h-9 rounded-lg bg-gold-500/10 border border-gold-500/20 flex items-center justify-center shrink-0">
+                    <Mail size={16} className="text-gold-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-medium text-slate-200 group-hover:text-gold-400 transition-colors">Aetheria432@pm.me</h4>
+                    <p className="text-[10px] text-slate-500">Questions, collaborations, research inquiries</p>
+                  </div>
+                  <ChevronRight size={14} className="text-slate-700 group-hover:text-gold-500 transition-colors shrink-0" />
+                </a>
+              </div>
+
+              {/* Footer */}
+              <div className="text-center pt-4 pb-6 space-y-1">
+                <div className="text-sm">🙏</div>
+                <div className="text-[10px] text-slate-600 italic">Healing the world heART</div>
+                <div className="text-[9px] text-slate-700">© 2026 Joseph & Alisha Lewis</div>
+                <div className="text-[8px] text-slate-700">27 frequencies · 432 Hz · 3-6-9</div>
+              </div>
+            </div>
+          </div>
 
           {/* NEW FOOTER - SNAPPED TO BOTTOM */}
           <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none flex justify-center">
