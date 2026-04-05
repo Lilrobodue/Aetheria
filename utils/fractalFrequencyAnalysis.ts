@@ -55,13 +55,16 @@ export const EXTENDED_SOLFEGGIO = {
 
 // Safety frequency ranges with protection protocols
 export const SAFETY_PROTOCOLS = {
-  SAFE_RANGE: { min: 20, max: 1205 }, // General safe listening range (up to GUT regime)
-  CAUTION_RANGE: { min: 1206, max: 3150 }, // HEART regime - requires subtle resonance mode
+  SAFE_RANGE: { min: 20, max: 963 }, // General safe listening range (up to traditional solfeggio top)
+  CAUTION_RANGE: { min: 964, max: 3150 }, // Above 963 - felt not heard, requires subtle resonance mode
   EXPERT_RANGE: { min: 3504, max: 8000 }, // HEAD regime - advanced practitioners only
   RESEARCH_RANGE: { min: 8001, max: 20000 }, // Research/documentation only
-  
+
   // Volume reduction curves for higher frequencies
   VOLUME_CURVES: {
+    964: 0.45, // 45% of normal volume (above traditional solfeggio)
+    1000: 0.4, // 40% - transitioning to felt-not-heard
+    1100: 0.35, // 35%
     1206: 0.3, // 30% of normal volume (HEART start)
     1500: 0.25, // 25% of normal volume
     2000: 0.2, // 20% of normal volume

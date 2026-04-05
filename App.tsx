@@ -1078,7 +1078,7 @@ const App: React.FC = () => {
       
       // Update safety state based on analysis
       const safetyAssessment = assessFrequencySafety(result.dominantFrequency);
-      if (result.dominantFrequency >= 1206) {
+      if (result.dominantFrequency > 963) {
         setSubtleResonanceMode(true);
         setShowSafetyProtocols(true);
         
@@ -3085,7 +3085,7 @@ const App: React.FC = () => {
       setSelectedSolfeggio(targetFreq);
       
       // Check if this is a high frequency track but don't interrupt playback
-      if (targetFreq >= 1206) {
+      if (targetFreq > 963) {
           setSubtleResonanceMode(true);
           // Don't automatically show safety protocols during playlist playback
           // Only show if manually selected
@@ -5636,9 +5636,10 @@ const App: React.FC = () => {
                     <div className="bg-slate-800 p-3 rounded-lg">
                       <div className="text-sm font-medium text-slate-300 mb-2">Recommendations</div>
                       <div className="space-y-1 text-xs text-slate-400">
-                        {selectedSolfeggio >= 1206 ? (
+                        {selectedSolfeggio > 963 ? (
                           <>
                             <div>• Keep volume low (feeling vs hearing)</div>
+                            <div>• Focus on subtle body sensations</div>
                             <div>• Limit session to 15-30 minutes</div>
                             <div>• Take breaks between sessions</div>
                             <div>• Stop if you feel uncomfortable</div>
