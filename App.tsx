@@ -5739,6 +5739,16 @@ const App: React.FC = () => {
                     </div>
                     <ChevronRight size={14} className="text-slate-700 group-hover:text-gold-500 transition-colors shrink-0" />
                   </a>
+                  <a href="https://lilrobodue.github.io/Aetheria-session-tagger/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-emerald-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                      <BarChart3 size={16} className="text-emerald-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-emerald-400 transition-colors">Session Tagger</h4>
+                      <p className="text-[10px] text-slate-500">Track your progress over time</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-emerald-500 transition-colors shrink-0" />
+                  </a>
                   <a href="https://aetheriarct.com" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-purple-500/40 transition-all group">
                     <div className="w-9 h-9 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0">
                       <Brain size={16} className="text-purple-400" />
