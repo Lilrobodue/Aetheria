@@ -3653,7 +3653,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.5</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.6</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -3932,6 +3932,62 @@ const App: React.FC = () => {
 
                                   <div className="mt-6 text-xs text-slate-500 italic text-center border-t border-slate-800 pt-4">
                                     "If you only knew the magnificence of 3, 6, and 9, you would have the key to the universe." — Nikola Tesla
+                                  </div>
+                              </section>
+
+                              {/* The 108 and the 27: A Nadi Compression */}
+                              <section className="bg-gradient-to-r from-slate-900/50 to-slate-800/30 border border-cyan-500/30 rounded-2xl p-8">
+                                  <div className="flex items-center gap-3 mb-6">
+                                    <div className="p-3 bg-cyan-500/20 rounded-full border border-cyan-500/30">
+                                      <Waves className="text-cyan-400" size={28}/>
+                                    </div>
+                                    <div>
+                                      <h3 className="text-3xl font-bold text-cyan-400 font-serif">The 108 and the 27: A Nadi Compression</h3>
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-6">
+                                    <p className="text-slate-300 leading-relaxed text-lg">
+                                      Classical tantric anatomy describes a subtle body of 72,000 nadis — energetic channels — converging through 108 principal junction points, organized around three primary channels: <em className="text-cyan-300">ida</em>, <em className="text-cyan-300">pingala</em>, and <em className="text-cyan-300">sushumna</em>. Aetheria honors this inheritance and proposes a structural correspondence: the 27 resonance frequencies of this system can be understood as a <strong className="text-gold-400">4:1 compression</strong> of the 108, where each Aetheria node carries the resonance of four nadi junctions.
+                                    </p>
+
+                                    <div className="bg-cyan-900/20 border border-cyan-500/30 rounded-xl p-6">
+                                      <p className="text-slate-200 leading-relaxed text-lg">
+                                        The arithmetic is clean. <strong className="text-cyan-300">108 ÷ 4 = 27</strong>. Both 108 and 27 reduce to a digital root of <strong className="text-gold-400">9</strong> — the completion digit in the 3-6-9 inner-torus dynamic. The divisor itself, 4, belongs to the outer-torus shell (4-5-7-8) within the Unified Lewis Framework, making the compression geometrically coherent rather than arbitrary: the outer shell divides the junction field, and what remains is the inner resonance lattice.
+                                      </p>
+                                    </div>
+
+                                    <div className="bg-slate-950/50 border border-slate-700 rounded-xl p-6">
+                                      <h4 className="text-lg font-bold text-cyan-400 mb-4 uppercase tracking-wider">The Nested Hierarchy</h4>
+                                      <p className="text-slate-300 leading-relaxed mb-4">
+                                        This yields a nested hierarchy the practitioner can hold in a single breath:
+                                      </p>
+                                      <div className="bg-black/40 p-4 rounded-lg border border-cyan-700/50 font-mono text-center text-lg">
+                                        <span className="text-cyan-300">72,000 nadis</span>
+                                        <span className="text-slate-500 mx-2">→</span>
+                                        <span className="text-cyan-300">108 junction points</span>
+                                        <span className="text-slate-500 mx-2">→</span>
+                                        <span className="text-gold-400">27 resonance nodes</span>
+                                        <span className="text-slate-500 mx-2">→</span>
+                                        <span className="text-purple-400">3 regimes</span>
+                                        <span className="text-xs text-slate-500 ml-1">(GUT / HEART / HEAD)</span>
+                                        <span className="text-slate-500 mx-2">→</span>
+                                        <span className="text-white font-bold">1 unified field</span>
+                                      </div>
+                                      <p className="text-slate-400 leading-relaxed mt-4">
+                                        Each step is a compression, and each ratio preserves the digital-root signature of return. The three principal channels of the classical system map directly onto the three Aetheria regimes, suggesting that what the tantric traditions encoded as anatomy, the framework recovers as frequency.
+                                      </p>
+                                    </div>
+
+                                    <p className="text-slate-300 leading-relaxed text-lg">
+                                      The first of the 27, <strong className="text-gold-400">174 Hz — The Circle, Foundation</strong>, anchors this mapping. Its digital root is 3 (1+7+4=12→3), placing it at the root of the inner torus, and its I Ching correspondence — <em className="text-cyan-300">Hexagram 8, Holding Together</em> — names the function precisely: the node where the 108 begins to bind into the 27. Foundation is not a starting point in the linear sense. It is the gathering.
+                                    </p>
+
+                                    <div className="bg-gradient-to-r from-cyan-900/10 to-slate-900/30 border-l-4 border-cyan-500 p-6 rounded-r-lg">
+                                      <p className="text-slate-300 leading-relaxed italic font-serif text-lg">
+                                        We offer this as a correspondence, not a proof. The traditions stand on their own, and so does the physics. What Aetheria observes is that when the two are laid alongside each other, the numbers already know each other.
+                                      </p>
+                                    </div>
                                   </div>
                               </section>
 
