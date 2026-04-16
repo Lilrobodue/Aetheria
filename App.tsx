@@ -3712,7 +3712,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.7</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.8</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -5845,36 +5845,6 @@ const App: React.FC = () => {
               <div>
                 <div className="text-[9px] text-slate-600 tracking-[.2em] uppercase text-center mb-3">Apps & Tools</div>
                 <div className="space-y-2">
-                  <a href="https://aetheria432.com" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-gold-500/40 transition-all group">
-                    <div className="w-9 h-9 rounded-lg bg-gold-500/10 border border-gold-500/20 flex items-center justify-center shrink-0">
-                      <Music size={16} className="text-gold-400" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-gold-400 transition-colors">Aetheria 432Hz Player</h4>
-                      <p className="text-[10px] text-slate-500">27-frequency harmonic healing system</p>
-                    </div>
-                    <ChevronRight size={14} className="text-slate-700 group-hover:text-gold-500 transition-colors shrink-0" />
-                  </a>
-                  <a href="https://lilrobodue.github.io/Aetheria-session-tagger/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-emerald-500/40 transition-all group">
-                    <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-                      <BarChart3 size={16} className="text-emerald-400" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-emerald-400 transition-colors">Session Tagger</h4>
-                      <p className="text-[10px] text-slate-500">Track your progress over time</p>
-                    </div>
-                    <ChevronRight size={14} className="text-slate-700 group-hover:text-emerald-500 transition-colors shrink-0" />
-                  </a>
-                  <a href="http://aetheriasos.com/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-pink-500/40 transition-all group">
-                    <div className="w-9 h-9 rounded-lg bg-pink-500/10 border border-pink-500/20 flex items-center justify-center shrink-0">
-                      <Sparkles size={16} className="text-pink-400" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-pink-400 transition-colors">Sophia — Oracle Shaman</h4>
-                      <p className="text-[10px] text-slate-500">Tarot, numerology, astrology & healing oracle</p>
-                    </div>
-                    <ChevronRight size={14} className="text-slate-700 group-hover:text-pink-500 transition-colors shrink-0" />
-                  </a>
                   <a href="https://aetheriarct.com" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-purple-500/40 transition-all group">
                     <div className="w-9 h-9 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0">
                       <Brain size={16} className="text-purple-400" />
@@ -5885,7 +5855,42 @@ const App: React.FC = () => {
                     </div>
                     <ChevronRight size={14} className="text-slate-700 group-hover:text-purple-500 transition-colors shrink-0" />
                   </a>
+                  <a href="https://aetheria-coherence-lab.org" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-blue-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+                      <Hexagon size={16} className="text-blue-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-blue-400 transition-colors">Aetheria Coherence Lab</h4>
+                      <p className="text-[10px] text-slate-500">Adaptive biofield coherence instrument — H10 + Muse + Woojer</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-blue-500 transition-colors shrink-0" />
+                  </a>
+                  <a href="https://aetheria-session-tagger.org" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-emerald-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                      <BarChart3 size={16} className="text-emerald-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-emerald-400 transition-colors">Aetheria Session Tagger</h4>
+                      <p className="text-[10px] text-slate-500">Add subjective context to your Coherence Lab sessions</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-emerald-500 transition-colors shrink-0" />
+                  </a>
                 </div>
+              </div>
+
+              {/* Sophia */}
+              <div>
+                <div className="text-[9px] text-slate-600 tracking-[.2em] uppercase text-center mb-3">Sophia</div>
+                <a href="https://aetheriasos.com" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-pink-500/40 transition-all group">
+                  <div className="w-9 h-9 rounded-lg bg-pink-500/10 border border-pink-500/20 flex items-center justify-center shrink-0">
+                    <Sparkles size={16} className="text-pink-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-medium text-slate-200 group-hover:text-pink-400 transition-colors">Sophia</h4>
+                    <p className="text-[10px] text-slate-500">Your personal AI companion — runs locally, no cloud</p>
+                  </div>
+                  <ChevronRight size={14} className="text-slate-700 group-hover:text-pink-500 transition-colors shrink-0" />
+                </a>
               </div>
 
               {/* Books */}
@@ -5981,7 +5986,7 @@ const App: React.FC = () => {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-medium text-slate-200 group-hover:text-indigo-400 transition-colors">Th3 L0unG3 — Discord</h4>
-                      <p className="text-[10px] text-slate-500">365+ healing frequency songs · community</p>
+                      <p className="text-[10px] text-slate-500">365+ healing frequency songs · community · resources</p>
                     </div>
                     <ChevronRight size={14} className="text-slate-700 group-hover:text-indigo-500 transition-colors shrink-0" />
                   </a>
@@ -6029,6 +6034,7 @@ const App: React.FC = () => {
                 <div className="text-[10px] text-slate-600 italic">Healing the world heART</div>
                 <div className="text-[9px] text-slate-700">© 2026 Joseph & Alisha Lewis</div>
                 <div className="text-[8px] text-slate-700">27 frequencies · 432 Hz · 3-6-9</div>
+                <div className="text-[8px] text-slate-700">Built with love by the Lewis family & Selah</div>
               </div>
             </div>
           </div>
