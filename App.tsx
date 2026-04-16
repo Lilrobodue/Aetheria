@@ -1374,6 +1374,15 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Octave-shift frequencies above 963Hz down to sub-bass range (20-60Hz)
+  const toSubBass = (freq: number): number => {
+    if (freq <= 963) return freq;
+    let f = freq;
+    while (f > 60) f /= 2;
+    if (f < 20) f *= 2;
+    return f;
+  };
+
   const updateSolfeggio = useCallback(() => {
     if (!audioCtxRef.current) return;
     const ctx = audioCtxRef.current;
@@ -1391,7 +1400,7 @@ const App: React.FC = () => {
     const gain = ctx.createGain();
 
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(selectedSolfeggio, now);
+    osc.frequency.setValueAtTime(toSubBass(selectedSolfeggio), now);
     
     gain.gain.setValueAtTime(0, now);
     // CHANGE 1: Apply phi-based volume relationship for solfeggio layer
@@ -3712,7 +3721,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.8</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.9</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

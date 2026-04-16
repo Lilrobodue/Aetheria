@@ -241,6 +241,15 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
     }
   };
 
+  // Octave-shift frequencies above 963Hz down to sub-bass range (20-60Hz)
+  const toSubBass = (freq: number): number => {
+    if (freq <= 963) return freq;
+    let f = freq;
+    while (f > 60) f /= 2;
+    if (f < 20) f *= 2;
+    return f;
+  };
+
   // Generate tone for testing
   const generateTestTone = (frequency: number, duration: number = 3000) => {
     if (!audioContextRef.current) {
@@ -248,7 +257,7 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
     }
 
     const context = audioContextRef.current;
-    
+
     // Stop any existing tone
     if (oscillatorRef.current) {
       oscillatorRef.current.stop();
@@ -261,9 +270,9 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
     // Create new tone
     const oscillator = context.createOscillator();
     const gainNode = context.createGain();
-    
+
     oscillator.type = 'sine';
-    oscillator.frequency.value = frequency;
+    oscillator.frequency.value = toSubBass(frequency);
     
     const safetyAssessment = assessFrequencySafety(frequency);
     const testVolume = Math.min(0.1, safetyAssessment.volume * 0.3); // Very quiet for testing
