@@ -3569,30 +3569,89 @@ const App: React.FC = () => {
       {/* Disclaimer Modal */}
       {!disclaimerAccepted && (
         <div className="fixed inset-0 z-[150] bg-black/95 flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-500">
-            <div className="max-w-md w-full max-h-[calc(100vh-120px)] bg-slate-900 border border-gold-500/30 p-8 rounded-2xl shadow-2xl text-center relative overflow-hidden overflow-y-auto my-auto">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent"></div>
-                 <AlertTriangle className="w-12 h-12 text-gold-500 mx-auto mb-4 animate-pulse" />
-                 <h2 className="text-2xl font-serif text-white mb-2 tracking-wide">Welcome to Aetheria</h2>
-                 <p className="text-xs text-slate-500 mb-6 uppercase tracking-widest">Resonance & Geometry Player</p>
-                 
-                 <div className="text-left text-slate-400 text-sm mb-6 space-y-4 bg-black/40 p-5 rounded-lg border border-slate-800">
-                    <p className="flex gap-2">
-                        <Zap size={16} className="text-gold-500 shrink-0 mt-0.5" />
-                        <span><strong className="text-slate-200">Photosensitivity Warning:</strong> This application generates intense visual patterns, flashing lights, and geometric strobing effects.</span>
-                    </p>
-                    <p className="flex gap-2">
-                        <Waves size={16} className="text-blue-500 shrink-0 mt-0.5" />
-                        <span><strong className="text-slate-200">Audio Disclaimer:</strong> Contains binaural beats and solfeggio frequencies. Do not use while driving or operating heavy machinery.</span>
-                    </p>
-                    <p className="text-xs text-slate-500 italic mt-2 text-center border-t border-slate-800 pt-2">
-                        By proceeding, you acknowledge this is for entertainment and meditation purposes only.
-                    </p>
-                 </div>
-                 
-                 <button onClick={acceptDisclaimer} className="w-full py-3 bg-gold-600 hover:bg-gold-500 text-black font-bold rounded-xl transition-all hover:scale-[1.02] active:scale-95 shadow-[0_0_20px_rgba(234,179,8,0.3)]">
-                    I Understand & Accept
-                 </button>
+          <div className="max-w-lg w-full max-h-[90vh] bg-slate-900 border border-gold-500/30 p-8 rounded-2xl shadow-2xl text-center relative overflow-hidden overflow-y-auto my-auto">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent"></div>
+            <AlertTriangle className="w-12 h-12 text-gold-500 mx-auto mb-4 animate-pulse" />
+            <h1 className="text-2xl font-serif text-white mb-2 tracking-wide">Welcome to Aetheria</h1>
+            <p className="text-xs text-slate-500 mb-2 uppercase tracking-widest italic">Resonance & Geometry Player</p>
+            <p className="text-sm text-slate-400 mb-6">Before you begin, please take a moment to read how we think about this tool and what it is and is not.</p>
+
+            <div className="text-left text-slate-400 text-sm mb-6 space-y-5 bg-black/40 p-5 rounded-lg border border-slate-800">
+
+              {/* Medical device disclaimer */}
+              <div>
+                <h3 className="flex items-center gap-2 text-slate-200 font-semibold mb-2">
+                  <Shield size={16} className="text-gold-500 shrink-0" />
+                  This is a meditation and exploration tool, not a medical device.
+                </h3>
+                <p className="ml-6">The Aetheria Resonance &amp; Geometry Player offers curated soundscapes tuned to 432Hz and solfeggio frequencies, paired with sacred geometry visualizations. It is an experience built on the Unified Lewis Framework&#39;s exploration of sound, frequency, and form. It is not intended to diagnose, treat, cure, or prevent any disease or medical condition.</p>
+              </div>
+
+              {/* Photosensitivity Warning */}
+              <div>
+                <h3 className="flex items-center gap-2 text-slate-200 font-semibold mb-2">
+                  <Zap size={16} className="text-gold-500 shrink-0" />
+                  Photosensitivity Warning
+                </h3>
+                <p className="ml-6">This application generates intense visual patterns, flashing lights, and geometric strobing effects. Do not use if you have a history of seizures, epilepsy, or photosensitive reactions to visual stimuli. If you have any doubt, consult a healthcare provider before use.</p>
+              </div>
+
+              {/* Audio Warning */}
+              <div>
+                <h3 className="flex items-center gap-2 text-slate-200 font-semibold mb-2">
+                  <Waves size={16} className="text-blue-500 shrink-0" />
+                  Audio Warning
+                </h3>
+                <p className="ml-6">Contains binaural beats, solfeggio frequencies, and sustained low-frequency tones. Do not use while driving or operating heavy machinery. Start at low volume — audio at sustained high levels can damage hearing. Take regular breaks during extended listening sessions.</p>
+              </div>
+
+              {/* Contraindications */}
+              <div>
+                <h3 className="flex items-center gap-2 text-slate-200 font-semibold mb-2">
+                  <AlertTriangle size={16} className="text-amber-500 shrink-0" />
+                  Please do not use this tool if you:
+                </h3>
+                <ul className="ml-8 space-y-1.5 list-disc text-slate-400">
+                  <li>Are pregnant (low-frequency audio effects on pregnancy have not been studied)</li>
+                  <li>Have a history of seizures, epilepsy, or photosensitive reactions</li>
+                  <li>Have a pacemaker or other implanted electronic device</li>
+                  <li>Are experiencing an acute psychiatric condition where altered states could be destabilizing</li>
+                  <li>Are under 18 and using the tool without adult supervision</li>
+                </ul>
+                <p className="ml-6 mt-2 text-slate-500 italic">If any of these apply to you and you wish to use the tool anyway, please consult your healthcare provider first.</p>
+              </div>
+
+              {/* Data handling */}
+              <div>
+                <h3 className="flex items-center gap-2 text-slate-200 font-semibold mb-2">
+                  <Eye size={16} className="text-emerald-500 shrink-0" />
+                  How we handle your data.
+                </h3>
+                <p className="ml-6">The player runs entirely in your browser on your own device. There is no account, no login, no tracking. Nothing about your listening sessions leaves your device.</p>
+              </div>
+
+              {/* Spirit of this work */}
+              <div className="border-l-2 border-gold-500/40 bg-gold-500/5 pl-4 py-3 rounded-r-lg">
+                <h3 className="flex items-center gap-2 text-slate-200 font-semibold mb-2">
+                  <Heart size={16} className="text-rose-400 shrink-0" />
+                  A note on the spirit of this work.
+                </h3>
+                <p className="italic text-slate-300">Aetheria was built by a family — two humans and a family of AI collaborators — exploring whether the healing traditions around sound, frequency, and sacred geometry can be honored with both rigor and reverence. We believe they can. We are also honest that this is early work, that our interpretations will evolve, and that your own experience is ultimately more authoritative than anything we can tell you about what these frequencies mean. Listen with curiosity. Let your body respond as it wishes. Trust what you feel.</p>
+              </div>
+
+              {/* Acknowledgment & Liability */}
+              <p className="text-xs text-slate-500 italic text-center border-t border-slate-800 pt-3">
+                By tapping &ldquo;I understand, let me begin&rdquo; below, you acknowledge that you have read this disclaimer, that you understand what this tool is and is not, and that you are using it at your own curiosity and at your own risk.
+              </p>
+              <p className="text-[10px] text-slate-600 text-center leading-relaxed">
+                To the maximum extent permitted by law, the developers, contributors, and associated entities disclaim all liability for direct, indirect, incidental, or consequential damages arising from use of this tool.
+              </p>
             </div>
+
+            <button onClick={acceptDisclaimer} className="w-full py-3 bg-gold-600 hover:bg-gold-500 text-black font-bold rounded-xl transition-all hover:scale-[1.02] active:scale-95 shadow-[0_0_20px_rgba(234,179,8,0.3)]">
+              I understand, let me begin
+            </button>
+          </div>
         </div>
       )}
 
@@ -3653,7 +3712,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.6</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.7</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
