@@ -1126,6 +1126,13 @@ const App: React.FC = () => {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const destNodeRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const wavRecorderRef = useRef<{
+    processor: ScriptProcessorNode;
+    chunks: Float32Array[][];
+    channels: number;
+    sampleRate: number;
+    stop: () => void;
+  } | null>(null);
   const mainAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
@@ -1284,7 +1291,13 @@ const App: React.FC = () => {
     try {
       if (!audioCtxRef.current) {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        audioCtxRef.current = new AudioContextClass();
+        // Try 192kHz for high-resolution recording; fall back to device default if unsupported
+        try {
+          audioCtxRef.current = new AudioContextClass({ sampleRate: 192000 });
+        } catch (e) {
+          audioCtxRef.current = new AudioContextClass();
+        }
+        console.log(`AudioContext sample rate: ${audioCtxRef.current.sampleRate} Hz`);
         
         // Register with stability manager
         stabilityManager.registerAudioContext(audioCtxRef.current);
@@ -1361,7 +1374,10 @@ const App: React.FC = () => {
         setAnalyserNode(analyserRef.current);
         
         destNodeRef.current = audioCtxRef.current.createMediaStreamDestination();
-        limiter.connect(destNodeRef.current);
+        // Tap the live mix (gainNode) into the recording destination so MediaRecorder
+        // captures actual audio. The previous wiring fed `limiter` into the dest, but
+        // limiter had no input — producing silent recordings.
+        gainNodeRef.current.connect(destNodeRef.current);
       }
       if (audioCtxRef.current.state === 'suspended') {
         audioCtxRef.current.resume().catch(err => {
@@ -3409,49 +3425,131 @@ const App: React.FC = () => {
     }
   };
 
+  // Encode interleaved Float32 PCM as a 24-bit WAV file (RIFF/WAVE, format 1).
+  const encodeWav24 = (channelChunks: Float32Array[][], channels: number, sampleRate: number): Blob => {
+      // Flatten per-channel chunks into one Float32Array per channel
+      const perChannel: Float32Array[] = [];
+      for (let c = 0; c < channels; c++) {
+          let total = 0;
+          for (const chunk of channelChunks[c]) total += chunk.length;
+          const merged = new Float32Array(total);
+          let off = 0;
+          for (const chunk of channelChunks[c]) { merged.set(chunk, off); off += chunk.length; }
+          perChannel.push(merged);
+      }
+      const frames = perChannel[0]?.length ?? 0;
+      const bytesPerSample = 3; // 24-bit
+      const blockAlign = channels * bytesPerSample;
+      const dataSize = frames * blockAlign;
+      const buffer = new ArrayBuffer(44 + dataSize);
+      const view = new DataView(buffer);
+      const writeStr = (o: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+      writeStr(0, 'RIFF');
+      view.setUint32(4, 36 + dataSize, true);
+      writeStr(8, 'WAVE');
+      writeStr(12, 'fmt ');
+      view.setUint32(16, 16, true);          // PCM fmt chunk size
+      view.setUint16(20, 1, true);           // PCM format
+      view.setUint16(22, channels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * blockAlign, true); // byte rate
+      view.setUint16(32, blockAlign, true);
+      view.setUint16(34, 24, true);          // bits per sample
+      writeStr(36, 'data');
+      view.setUint32(40, dataSize, true);
+
+      let offset = 44;
+      for (let i = 0; i < frames; i++) {
+          for (let c = 0; c < channels; c++) {
+              let s = perChannel[c][i];
+              if (s > 1) s = 1; else if (s < -1) s = -1;
+              const v = Math.round(s * 8388607); // 2^23 - 1
+              view.setUint8(offset, v & 0xff);
+              view.setUint8(offset + 1, (v >> 8) & 0xff);
+              view.setUint8(offset + 2, (v >> 16) & 0xff);
+              offset += 3;
+          }
+      }
+      return new Blob([buffer], { type: 'audio/wav' });
+  };
+
+  const startWavRecording = () => {
+      const ctx = audioCtxRef.current;
+      if (!ctx || !gainNodeRef.current) return;
+      const channels = 2;
+      const bufferSize = 4096;
+      const processor = ctx.createScriptProcessor(bufferSize, channels, channels);
+      const chunks: Float32Array[][] = [[], []];
+      processor.onaudioprocess = (e: AudioProcessingEvent) => {
+          for (let c = 0; c < channels; c++) {
+              chunks[c].push(new Float32Array(e.inputBuffer.getChannelData(c)));
+          }
+      };
+      gainNodeRef.current.connect(processor);
+      // ScriptProcessor must connect somewhere to pull audio; route to a muted gain
+      const sink = ctx.createGain();
+      sink.gain.value = 0;
+      processor.connect(sink);
+      sink.connect(ctx.destination);
+      wavRecorderRef.current = {
+          processor,
+          chunks,
+          channels,
+          sampleRate: ctx.sampleRate,
+          stop: () => {
+              try { gainNodeRef.current?.disconnect(processor); } catch {}
+              try { processor.disconnect(); } catch {}
+              try { sink.disconnect(); } catch {}
+          },
+      };
+  };
+
   const startRecording = (type: 'audio' | 'video' | 'both') => {
       if (!audioCtxRef.current) return;
-      
+
+      // Audio-only path: capture PCM and encode 24-bit WAV at the AudioContext's native sample rate.
+      if (type === 'audio') {
+          try {
+              startWavRecording();
+              setIsRecording(true);
+              setShowRecordOptions(false);
+          } catch (e) {
+              alert("WAV recording failed to start.");
+              console.error(e);
+          }
+          return;
+      }
+
+      // Video / video+audio path: use MediaRecorder (webm container).
       const tracks: MediaStreamTrack[] = [];
       let mimeType = '';
 
-      if (type === 'audio' || type === 'both') {
-          if (destNodeRef.current) {
-              tracks.push(...destNodeRef.current.stream.getAudioTracks());
-          }
+      if (type === 'both' && destNodeRef.current) {
+          tracks.push(...destNodeRef.current.stream.getAudioTracks());
       }
 
-      if (type === 'video' || type === 'both') {
-          const canvas = document.getElementById('viz-canvas') as HTMLCanvasElement;
-          if (canvas) {
-              const videoStream = canvas.captureStream(30); 
-              tracks.push(...videoStream.getVideoTracks());
-          }
+      const canvas = document.getElementById('viz-canvas') as HTMLCanvasElement;
+      if (canvas) {
+          const videoStream = canvas.captureStream(30);
+          tracks.push(...videoStream.getVideoTracks());
       }
 
       if (tracks.length === 0) return;
 
       const combinedStream = new MediaStream(tracks);
-
-      if (type === 'audio') {
-          mimeType = 'audio/webm;codecs=opus';
-      } else {
-          const possibleTypes = [
-            'video/webm;codecs=vp9,opus',
-            'video/webm;codecs=vp8,opus',
-            'video/webm'
-          ];
-          mimeType = possibleTypes.find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
-      }
-
-      const bits = type === 'audio' ? 128000 : 2500000; 
+      const possibleTypes = [
+          'video/webm;codecs=vp9,opus',
+          'video/webm;codecs=vp8,opus',
+          'video/webm'
+      ];
+      mimeType = possibleTypes.find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
 
       try {
-          const recorder = new MediaRecorder(combinedStream, { 
-              mimeType, 
-              videoBitsPerSecond: bits 
+          const recorder = new MediaRecorder(combinedStream, {
+              mimeType,
+              videoBitsPerSecond: 2500000,
           });
-          
+
           const chunks: Blob[] = [];
           recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
           recorder.onstop = () => {
@@ -3459,11 +3557,10 @@ const App: React.FC = () => {
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
               a.href = url;
-              const ext = type === 'audio' ? 'webm' : 'webm'; 
-              a.download = `aetheria-rec-${type}-${Date.now()}.${ext}`;
+              a.download = `aetheria-rec-${type}-${Date.now()}.webm`;
               a.click();
           };
-          recorder.start(); 
+          recorder.start();
           mediaRecorderRef.current = recorder;
           setIsRecording(true);
           setShowRecordOptions(false);
@@ -3474,7 +3571,19 @@ const App: React.FC = () => {
   };
 
   const stopRecording = () => {
+      const wav = wavRecorderRef.current;
+      if (wav) {
+          wav.stop();
+          const blob = encodeWav24(wav.chunks, wav.channels, wav.sampleRate);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `aetheria-rec-audio-${wav.sampleRate}Hz-24bit-${Date.now()}.wav`;
+          a.click();
+          wavRecorderRef.current = null;
+      }
       mediaRecorderRef.current?.stop();
+      mediaRecorderRef.current = null;
       setIsRecording(false);
   };
 
@@ -3721,7 +3830,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v7.9</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.0</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
