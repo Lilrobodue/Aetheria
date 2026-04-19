@@ -1127,12 +1127,12 @@ const App: React.FC = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const destNodeRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const wavRecorderRef = useRef<{
-    processor: ScriptProcessorNode;
     chunks: Float32Array[][];
     channels: number;
     sampleRate: number;
     stop: () => void;
   } | null>(null);
+  const wavWorkletReadyRef = useRef<Promise<void> | null>(null);
   const mainAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
@@ -1291,12 +1291,9 @@ const App: React.FC = () => {
     try {
       if (!audioCtxRef.current) {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        // Try 192kHz for high-resolution recording; fall back to device default if unsupported
-        try {
-          audioCtxRef.current = new AudioContextClass({ sampleRate: 192000 });
-        } catch (e) {
-          audioCtxRef.current = new AudioContextClass();
-        }
+        // Use device native sample rate. Forcing 192kHz just upsamples 44.1/48kHz source
+        // files (no quality gain) and quadruples WAV file size.
+        audioCtxRef.current = new AudioContextClass();
         console.log(`AudioContext sample rate: ${audioCtxRef.current.sampleRate} Hz`);
         
         // Register with stability manager
@@ -3473,33 +3470,64 @@ const App: React.FC = () => {
       return new Blob([buffer], { type: 'audio/wav' });
   };
 
-  const startWavRecording = () => {
+  // Lazily register the capture worklet once per AudioContext.
+  const ensureWavWorklet = (ctx: AudioContext): Promise<void> => {
+      if (wavWorkletReadyRef.current) return wavWorkletReadyRef.current;
+      const workletCode = `
+class WavCapture extends AudioWorkletProcessor {
+  process(inputs) {
+    const input = inputs[0];
+    if (input && input.length > 0 && input[0] && input[0].length > 0) {
+      const copies = new Array(input.length);
+      for (let c = 0; c < input.length; c++) copies[c] = input[c].slice();
+      this.port.postMessage(copies, copies.map(b => b.buffer));
+    }
+    return true;
+  }
+}
+registerProcessor('wav-capture', WavCapture);
+`;
+      const blob = new Blob([workletCode], { type: 'application/javascript' });
+      const url = URL.createObjectURL(blob);
+      wavWorkletReadyRef.current = ctx.audioWorklet.addModule(url).finally(() => URL.revokeObjectURL(url));
+      return wavWorkletReadyRef.current;
+  };
+
+  const startWavRecording = async () => {
       const ctx = audioCtxRef.current;
       if (!ctx || !gainNodeRef.current) return;
+      await ensureWavWorklet(ctx);
       const channels = 2;
-      const bufferSize = 4096;
-      const processor = ctx.createScriptProcessor(bufferSize, channels, channels);
-      const chunks: Float32Array[][] = [[], []];
-      processor.onaudioprocess = (e: AudioProcessingEvent) => {
+      const node = new AudioWorkletNode(ctx, 'wav-capture', {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          outputChannelCount: [channels],
+          channelCount: channels,
+          channelCountMode: 'explicit',
+          channelInterpretation: 'speakers',
+      });
+      const chunks: Float32Array[][] = Array.from({ length: channels }, () => []);
+      node.port.onmessage = (e: MessageEvent<Float32Array[]>) => {
+          const data = e.data;
           for (let c = 0; c < channels; c++) {
-              chunks[c].push(new Float32Array(e.inputBuffer.getChannelData(c)));
+              chunks[c].push(data[c] || new Float32Array(0));
           }
       };
-      gainNodeRef.current.connect(processor);
-      // ScriptProcessor must connect somewhere to pull audio; route to a muted gain
+      gainNodeRef.current.connect(node);
+      // Worklet output is silent — connect to a muted sink so the graph stays alive.
       const sink = ctx.createGain();
       sink.gain.value = 0;
-      processor.connect(sink);
+      node.connect(sink);
       sink.connect(ctx.destination);
       wavRecorderRef.current = {
-          processor,
           chunks,
           channels,
           sampleRate: ctx.sampleRate,
           stop: () => {
-              try { gainNodeRef.current?.disconnect(processor); } catch {}
-              try { processor.disconnect(); } catch {}
+              try { gainNodeRef.current?.disconnect(node); } catch {}
+              try { node.disconnect(); } catch {}
               try { sink.disconnect(); } catch {}
+              node.port.onmessage = null;
           },
       };
   };
@@ -3509,14 +3537,15 @@ const App: React.FC = () => {
 
       // Audio-only path: capture PCM and encode 24-bit WAV at the AudioContext's native sample rate.
       if (type === 'audio') {
-          try {
-              startWavRecording();
-              setIsRecording(true);
-              setShowRecordOptions(false);
-          } catch (e) {
-              alert("WAV recording failed to start.");
-              console.error(e);
-          }
+          startWavRecording()
+              .then(() => {
+                  setIsRecording(true);
+                  setShowRecordOptions(false);
+              })
+              .catch((e) => {
+                  alert("WAV recording failed to start.");
+                  console.error(e);
+              });
           return;
       }
 
@@ -3830,7 +3859,7 @@ const App: React.FC = () => {
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.0</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
