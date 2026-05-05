@@ -49,7 +49,23 @@ interface FrequencySelectorProps {
   fractalAnalysis?: FractalAnalysisResult;
   userExperienceLevel: 'beginner' | 'intermediate' | 'advanced' | 'expert';
   onExperienceLevelChange: (level: 'beginner' | 'intermediate' | 'advanced' | 'expert') => void;
+  /** When true, GUT-band Solfeggio frequencies are displayed and selected as
+   *  their Lo Shu Perfect counterparts (174→75, 285→186, 396→297, 417→408,
+   *  528→519, 639→630). 741/852/963 are exact matches and unaffected. */
+  loShuPerfectGUT?: boolean;
 }
+
+// Lo Shu Perfect GUT swap table — only the 6 GUT positions that differ from
+// the Lo Shu Perfect 111-interval sequence. 741, 852, 963 are exact matches
+// in both systems; HEART/HEAD frequencies are not in the GUT band at all.
+const LO_SHU_PERFECT_GUT_MAP: Record<number, number> = {
+  174: 75,
+  285: 186,
+  396: 297,
+  417: 408,
+  528: 519,
+  639: 630,
+};
 
 interface FrequencyPreset {
   name: string;
@@ -74,16 +90,19 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
   onPlayPause,
   fractalAnalysis,
   userExperienceLevel,
-  onExperienceLevelChange
+  onExperienceLevelChange,
+  loShuPerfectGUT = false,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [customFrequency, setCustomFrequency] = useState('');
-  const [showSafetyModal, setShowSafetyModal] = useState(false);
-  const [pendingFrequency, setPendingFrequency] = useState<number | null>(null);
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [intentionMode, setIntentionMode] = useState(false);
+
+  // The currently selected frequency's safety warning, if any. Surfaced
+  // inline rather than as a blocking modal — selection always proceeds.
+  const selectedWarning = generateSafetyWarning(selectedFrequency);
   
   const audioContextRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
@@ -93,8 +112,11 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
   const generatePresets = (): FrequencyPreset[] => {
     const presets: FrequencyPreset[] = [];
 
-    // Solfeggio Frequencies
-    EXTENDED_SOLFEGGIO.BASE_FREQUENCIES.forEach((freq, index) => {
+    // Solfeggio Frequencies — when Lo Shu Perfect mode is on, the GUT-band
+    // entries are mapped to their perfect counterparts at both display and
+    // selection time. The display value === the selection value, so the
+    // app's audio-side mapper is a no-op for these (no double-swap risk).
+    EXTENDED_SOLFEGGIO.BASE_FREQUENCIES.forEach((rawFreq, index) => {
       const solfeggioInfo = [
         { name: 'UT - Liberation', benefits: ['Release guilt', 'Clear fear', 'Ground energy'], color: '#8B0000' },
         { name: 'RE - Transformation', benefits: ['Heal trauma', 'Restore tissue', 'Cellular repair'], color: '#FF0000' },
@@ -107,11 +129,16 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
         { name: 'NI - Unity', benefits: ['Crown activation', 'Divine connection', 'Perfect state'], color: '#EE82EE' }
       ][index];
 
+      const freq = loShuPerfectGUT ? (LO_SHU_PERFECT_GUT_MAP[rawFreq] ?? rawFreq) : rawFreq;
+      const swapped = freq !== rawFreq;
+
       presets.push({
         name: `${freq} Hz - ${solfeggioInfo.name}`,
         frequency: freq,
         category: 'solfeggio',
-        description: `Ancient solfeggio frequency for healing and transformation`,
+        description: swapped
+          ? `Lo Shu Perfect counterpart of ${rawFreq} Hz — keeps the same digit root and chakra mapping at the perfect 111 Hz interval.`
+          : `Ancient solfeggio frequency for healing and transformation`,
         benefits: solfeggioInfo.benefits,
         safetyLevel: 'SAFE',
         icon: <Heart className="w-5 h-5" />,
@@ -176,7 +203,9 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
     return presets.sort((a, b) => a.frequency - b.frequency);
   };
 
-  const [presets] = useState<FrequencyPreset[]>(generatePresets());
+  // Re-generate presets whenever the Lo Shu Perfect mode flips, so the
+  // displayed Solfeggio entries swap to/from their perfect counterparts.
+  const presets = React.useMemo(generatePresets, [loShuPerfectGUT]);
 
   // Filter presets based on search and category
   const filteredPresets = presets.filter(preset => {
@@ -205,22 +234,26 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
     return matchesSearch && matchesCategory && experienceFilter;
   });
 
-  // Handle frequency selection with safety checks
+  // Handle frequency selection.
+  // Previously this popped a blocking safety modal for non-expert users on any
+  // frequency that produced a warning, which prevented playback. The warning
+  // is now surfaced inline (see the "Selected" card and the per-preset card)
+  // and selection always proceeds. The per-frequency volume safety net still
+  // runs so high frequencies can't be played at unsafe levels.
   const handleFrequencySelect = (frequency: number) => {
     const safetyAssessment = assessFrequencySafety(frequency);
-    const warning = generateSafetyWarning(frequency);
-    
-    if (warning && userExperienceLevel !== 'expert') {
-      setPendingFrequency(frequency);
-      setShowSafetyModal(true);
-      return;
-    }
-    
+
     onFrequencyChange(frequency);
-    
+
     // Auto-adjust volume for safety
     if (safetyAssessment.volume < volume) {
       onVolumeChange(safetyAssessment.volume);
+    }
+
+    // If the player is currently paused, start playback so the user hears
+    // the frequency they just picked instead of having to reach for play.
+    if (!isPlaying) {
+      onPlayPause();
     }
   };
 
@@ -317,12 +350,20 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
     <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 shadow-2xl max-w-4xl mx-auto">
       
       {/* Header */}
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-6 flex-wrap gap-3">
         <h2 className="text-2xl font-bold text-gold-400 flex items-center gap-2">
           <Target className="w-6 h-6" />
           Frequency Laboratory
+          {loShuPerfectGUT && (
+            <span
+              className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 uppercase tracking-wider"
+              title="Lo Shu Perfect mode is active. GUT-band Solfeggio entries are shown and selected as their perfect 111 Hz counterparts (174→75, 285→186, 396→297, 417→408, 528→519, 639→630). Toggle in the Guidebook → Lo Shu section."
+            >
+              Lo Shu Perfect
+            </span>
+          )}
         </h2>
-        
+
         {/* Experience Level Selector */}
         <div className="flex items-center gap-2">
           <label className="text-xs text-slate-400">Experience:</label>
@@ -338,6 +379,17 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
           </select>
         </div>
       </div>
+
+      {/* Inline safety warning for the currently selected frequency.
+          Replaces the old blocking modal — selection now always proceeds. */}
+      {selectedWarning && (
+        <div className="mb-4 flex items-start gap-3 p-3 rounded-lg border border-yellow-500/40 bg-yellow-500/10">
+          <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+          <pre className="text-xs text-yellow-200 whitespace-pre-wrap font-sans leading-relaxed">
+            {selectedWarning}
+          </pre>
+        </div>
+      )}
 
       {/* Current Selection */}
       <div className="bg-slate-800 border border-slate-600 rounded-lg p-4 mb-6">
@@ -595,46 +647,6 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
         </div>
       )}
 
-      {/* Safety Modal */}
-      {showSafetyModal && pendingFrequency && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-yellow-500 rounded-xl max-w-lg w-full">
-            <div className="p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <AlertTriangle className="w-8 h-8 text-yellow-500" />
-                <h3 className="text-xl font-bold text-white">Frequency Safety Notice</h3>
-              </div>
-              
-              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mb-4">
-                <pre className="text-sm text-yellow-200 whitespace-pre-wrap">
-                  {generateSafetyWarning(pendingFrequency)}
-                </pre>
-              </div>
-              
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowSafetyModal(false)}
-                  className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded text-white"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    onFrequencyChange(pendingFrequency);
-                    const safetyAssessment = assessFrequencySafety(pendingFrequency);
-                    onVolumeChange(safetyAssessment.volume);
-                    setShowSafetyModal(false);
-                    setPendingFrequency(null);
-                  }}
-                  className="flex-1 px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded text-white font-bold"
-                >
-                  I Understand - Proceed
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

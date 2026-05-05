@@ -11,6 +11,7 @@ import FrequencySelector from './components/FrequencySelector';
 import SafetyProtocols from './components/SafetyProtocols';
 import ExperienceTracker from './components/ExperienceTracker';
 import OfflineIndicator from './components/OfflineIndicator';
+import LoShuMatrix from './components/LoShuMatrix';
 import { 
   analyzeFractalFrequencies, 
   assessFrequencySafety, 
@@ -967,17 +968,21 @@ const App: React.FC = () => {
       localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
   };
 
-  const [vizSettings, setVizSettings] = useState<VizSettings>({
-    speed: 1.0, // Changed from 2.5 to 1.0 for normal speed default
+  // Visual settings — persisted to localStorage so the user's tuning survives
+  // reloads and new sessions. Bump VIZ_SETTINGS_VERSION if VizSettings shape
+  // changes incompatibly; saved values from older versions will be discarded.
+  const VIZ_SETTINGS_STORAGE_KEY = 'aetheria.vizSettings.v1';
+  const VIZ_SETTINGS_DEFAULTS: VizSettings = {
+    speed: 1.0,
     sensitivity: 1.0,
     particleDensity: 'medium',
-    particleBaseSize: 3.5, 
+    particleBaseSize: 3.5,
     coreSize: 1.0,
     showHexagons: true,
     hexOpacity: 0.6,
-    hexVisualMode: 'spectrum', 
+    hexVisualMode: 'spectrum',
     showWaterRipples: false,
-    hydroIntensity: 50, // 0-100 scale
+    hydroIntensity: 50,
     showTreeOfLife: false,
     colorMode: 'chakra',
     autoRotate: true,
@@ -987,13 +992,73 @@ const App: React.FC = () => {
     enableFloat: false,
     enablePulse: false,
     enableTrails: false,
+  };
+
+  const [vizSettings, setVizSettings] = useState<VizSettings>(() => {
+    try {
+      const raw = typeof localStorage !== 'undefined'
+        ? localStorage.getItem(VIZ_SETTINGS_STORAGE_KEY)
+        : null;
+      if (!raw) return VIZ_SETTINGS_DEFAULTS;
+      const parsed = JSON.parse(raw);
+      // Spread defaults first so any keys missing from older saves get filled in.
+      return { ...VIZ_SETTINGS_DEFAULTS, ...parsed };
+    } catch {
+      return VIZ_SETTINGS_DEFAULTS;
+    }
   });
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(VIZ_SETTINGS_STORAGE_KEY, JSON.stringify(vizSettings));
+      }
+    } catch {
+      // localStorage may be full, blocked by privacy mode, or unavailable —
+      // persistence is best-effort, never fatal.
+    }
+  }, [vizSettings]);
 
   const [volume, setVolume] = useState(0.8);
   const [solfeggioVolume, setSolfeggioVolume] = useState(0.01);
+  // Independent gate for the solfeggio oscillator so the user can hear a
+  // selected tone without the music track also resuming. Set true by
+  // selectFrequency, cleared when the user explicitly pauses via the main
+  // play/pause button.
+  const [isSolfeggioActive, setIsSolfeggioActive] = useState(false);
+  // One-shot guard so we bump a near-zero solfeggio volume up to an audible
+  // level the first time the user activates a tone — without overriding
+  // intentional later adjustments.
+  const hasBoostedSolfeggioVolumeRef = useRef(false);
   const [binauralVolume, setBinauralVolume] = useState(0.03); // Initialized to 3%
   const [selectedSolfeggio, setSelectedSolfeggio] = useState<number>(396);
-  const [selectedBinaural, setSelectedBinaural] = useState<BinauralPreset>(BINAURAL_PRESETS[2]); 
+  // Lo Shu Perfect GUT mode — when ON, the GUT-band Solfeggio frequencies
+  // (174,285,396,417,528,639) play at their Lo Shu Perfect counterparts
+  // (75,186,297,408,519,630). 741/852/963 are exact matches in both sets,
+  // and HEART/HEAD frequencies are unaffected.
+  // Persisted to localStorage so the user's chosen mode survives reloads.
+  const LO_SHU_MODE_STORAGE_KEY = 'aetheria.loShuPerfectGUT.v1';
+  const [loShuPerfectGUT, setLoShuPerfectGUT] = useState<boolean>(() => {
+    try {
+      const raw = typeof localStorage !== 'undefined'
+        ? localStorage.getItem(LO_SHU_MODE_STORAGE_KEY)
+        : null;
+      return raw === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(LO_SHU_MODE_STORAGE_KEY, String(loShuPerfectGUT));
+      }
+    } catch {
+      // localStorage may be full or blocked — persistence is best-effort.
+    }
+  }, [loShuPerfectGUT]);
+  const [selectedBinaural, setSelectedBinaural] = useState<BinauralPreset>(BINAURAL_PRESETS[2]);
   const [useChakraOrder, setUseChakraOrder] = useState(false);
   const [isAdaptiveBinaural, setIsAdaptiveBinaural] = useState(true); // Default ON
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -1396,6 +1461,20 @@ const App: React.FC = () => {
     return f;
   };
 
+  // Lo Shu Perfect GUT swap table. Only positions 1-6 differ; 7-9 are identical
+  // in both sets, so they're absent here. Returns the input unchanged when the
+  // mode is off or the frequency isn't a GUT-band Solfeggio.
+  const LO_SHU_PERFECT_MAP: Record<number, number> = {
+    174: 75,
+    285: 186,
+    396: 297,
+    417: 408,
+    528: 519,
+    639: 630,
+  };
+  const applyLoShuPerfectMap = (freq: number): number =>
+    loShuPerfectGUT ? (LO_SHU_PERFECT_MAP[freq] ?? freq) : freq;
+
   const updateSolfeggio = useCallback(() => {
     if (!audioCtxRef.current) return;
     const ctx = audioCtxRef.current;
@@ -1407,13 +1486,17 @@ const App: React.FC = () => {
     }
     if (solfeggioGainRef.current) solfeggioGainRef.current.disconnect();
 
-    if (!isPlaying) return;
+    // Run the oscillator when EITHER the music is playing OR the user
+    // activated a tone-only session by clicking a frequency. This decouples
+    // the tone from the music transport so picking a frequency in any
+    // selector plays the chosen tone without resuming a paused track.
+    if (!isPlaying && !isSolfeggioActive) return;
 
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(toSubBass(selectedSolfeggio), now);
+    osc.frequency.setValueAtTime(toSubBass(applyLoShuPerfectMap(selectedSolfeggio)), now);
     
     gain.gain.setValueAtTime(0, now);
     // CHANGE 1: Apply phi-based volume relationship for solfeggio layer
@@ -1431,7 +1514,7 @@ const App: React.FC = () => {
 
     solfeggioOscRef.current = osc;
     solfeggioGainRef.current = gain;
-  }, [isPlaying, selectedSolfeggio, solfeggioVolume, enablePhiMode, volume, binauralVolume]);
+  }, [isPlaying, isSolfeggioActive, selectedSolfeggio, solfeggioVolume, enablePhiMode, volume, binauralVolume, loShuPerfectGUT]);
 
   useEffect(() => {
       if (binauralGainRef.current && audioCtxRef.current) {
@@ -3211,6 +3294,9 @@ const App: React.FC = () => {
         await audioCtxRef.current.suspend();
       }
       setIsPlaying(false);
+      // Pressing the main pause button stops everything — including any
+      // tone-only session started by clicking a frequency picker.
+      setIsSolfeggioActive(false);
       // Update media session state
       if ('mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'paused';
@@ -3392,6 +3478,35 @@ const App: React.FC = () => {
         }
       }
     }
+  };
+
+  // Select a Solfeggio frequency from any picker. Sets the tone, applies the
+  // Lo Shu Perfect mapping (so display + audio stay aligned), and activates
+  // the solfeggio oscillator independently of the music transport so the
+  // user actually hears the chosen tone — instead of either silence (paused)
+  // or the music resuming on top.
+  const selectFrequency = (rawFreq: number) => {
+    initAudio();
+    // Browsers suspend the AudioContext until a user gesture, and again
+    // after the page is hidden — make sure it's running before we schedule
+    // the oscillator, otherwise nothing comes out.
+    if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume().catch((err: unknown) =>
+        console.error('Failed to resume audio context for tone playback:', err)
+      );
+    }
+
+    // First-time courtesy boost: the default solfeggio "Layer Intensity" is
+    // 1%, which is inaudible alongside music. Bump once to ~30% on the very
+    // first tone activation so the user hears something. We won't override
+    // any later manual adjustment.
+    if (!hasBoostedSolfeggioVolumeRef.current && solfeggioVolume < 0.1) {
+      setSolfeggioVolume(0.3);
+      hasBoostedSolfeggioVolumeRef.current = true;
+    }
+
+    setSelectedSolfeggio(applyLoShuPerfectMap(rawFreq));
+    setIsSolfeggioActive(true);
   };
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -3859,7 +3974,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -4505,7 +4620,15 @@ registerProcessor('wav-capture', WavCapture);
                                       ))}
                                   </div>
                               </section>
-                              
+
+                              {/* Section 4: The Lo Shu Magic Square */}
+                              <LoShuMatrix
+                                currentFrequency={selectedSolfeggio}
+                                onSelectFrequency={setSelectedSolfeggio}
+                                loShuPerfectGUT={loShuPerfectGUT}
+                                onLoShuPerfectChange={setLoShuPerfectGUT}
+                              />
+
                               <div className="p-8 mt-4 bg-gradient-to-br from-slate-900 to-black border border-gold-500/20 rounded-2xl text-center relative overflow-hidden">
                                   <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent opacity-50"></div>
                                   <p className="text-xl font-serif text-gold-200 font-medium tracking-wide">"{UNIFIED_THEORY.conclusion}"</p>
@@ -5234,19 +5357,30 @@ registerProcessor('wav-capture', WavCapture);
                    </div>
 
                   <div>
-                    <label className="text-xs uppercase tracking-widest text-slate-500 mb-4 block font-bold">Solfeggio Frequency Layer</label>
-                    
-                    {/* Traditional Solfeggio (First-Third Order) */}
+                    <div className="flex items-center justify-between mb-4">
+                      <label className="text-xs uppercase tracking-widest text-slate-500 block font-bold">Solfeggio Frequency Layer</label>
+                      {loShuPerfectGUT && (
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-medium border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 uppercase tracking-wider"
+                          title="Lo Shu Perfect mode is active. GUT-band Solfeggio frequencies are shown and selected as their perfect 111 Hz counterparts (174→75, 285→186, 396→297, 417→408, 528→519, 639→630). Toggle in the Guidebook → Lo Shu section."
+                        >
+                          Lo Shu Perfect
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Traditional Solfeggio (First-Third Order) — these are the
+                        GUT band, so display values swap when Lo Shu Perfect is on. */}
                     <div className="mb-4">
                       <div className="text-[10px] text-slate-400 mb-2 uppercase tracking-widest">Traditional Scale (Safe)</div>
                       <div className="grid grid-cols-3 gap-2">
                         {SOLFEGGIO_INFO.filter(s => ['First', 'Second', 'Third'].includes(s.order)).map((s) => (
                           <button
                             key={s.freq}
-                            onClick={() => setSelectedSolfeggio(s.freq)}
-                            className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-gold-600 text-black border-gold-600 shadow-lg shadow-gold-500/20' : 'border-slate-800 bg-slate-900 hover:border-gold-500'}`}
+                            onClick={() => selectFrequency(s.freq)}
+                            className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === applyLoShuPerfectMap(s.freq) ? 'bg-gold-600 text-black border-gold-600 shadow-lg shadow-gold-500/20' : 'border-slate-800 bg-slate-900 hover:border-gold-500'}`}
                           >
-                            {s.freq}
+                            {applyLoShuPerfectMap(s.freq)}
                           </button>
                         ))}
                       </div>
@@ -5263,8 +5397,8 @@ registerProcessor('wav-capture', WavCapture);
                           {SOLFEGGIO_INFO.filter(s => s.order === 'Fourth').map((s) => (
                             <button
                               key={s.freq}
-                              onClick={() => setSelectedSolfeggio(s.freq)}
-                              className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-yellow-600 text-black border-yellow-600 shadow-lg shadow-yellow-500/20' : 'border-yellow-800 bg-yellow-900/20 hover:border-yellow-500 text-yellow-300'}`}
+                              onClick={() => selectFrequency(s.freq)}
+                              className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === applyLoShuPerfectMap(s.freq) ? 'bg-yellow-600 text-black border-yellow-600 shadow-lg shadow-yellow-500/20' : 'border-yellow-800 bg-yellow-900/20 hover:border-yellow-500 text-yellow-300'}`}
                             >
                               {s.freq}
                             </button>
@@ -5285,8 +5419,8 @@ registerProcessor('wav-capture', WavCapture);
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Fifth').map((s) => (
                               <button
                                 key={s.freq}
-                                onClick={() => setSelectedSolfeggio(s.freq)}
-                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-orange-600 text-black border-orange-600 shadow-lg shadow-orange-500/20' : 'border-orange-800 bg-orange-900/20 hover:border-orange-500 text-orange-300'}`}
+                                onClick={() => selectFrequency(s.freq)}
+                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === applyLoShuPerfectMap(s.freq) ? 'bg-orange-600 text-black border-orange-600 shadow-lg shadow-orange-500/20' : 'border-orange-800 bg-orange-900/20 hover:border-orange-500 text-orange-300'}`}
                               >
                                 {s.freq}
                               </button>
@@ -5304,8 +5438,8 @@ registerProcessor('wav-capture', WavCapture);
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Sixth').map((s) => (
                               <button
                                 key={s.freq}
-                                onClick={() => setSelectedSolfeggio(s.freq)}
-                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-red-600 text-white border-red-600 shadow-lg shadow-red-500/20' : 'border-red-800 bg-red-900/20 hover:border-red-500 text-red-300'}`}
+                                onClick={() => selectFrequency(s.freq)}
+                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === applyLoShuPerfectMap(s.freq) ? 'bg-red-600 text-white border-red-600 shadow-lg shadow-red-500/20' : 'border-red-800 bg-red-900/20 hover:border-red-500 text-red-300'}`}
                               >
                                 {s.freq}
                               </button>
@@ -5323,8 +5457,8 @@ registerProcessor('wav-capture', WavCapture);
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Seventh').map((s) => (
                               <button
                                 key={s.freq}
-                                onClick={() => setSelectedSolfeggio(s.freq)}
-                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-violet-600 text-white border-violet-600 shadow-lg shadow-violet-500/20' : 'border-violet-800 bg-violet-900/20 hover:border-violet-500 text-violet-300'}`}
+                                onClick={() => selectFrequency(s.freq)}
+                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === applyLoShuPerfectMap(s.freq) ? 'bg-violet-600 text-white border-violet-600 shadow-lg shadow-violet-500/20' : 'border-violet-800 bg-violet-900/20 hover:border-violet-500 text-violet-300'}`}
                               >
                                 {s.freq}
                               </button>
@@ -5342,8 +5476,8 @@ registerProcessor('wav-capture', WavCapture);
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Eighth').map((s) => (
                               <button
                                 key={s.freq}
-                                onClick={() => setSelectedSolfeggio(s.freq)}
-                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === s.freq ? 'bg-cyan-600 text-white border-cyan-600 shadow-lg shadow-cyan-500/20' : 'border-cyan-800 bg-cyan-900/20 hover:border-cyan-500 text-cyan-300'}`}
+                                onClick={() => selectFrequency(s.freq)}
+                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 ${selectedSolfeggio === applyLoShuPerfectMap(s.freq) ? 'bg-cyan-600 text-white border-cyan-600 shadow-lg shadow-cyan-500/20' : 'border-cyan-800 bg-cyan-900/20 hover:border-cyan-500 text-cyan-300'}`}
                               >
                                 {s.freq}
                               </button>
@@ -5362,8 +5496,8 @@ registerProcessor('wav-capture', WavCapture);
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Ninth').map((s) => (
                               <button
                                 key={s.freq}
-                                onClick={() => setSelectedSolfeggio(s.freq)}
-                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 relative ${selectedSolfeggio === s.freq ? 'bg-pink-600 text-white border-pink-600 shadow-lg shadow-pink-500/20' : 'border-pink-800 bg-pink-900/20 hover:border-pink-500 text-pink-300'}`}
+                                onClick={() => selectFrequency(s.freq)}
+                                className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all active:scale-95 relative ${selectedSolfeggio === applyLoShuPerfectMap(s.freq) ? 'bg-pink-600 text-white border-pink-600 shadow-lg shadow-pink-500/20' : 'border-pink-800 bg-pink-900/20 hover:border-pink-500 text-pink-300'}`}
                               >
                                 {s.freq}
                                 {s.freq === 5031 && (
@@ -5633,7 +5767,7 @@ registerProcessor('wav-capture', WavCapture);
                           <button
                             key={s.freq}
                             onClick={() => {
-                              setSelectedSolfeggio(s.freq);
+                              selectFrequency(s.freq);
                               setShowFrequencySelector(false);
                             }}
                             className="py-2 px-2 bg-slate-800 hover:bg-gold-600 text-white rounded border border-slate-600 transition-colors text-xs"
@@ -5656,7 +5790,7 @@ registerProcessor('wav-capture', WavCapture);
                             <button
                               key={s.freq}
                               onClick={() => {
-                                setSelectedSolfeggio(s.freq);
+                                selectFrequency(s.freq);
                                 setShowFrequencySelector(false);
                               }}
                               className="py-2 px-2 bg-yellow-900/30 hover:bg-yellow-600 text-yellow-300 hover:text-black rounded border border-yellow-600 transition-colors text-xs"
@@ -5680,7 +5814,7 @@ registerProcessor('wav-capture', WavCapture);
                               <button
                                 key={s.freq}
                                 onClick={() => {
-                                  setSelectedSolfeggio(s.freq);
+                                  selectFrequency(s.freq);
                                   setShowFrequencySelector(false);
                                 }}
                                 className="py-2 px-2 bg-orange-900/30 hover:bg-orange-600 text-orange-300 hover:text-black rounded border border-orange-600 transition-colors text-xs"
@@ -5701,7 +5835,7 @@ registerProcessor('wav-capture', WavCapture);
                               <button
                                 key={s.freq}
                                 onClick={() => {
-                                  setSelectedSolfeggio(s.freq);
+                                  selectFrequency(s.freq);
                                   setShowFrequencySelector(false);
                                 }}
                                 className="py-2 px-2 bg-red-900/30 hover:bg-red-600 text-red-300 hover:text-white rounded border border-red-600 transition-colors text-xs"
@@ -5722,7 +5856,7 @@ registerProcessor('wav-capture', WavCapture);
                               <button
                                 key={s.freq}
                                 onClick={() => {
-                                  setSelectedSolfeggio(s.freq);
+                                  selectFrequency(s.freq);
                                   setShowFrequencySelector(false);
                                 }}
                                 className="py-2 px-2 bg-violet-900/30 hover:bg-violet-600 text-violet-300 hover:text-white rounded border border-violet-600 transition-colors text-xs"
@@ -5743,7 +5877,7 @@ registerProcessor('wav-capture', WavCapture);
                               <button
                                 key={s.freq}
                                 onClick={() => {
-                                  setSelectedSolfeggio(s.freq);
+                                  selectFrequency(s.freq);
                                   setShowFrequencySelector(false);
                                 }}
                                 className="py-2 px-2 bg-cyan-900/30 hover:bg-cyan-600 text-cyan-300 hover:text-white rounded border border-cyan-600 transition-colors text-xs"
@@ -5765,7 +5899,7 @@ registerProcessor('wav-capture', WavCapture);
                               <button
                                 key={s.freq}
                                 onClick={() => {
-                                  setSelectedSolfeggio(s.freq);
+                                  selectFrequency(s.freq);
                                   setShowFrequencySelector(false);
                                 }}
                                 className={`py-2 px-2 bg-pink-900/30 hover:bg-pink-600 text-pink-300 hover:text-white rounded border border-pink-600 transition-colors text-xs relative ${s.freq === 5031 ? 'ring-2 ring-gold-500/50' : ''}`}
@@ -5792,7 +5926,7 @@ registerProcessor('wav-capture', WavCapture);
                     </button>
                   </div>
                   
-                  {/* 
+                  {/*
                   <FrequencySelector
                     selectedFrequency={selectedSolfeggio}
                     onFrequencyChange={(freq) => {
@@ -5806,6 +5940,7 @@ registerProcessor('wav-capture', WavCapture);
                     fractalAnalysis={fractalAnalysis}
                     userExperienceLevel={userExperienceLevel}
                     onExperienceLevelChange={setUserExperienceLevel}
+                    loShuPerfectGUT={loShuPerfectGUT}
                   />
                   */}
                 </div>
@@ -6228,16 +6363,41 @@ registerProcessor('wav-capture', WavCapture);
                         </span>
                         
                         <div className="flex items-center gap-2">
-                         <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded border ${
-                           subtleResonanceMode 
-                             ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' 
-                             : 'bg-gold-500/10 text-gold-500 border-gold-500/20'
-                         }`}
-                         title={`Sacred Geometry: ${getCurrentSacredGeometry().shape} (${getCurrentSacredGeometry().element} Element)`}>
-                            <Activity size={8} /> 
-                            {playlist[currentSongIndex]?.closestSolfeggio || selectedSolfeggio}Hz
-                            {subtleResonanceMode && <Zap size={8} />}
-                         </span>
+                         {(() => {
+                           // Footer Hz pill — reflects Lo Shu Perfect mode by displaying
+                           // the swapped GUT counterpart and tinting the pill emerald, so
+                           // the badge always tells the truth about what's playing.
+                           const rawFreq = playlist[currentSongIndex]?.closestSolfeggio || selectedSolfeggio;
+                           const displayFreq = applyLoShuPerfectMap(rawFreq);
+                           const isLoShuSwap = loShuPerfectGUT && displayFreq !== rawFreq;
+                           const pillClass = isLoShuSwap
+                             ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                             : subtleResonanceMode
+                               ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                               : 'bg-gold-500/10 text-gold-500 border-gold-500/20';
+                           return (
+                             <span
+                               className={`flex items-center gap-1 px-1.5 py-0.5 rounded border ${pillClass}`}
+                               title={
+                                 isLoShuSwap
+                                   ? `Lo Shu Perfect: playing ${displayFreq} Hz (Solfeggio ${rawFreq} Hz mapped to its perfect 111 Hz counterpart). Sacred Geometry: ${getCurrentSacredGeometry().shape}.`
+                                   : `Sacred Geometry: ${getCurrentSacredGeometry().shape} (${getCurrentSacredGeometry().element} Element)`
+                               }
+                             >
+                               <Activity size={8} />
+                               {displayFreq}Hz
+                               {subtleResonanceMode && <Zap size={8} />}
+                             </span>
+                           );
+                         })()}
+                         {loShuPerfectGUT && (
+                           <span
+                             className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded border bg-emerald-500/10 text-emerald-300 border-emerald-500/30 text-[10px] font-medium uppercase tracking-wider"
+                             title="Lo Shu Perfect mode is active. Toggle in the Guidebook → Lo Shu section."
+                           >
+                             Lo Shu
+                           </span>
+                         )}
                          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
                             <Waves size={8} /> {selectedBinaural.name}
                          </span>

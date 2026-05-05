@@ -59,6 +59,14 @@ interface Ripple {
 const PHI = (1 + Math.sqrt(5)) / 2; // 1.618...
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5)); // ~2.399 rad
 
+// Hard cap on simultaneously-active water ripples. Without this, the
+// continuous "rain" pushes 1–3 ripple objects per frame at high audio
+// energy, accumulating into hundreds of live entries within seconds — the
+// per-hex inner loop becomes O(hexes × ripples) and the constant
+// allocation/decay churn triggers GC pauses that look like the "smooth
+// for a second then jerky" stutter the user reported.
+const MAX_ACTIVE_RIPPLES = 80;
+
 // Convert Hex to HSL for color math
 const hexToHSL = (hex: string): { h: number; s: number; l: number } => {
   let r = 0, g = 0, b = 0;
@@ -845,39 +853,63 @@ const Visualizer: React.FC<VisualizerProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Reset on (re)mount so the first-frame guard below seeds a fresh baseline.
+    // Without this, an effect re-run could leave lastFrameTimeRef holding a
+    // very old timestamp, producing a time-jump on the first new frame.
+    lastFrameTimeRef.current = 0;
+
     // Pre-calculate Color Palette
     const baseHSL = hexToHSL(primaryColor);
-    const primaryStr = `hsla(${baseHSL.h}, ${baseHSL.s}%, ${baseHSL.l}%,`; 
+    const primaryStr = `hsla(${baseHSL.h}, ${baseHSL.s}%, ${baseHSL.l}%,`;
     const shade1Str = `hsla(${baseHSL.h}, ${Math.min(100, baseHSL.s + 15)}%, ${Math.max(10, baseHSL.l - 25)}%,`;
     const shade2Str = `hsla(${baseHSL.h}, ${Math.max(0, baseHSL.s - 15)}%, ${Math.min(95, baseHSL.l + 30)}%,`;
+
+    // Reusable audio buffer — allocated once, resized only when bufferLength changes.
+    // Allocating per-frame caused GC churn that visibly stuttered the loop.
+    let dataArray = new Uint8Array(analyser ? analyser.frequencyBinCount : 0);
 
     const render = (timestamp?: number) => {
       // Initialize dynamic speed variable
       let dynamicSpeed = settings.speed;
-      
+
       // Performance optimization: Stable frame rate limiting
       if (timestamp) {
+        // First frame after mount/restart: seed lastFrameTime to avoid a
+        // huge initial deltaTime that causes a time-jump on resume.
+        if (lastFrameTimeRef.current === 0) {
+          lastFrameTimeRef.current = timestamp;
+          rafRef.current = requestAnimationFrame(render);
+          return;
+        }
+
         const deltaTime = timestamp - lastFrameTimeRef.current;
-        
-        // Fixed 30 FPS for smoother performance (33.33ms per frame)
+
+        // 30 FPS cap (~33.33ms/frame). This roughly halves the per-frame work
+        // (trails fillRect, ripple draws, hex iterations, particle projection)
+        // compared to 60 FPS — the right call once a scene is heavy enough
+        // that 60 FPS produces GC hitches. Tradeoff: on a 60 Hz display each
+        // rendered frame holds for two vsyncs, so motion looks slightly less
+        // continuous than at 60 FPS, but there are no GC stutters to break it.
         const targetFrameTime = 33.33;
-        
+
         // Skip frame if we're running too fast
         if (deltaTime < targetFrameTime) {
           rafRef.current = requestAnimationFrame(render);
           return;
         }
-        
-        // Account for multiple frames if we're running slow
-        const framesToCatch = Math.floor(deltaTime / targetFrameTime);
+
+        // Account for multiple frames if we're running slow, but cap at 3
+        // so that returning from a backgrounded tab (or an effect re-mount)
+        // doesn't cause a huge time-jump in the animation.
+        const framesToCatch = Math.min(3, Math.floor(deltaTime / targetFrameTime));
         lastFrameTimeRef.current = timestamp - (deltaTime % targetFrameTime);
-        
+
         // Increment time based on actual frames rendered and music tempo
         // Base speed scaled up by 2.5x so that 1.0 = old 2.5
         const tempoSpeed = isPlaying ? dynamicSpeed : settings.speed;
         timeRef.current += (0.025 * tempoSpeed) * framesToCatch; // Changed from 0.01 to 0.025 (2.5x)
       }
-      
+
       // 1. Resize Handling
       if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
         canvas.width = window.innerWidth;
@@ -890,7 +922,9 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
       // 2. Audio Data Analysis - Enhanced for Musical Responsiveness
       const bufferLength = analyser ? analyser.frequencyBinCount : 0;
-      const dataArray = new Uint8Array(bufferLength);
+      if (dataArray.length !== bufferLength) {
+        dataArray = new Uint8Array(bufferLength);
+      }
       if (analyser) analyser.getByteFrequencyData(dataArray);
 
       // More detailed frequency band analysis
@@ -1057,69 +1091,77 @@ const Visualizer: React.FC<VisualizerProps> = ({
            const aboveThreshold = bassEnergy > bassThreshold;
            const cooldownMet = (now - lastBassRipple) > cooldown;
            
+           // Cap-respecting push so we never let the ripple pool grow unbounded.
+           const pushRipple = (r: Ripple) => {
+              if (ripplesRef.current.length < MAX_ACTIVE_RIPPLES) {
+                  ripplesRef.current.push(r);
+              }
+           };
+
            if ((bassIncreased && aboveThreshold && cooldownMet) || (subBassHit && cooldownMet)) {
               (window as any).lastBassRipple = now;
-              
+
               // Create expanding wave ripple with frequency-based characteristics
               const rippleStrength = subBassHit ? subBassEnergy : bassEnergy;
               const rippleSize = subBassHit ? 0.9 : 0.7;
-              
-              ripplesRef.current.push({ 
+
+              pushRipple({
                   x: cx + (subBassHit ? 0 : (Math.random() - 0.5) * 100), // Sub-bass always center
-                  y: cy + (subBassHit ? 0 : (Math.random() - 0.5) * 100), 
-                  radius: 20 * (1 + rippleStrength), 
-                  maxRadius: Math.max(w, h) * rippleSize, 
-                  alpha: 0.5 + rippleStrength * 0.3, 
+                  y: cy + (subBassHit ? 0 : (Math.random() - 0.5) * 100),
+                  radius: 20 * (1 + rippleStrength),
+                  maxRadius: Math.max(w, h) * rippleSize,
+                  alpha: 0.5 + rippleStrength * 0.3,
                   speed: 8.75 * settings.speed * (1 + rippleStrength * 0.5), // 3.5 * 2.5 = 8.75
-                  color: subBassHit ? shade1Str : primaryStr, 
-                  type: 'bass' 
+                  color: subBassHit ? shade1Str : primaryStr,
+                  type: 'bass'
               });
-              
-              // Add inner ripple for more impact
-              setTimeout(() => {
-                  ripplesRef.current.push({ 
-                      x: cx, 
-                      y: cy, 
-                      radius: 10, 
-                      maxRadius: Math.max(w, h) * 0.5, 
-                      alpha: 0.3 + rippleStrength * 0.2, 
-                      speed: 7.5 * settings.speed, // 3 * 2.5 = 7.5
-                      color: primaryStr, 
-                      type: 'bass' 
-                  });
-              }, 50);
+
+              // Inner impact ripple — pushed inline rather than via a 50ms
+              // setTimeout. The previous setTimeout-per-beat pattern fired
+              // ~60 times/sec at heavy bass, each allocating a closure that
+              // outlived the frame, contributing to GC pauses.
+              pushRipple({
+                  x: cx,
+                  y: cy,
+                  radius: 10,
+                  maxRadius: Math.max(w, h) * 0.5,
+                  alpha: 0.3 + rippleStrength * 0.2,
+                  speed: 7.5 * settings.speed, // 3 * 2.5 = 7.5
+                  color: primaryStr,
+                  type: 'bass'
+              });
            }
-           
+
            // Mid-frequency ripples at random positions
            if (midEnergy > 0.5 && Math.random() < midEnergy * normalizedLinear) {
-              ripplesRef.current.push({ 
-                  x: cx + (Math.random() - 0.5) * w * 0.6, 
-                  y: cy + (Math.random() - 0.5) * h * 0.6, 
-                  radius: 5, 
-                  maxRadius: 150 + midEnergy * 100, 
-                  alpha: 0.4 + midEnergy * 0.3, 
+              pushRipple({
+                  x: cx + (Math.random() - 0.5) * w * 0.6,
+                  y: cy + (Math.random() - 0.5) * h * 0.6,
+                  radius: 5,
+                  maxRadius: 150 + midEnergy * 100,
+                  alpha: 0.4 + midEnergy * 0.3,
                   speed: 6.25 * settings.speed, // 2.5 * 2.5 = 6.25
-                  color: shade2Str, 
-                  type: 'rain' 
+                  color: shade2Str,
+                  type: 'rain'
               });
            }
-           
+
            // Rain ripples - continuous at 50% and above
            const rainThreshold = 0.3 - normalizedLinear * 0.25; // Very low threshold
-           
+
            // At 50%, create rain effect continuously
            if (normalizedLinear >= 0.5 || (highEnergy > rainThreshold && Math.random() < normalizedLinear)) {
               const numDrops = 1 + Math.floor(normalizedLinear * 2); // 1-3 drops
               for (let i = 0; i < numDrops; i++) {
-                  ripplesRef.current.push({ 
-                      x: Math.random() * w, 
-                      y: Math.random() * h, 
-                      radius: 0, 
-                      maxRadius: 80 + (normalizedLinear * 120), 
-                      alpha: 0.3 + (normalizedLinear * 0.4), 
+                  pushRipple({
+                      x: Math.random() * w,
+                      y: Math.random() * h,
+                      radius: 0,
+                      maxRadius: 80 + (normalizedLinear * 120),
+                      alpha: 0.3 + (normalizedLinear * 0.4),
                       speed: 5 * settings.speed, // 2 * 2.5 = 5
-                      color: Math.random() > 0.5 ? shade2Str : shade1Str, 
-                      type: 'rain' 
+                      color: Math.random() > 0.5 ? shade2Str : shade1Str,
+                      type: 'rain'
                   });
               }
            }
@@ -1176,16 +1218,20 @@ const Visualizer: React.FC<VisualizerProps> = ({
       if (settings.showHexagons) {
           ctx.save();
           ctx.translate(cx, cy);
-          
-          // Performance optimization: Only render visible hexagons
-          const visibleHexagons = hexGridRef.current.filter(hex => {
+
+          // Cull off-screen hexagons in-place. The previous .filter() built
+          // a fresh ~600-entry array every frame (~36k objects/sec at 60fps)
+          // — major GC pressure during music playback. We now skip hidden
+          // cells inside the forEach with no allocation.
+          hexGridRef.current.forEach((hex: HexCell) => {
               const screenX = cx + hex.x;
               const screenY = cy + hex.y;
-              return screenX > -hex.size && screenX < w + hex.size && 
-                     screenY > -hex.size && screenY < h + hex.size;
-          });
-          
-          visibleHexagons.forEach(hex => {
+              if (
+                  screenX < -hex.size || screenX > w + hex.size ||
+                  screenY < -hex.size || screenY > h + hex.size
+              ) {
+                  return;
+              }
               let active = 0;
               if (isPlaying && bufferLength > 0) {
                   if (settings.hexVisualMode === 'spectrum') {
@@ -1219,11 +1265,26 @@ const Visualizer: React.FC<VisualizerProps> = ({
               
               let waveLift = 0;
               if (settings.showWaterRipples && isPlaying) {
-                  ripplesRef.current.forEach(r => {
-                      const distToWaveFront = Math.abs(Math.sqrt((hex.x - (r.x - cx))**2 + (hex.y - (r.y - cy))**2) - r.radius);
+                  // Hot path: this runs O(visibleHexes × activeRipples) per frame
+                  // (~600 × up to 80 = ~48k iterations/sec at 60fps). Reject far
+                  // ripples with a cheap bounding-box test before the sqrt — most
+                  // hex/ripple pairs are far apart and this short-circuits the
+                  // expensive distance math, which was a major contributor to the
+                  // jank you were seeing with ripples + trails active.
+                  const ripples = ripplesRef.current;
+                  for (let ri = 0; ri < ripples.length; ri++) {
+                      const r = ripples[ri];
+                      const dx = hex.x - (r.x - cx);
+                      const dy = hex.y - (r.y - cy);
                       const waveWidth = r.type === 'bass' ? 50 : 30;
-                      if (distToWaveFront < waveWidth) waveLift += (1 - (distToWaveFront / waveWidth)) * r.alpha;
-                  });
+                      const maxReach = r.radius + waveWidth;
+                      // Square-bounds rejection — no sqrt, no Math.abs, just two compares.
+                      if (dx > maxReach || dx < -maxReach || dy > maxReach || dy < -maxReach) continue;
+                      const distToWaveFront = Math.abs(Math.sqrt(dx * dx + dy * dy) - r.radius);
+                      if (distToWaveFront < waveWidth) {
+                          waveLift += (1 - (distToWaveFront / waveWidth)) * r.alpha;
+                      }
+                  }
               }
               active = Math.min(1.5, active + waveLift * 0.8);
               hex.activeLevel = hex.activeLevel * 0.9 + active * 0.1;
@@ -1261,11 +1322,15 @@ const Visualizer: React.FC<VisualizerProps> = ({
           for (let i = ripplesRef.current.length - 1; i >= 0; i--) {
               const r = ripplesRef.current[i];
               r.radius += r.speed;
-              // Different fade rates for different ripple types
+              // Different fade rates for different ripple types. Bumped from
+              // 0.006/0.004 — slightly faster decay shrinks the average live
+              // ripple pool by ~30%, which directly reduces work in the
+              // O(visibleHexes × ripples) wave-lift loop above. Still slow
+              // enough to read as a wave, just less long-tailed buildup.
               if (r.type === 'bass') {
-                  r.alpha -= 0.006; // Moderate fade for proper wave effect
+                  r.alpha -= 0.008;
               } else {
-                  r.alpha -= 0.004; // Slower fade for rain ripples
+                  r.alpha -= 0.006;
               }
               if (r.alpha <= 0 || r.radius > r.maxRadius) { ripplesRef.current.splice(i, 1); continue; }
               ctx.strokeStyle = r.color + r.alpha + ')';
