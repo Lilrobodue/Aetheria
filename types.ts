@@ -57,10 +57,14 @@ export interface VizSettings {
   hydroIntensity: number; // 0.1 to 2.0
   
   // Overlays
-  showTreeOfLife: boolean; 
+  showTreeOfLife: boolean;
+  showLoShuCube: boolean; // Render the 3x3x3 Lo Shu cube overlay (27 sub-cubes by frequency)
+  loShuCubeAutoRotate: boolean; // When true, the cube turntables; when false, holds at loShuCubeRotation
+  loShuCubeRotation: number; // Manual rotation angle in degrees (0–360), used when auto-rotate is off
   
-  // Color Logic
-  colorMode: 'chakra' | 'cycle' | 'static'; 
+  // Color Logic — 'spectrum' is the 4th mode: visible-light wavelength of
+  // the active frequency (still audio-reactive via HSL modulation).
+  colorMode: 'chakra' | 'cycle' | 'static' | 'spectrum';
   
   // Motion Logic
   autoRotate: boolean; 

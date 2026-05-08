@@ -1,5 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { VizSettings } from '../types';
+import { frequencyToSpectrumColor, type FrequencyColorMode } from '../utils/spectrumColor';
+import { LO_SHU_WALKS, type LoShuWalkMode } from '../constants';
 
 interface VisualizerProps {
   analyser: AnalyserNode | null;
@@ -8,7 +10,40 @@ interface VisualizerProps {
   binauralDelta: number;
   selectedFrequency: number;
   settings: VizSettings;
+  /** When 'spectrum', the Lo Shu cube tints sub-cubes by visible-light wavelength
+   *  rather than the chakra palette. Defaults to 'chakra'. */
+  frequencyColorMode?: FrequencyColorMode;
+  /** When set, the cube layer draws a polyline tracing the walk's 27-frequency
+   *  path through the sub-cubes. Segments up to the currently-playing cube glow
+   *  brighter than the upcoming portion. */
+  loShuWalkMode?: LoShuWalkMode | null;
 }
+
+// 27 Aetheria frequencies arranged into [GUT, HEART, HEAD] layers, ordered
+// by Lo Shu position 1..9 (so index 0 == position 1).
+const LO_SHU_CUBE_FREQS: number[][] = [
+  [174, 285, 396, 417, 528, 639, 741, 852, 963],
+  [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150],
+  [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336],
+];
+
+// Standard Lo Shu position layout (visible grid order):
+//   4 9 2
+//   3 5 7
+//   8 1 6
+const LO_SHU_GRID_ORDER: number[] = [4, 9, 2, 3, 5, 7, 8, 1, 6];
+
+// Chakra-palette fallback colours for each of the 27 frequencies, indexed
+// [layer][position-1]. Mirrors the SOLFEGGIO_INFO chakra palette without
+// importing the whole table into the Visualizer.
+const LO_SHU_CUBE_CHAKRA_COLORS: string[][] = [
+  // GUT
+  ['#8B0000', '#FF0000', '#FF4500', '#FF8C00', '#FFD700', '#7BC74D', '#00B7EB', '#3B82F6', '#A78BFA'],
+  // HEART
+  ['#FB923C', '#FBBF24', '#A3E635', '#34D399', '#10B981', '#06B6D4', '#22D3EE', '#60A5FA', '#A855F7'],
+  // HEAD
+  ['#C084FC', '#E879F9', '#F472B6', '#FB7185', '#F43F5E', '#9333EA', '#7C3AED', '#A78BFA', '#FFFFFF'],
+];
 
 // --- Types ---
 interface Point3D { x: number; y: number; z: number; }
@@ -670,12 +705,14 @@ const getTreeOfLife = (scale: number = 1): { nodes: TreeNode[], edges: [number, 
     return { nodes: rawNodes, edges };
 };
 
-const Visualizer: React.FC<VisualizerProps> = ({ 
-  analyser, 
-  primaryColor, 
-  isPlaying, 
+const Visualizer: React.FC<VisualizerProps> = ({
+  analyser,
+  primaryColor,
+  isPlaying,
   settings,
-  selectedFrequency
+  selectedFrequency,
+  frequencyColorMode = 'chakra',
+  loShuWalkMode = null,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -1503,6 +1540,300 @@ const Visualizer: React.FC<VisualizerProps> = ({
         ctx.restore();
       }
 
+      // --- LAYER 3.5: LO SHU CUBE (translucent 3x3x3 rubix-style) ---
+      if (settings.showLoShuCube) {
+        ctx.save();
+
+        // Cube layout: each sub-cube is 1 grid unit, separated by a 1-unit
+        // gap so the walk-path lines have room to thread between them.
+        // Total grid extent = 3 cubes × 1 + 2 gaps × 1 = 5 units. Cube i
+        // occupies [i*step, i*step + 1] along each axis.
+        const STEP = 2;
+        const TOTAL_EXTENT = 3 * STEP - 1; // = 5 (last cube extends to gx*step+1)
+        const CUBE_CENTRE_GRID = TOTAL_EXTENT / 2; // = 2.5
+
+        // Find the active sub-cube (if the current frequency lands on one
+        // of the 27 positions). gx, gy, gz are 0..2 grid coordinates.
+        let activeGx = -1, activeGy = -1, activeGz = -1;
+        outer: for (let gy = 0; gy < 3; gy++) {
+          for (let gz = 0; gz < 3; gz++) {
+            for (let gx = 0; gx < 3; gx++) {
+              const gridIndex = gz * 3 + gx;
+              const position = LO_SHU_GRID_ORDER[gridIndex];
+              if (LO_SHU_CUBE_FREQS[gy][position - 1] === selectedFrequency) {
+                activeGx = gx; activeGy = gy; activeGz = gz;
+                break outer;
+              }
+            }
+          }
+        }
+        const hasActive = activeGx !== -1;
+        const pulse = Math.sin(timeRef.current * 1.6) * 0.5 + 0.5;
+        // Cube rotation: auto-rotate (slow turntable) or hold at the user's
+        // manual angle. The manual value is in degrees for the UI; convert
+        // to radians for the projection. Default 0 = front-on iso view.
+        const turn = settings.loShuCubeAutoRotate
+          ? timeRef.current * 0.18
+          : (settings.loShuCubeRotation * Math.PI) / 180;
+
+        // True isometric angles — 30° from horizontal — so all three faces
+        // of every sub-cube render as identical rhombuses (symmetrical).
+        const cellSize = Math.min(22, Math.min(w, h) / 22);
+        const COS30 = Math.cos(Math.PI / 6); // ≈ 0.866
+        const SIN30 = Math.sin(Math.PI / 6); // 0.5
+        const isoX = cellSize * COS30;       // horizontal step per grid unit
+        const isoY = cellSize * SIN30;       // vertical step per grid unit
+        const heightUnit = cellSize;         // vertical step per layer (gy)
+
+        // Centre the cube on screen. Iso projection of the cube centre at
+        // grid (2.5, 2.5, 2.5), accounting for height.
+        const centreScreenY = (CUBE_CENTRE_GRID + CUBE_CENTRE_GRID) * isoY - CUBE_CENTRE_GRID * heightUnit;
+        const cubeHalfWidth = TOTAL_EXTENT * isoX;
+        const cubeHalfHeight = TOTAL_EXTENT * (isoY + heightUnit / 2) / 2;
+        const offsetX = settings.showTreeOfLife
+          ? w - cubeHalfWidth - cellSize * 3
+          : cx;
+        const offsetY = settings.showTreeOfLife
+          ? cubeHalfHeight + cellSize * 4
+          : cy;
+        ctx.translate(offsetX, offsetY - centreScreenY);
+
+        // Project a (rotated) 3D grid point onto screen.
+        const project = (x: number, y: number, z: number) => {
+          // Rotate around the vertical axis through the cube's geometric centre.
+          const rx = x - CUBE_CENTRE_GRID, rz = z - CUBE_CENTRE_GRID;
+          const cosT = Math.cos(turn), sinT = Math.sin(turn);
+          const xr = rx * cosT - rz * sinT + CUBE_CENTRE_GRID;
+          const zr = rx * sinT + rz * cosT + CUBE_CENTRE_GRID;
+          return {
+            sx: (xr - zr) * isoX,
+            sy: (xr + zr) * isoY - y * heightUnit,
+            depth: xr + zr + y * 0.5, // higher = closer to viewer
+          };
+        };
+
+        // Helper: parse "#rrggbb" into r/g/b ints so we can build rgba()
+        // strings with arbitrary alpha for translucent fills.
+        const hexToRgb = (hex: string) => {
+          const s = hex.replace('#', '');
+          if (s.length !== 6) return { r: 200, g: 200, b: 200 };
+          return {
+            r: parseInt(s.slice(0, 2), 16),
+            g: parseInt(s.slice(2, 4), 16),
+            b: parseInt(s.slice(4, 6), 16),
+          };
+        };
+        const rgba = (hex: string, a: number) => {
+          const { r, g, b } = hexToRgb(hex);
+          return `rgba(${r},${g},${b},${a.toFixed(3)})`;
+        };
+
+        // Build the 27 sub-cubes with their colour + active flag. We also
+        // index by frequency so the walk-path renderer below can look up
+        // each cube's screen position.
+        type Sub = { gx: number; gy: number; gz: number; freq: number; color: string; active: boolean; depth: number };
+        const subs: Sub[] = [];
+        const cubeByFreq = new Map<number, Sub>();
+        for (let gy = 0; gy < 3; gy++) {
+          for (let gz = 0; gz < 3; gz++) {
+            for (let gx = 0; gx < 3; gx++) {
+              const gridIndex = gz * 3 + gx;
+              const position = LO_SHU_GRID_ORDER[gridIndex];
+              const freq = LO_SHU_CUBE_FREQS[gy][position - 1];
+              const color = frequencyColorMode === 'spectrum'
+                ? frequencyToSpectrumColor(freq)
+                : LO_SHU_CUBE_CHAKRA_COLORS[gy][position - 1];
+              // Use the centre of each cube for depth sorting.
+              const c = project(gx * STEP + 0.5, gy * STEP + 0.5, gz * STEP + 0.5);
+              const sub: Sub = { gx, gy, gz, freq, color, active: gx === activeGx && gy === activeGy && gz === activeGz, depth: c.depth };
+              subs.push(sub);
+              cubeByFreq.set(freq, sub);
+            }
+          }
+        }
+        // Painter's algorithm: draw far cubes first so closer translucent
+        // cubes layer correctly on top.
+        subs.sort((a, b) => a.depth - b.depth);
+
+        const drawFace = (
+          v0: { sx: number; sy: number },
+          v1: { sx: number; sy: number },
+          v2: { sx: number; sy: number },
+          v3: { sx: number; sy: number },
+          color: string,
+          fillAlpha: number,
+          edgeAlpha: number,
+          edgeWidth: number,
+        ) => {
+          ctx.beginPath();
+          ctx.moveTo(v0.sx, v0.sy);
+          ctx.lineTo(v1.sx, v1.sy);
+          ctx.lineTo(v2.sx, v2.sy);
+          ctx.lineTo(v3.sx, v3.sy);
+          ctx.closePath();
+          ctx.fillStyle = rgba(color, fillAlpha);
+          ctx.fill();
+          ctx.lineWidth = edgeWidth;
+          ctx.strokeStyle = rgba(color, edgeAlpha);
+          ctx.stroke();
+        };
+
+        // Soft contact shadow under the cube — the wide blurry oval grounds
+        // it visually, like the reflection in the reference image.
+        ctx.save();
+        const shadowCx = 0;
+        const shadowCy = (1.5 + 1.5) * isoY + heightUnit * 0.4;
+        const grad = ctx.createRadialGradient(shadowCx, shadowCy, 0, shadowCx, shadowCy, isoX * 4);
+        grad.addColorStop(0, 'rgba(80,80,140,0.35)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(shadowCx, shadowCy, isoX * 3.6, isoY * 2.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        for (const sub of subs) {
+          const { gx, gy, gz, color, active, freq } = sub;
+          // Cube origin in grid space (with gaps applied).
+          const ox = gx * STEP, oy = gy * STEP, oz = gz * STEP;
+
+          // 7 visible corners (the back-bottom-back v000 isn't part of any
+          // visible face in our standard iso view, so we skip it).
+          const v100 = project(ox + 1, oy,     oz);
+          const v110 = project(ox + 1, oy + 1, oz);
+          const v010 = project(ox,     oy + 1, oz);
+          const v001 = project(ox,     oy,     oz + 1);
+          const v101 = project(ox + 1, oy,     oz + 1);
+          const v111 = project(ox + 1, oy + 1, oz + 1);
+          const v011 = project(ox,     oy + 1, oz + 1);
+
+          // Translucency depth — outer cubes lighter, with the active one
+          // popping. Each face has a slightly different alpha so the cube
+          // reads as 3D rather than flat.
+          const baseFill = active ? 0.55 + 0.30 * pulse : (hasActive ? 0.18 : 0.32);
+          const baseEdge = active ? 0.95 : 0.55;
+
+          // Top (y+1) face — visible from above.
+          drawFace(v010, v110, v111, v011, color, baseFill * 1.15, baseEdge, active ? 1.6 : 0.9);
+          // Right (x+1) face.
+          drawFace(v100, v110, v111, v101, color, baseFill * 0.85, baseEdge * 0.85, active ? 1.5 : 0.8);
+          // Front (z+1) face.
+          drawFace(v001, v101, v111, v011, color, baseFill * 1.0, baseEdge, active ? 1.6 : 0.9);
+
+          // Highlight the active cube with an extra glow halo around all
+          // three visible faces, plus the freq label in the centre.
+          if (active) {
+            ctx.save();
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 22 + 14 * pulse;
+            ctx.strokeStyle = rgba(color, 0.95);
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(v010.sx, v010.sy);
+            ctx.lineTo(v110.sx, v110.sy);
+            ctx.lineTo(v111.sx, v111.sy);
+            ctx.lineTo(v011.sx, v011.sy);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(v100.sx, v100.sy);
+            ctx.lineTo(v110.sx, v110.sy);
+            ctx.lineTo(v111.sx, v111.sy);
+            ctx.lineTo(v101.sx, v101.sy);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(v001.sx, v001.sy);
+            ctx.lineTo(v101.sx, v101.sy);
+            ctx.lineTo(v111.sx, v111.sy);
+            ctx.lineTo(v011.sx, v011.sy);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.restore();
+
+            // Hz label on the front face.
+            const labelCenter = {
+              sx: (v001.sx + v101.sx + v111.sx + v011.sx) / 4,
+              sy: (v001.sy + v101.sy + v111.sy + v011.sy) / 4,
+            };
+            ctx.save();
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 10px monospace';
+            ctx.textAlign = 'center';
+            ctx.shadowColor = 'black';
+            ctx.shadowBlur = 3;
+            ctx.fillText(`${freq}`, labelCenter.sx, labelCenter.sy + 3);
+            ctx.restore();
+          }
+        }
+
+        // Walk-path overlay: when a Lo Shu walk is active and the user is
+        // playing, draw a polyline through the centres of the 27 cubes in
+        // the walk's order. The played-so-far portion glows brighter; the
+        // upcoming portion is a faint thread. Drawn after all cubes so the
+        // line reads as light passing through the (translucent) cube.
+        if (loShuWalkMode && isPlaying) {
+          const walk = LO_SHU_WALKS[loShuWalkMode];
+          // Find the index of the currently-playing cube in the walk.
+          const currentStep = walk.indexOf(selectedFrequency);
+          // Project each walk frequency to its cube centre on screen.
+          type Pt = { sx: number; sy: number; depth: number; freq: number };
+          const points: Pt[] = walk.map((freq: number) => {
+            const c = cubeByFreq.get(freq);
+            if (!c) return null;
+            const p = project(c.gx * STEP + 0.5, c.gy * STEP + 0.5, c.gz * STEP + 0.5);
+            return { sx: p.sx, sy: p.sy, depth: p.depth, freq };
+          }).filter((x: Pt | null): x is Pt => x !== null);
+
+          ctx.save();
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            const isPlayed = currentStep >= 0 && i < currentStep;
+            const isLeading = currentStep >= 0 && i === currentStep - 1;
+            // Gradient between the two cubes' colours so the line picks up
+            // the chakra/spectrum tint of each end.
+            const aColor = cubeByFreq.get(a.freq)!.color;
+            const bColor = cubeByFreq.get(b.freq)!.color;
+            const grad = ctx.createLinearGradient(a.sx, a.sy, b.sx, b.sy);
+            const alpha = isLeading ? 0.95 : isPlayed ? 0.7 : 0.22;
+            grad.addColorStop(0, hexToRgb(aColor) ? `rgba(${hexToRgb(aColor).r},${hexToRgb(aColor).g},${hexToRgb(aColor).b},${alpha})` : `rgba(255,215,0,${alpha})`);
+            grad.addColorStop(1, hexToRgb(bColor) ? `rgba(${hexToRgb(bColor).r},${hexToRgb(bColor).g},${hexToRgb(bColor).b},${alpha})` : `rgba(255,215,0,${alpha})`);
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = isLeading ? 3 : isPlayed ? 2 : 1;
+            if (isPlayed || isLeading) {
+              ctx.shadowColor = bColor;
+              ctx.shadowBlur = isLeading ? 14 + 6 * pulse : 8;
+            } else {
+              ctx.shadowBlur = 0;
+            }
+            ctx.beginPath();
+            ctx.moveTo(a.sx, a.sy);
+            ctx.lineTo(b.sx, b.sy);
+            ctx.stroke();
+          }
+          ctx.shadowBlur = 0;
+
+          // Small dots at each cube centre — like beads on the thread —
+          // brightest at the leading edge.
+          for (let i = 0; i < points.length; i++) {
+            const p = points[i];
+            const isPlayed = currentStep >= 0 && i <= currentStep;
+            const isCurrent = i === currentStep;
+            ctx.beginPath();
+            ctx.arc(p.sx, p.sy, isCurrent ? 4 : isPlayed ? 2.4 : 1.4, 0, Math.PI * 2);
+            const col = cubeByFreq.get(p.freq)!.color;
+            ctx.fillStyle = isCurrent ? '#ffffff' : rgba(col, isPlayed ? 0.85 : 0.35);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+
+        ctx.restore();
+      }
+
       // --- LAYER 4: SACRED GEOMETRY PARTICLES ---
       if (settings.particleDensity !== 'off') {
         ctx.save();
@@ -1608,6 +1939,20 @@ const Visualizer: React.FC<VisualizerProps> = ({
                 } else {
                     p.color = primaryColor;
                 }
+            } else if (settings.colorMode === 'spectrum') {
+                // Spectrum mode: base hue from the visible-light wavelength of
+                // the active frequency, modulated by audio so the field stays
+                // captivating instead of looking flat. Per-particle hue jitter
+                // (PHI-distributed) gives the cloud a sense of depth.
+                const specHex = selectedFrequency
+                  ? frequencyToSpectrumColor(selectedFrequency)
+                  : primaryColor;
+                const specHSL = hexToHSL(specHex);
+                const hueJitter = (((index * PHI) % 1) - 0.5) * 12; // ±6°
+                const hue = (specHSL.h + hueJitter + spectralCentroid * 8 + 360) % 360;
+                const sat = Math.min(100, Math.max(45, specHSL.s + midEnergy * 25 + highEnergy * 15));
+                const lit = Math.min(75, Math.max(35, specHSL.l + bassEnergy * 12 + midEnergy * 15 + highEnergy * 18));
+                p.color = `hsl(${hue}, ${sat}%, ${lit}%)`;
             } else {
                 p.color = primaryColor;
             }

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Calculator, Sparkles, CheckCircle2, AlertCircle, Box, Volume2, ArrowUpCircle, Layers, Wind } from 'lucide-react';
 import { LO_SHU_WALK_INFO, type LoShuWalkMode } from '../constants';
+import { frequencyToSpectrumColor, type FrequencyColorMode } from '../utils/spectrumColor';
 
 // Standard Lo Shu position layout:
 //   4  9  2
@@ -146,11 +147,14 @@ interface CellProps {
   name: string;
   selected?: boolean;
   onSelect?: (hz: number) => void;
+  colorMode?: FrequencyColorMode;
 }
 
-const Cell: React.FC<CellProps> = ({ freq, position, name, selected, onSelect }) => {
+const Cell: React.FC<CellProps> = ({ freq, position, name, selected, onSelect, colorMode }) => {
   const root = digitRoot(freq);
-  const color = ROOT_COLOR[root] ?? '#888';
+  const color = colorMode === 'spectrum'
+    ? frequencyToSpectrumColor(freq)
+    : (ROOT_COLOR[root] ?? '#888');
   const clickable = !!onSelect;
   const baseClasses =
     'relative aspect-square flex flex-col items-center justify-center rounded-lg border bg-black/40 transition-transform';
@@ -208,9 +212,10 @@ interface RegimeBlockProps {
   regime: RegimeDef;
   currentFrequency?: number;
   onSelectFrequency?: (hz: number) => void;
+  colorMode?: FrequencyColorMode;
 }
 
-const RegimeBlock: React.FC<RegimeBlockProps> = ({ regime, currentFrequency, onSelectFrequency }) => {
+const RegimeBlock: React.FC<RegimeBlockProps> = ({ regime, currentFrequency, onSelectFrequency, colorMode }) => {
   const analysis = useMemo(() => analyze(regime.freqs), [regime.freqs]);
   const { rows, cols, diags, expected, perfect, perfectCount } = analysis;
 
@@ -247,6 +252,7 @@ const RegimeBlock: React.FC<RegimeBlockProps> = ({ regime, currentFrequency, onS
                   name={regime.names[pos - 1]}
                   selected={currentFrequency === freq}
                   onSelect={onSelectFrequency}
+                  colorMode={colorMode}
                 />
               );
             })}
@@ -326,15 +332,25 @@ interface LoShuMatrixProps {
   onStartWalk?: (mode: LoShuWalkMode) => void;
   /** Currently active walk mode (if any). Highlights the matching button. */
   activeWalkMode?: LoShuWalkMode | null;
+  /** Frequency colour palette: 'chakra' (Solfeggio) or 'spectrum' (visible-light). */
+  colorMode?: FrequencyColorMode;
+  /** Setter for the colour-mode toggle inside the matrix. Render an inline
+   *  toggle when provided so the Guidebook can switch palettes in context. */
+  onColorModeChange?: (mode: FrequencyColorMode) => void;
 }
 
-const WALK_ICONS: Record<LoShuWalkMode, React.ComponentType<{ size?: number; className?: string }>> = {
+// The matrix only surfaces the three Lo Shu walks (A/B/C). The
+// 'traditional' mode is rendered by the existing GUT Alignment button
+// elsewhere, so we type these maps narrowly to the visible subset.
+type MatrixWalkMode = Exclude<LoShuWalkMode, 'traditional'>;
+
+const WALK_ICONS: Record<MatrixWalkMode, React.ComponentType<{ size?: number; className?: string }>> = {
   A: ArrowUpCircle,
   B: Layers,
   C: Wind,
 };
 
-const WALK_ACCENTS: Record<LoShuWalkMode, { active: string; idle: string; icon: string }> = {
+const WALK_ACCENTS: Record<MatrixWalkMode, { active: string; idle: string; icon: string }> = {
   A: {
     active: 'bg-amber-500/20 border-amber-500/60 text-amber-200 shadow-lg shadow-amber-500/20',
     idle: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-amber-500/40 hover:text-amber-300',
@@ -359,6 +375,8 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
   onLoShuPerfectChange,
   onStartWalk,
   activeWalkMode,
+  colorMode,
+  onColorModeChange,
 }) => {
   const [internalShowPerfect, setInternalShowPerfect] = useState(false);
   const isControlled = loShuPerfectGUT !== undefined;
@@ -425,12 +443,52 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
           <p>
             <span className="text-purple-300 font-bold">Reading the grids:</span>{' '}
             small number top-left is the Lo Shu position (1–9); colored digit top-right is
-            the digit root of the frequency. Cells are tinted by digit root —{' '}
-            <span style={{ color: ROOT_COLOR[3] }}>green = 3 (Structure)</span>,{' '}
-            <span style={{ color: ROOT_COLOR[6] }}>gold = 6 (Harmony)</span>,{' '}
-            <span style={{ color: ROOT_COLOR[9] }}>purple = 9 (Completion)</span>.
-            Sums in green match the regime's magic constant; orange flags a deviation.
+            the digit root of the frequency.
+            {colorMode === 'spectrum' ? (
+              <>
+                {' '}Cells are tinted by the colour each frequency would have if octave-shifted into{' '}
+                <span className="text-cyan-300 font-bold">visible light</span>{' '}
+                (174 Hz → infrared edge, 528 Hz → green, 6336 Hz → violet).
+              </>
+            ) : (
+              <>
+                {' '}Cells are tinted by digit root —{' '}
+                <span style={{ color: ROOT_COLOR[3] }}>green = 3 (Structure)</span>,{' '}
+                <span style={{ color: ROOT_COLOR[6] }}>gold = 6 (Harmony)</span>,{' '}
+                <span style={{ color: ROOT_COLOR[9] }}>purple = 9 (Completion)</span>.
+              </>
+            )}
+            {' '}Sums in green match the regime's magic constant; orange flags a deviation.
           </p>
+
+          {/* Frequency colour palette toggle — chakra digit-root vs visible-light spectrum. */}
+          {onColorModeChange && (
+            <div className="mt-3 flex items-center gap-3 flex-wrap">
+              <span className="text-slate-500">Cell colours:</span>
+              <button
+                onClick={() => onColorModeChange('chakra')}
+                className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
+                  colorMode !== 'spectrum'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                }`}
+                title="Original chakra/digit-root palette"
+              >
+                Chakra (original)
+              </button>
+              <button
+                onClick={() => onColorModeChange('spectrum')}
+                className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
+                  colorMode === 'spectrum'
+                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                }`}
+                title="Tint cells by the colour each frequency would have as visible light"
+              >
+                Spectrum (visible light)
+              </button>
+            </div>
+          )}
           <div className="mt-3 flex items-center gap-3 flex-wrap">
             <span className="text-slate-500">GUT regime:</span>
             <button
@@ -489,7 +547,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
             in your library — positions with no match are skipped.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {(['A', 'B', 'C'] as LoShuWalkMode[]).map(mode => {
+            {(['A', 'B', 'C'] as MatrixWalkMode[]).map(mode => {
               const info = LO_SHU_WALK_INFO[mode];
               const Icon = WALK_ICONS[mode];
               const accent = WALK_ACCENTS[mode];
@@ -530,9 +588,9 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
         </div>
       )}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <RegimeBlock regime={gut} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} />
-        <RegimeBlock regime={HEART} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} />
-        <RegimeBlock regime={HEAD} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} />
+        <RegimeBlock regime={gut} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} />
+        <RegimeBlock regime={HEART} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} />
+        <RegimeBlock regime={HEAD} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} />
       </div>
 
       {/* Interval architecture */}

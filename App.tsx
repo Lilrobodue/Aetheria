@@ -24,7 +24,8 @@ import {
 } from './utils/effectsDocumentation';
 import { useMediaSession, type Track } from './hooks/useMediaSession';
 import { stabilityManager, wakeLockManager } from './utils/stabilityManager';
-import { 
+import { frequencyToSpectrumColor, type FrequencyColorMode } from './utils/spectrumColor';
+import {
   calculatePhiVolumeRatios,
   getBinauralPhaseOffset,
   getPhiTimingMarkers,
@@ -984,6 +985,9 @@ const App: React.FC = () => {
     showWaterRipples: false,
     hydroIntensity: 50,
     showTreeOfLife: false,
+    showLoShuCube: false,
+    loShuCubeAutoRotate: true,
+    loShuCubeRotation: 0,
     colorMode: 'chakra',
     autoRotate: true,
     invertPerspective: false,
@@ -1058,6 +1062,31 @@ const App: React.FC = () => {
       // localStorage may be full or blocked — persistence is best-effort.
     }
   }, [loShuPerfectGUT]);
+
+  // Frequency colour mode — 'chakra' (the chakra/order palette stored in
+  // SOLFEGGIO_INFO) or 'spectrum' (the colour the frequency would actually
+  // have if octave-shifted up into visible light). Persisted to localStorage
+  // so the user's choice survives reloads.
+  const FREQUENCY_COLOR_MODE_STORAGE_KEY = 'aetheria.frequencyColorMode.v1';
+  const [frequencyColorMode, setFrequencyColorMode] = useState<FrequencyColorMode>(() => {
+    try {
+      const raw = typeof localStorage !== 'undefined'
+        ? localStorage.getItem(FREQUENCY_COLOR_MODE_STORAGE_KEY)
+        : null;
+      return raw === 'spectrum' ? 'spectrum' : 'chakra';
+    } catch {
+      return 'chakra';
+    }
+  });
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(FREQUENCY_COLOR_MODE_STORAGE_KEY, frequencyColorMode);
+      }
+    } catch {
+      // localStorage may be full or blocked — persistence is best-effort.
+    }
+  }, [frequencyColorMode]);
 
   // Lo Shu Walk mode — null = off, otherwise indicates which 27-frequency
   // walk built the current playlist. Set by generateLoShuWalk(); cleared
@@ -2177,11 +2206,17 @@ const App: React.FC = () => {
       
       if (journeyPlaylist.length > 0) {
           setPlaylist(journeyPlaylist);
+          // The traditional 9-frequency ascent reuses the walk-overlay
+          // infrastructure so the cube draws its path too. Snapshot the
+          // playlist ids so the auto-clear effect doesn't drop the badge
+          // immediately.
+          loShuWalkSnapshotRef.current = journeyPlaylist.map(s => s.id).join('|');
+          setLoShuWalkMode('traditional');
           setUseChakraOrder(true);
           setCurrentSongIndex(0);
           setSearchTerm(''); // Clear search when creating aligned playlist
           setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
-          playTrackRef.current(0, journeyPlaylist); 
+          playTrackRef.current(0, journeyPlaylist);
           if(window.innerWidth < 768) setShowSidebar(false);
       } else {
           alert("Not enough analyzed songs. Try scanning library first.");
@@ -3819,6 +3854,17 @@ registerProcessor('wav-capture', WavCapture);
   };
 
   const getCurrentChakraColor = () => {
+    // Either path triggers spectrum primary colour: the global
+    // frequencyColorMode toggle (Lo Shu popover / Guidebook), or the
+    // visualizer's own Spectrum colour-mode option. Whichever asks for it,
+    // the Tree of Life accent, hex grid palette, and other primary-driven
+    // visuals follow the visible-light wavelength of the current frequency.
+    const useSpectrum =
+      frequencyColorMode === 'spectrum' || vizSettings.colorMode === 'spectrum';
+    if (useSpectrum) {
+      const rawFreq = playlist[currentSongIndex]?.closestSolfeggio || selectedSolfeggio;
+      return frequencyToSpectrumColor(rawFreq);
+    }
     const s = SOLFEGGIO_INFO.find(s => s.freq === selectedSolfeggio);
     return s ? s.color : '#fbbf24';
   };
@@ -4039,13 +4085,15 @@ registerProcessor('wav-capture', WavCapture);
           )}
 
       <div className="absolute inset-0 z-0 pointer-events-none">
-        <Visualizer 
-            analyser={analyserNode} 
-            primaryColor={getCurrentChakraColor()} 
+        <Visualizer
+            analyser={analyserNode}
+            primaryColor={getCurrentChakraColor()}
             isPlaying={isPlaying}
             binauralDelta={selectedBinaural.delta}
             selectedFrequency={selectedSolfeggio}
             settings={vizSettings}
+            frequencyColorMode={frequencyColorMode}
+            loShuWalkMode={loShuWalkMode}
         />
       </div>
 
@@ -4061,7 +4109,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.4</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -4181,6 +4229,28 @@ registerProcessor('wav-capture', WavCapture);
                           </div>
 
                           <div className="px-8 pb-12 space-y-12">
+                              {/* The Lo Shu Cube — placed first as the geometric blueprint that
+                                  the rest of the guidebook describes in language. Each section
+                                  below (regimes, nadi compression, Tree of Life, sacred geometry)
+                                  is one face of what this single object encodes. */}
+                              <div>
+                                <div className="mb-4 p-5 bg-gradient-to-r from-emerald-900/15 via-slate-900/40 to-slate-900/40 border-l-4 border-emerald-500/60 rounded-r-lg">
+                                  <p className="text-base text-slate-200 leading-relaxed font-serif">
+                                    Before the words, the geometry. The 27 Aetheria frequencies are not a list — they are a <strong className="text-emerald-300">3 × 3 × 3 cube</strong> of three Lo Shu magic squares stacked vertically (GUT → HEART → HEAD). Every section that follows is one way of reading this single object: the regimes are its layers, the nadi compression is its count, the Tree of Life is its axis, and the sacred geometries are its faces. Start here and the rest will rhyme.
+                                  </p>
+                                </div>
+                                <LoShuMatrix
+                                  currentFrequency={selectedSolfeggio}
+                                  onSelectFrequency={setSelectedSolfeggio}
+                                  loShuPerfectGUT={loShuPerfectGUT}
+                                  onLoShuPerfectChange={setLoShuPerfectGUT}
+                                  onStartWalk={generateLoShuWalk}
+                                  activeWalkMode={loShuWalkMode}
+                                  colorMode={frequencyColorMode}
+                                  onColorModeChange={setFrequencyColorMode}
+                                />
+                              </div>
+
                               {/* THE MASTER FREQUENCY ARCHITECTURE v3.0 */}
                               <section className="bg-gradient-to-r from-slate-900/50 to-slate-800/30 border border-gold-500/30 rounded-2xl p-8">
                                   <div className="flex items-center gap-3 mb-6">
@@ -4377,11 +4447,16 @@ registerProcessor('wav-capture', WavCapture);
                                         <span className="text-slate-500 mx-2">→</span>
                                         <span className="text-gold-400">27 resonance nodes</span>
                                         <span className="text-slate-500 mx-2">→</span>
+                                        <span className="text-emerald-300">Lo Shu 3×3×3 cube</span>
+                                        <span className="text-slate-500 mx-2">→</span>
                                         <span className="text-purple-400">3 regimes</span>
                                         <span className="text-xs text-slate-500 ml-1">(GUT / HEART / HEAD)</span>
                                         <span className="text-slate-500 mx-2">→</span>
                                         <span className="text-white font-bold">1 unified field</span>
                                       </div>
+                                      <p className="text-[11px] text-slate-500 italic text-center mt-2">
+                                        The Lo Shu cube is what 27 looks like when arranged so every row, column, and diagonal sums to the same number. It's the geometric form of this compression.
+                                      </p>
                                       <p className="text-slate-400 leading-relaxed mt-4">
                                         Each step is a compression, and each ratio preserves the digital-root signature of return. The three principal channels of the classical system map directly onto the three Aetheria regimes, suggesting that what the tantric traditions encoded as anatomy, the framework recovers as frequency.
                                       </p>
@@ -4417,7 +4492,7 @@ registerProcessor('wav-capture', WavCapture);
                                     <h3 className="text-2xl font-bold text-white">The 3 Regimes of Consciousness: Complete Harmonic System</h3>
                                   </div>
                                   <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">
-                                    The Complete Harmonic Frequency System encompasses 3 distinct regimes of consciousness following the sacred 111-243-354 mathematical pattern. Orders 4-9 expand from the traditional solfeggio foundation through precise mathematical intervals, creating 27 frequencies that span from physical foundation to SOURCE consciousness.
+                                    The Complete Harmonic Frequency System encompasses 3 distinct regimes of consciousness following the sacred 111-243-354 mathematical pattern. Orders 4-9 expand from the traditional Solfeggio foundation through precise mathematical intervals, creating 27 frequencies that span from physical foundation to SOURCE consciousness. Each regime below is a single horizontal slice of the <strong className="text-emerald-300">Lo Shu cube</strong> at the top of this guide — GUT is the bottom layer, HEART the middle, HEAD the crown. The 111 / 243 / 354 intervals are the magic constants that make each layer a self-summing square.
                                   </p>
 
                                   {/* Group by Regime */}
@@ -4490,7 +4565,7 @@ registerProcessor('wav-capture', WavCapture);
                                             { freq: 1449, benefit: 'Harmonic bridging', color: '#FF1493', order: '4th', step: '+243' },
                                             { freq: 1692, benefit: 'Heart completion', color: '#DC143C', order: '4th', step: '+243' },
                                             { freq: 1935, benefit: 'Stellar alignment', color: '#8A2BE2', order: '5th', step: '+243' },
-                                            { freq: 2178, benefit: 'Quantum consciousness', color: '#9370DB', order: '5th', step: '+243' },
+                                            { freq: 2178, benefit: 'SOURCE — Compassion Activation', color: '#9370DB', order: '5th', step: '+243' },
                                             { freq: 2421, benefit: 'Dimensional awareness', color: '#4B0082', order: '5th', step: '+243' },
                                             { freq: 2664, benefit: 'Universal love', color: '#6A5ACD', order: '6th', step: '+243' },
                                             { freq: 2907, benefit: 'Divine source connection', color: '#483D8B', order: '6th', step: '+243' },
@@ -4507,14 +4582,26 @@ registerProcessor('wav-capture', WavCapture);
                                                   {f.freq === 1449 && "Fourth Order +243 (1206+243) - Creates harmonic bridges between emotional states."}
                                                   {f.freq === 1692 && "Fourth Order +243 (1449+243) - Completes the fourth order heart integration cycle."}
                                                   {f.freq === 1935 && "Fifth Order +243 (1692+243) - Aligns consciousness with stellar and galactic energies."}
-                                                  {f.freq === 2178 && "Fifth Order +243 (1935+243) - Expands consciousness into quantum field awareness."}
+                                                  {f.freq === 2178 && "Fifth Order +243 (1935+243) — Position 5 of the HEART layer and the geometric centre of the entire Lo Shu cube. The point where every row, column, diagonal, and the central vertical axis (528 → 2178 → 4920) intersects. Compassion as the SOURCE field from which the 27 frequencies radiate outward."}
                                                   {f.freq === 2421 && "Fifth Order +243 (2178+243) - Opens awareness to multiple dimensions simultaneously."}
                                                   {f.freq === 2664 && "Sixth Order +243 (2421+243) - Transmits universal love energy across dimensions."}
                                                   {f.freq === 2907 && "Sixth Order +243 (2664+243) - Connects to divine source code of creation."}
                                                   {f.freq === 3150 && "Sixth Order +243 (2907+243) - Bridges into unity consciousness and mental clarity."}
                                                 </p>
+                                                {f.freq === 2178 && (
+                                                  <div className="mt-2 p-2 bg-gold-500/20 border border-gold-500/50 rounded text-center">
+                                                    <div className="text-[9px] text-gold-400 font-bold uppercase tracking-widest">SOURCE FREQUENCY · CUBE CENTRE</div>
+                                                  </div>
+                                                )}
                                             </div>
                                           ))}
+                                        </div>
+                                        <div className="mt-4 p-4 bg-gold-900/20 border border-gold-500/50 rounded-lg text-center">
+                                          <div className="flex items-center justify-center gap-2 text-gold-400 text-lg font-bold mb-2">
+                                            <Target size={20} />
+                                            2178 Hz — SOURCE: The Centre of the Cube
+                                          </div>
+                                          <p className="text-sm text-gold-300">Compassion Activation. Position 5 of the HEART layer — the cell that simultaneously sits on every row, every column, both diagonals, and the central vertical pillar (528 → 2178 → 4920). All 27 frequencies radiate outward from this point. SOURCE is not the highest, it is the centre.</p>
                                         </div>
                                         <div className="mt-4 p-3 bg-blue-900/20 border border-blue-500/50 rounded-lg">
                                           <div className="flex items-center gap-2 text-blue-400 text-sm font-bold mb-1">
@@ -4553,7 +4640,7 @@ registerProcessor('wav-capture', WavCapture);
                                             { freq: 5274, benefit: 'Universal mind access', color: '#6600CC', order: '8th', step: '+354' },
                                             { freq: 5628, benefit: 'Galactic consciousness', color: '#7700FF', order: '9th', step: '+354' },
                                             { freq: 5982, benefit: 'Divine source portal', color: '#8800FF', order: '9th', step: '+354' },
-                                            { freq: 6336, benefit: 'SOURCE embodiment', color: '#9933FF', order: '9th', step: '+354' }
+                                            { freq: 6336, benefit: 'Completion of the ascent', color: '#9933FF', order: '9th', step: '+354' }
                                           ].map(f => (
                                             <div key={f.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-purple-500/50 transition-colors group relative">
                                                 <div className="absolute top-2 right-2">
@@ -4573,11 +4660,11 @@ registerProcessor('wav-capture', WavCapture);
                                                   {f.freq === 5274 && "Eighth Order +354 (4920+354) - Opens third transpersonal gate to universal mind."}
                                                   {f.freq === 5628 && "Ninth Order +354 (5274+354) - Connects to galactic center consciousness."}
                                                   {f.freq === 5982 && "Ninth Order +354 (5628+354) - Creates direct portal to divine source consciousness."}
-                                                  {f.freq === 6336 && "Ninth Order +354 (5982+354) - Complete SOURCE embodiment and infinite unity. Mirror number reducing to 9."}
+                                                  {f.freq === 6336 && "Ninth Order +354 (5982+354) — completion of the ascent and the outermost vertex of the cube. Mirror number reducing to 9. The path that began at 174 Hz returns home through this corner; SOURCE itself sits one layer down at 2178 Hz, the cube's centre."}
                                                 </p>
                                                 {f.freq === 6336 && (
-                                                  <div className="mt-2 p-2 bg-gold-500/20 border border-gold-500/50 rounded text-center">
-                                                    <div className="text-[9px] text-gold-400 font-bold uppercase tracking-widest">SOURCE FREQUENCY</div>
+                                                  <div className="mt-2 p-2 bg-violet-500/20 border border-violet-500/50 rounded text-center">
+                                                    <div className="text-[9px] text-violet-300 font-bold uppercase tracking-widest">COMPLETION · OUTERMOST VERTEX</div>
                                                   </div>
                                                 )}
                                             </div>
@@ -4590,12 +4677,12 @@ registerProcessor('wav-capture', WavCapture);
                                           </div>
                                           <p className="text-xs text-blue-300">Order 7: 3504→3858→4212 | Order 8: 4566→4920→5274 | Order 9: 5628→5982→6336</p>
                                         </div>
-                                        <div className="mt-4 p-4 bg-gold-900/20 border border-gold-500/50 rounded-lg text-center">
-                                          <div className="flex items-center justify-center gap-2 text-gold-400 text-lg font-bold mb-2">
+                                        <div className="mt-4 p-4 bg-violet-900/20 border border-violet-500/50 rounded-lg text-center">
+                                          <div className="flex items-center justify-center gap-2 text-violet-300 text-lg font-bold mb-2">
                                             <Target size={20} />
-                                            6336 Hz - Ultimate SOURCE Frequency
+                                            6336 Hz — Completion of the Ascent
                                           </div>
-                                          <p className="text-sm text-gold-300">The mathematically correct completion frequency (5982+354) representing infinite SOURCE consciousness. Mirror number reducing to 9.</p>
+                                          <p className="text-sm text-violet-200">The mathematically correct completion frequency (5982 + 354). Mirror number reducing to 9 — the corner of the cube farthest from centre. Walks that begin at 174 Hz arrive here, but they do not arrive at SOURCE: SOURCE is 2178 Hz, the geometric heart of the cube. 6336 is the journey's outer turning point, not its origin.</p>
                                         </div>
                                       </div>
                                     </div>
@@ -4609,8 +4696,8 @@ registerProcessor('wav-capture', WavCapture);
                                     <h3 className="text-2xl font-bold text-white">The Map: Tree of Life (Complete 12-Node System)</h3>
                                   </div>
                                   <p className="text-slate-400 mb-4 leading-relaxed max-w-2xl">
-                                    The complete blueprint of creation. A map of how the Divine manifests through the physical world via twelve distinct nodes, 
-                                    forming a complete energy circuit to SOURCE.
+                                    The complete blueprint of creation. A map of how the Divine manifests through the physical world via twelve distinct nodes,
+                                    forming a complete energy circuit to SOURCE. The Tree's central pillar is the same axis that runs through the centre of the <strong className="text-emerald-300">Lo Shu cube</strong> — Position 5 of every layer (528 → 2178 → 4920) — connecting Earth-Star to Crown along a single vertical thread.
                                   </p>
 
                                   {/* Energy Circuit Explanation */}
@@ -4693,7 +4780,10 @@ registerProcessor('wav-capture', WavCapture);
                                     <div className="p-2 bg-red-500/10 rounded-full"><Box className="text-red-400" size={24}/></div>
                                     <h3 className="text-2xl font-bold text-white">The Form: Sacred Geometry</h3>
                                   </div>
-                                  
+                                  <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">
+                                    Each frequency has a corresponding geometric form. Read together they spell out the faces of the <strong className="text-emerald-300">Lo Shu cube</strong> — the lower geometries (Circle, Vesica, Triangle) anchor the GUT layer, the middle forms (Flower of Life, Tube Torus) bridge HEART, and the higher geometries open HEAD.
+                                  </p>
+
                                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                                       {GEOMETRY_INFO.map(geo => (
                                           <div key={geo.freq} className="p-4 bg-slate-900/40 rounded-xl border border-slate-800">
@@ -4707,16 +4797,6 @@ registerProcessor('wav-capture', WavCapture);
                                       ))}
                                   </div>
                               </section>
-
-                              {/* Section 4: The Lo Shu Magic Square */}
-                              <LoShuMatrix
-                                currentFrequency={selectedSolfeggio}
-                                onSelectFrequency={setSelectedSolfeggio}
-                                loShuPerfectGUT={loShuPerfectGUT}
-                                onLoShuPerfectChange={setLoShuPerfectGUT}
-                                onStartWalk={generateLoShuWalk}
-                                activeWalkMode={loShuWalkMode}
-                              />
 
                               <div className="p-8 mt-4 bg-gradient-to-br from-slate-900 to-black border border-gold-500/20 rounded-2xl text-center relative overflow-hidden">
                                   <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent opacity-50"></div>
@@ -5349,12 +5429,62 @@ registerProcessor('wav-capture', WavCapture);
 
                                 <div className="flex items-center justify-between p-3 bg-slate-900 rounded-lg border border-slate-800">
                                     <span className="text-[10px] text-gold-400 font-bold uppercase tracking-wider flex items-center gap-2"><Flower2 size={12}/> Tree of Life</span>
-                                    <button 
+                                    <button
                                         onClick={() => setVizSettings({...vizSettings, showTreeOfLife: !vizSettings.showTreeOfLife})}
                                         className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.showTreeOfLife ? 'bg-gold-500' : 'bg-slate-700'}`}
                                     >
                                         <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.showTreeOfLife ? 'left-4.5' : 'left-0.5'}`}></div>
                                     </button>
+                                </div>
+
+                                <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[10px] text-emerald-300 font-bold uppercase tracking-wider flex items-center gap-2"><Box size={12}/> Lo Shu Cube</span>
+                                        <button
+                                            onClick={() => setVizSettings({...vizSettings, showLoShuCube: !vizSettings.showLoShuCube})}
+                                            className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.showLoShuCube ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                                        >
+                                            <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.showLoShuCube ? 'left-4.5' : 'left-0.5'}`}></div>
+                                        </button>
+                                    </div>
+                                    <p className="text-[9px] text-slate-500 mt-1">
+                                        {vizSettings.showLoShuCube
+                                            ? `27 sub-cubes (GUT/HEART/HEAD × Lo Shu 1–9), tinted by ${frequencyColorMode === 'spectrum' ? 'visible-light wavelength' : 'chakra palette'}.`
+                                            : 'Render the 3×3×3 Lo Shu cube as a visualizer overlay.'}
+                                    </p>
+
+                                    {/* Rotation controls — only meaningful when the cube is on. */}
+                                    {vizSettings.showLoShuCube && (
+                                        <div className="mt-2 pt-2 border-t border-slate-800 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[10px] text-emerald-300/80 uppercase tracking-wider flex items-center gap-2"><RotateCw size={10}/> Auto-Rotate</span>
+                                                <button
+                                                    onClick={() => setVizSettings({...vizSettings, loShuCubeAutoRotate: !vizSettings.loShuCubeAutoRotate})}
+                                                    className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.loShuCubeAutoRotate ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                                                    title={vizSettings.loShuCubeAutoRotate ? 'Stop turntable rotation' : 'Resume turntable rotation'}
+                                                >
+                                                    <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.loShuCubeAutoRotate ? 'left-4.5' : 'left-0.5'}`}></div>
+                                                </button>
+                                            </div>
+                                            <div className={`transition-opacity ${vizSettings.loShuCubeAutoRotate ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-[10px] text-emerald-300/80 uppercase tracking-wider">Position</span>
+                                                    <span className="text-[10px] text-slate-400 font-mono">{Math.round(vizSettings.loShuCubeRotation)}°</span>
+                                                </div>
+                                                <input
+                                                    type="range"
+                                                    min={0}
+                                                    max={360}
+                                                    step={1}
+                                                    value={vizSettings.loShuCubeRotation}
+                                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setVizSettings({...vizSettings, loShuCubeRotation: parseFloat(e.target.value)})}
+                                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                                                    title="Hold the cube at this rotation when auto-rotate is off"
+                                                    disabled={vizSettings.loShuCubeAutoRotate}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
@@ -5415,27 +5545,34 @@ registerProcessor('wav-capture', WavCapture);
 
                                 <div>
                                     <div className="text-[10px] text-slate-400 mb-1 uppercase tracking-widest">Color Mode</div>
-                                    <div className="grid grid-cols-3 gap-1">
+                                    <div className="grid grid-cols-2 gap-1">
                                         <button
                                             onClick={() => setVizSettings({...vizSettings, colorMode: 'chakra'})}
                                             className={`text-[10px] py-1 rounded border ${vizSettings.colorMode === 'chakra' ? 'bg-blue-500 text-white border-blue-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
-                                            title="Chakra Colors"
+                                            title="Chakra palette tied to the current Solfeggio frequency"
                                         >
                                             Chakra
                                         </button>
                                         <button
                                             onClick={() => setVizSettings({...vizSettings, colorMode: 'cycle'})}
                                             className={`text-[10px] py-1 rounded border ${vizSettings.colorMode === 'cycle' ? 'bg-purple-500 text-white border-purple-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
-                                            title="RGB Cycle Sync"
+                                            title="RGB cycle synced to audio energy"
                                         >
                                             Hypnotic
                                         </button>
                                         <button
                                             onClick={() => setVizSettings({...vizSettings, colorMode: 'static'})}
                                             className={`text-[10px] py-1 rounded border ${vizSettings.colorMode === 'static' ? 'bg-gold-500 text-black border-gold-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
-                                            title="Single Color"
+                                            title="Single colour locked to the current chakra/spectrum primary"
                                         >
                                             Static
+                                        </button>
+                                        <button
+                                            onClick={() => setVizSettings({...vizSettings, colorMode: 'spectrum'})}
+                                            className={`text-[10px] py-1 rounded border ${vizSettings.colorMode === 'spectrum' ? 'bg-cyan-500 text-white border-cyan-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}
+                                            title="Visible-light wavelength of the active frequency, modulated by audio"
+                                        >
+                                            Spectrum
                                         </button>
                                     </div>
                                 </div>
@@ -5451,7 +5588,7 @@ registerProcessor('wav-capture', WavCapture);
                       {loShuPerfectGUT && (
                         <span
                           className="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-medium border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 uppercase tracking-wider"
-                          title="Lo Shu Perfect mode is active. GUT-band Solfeggio frequencies are shown and selected as their perfect 111 Hz counterparts (174→75, 285→186, 396→297, 417→408, 528→519, 639→630). Toggle in the Guidebook → Lo Shu section."
+                          title="Lo Shu Perfect mode is active. GUT-band Solfeggio frequencies are shown and selected as their perfect 111 Hz counterparts (174→75, 285→186, 396→297, 417→408, 528→519, 639→630). Toggle from the Lo Shu button in the player toolbar, or in the Guidebook's Lo Shu Cube panel."
                         >
                           Lo Shu Perfect
                         </span>
@@ -6482,7 +6619,7 @@ registerProcessor('wav-capture', WavCapture);
                          {loShuPerfectGUT && (
                            <span
                              className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded border bg-emerald-500/10 text-emerald-300 border-emerald-500/30 text-[10px] font-medium uppercase tracking-wider"
-                             title="Lo Shu Perfect mode is active. Toggle in the Guidebook → Lo Shu section."
+                             title="Lo Shu Perfect mode is active. Toggle from the Lo Shu button in the player toolbar, or in the Guidebook's Lo Shu Cube panel."
                            >
                              Lo Shu
                            </span>
@@ -6496,14 +6633,14 @@ registerProcessor('wav-capture', WavCapture);
                            const info = LO_SHU_WALK_INFO[loShuWalkMode];
                            return (
                              <span
-                               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-purple-500/10 text-purple-300 border-purple-500/30 text-[10px] font-medium uppercase tracking-wider"
+                               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-emerald-500/10 text-emerald-300 border-emerald-500/30 text-[10px] font-medium uppercase tracking-wider"
                                title={`Lo Shu Walk · ${info.fullName} — ${info.philosophy}`}
                              >
                                <Box size={8} />
                                <span className="hidden sm:inline">Lo Shu · </span>
                                {info.shortName}
                                {pos && (
-                                 <span className="ml-1 text-purple-400/80 normal-case font-mono">
+                                 <span className="ml-1 text-emerald-400/80 normal-case font-mono">
                                    · {pos.regime} {pos.position} ({pos.direction})
                                  </span>
                                )}
@@ -6583,7 +6720,7 @@ registerProcessor('wav-capture', WavCapture);
                             {/* Lo Shu Walk shortcut — opens a popover with the three walks. */}
                             <button
                                 onClick={() => setShowLoShuWalkMenu((v: boolean) => !v)}
-                                className={`${loShuWalkMode ? 'text-purple-400' : loShuPerfectGUT ? 'text-emerald-400' : 'text-slate-600'} hover:text-white transition-colors`}
+                                className={`${(loShuWalkMode || loShuPerfectGUT) ? 'text-emerald-400' : 'text-slate-600'} hover:text-white transition-colors`}
                                 title={
                                     loShuWalkMode
                                         ? `Lo Shu Walk active: ${LO_SHU_WALK_INFO[loShuWalkMode].fullName}${loShuPerfectGUT ? ' · Perfect GUT mapping ON' : ''}`
@@ -6605,17 +6742,59 @@ registerProcessor('wav-capture', WavCapture);
                                         aria-hidden="true"
                                     />
                                     <div
-                                        className="absolute bottom-full right-0 mb-2 w-72 z-50 p-3 rounded-xl bg-slate-950/95 backdrop-blur-md border border-purple-500/40 shadow-2xl shadow-purple-900/40"
+                                        className="absolute bottom-full right-0 mb-2 w-72 z-50 p-3 rounded-xl bg-slate-950/95 backdrop-blur-md border border-emerald-500/40 shadow-2xl shadow-emerald-900/40"
                                         role="menu"
                                     >
                                         <div className="flex items-center gap-2 mb-2">
-                                            <Box size={14} className="text-purple-300" />
-                                            <div className="text-xs font-bold text-purple-200 uppercase tracking-wider">Lo Shu Controls</div>
+                                            <Box size={14} className="text-emerald-300" />
+                                            <div className="text-xs font-bold text-emerald-200 uppercase tracking-wider">Lo Shu Controls</div>
                                             {loShuWalkMode && (
-                                                <span className="ml-auto text-[10px] text-purple-300 font-mono">
+                                                <span className="ml-auto text-[10px] text-emerald-300 font-mono">
                                                     {LO_SHU_WALK_INFO[loShuWalkMode].shortName}
                                                 </span>
                                             )}
+                                        </div>
+
+                                        {/* Frequency colour mode — chakra palette vs visible-light spectrum. */}
+                                        <div className="mb-3 p-2.5 rounded-lg border border-cyan-500/30 bg-cyan-500/5">
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <Sparkles size={12} className="text-cyan-300" />
+                                                <div className="text-[11px] font-bold text-cyan-200 uppercase tracking-wider">Colour Mode</div>
+                                                <span
+                                                    className={`ml-auto text-[10px] px-1.5 py-0.5 rounded border font-mono ${
+                                                        frequencyColorMode === 'spectrum'
+                                                            ? 'bg-cyan-500/20 text-cyan-200 border-cyan-500/40'
+                                                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                                                    }`}
+                                                >
+                                                    {frequencyColorMode === 'spectrum' ? 'SPECTRUM' : 'CHAKRA'}
+                                                </span>
+                                            </div>
+                                            <p className="text-[10px] text-slate-400 leading-snug mb-2">
+                                                Chakra: the traditional Solfeggio palette. Spectrum: the colour each frequency would have if octave-shifted into visible light. Affects the visualizer, the Lo&nbsp;Shu cube, and grid cells.
+                                            </p>
+                                            <div className="grid grid-cols-2 gap-1.5">
+                                                <button
+                                                    onClick={() => setFrequencyColorMode('chakra')}
+                                                    className={`text-[11px] py-1.5 rounded-md border font-medium transition-colors ${
+                                                        frequencyColorMode === 'chakra'
+                                                            ? 'bg-amber-500/20 border-amber-500/50 text-amber-100'
+                                                            : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-amber-500/40 hover:text-amber-200'
+                                                    }`}
+                                                >
+                                                    Chakra
+                                                </button>
+                                                <button
+                                                    onClick={() => setFrequencyColorMode('spectrum')}
+                                                    className={`text-[11px] py-1.5 rounded-md border font-medium transition-colors ${
+                                                        frequencyColorMode === 'spectrum'
+                                                            ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100'
+                                                            : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-cyan-500/40 hover:text-cyan-200'
+                                                    }`}
+                                                >
+                                                    Spectrum
+                                                </button>
+                                            </div>
                                         </div>
 
                                         {/* Perfect-GUT audio-mapping toggle (was buried in the Guidebook). */}
@@ -6649,7 +6828,7 @@ registerProcessor('wav-capture', WavCapture);
                                         </div>
 
                                         <div className="border-t border-slate-800 pt-3">
-                                            <div className="text-[11px] font-bold text-purple-200 uppercase tracking-wider mb-1">Lo Shu Walks</div>
+                                            <div className="text-[11px] font-bold text-emerald-200 uppercase tracking-wider mb-1">Lo Shu Walks</div>
                                             <p className="text-[10px] text-slate-400 leading-snug mb-2">
                                                 Build a 27-track journey from your library along one of three Lo&nbsp;Shu paths through GUT, HEART, and HEAD.
                                             </p>
@@ -6663,8 +6842,8 @@ registerProcessor('wav-capture', WavCapture);
                                                             onClick={() => generateLoShuWalk(mode)}
                                                             className={`w-full text-left p-2.5 rounded-lg border text-xs transition-colors ${
                                                                 isActive
-                                                                    ? 'bg-purple-500/20 border-purple-500/60 text-purple-100'
-                                                                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-purple-500/40 hover:text-purple-200'
+                                                                    ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-100'
+                                                                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-emerald-500/40 hover:text-emerald-200'
                                                             }`}
                                                         >
                                                             <div className="font-bold">{info.fullName}</div>

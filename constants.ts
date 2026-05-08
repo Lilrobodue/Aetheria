@@ -354,7 +354,10 @@ export const SEPHIROT_INFO = [
 // (1206–3150), and HEAD (3504–6336) regimes. Used by generateLoShuWalk()
 // in App.tsx to assemble a journey playlist from songs whose closestSolfeggio
 // matches each frequency in turn.
-export type LoShuWalkMode = 'A' | 'B' | 'C';
+// 'traditional' covers the classic 9-frequency Solfeggio ascent (GUT only,
+// 174→963). It's surfaced alongside the three Lo Shu walks so the cube
+// overlay and walk indicator can render its path too.
+export type LoShuWalkMode = 'A' | 'B' | 'C' | 'traditional';
 
 // Walk A — Layer Ascent: positions 1→9 through GUT, then HEART, then HEAD.
 // Ground before you rise. Mirrors the existing Alignment journey extended
@@ -388,10 +391,18 @@ export const LO_SHU_WALK_C: number[] = [
   4920, 5274, 5628, 5982, 6336, 3504, 3858, 4212, 4566,
 ];
 
+// Traditional Solfeggio ascent — 9-frequency GUT-only path (174→963).
+// Same shape as the existing Alignment Journey, surfaced through the walk
+// system so the cube overlay can render its path.
+export const LO_SHU_WALK_TRADITIONAL: number[] = [
+  174, 285, 396, 417, 528, 639, 741, 852, 963,
+];
+
 export const LO_SHU_WALKS: Record<LoShuWalkMode, number[]> = {
   A: LO_SHU_WALK_A,
   B: LO_SHU_WALK_B,
   C: LO_SHU_WALK_C,
+  traditional: LO_SHU_WALK_TRADITIONAL,
 };
 
 export const LO_SHU_WALK_INFO: Record<LoShuWalkMode, {
@@ -417,6 +428,12 @@ export const LO_SHU_WALK_INFO: Record<LoShuWalkMode, {
     fullName: 'Flying Star Vortex',
     tagline: '5→6→7→8→9→1→2→3→4 spiral, per layer',
     philosophy: 'Emanate from the heart. The traditional Daoist Flying Star path through the nine palaces, applied to each regime. Every layer starts at its CENTER frequency (528, 2178, 4920) and spirals outward.',
+  },
+  traditional: {
+    shortName: 'Solfeggio',
+    fullName: 'Traditional Solfeggio',
+    tagline: '174→963, GUT-only ascent',
+    philosophy: 'The classic 9-frequency Solfeggio scale — Foundation (174) through Divine Consciousness (963). Walks the GUT regime only; HEART and HEAD layers stay quiet on the cube.',
   },
 };
 
