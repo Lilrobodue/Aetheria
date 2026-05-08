@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Calculator, Sparkles, CheckCircle2, AlertCircle, Box, Volume2 } from 'lucide-react';
+import { Calculator, Sparkles, CheckCircle2, AlertCircle, Box, Volume2, ArrowUpCircle, Layers, Wind } from 'lucide-react';
+import { LO_SHU_WALK_INFO, type LoShuWalkMode } from '../constants';
 
 // Standard Lo Shu position layout:
 //   4  9  2
@@ -321,13 +322,43 @@ interface LoShuMatrixProps {
   loShuPerfectGUT?: boolean;
   /** Setter for the controlled toggle. Required when `loShuPerfectGUT` is provided to mean anything more than display. */
   onLoShuPerfectChange?: (enabled: boolean) => void;
+  /** When provided, clicking a walk button starts that 27-track Lo Shu walk in the player. */
+  onStartWalk?: (mode: LoShuWalkMode) => void;
+  /** Currently active walk mode (if any). Highlights the matching button. */
+  activeWalkMode?: LoShuWalkMode | null;
 }
+
+const WALK_ICONS: Record<LoShuWalkMode, React.ComponentType<{ size?: number; className?: string }>> = {
+  A: ArrowUpCircle,
+  B: Layers,
+  C: Wind,
+};
+
+const WALK_ACCENTS: Record<LoShuWalkMode, { active: string; idle: string; icon: string }> = {
+  A: {
+    active: 'bg-amber-500/20 border-amber-500/60 text-amber-200 shadow-lg shadow-amber-500/20',
+    idle: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-amber-500/40 hover:text-amber-300',
+    icon: 'text-amber-400',
+  },
+  B: {
+    active: 'bg-emerald-500/20 border-emerald-500/60 text-emerald-200 shadow-lg shadow-emerald-500/20',
+    idle: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-emerald-500/40 hover:text-emerald-300',
+    icon: 'text-emerald-400',
+  },
+  C: {
+    active: 'bg-purple-500/20 border-purple-500/60 text-purple-200 shadow-lg shadow-purple-500/20',
+    idle: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-purple-500/40 hover:text-purple-300',
+    icon: 'text-purple-400',
+  },
+};
 
 const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
   onSelectFrequency,
   currentFrequency,
   loShuPerfectGUT,
   onLoShuPerfectChange,
+  onStartWalk,
+  activeWalkMode,
 }) => {
   const [internalShowPerfect, setInternalShowPerfect] = useState(false);
   const isControlled = loShuPerfectGUT !== undefined;
@@ -438,6 +469,58 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Lo Shu Walks — 27-track playlist orderings */}
+      {onStartWalk && (
+        <div className="mb-6 p-5 bg-gradient-to-br from-purple-900/15 via-slate-900/40 to-slate-900/40 border border-purple-500/30 rounded-xl">
+          <div className="flex items-center gap-3 mb-3">
+            <Sparkles className="text-purple-300" size={18} />
+            <h4 className="text-base font-bold text-purple-200 uppercase tracking-wider">Lo Shu Walks</h4>
+            {activeWalkMode && (
+              <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-purple-500/20 text-purple-200 border border-purple-500/40 uppercase tracking-wider">
+                Active · {LO_SHU_WALK_INFO[activeWalkMode].shortName}
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-slate-300 leading-relaxed mb-4">
+            Three 27-track journeys built from the standard Lo Shu magic square. Each walk traces a distinct
+            path through the GUT (174–963 Hz), HEART (1206–3150 Hz), and HEAD (3504–6336 Hz) regimes.
+            Pick a walk and the player assembles a playlist by matching each frequency to the closest song
+            in your library — positions with no match are skipped.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {(['A', 'B', 'C'] as LoShuWalkMode[]).map(mode => {
+              const info = LO_SHU_WALK_INFO[mode];
+              const Icon = WALK_ICONS[mode];
+              const accent = WALK_ACCENTS[mode];
+              const isActive = activeWalkMode === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onStartWalk(mode)}
+                  className={`text-left p-4 rounded-lg border transition-all active:scale-[0.98] ${
+                    isActive ? accent.active : accent.idle
+                  }`}
+                  title={info.philosophy}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <Icon size={18} className={accent.icon} />
+                    <div className="font-bold text-sm">{info.fullName}</div>
+                  </div>
+                  <div className="text-[11px] text-slate-400 font-mono mb-2">{info.tagline}</div>
+                  <div className="text-[11px] text-slate-300/80 leading-relaxed">
+                    {info.philosophy}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-3 text-[10px] text-slate-500 italic">
+            Walks need analyzed songs across the regime ranges. Run Deep Scan first if your library is unprocessed.
+          </div>
+        </div>
+      )}
 
       {/* Three regime grids */}
       {cellsClickable && (

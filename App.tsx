@@ -5,7 +5,7 @@ import {
   Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
-import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO } from './constants';
+import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, getLoShuPosition, type LoShuWalkMode } from './constants';
 import Visualizer from './components/Visualizer';
 import FrequencySelector from './components/FrequencySelector';
 import SafetyProtocols from './components/SafetyProtocols';
@@ -1058,7 +1058,31 @@ const App: React.FC = () => {
       // localStorage may be full or blocked — persistence is best-effort.
     }
   }, [loShuPerfectGUT]);
+
+  // Lo Shu Walk mode — null = off, otherwise indicates which 27-frequency
+  // walk built the current playlist. Set by generateLoShuWalk(); cleared
+  // automatically by the effect below when the playlist no longer matches
+  // the walk snapshot (so any other journey generator implicitly clears it).
+  const [loShuWalkMode, setLoShuWalkMode] = useState<LoShuWalkMode | null>(null);
+  // Snapshot of song-ids that made up the walk playlist when we set the
+  // mode — used to detect "this playlist isn't the walk anymore" without
+  // having to instrument every other journey generator.
+  const loShuWalkSnapshotRef = useRef<string>('');
+  // Local UI state — controls whether the toolbar walk popover is open.
+  const [showLoShuWalkMenu, setShowLoShuWalkMenu] = useState(false);
+
   const [selectedBinaural, setSelectedBinaural] = useState<BinauralPreset>(BINAURAL_PRESETS[2]);
+  // Auto-clear the Lo Shu walk badge whenever the playlist diverges from
+  // the snapshot we took when the walk started. Any other journey/filter
+  // generator that calls setPlaylist implicitly clears the badge this way,
+  // without us having to instrument each one.
+  useEffect(() => {
+    if (!loShuWalkMode) return;
+    const currentIds = playlist.map((s: Song) => s.id).join('|');
+    if (currentIds !== loShuWalkSnapshotRef.current) {
+      setLoShuWalkMode(null);
+    }
+  }, [playlist, loShuWalkMode]);
   const [useChakraOrder, setUseChakraOrder] = useState(false);
   const [isAdaptiveBinaural, setIsAdaptiveBinaural] = useState(true); // Default ON
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -2277,6 +2301,69 @@ const App: React.FC = () => {
           alert(`HEAD Alignment: Found ${headMatches.length} matching songs.\n\nHEAD frequencies detected:\n${foundFreqs.map(f => `${f}Hz: ${originalPlaylist.filter(s => s.closestSolfeggio === f).length} songs`).join('\n')}\n\nTry scanning library first or use the test distribution mode.`);
       }
   };
+
+  // Lo Shu Walk — build a 27-track journey playlist whose ordering follows
+  // one of the three Lo Shu walks (Layer Ascent / Pillar / Flying Star
+  // Vortex). For each frequency in the walk's sequence we pick the best-
+  // matching unused song from `originalPlaylist`. Positions with no matching
+  // song are skipped silently — the walk is reported as "N/27" so the user
+  // knows how complete it is.
+  const generateLoShuWalk = (mode: LoShuWalkMode) => {
+      const sequence = LO_SHU_WALKS[mode];
+      const info = LO_SHU_WALK_INFO[mode];
+      const walkPlaylist: Song[] = [];
+      const usedIds = new Set<string>();
+
+      sequence.forEach(freq => {
+          const candidates = originalPlaylist.filter(s => s.closestSolfeggio === freq && !usedIds.has(s.id));
+          if (candidates.length > 0) {
+              candidates.sort((a, b) => {
+                  const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
+                  const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
+                  if (Math.abs(aGolden - bGolden) > 0.1) return bGolden - aGolden;
+                  return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
+              });
+              const bestMatch = candidates[0];
+              walkPlaylist.push(bestMatch);
+              usedIds.add(bestMatch.id);
+          }
+      });
+
+      if (walkPlaylist.length > 0) {
+          setPlaylist(walkPlaylist);
+          loShuWalkSnapshotRef.current = walkPlaylist.map(s => s.id).join('|');
+          setLoShuWalkMode(mode);
+          setUseChakraOrder(true);
+          setCurrentSongIndex(0);
+          setSearchTerm('');
+          setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
+          setShowLoShuWalkMenu(false);
+
+          // Walks reach into HEART/HEAD; nudge experience level the same way
+          // the existing HEART/HEAD alignment journeys do so safety messaging
+          // stays consistent.
+          if (userExperienceLevel === 'beginner') setUserExperienceLevel('intermediate');
+
+          setAnalysisNotification(
+              `Lo Shu · ${info.fullName} — ${walkPlaylist.length}/${sequence.length} positions filled.`
+          );
+          setTimeout(() => setAnalysisNotification(null), 5000);
+
+          playTrackRef.current(0, walkPlaylist);
+          if (window.innerWidth < 768) setShowSidebar(false);
+      } else {
+          alert(
+              `Lo Shu · ${info.fullName}: no matching songs in your library yet.\n\n` +
+              `This walk needs songs whose closest Solfeggio frequency matches positions in the 27-frequency Aetheria set. ` +
+              `Try running Deep Scan, or load tracks across the GUT/HEART/HEAD ranges.`
+          );
+      }
+  };
+
+  // Clear the active Lo Shu walk indicator without otherwise touching the
+  // playlist. Called by other journey generators (alignment, mood, etc.) so
+  // the walk badge doesn't linger after the user starts a different journey.
+  const clearLoShuWalkMode = () => setLoShuWalkMode(null);
 
   // Generate full library alignment ordered by frequency
   const generateFullLibraryAlignment = () => {
@@ -3974,7 +4061,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -4627,6 +4714,8 @@ registerProcessor('wav-capture', WavCapture);
                                 onSelectFrequency={setSelectedSolfeggio}
                                 loShuPerfectGUT={loShuPerfectGUT}
                                 onLoShuPerfectChange={setLoShuPerfectGUT}
+                                onStartWalk={generateLoShuWalk}
+                                activeWalkMode={loShuWalkMode}
                               />
 
                               <div className="p-8 mt-4 bg-gradient-to-br from-slate-900 to-black border border-gold-500/20 rounded-2xl text-center relative overflow-hidden">
@@ -6398,6 +6487,29 @@ registerProcessor('wav-capture', WavCapture);
                              Lo Shu
                            </span>
                          )}
+                         {loShuWalkMode && (() => {
+                           // Walk indicator pill — surfaces the current walk mode and
+                           // (when the current song's closestSolfeggio is one of the
+                           // 27 walk frequencies) the Lo Shu position + compass dir.
+                           const rawFreq = playlist[currentSongIndex]?.closestSolfeggio;
+                           const pos = rawFreq ? getLoShuPosition(rawFreq) : null;
+                           const info = LO_SHU_WALK_INFO[loShuWalkMode];
+                           return (
+                             <span
+                               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-purple-500/10 text-purple-300 border-purple-500/30 text-[10px] font-medium uppercase tracking-wider"
+                               title={`Lo Shu Walk · ${info.fullName} — ${info.philosophy}`}
+                             >
+                               <Box size={8} />
+                               <span className="hidden sm:inline">Lo Shu · </span>
+                               {info.shortName}
+                               {pos && (
+                                 <span className="ml-1 text-purple-400/80 normal-case font-mono">
+                                   · {pos.regime} {pos.position} ({pos.direction})
+                                 </span>
+                               )}
+                             </span>
+                           );
+                         })()}
                          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
                             <Waves size={8} /> {selectedBinaural.name}
                          </span>
@@ -6454,19 +6566,125 @@ registerProcessor('wav-capture', WavCapture);
                     <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 w-full">
                         
                         {/* Playback Controls */}
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 relative">
                             <button onClick={() => setIsShuffle(!isShuffle)} className={`${isShuffle ? 'text-gold-500' : 'text-slate-600'} hover:text-white transition-colors`}><Shuffle size={14}/></button>
                             <button onClick={handlePrev} className="text-slate-300 hover:text-white transition-colors"><SkipBack size={16}/></button>
-                            
-                            <button 
-                                onClick={handlePlayPause} 
+
+                            <button
+                                onClick={handlePlayPause}
                                 className="w-8 h-8 rounded-full bg-gold-500 hover:bg-gold-400 flex items-center justify-center text-black shadow-lg shadow-gold-500/20 transition-all hover:scale-105 active:scale-95"
                             >
                                 {isPlaying ? <Pause size={16} fill="black" /> : <Play size={16} fill="black" className="ml-0.5" />}
                             </button>
-                            
+
                             <button onClick={handleNext} className="text-slate-300 hover:text-white transition-colors"><SkipForward size={16}/></button>
                             <button onClick={() => setIsLoop(!isLoop)} className={`${isLoop ? 'text-gold-500' : 'text-slate-600'} hover:text-white transition-colors`}><Repeat size={14}/></button>
+
+                            {/* Lo Shu Walk shortcut — opens a popover with the three walks. */}
+                            <button
+                                onClick={() => setShowLoShuWalkMenu((v: boolean) => !v)}
+                                className={`${loShuWalkMode ? 'text-purple-400' : loShuPerfectGUT ? 'text-emerald-400' : 'text-slate-600'} hover:text-white transition-colors`}
+                                title={
+                                    loShuWalkMode
+                                        ? `Lo Shu Walk active: ${LO_SHU_WALK_INFO[loShuWalkMode].fullName}${loShuPerfectGUT ? ' · Perfect GUT mapping ON' : ''}`
+                                        : loShuPerfectGUT
+                                            ? 'Lo Shu Perfect GUT mapping ON · click to open Lo Shu controls'
+                                            : 'Lo Shu controls — Perfect GUT toggle + 27-track walks'
+                                }
+                                aria-haspopup="menu"
+                                aria-expanded={showLoShuWalkMenu}
+                            >
+                                <Box size={14}/>
+                            </button>
+                            {showLoShuWalkMenu && (
+                                <>
+                                    {/* Click-away catcher */}
+                                    <div
+                                        className="fixed inset-0 z-40"
+                                        onClick={() => setShowLoShuWalkMenu(false)}
+                                        aria-hidden="true"
+                                    />
+                                    <div
+                                        className="absolute bottom-full right-0 mb-2 w-72 z-50 p-3 rounded-xl bg-slate-950/95 backdrop-blur-md border border-purple-500/40 shadow-2xl shadow-purple-900/40"
+                                        role="menu"
+                                    >
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Box size={14} className="text-purple-300" />
+                                            <div className="text-xs font-bold text-purple-200 uppercase tracking-wider">Lo Shu Controls</div>
+                                            {loShuWalkMode && (
+                                                <span className="ml-auto text-[10px] text-purple-300 font-mono">
+                                                    {LO_SHU_WALK_INFO[loShuWalkMode].shortName}
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {/* Perfect-GUT audio-mapping toggle (was buried in the Guidebook). */}
+                                        <div className="mb-3 p-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5">
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <Volume2 size={12} className="text-emerald-300" />
+                                                <div className="text-[11px] font-bold text-emerald-200 uppercase tracking-wider">Perfect GUT</div>
+                                                <span
+                                                    className={`ml-auto text-[10px] px-1.5 py-0.5 rounded border font-mono ${
+                                                        loShuPerfectGUT
+                                                            ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40'
+                                                            : 'bg-slate-800 text-slate-500 border-slate-700'
+                                                    }`}
+                                                >
+                                                    {loShuPerfectGUT ? 'ON' : 'OFF'}
+                                                </span>
+                                            </div>
+                                            <p className="text-[10px] text-slate-400 leading-snug mb-2">
+                                                Plays GUT-band Solfeggio frequencies at their perfect 111&nbsp;Hz Lo&nbsp;Shu counterparts (174→75, 285→186, 396→297, 417→408, 528→519, 639→630). 741/852/963 are exact matches.
+                                            </p>
+                                            <button
+                                                onClick={() => setLoShuPerfectGUT(!loShuPerfectGUT)}
+                                                className={`w-full text-[11px] py-1.5 rounded-md border font-medium transition-colors ${
+                                                    loShuPerfectGUT
+                                                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-100 hover:bg-emerald-500/30'
+                                                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-emerald-500/40 hover:text-emerald-200'
+                                                }`}
+                                            >
+                                                {loShuPerfectGUT ? 'Switch to Solfeggio' : 'Switch to Lo Shu Perfect'}
+                                            </button>
+                                        </div>
+
+                                        <div className="border-t border-slate-800 pt-3">
+                                            <div className="text-[11px] font-bold text-purple-200 uppercase tracking-wider mb-1">Lo Shu Walks</div>
+                                            <p className="text-[10px] text-slate-400 leading-snug mb-2">
+                                                Build a 27-track journey from your library along one of three Lo&nbsp;Shu paths through GUT, HEART, and HEAD.
+                                            </p>
+                                            <div className="space-y-1.5">
+                                                {(['A','B','C'] as LoShuWalkMode[]).map(mode => {
+                                                    const info = LO_SHU_WALK_INFO[mode];
+                                                    const isActive = loShuWalkMode === mode;
+                                                    return (
+                                                        <button
+                                                            key={mode}
+                                                            onClick={() => generateLoShuWalk(mode)}
+                                                            className={`w-full text-left p-2.5 rounded-lg border text-xs transition-colors ${
+                                                                isActive
+                                                                    ? 'bg-purple-500/20 border-purple-500/60 text-purple-100'
+                                                                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-purple-500/40 hover:text-purple-200'
+                                                            }`}
+                                                        >
+                                                            <div className="font-bold">{info.fullName}</div>
+                                                            <div className="text-[10px] text-slate-400 font-mono mt-0.5">{info.tagline}</div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                        {loShuWalkMode && (
+                                            <button
+                                                onClick={() => { clearLoShuWalkMode(); setShowLoShuWalkMenu(false); }}
+                                                className="mt-3 w-full text-[10px] uppercase tracking-wider py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
+                                            >
+                                                Clear walk badge
+                                            </button>
+                                        )}
+                                    </div>
+                                </>
+                            )}
                         </div>
 
                         {/* Divider (Hidden on very small screens) */}

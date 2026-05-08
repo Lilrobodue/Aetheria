@@ -347,3 +347,105 @@ export const SEPHIROT_INFO = [
   { name: 'Keter', title: 'The Crown', meaning: 'Source, Infinite Light, God.', correspondence: 'Crown Chakra', color: '#EE82EE', desc: 'The point of origin. Beyond comprehension. Pure unity.' },
   { name: 'Ain Soph', title: 'The Limitless', meaning: 'The Infinite SOURCE, Beyond All Form.', correspondence: 'Trans-Crown Chakra / SOURCE Field', color: '#FFFFFF', desc: 'The 12th node completing the energy circuit. The SOURCE connection that enables the Tree of Life to function as a complete system. Pure infinite consciousness beyond all limitation.' },
 ];
+
+// --- Lo Shu Walks ----------------------------------------------------------
+// Three playlist orderings derived from the standard Lo Shu magic square.
+// Each walk is a 27-frequency sequence covering GUT (174–963), HEART
+// (1206–3150), and HEAD (3504–6336) regimes. Used by generateLoShuWalk()
+// in App.tsx to assemble a journey playlist from songs whose closestSolfeggio
+// matches each frequency in turn.
+export type LoShuWalkMode = 'A' | 'B' | 'C';
+
+// Walk A — Layer Ascent: positions 1→9 through GUT, then HEART, then HEAD.
+// Ground before you rise. Mirrors the existing Alignment journey extended
+// across all three regimes.
+export const LO_SHU_WALK_A: number[] = [
+  174, 285, 396, 417, 528, 639, 741, 852, 963,
+  1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150,
+  3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336,
+];
+
+// Walk B — Pillar Walk: for each position 1→9, traverse GUT→HEART→HEAD
+// before moving to the next position. Nine vertical pillars through the cube.
+export const LO_SHU_WALK_B: number[] = [
+  174, 1206, 3504,
+  285, 1449, 3858,
+  396, 1692, 4212,
+  417, 1935, 4566,
+  528, 2178, 4920,
+  639, 2421, 5274,
+  741, 2664, 5628,
+  852, 2907, 5982,
+  963, 3150, 6336,
+];
+
+// Walk C — Flying Star Vortex: traditional Daoist palace order
+// 5→6→7→8→9→1→2→3→4 applied to each layer. Each regime starts at its
+// CENTER frequency and spirals outward.
+export const LO_SHU_WALK_C: number[] = [
+  528, 639, 741, 852, 963, 174, 285, 396, 417,
+  2178, 2421, 2664, 2907, 3150, 1206, 1449, 1692, 1935,
+  4920, 5274, 5628, 5982, 6336, 3504, 3858, 4212, 4566,
+];
+
+export const LO_SHU_WALKS: Record<LoShuWalkMode, number[]> = {
+  A: LO_SHU_WALK_A,
+  B: LO_SHU_WALK_B,
+  C: LO_SHU_WALK_C,
+};
+
+export const LO_SHU_WALK_INFO: Record<LoShuWalkMode, {
+  shortName: string;       // "Ascent"
+  fullName: string;        // "Layer Ascent"
+  tagline: string;         // one-liner shown on buttons
+  philosophy: string;      // longer description for the explainer
+}> = {
+  A: {
+    shortName: 'Ascent',
+    fullName: 'Layer Ascent',
+    tagline: '1→9 through GUT, HEART, HEAD',
+    philosophy: 'Ground before you rise. Walks positions 1 through 9 in each layer, climbing one regime at a time. Mirrors the standard chakra-style ascent extended across all 27 frequencies.',
+  },
+  B: {
+    shortName: 'Pillar',
+    fullName: 'Pillar Walk',
+    tagline: 'Nine vertical pillars (GUT→HEART→HEAD per position)',
+    philosophy: 'Integrate each quality fully before moving on. For each Lo Shu position 1→9, you pass through GUT, then HEART, then HEAD — nine vertical pillars woven through the cube.',
+  },
+  C: {
+    shortName: 'Vortex',
+    fullName: 'Flying Star Vortex',
+    tagline: '5→6→7→8→9→1→2→3→4 spiral, per layer',
+    philosophy: 'Emanate from the heart. The traditional Daoist Flying Star path through the nine palaces, applied to each regime. Every layer starts at its CENTER frequency (528, 2178, 4920) and spirals outward.',
+  },
+};
+
+// Lo Shu position (1–9) → compass direction in the standard layout:
+//   4(SE)  9(S)   2(SW)
+//   3(E)   5(C)   7(W)
+//   8(NE)  1(N)   6(NW)
+export const LO_SHU_POS_DIR: Record<number, string> = {
+  1: 'N', 2: 'SW', 3: 'E', 4: 'SE', 5: 'Center',
+  6: 'NW', 7: 'W', 8: 'NE', 9: 'S',
+};
+
+// Reverse-lookup: any frequency in the 27-frequency Aetheria set → its
+// Lo Shu position 1–9 within its regime (positions repeat per layer).
+const LO_SHU_FREQ_POSITIONS: Record<'GUT' | 'HEART' | 'HEAD', number[]> = {
+  GUT:   [174, 285, 396, 417, 528, 639, 741, 852, 963],
+  HEART: [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150],
+  HEAD:  [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336],
+};
+
+export const getLoShuPosition = (
+  freq: number
+): { regime: 'GUT' | 'HEART' | 'HEAD'; position: number; direction: string } | null => {
+  for (const regime of ['GUT', 'HEART', 'HEAD'] as const) {
+    const idx = LO_SHU_FREQ_POSITIONS[regime].indexOf(freq);
+    if (idx !== -1) {
+      const position = idx + 1;
+      return { regime, position, direction: LO_SHU_POS_DIR[position] };
+    }
+  }
+  return null;
+};
