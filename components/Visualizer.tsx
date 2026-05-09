@@ -1578,7 +1578,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
         // True isometric angles — 30° from horizontal — so all three faces
         // of every sub-cube render as identical rhombuses (symmetrical).
-        const cellSize = Math.min(22, Math.min(w, h) / 22) * 1.25;
+        const cellSize = Math.min(22, Math.min(w, h) / 22) * 1.5625;
         const COS30 = Math.cos(Math.PI / 6); // ≈ 0.866
         const SIN30 = Math.sin(Math.PI / 6); // 0.5
         const isoX = cellSize * COS30;       // horizontal step per grid unit
