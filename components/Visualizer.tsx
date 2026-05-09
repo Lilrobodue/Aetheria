@@ -1578,7 +1578,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
         // True isometric angles — 30° from horizontal — so all three faces
         // of every sub-cube render as identical rhombuses (symmetrical).
-        const cellSize = Math.min(22, Math.min(w, h) / 22);
+        const cellSize = Math.min(22, Math.min(w, h) / 22) * 1.25;
         const COS30 = Math.cos(Math.PI / 6); // ≈ 0.866
         const SIN30 = Math.sin(Math.PI / 6); // 0.5
         const isoX = cellSize * COS30;       // horizontal step per grid unit
@@ -1588,15 +1588,11 @@ const Visualizer: React.FC<VisualizerProps> = ({
         // Centre the cube on screen. Iso projection of the cube centre at
         // grid (2.5, 2.5, 2.5), accounting for height.
         const centreScreenY = (CUBE_CENTRE_GRID + CUBE_CENTRE_GRID) * isoY - CUBE_CENTRE_GRID * heightUnit;
-        const cubeHalfWidth = TOTAL_EXTENT * isoX;
-        const cubeHalfHeight = TOTAL_EXTENT * (isoY + heightUnit / 2) / 2;
-        const offsetX = settings.showTreeOfLife
-          ? w - cubeHalfWidth - cellSize * 3
-          : cx;
-        const offsetY = settings.showTreeOfLife
-          ? cubeHalfHeight + cellSize * 4
-          : cy;
-        ctx.translate(offsetX, offsetY - centreScreenY);
+        // When both Tree of Life and Lo Shu cube are on, layer them centered
+        // (cube renders on top of the tree via the painter's algorithm and the
+        // 'lighter' blend mode, so the two visuals stack rather than fight for
+        // space).
+        ctx.translate(cx, cy - centreScreenY);
 
         // Project a (rotated) 3D grid point onto screen.
         const project = (x: number, y: number, z: number) => {
@@ -1767,12 +1763,14 @@ const Visualizer: React.FC<VisualizerProps> = ({
           }
         }
 
-        // Walk-path overlay: when a Lo Shu walk is active and the user is
-        // playing, draw a polyline through the centres of the 27 cubes in
-        // the walk's order. The played-so-far portion glows brighter; the
-        // upcoming portion is a faint thread. Drawn after all cubes so the
-        // line reads as light passing through the (translucent) cube.
-        if (loShuWalkMode && isPlaying) {
+        // Walk-path overlay: when a Lo Shu walk is active, draw a polyline
+        // through the centres of the 27 cubes in the walk's order. The
+        // played-so-far portion glows brighter; the upcoming portion is a
+        // faint thread. Drawn after all cubes so the line reads as light
+        // passing through the (translucent) cube. The path persists through
+        // pause and after the walk's last track ends — only clearing when
+        // the walk mode itself is turned off.
+        if (loShuWalkMode) {
           const walk = LO_SHU_WALKS[loShuWalkMode];
           // Find the index of the currently-playing cube in the walk.
           const currentStep = walk.indexOf(selectedFrequency);

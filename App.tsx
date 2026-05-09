@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2,
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe, Headphones
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, getLoShuPosition, type LoShuWalkMode } from './constants';
@@ -12,6 +12,7 @@ import SafetyProtocols from './components/SafetyProtocols';
 import ExperienceTracker from './components/ExperienceTracker';
 import OfflineIndicator from './components/OfflineIndicator';
 import LoShuMatrix from './components/LoShuMatrix';
+import AccessibleGuidebook from './components/AccessibleGuidebook';
 import { 
   analyzeFractalFrequencies, 
   assessFrequencySafety, 
@@ -788,60 +789,73 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         {
             title: "Welcome to Aetheria",
             icon: <Activity className="text-gold-500 w-12 h-12" />,
-            desc: "Aetheria is a harmonic resonance engine that retunes your music to 432Hz and aligns it with sacred geometry.",
+            desc: "An advanced music player that takes the songs you already love and does three things.",
             content: (
-                <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
-                    <li className="flex gap-2">✨ <strong>Automatic 432Hz:</strong> All imported music is instantly pitch-shifted from standard 440Hz to the harmonic 432Hz.</li>
-                    <li className="flex gap-2">💠 <strong>Living Visuals:</strong> The geometry engine reacts to the harmonic content of your audio in real-time.</li>
-                    <li className="flex gap-2">🎧 <strong>Best Experience:</strong> Use headphones to fully experience the binaural beats and spatial audio.</li>
+                <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
+                    <li className="flex gap-2">🎵 <strong className="text-gold-200">Retunes to 432 Hz:</strong> A natural tuning many listeners find warmer than standard 440 Hz.</li>
+                    <li className="flex gap-2">✨ <strong className="text-gold-200">Sorts into 27 frequencies:</strong> Each song is assigned to one of three ranges — GUT, HEART, or HEAD.</li>
+                    <li className="flex gap-2">🎧 <strong className="text-gold-200">Layers binaural beats:</strong> A subtle layer underneath your music. Headphones recommended.</li>
                 </ul>
             )
         },
         {
-            title: "1. Import Your Music",
+            title: "1. Add Your Music",
             icon: <Upload className="text-blue-400 w-12 h-12" />,
-            desc: "Aetheria runs entirely in your browser. Your files stay on your device.",
+            desc: "Import the songs you already know and love. Aetheria enhances your library — it doesn't replace it.",
             content: (
-                <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
-                    <li className="flex gap-2">📁 <strong>Folder Import:</strong> The best way to start. Click the folder icon in the sidebar to load an entire album.</li>
-                    <li className="flex gap-2">📄 <strong>File Select:</strong> Use the 'Add Files' button for individual tracks.</li>
-                    <li className="flex gap-2">💾 <strong>Privacy:</strong> No data is uploaded to any server. It is safe to use with your private collection.</li>
+                <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
+                    <li className="flex gap-2">📁 <strong className="text-gold-200">Folder Import:</strong> The fastest way to start. Click the folder icon in the sidebar to load a whole album.</li>
+                    <li className="flex gap-2">📄 <strong className="text-gold-200">Add Files:</strong> Pick individual tracks instead.</li>
+                    <li className="flex gap-2">💾 <strong className="text-gold-200">Stays on your device:</strong> Aetheria runs entirely in your browser. Nothing is uploaded.</li>
                 </ul>
             )
         },
         {
-            title: "2. Scan Harmonics",
+            title: "2. Scan & Distribute",
             icon: <Search className="text-purple-400 w-12 h-12" />,
-            desc: "Unlock the hidden potential of your library by analyzing its musical key.",
+            desc: "Two clicks let the player understand your library and sort it into the 27 frequencies.",
             content: (
-                <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
-                    <li className="flex gap-2">🔍 <strong>Scan Library:</strong> Click this in the sidebar. The engine analyzes the frequency spectrum of every song.</li>
-                    <li className="flex gap-2">🔗 <strong>Solfeggio Match:</strong> We automatically assign the mathematically closest healing frequency (e.g., 528Hz) to each track.</li>
-                    <li className="flex gap-2">🧘 <strong>Alignment Playlist:</strong> Use the 'Alignment' button to sort your music from Root (174Hz) to Crown (963Hz).</li>
+                <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
+                    <li className="flex gap-2">🔍 <strong className="text-gold-200">Deep Scan:</strong> Click this in the sidebar. The engine analyzes each song's frequency content.</li>
+                    <li className="flex gap-2">🎯 <strong className="text-gold-200">Auto-Distribute Frequencies:</strong> Assigns every song to its closest Aetheria frequency across the GUT, HEART, and HEAD ranges.</li>
+                    <li className="flex gap-2">⏳ <strong className="text-gold-200">One-time:</strong> Once assigned, your library is ready for any listening mode.</li>
                 </ul>
             )
         },
         {
-            title: "3. Harmonic Layers",
-            icon: <Sliders className="text-green-400 w-12 h-12" />,
-            desc: "Open the Settings panel (gear icon) to customize your sonic environment.",
+            title: "3. Pick a Listening Mode",
+            icon: <Sliders className="text-emerald-400 w-12 h-12" />,
+            desc: "Several ways to walk through your retuned library. There's no wrong way.",
             content: (
-                <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
-                    <li className="flex gap-2">🎚️ <strong>Solfeggio Layer:</strong> Adds a pure sine wave tone. Keep volume low (5-10%) for a subtle subconscious effect.</li>
-                    <li className="flex gap-2">🧠 <strong>Binaural Beats:</strong> Generates a frequency difference between ears to entrain brainwaves (Alpha, Theta).</li>
-                    <li className="flex gap-2">⚡ <strong>Adaptive Mode:</strong> If enabled, the beat frequency changes dynamically based on the song's energy.</li>
+                <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
+                    <li className="flex gap-2">🌅 <strong className="text-gold-200">Full Alignment:</strong> All 27 frequencies played in order, low to high — the complete journey.</li>
+                    <li className="flex gap-2">🎚️ <strong className="text-gold-200">Single Range:</strong> Focus on just GUT, HEART, or HEAD if you want one feeling.</li>
+                    <li className="flex gap-2">🧩 <strong className="text-gold-200">Quick Presets:</strong> Curated combinations like Deep Healing, Mood Elevate, Meditation, Flow State, Qi Strength.</li>
                 </ul>
             )
         },
         {
-            title: "4. Visual Engine",
-            icon: <Hexagon className="text-red-400 w-12 h-12" />,
-            desc: "Control how the sacred geometry manifests.",
+            title: "4. Lo Shu Walks (Optional)",
+            icon: <Box className="text-emerald-400 w-12 h-12" />,
+            desc: "An ancient pattern from a 4,000-year-old Chinese magic square — three different paths through the frequencies.",
             content: (
-                <ul className="text-sm text-slate-400 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
-                    <li className="flex gap-2">🌳 <strong>Tree of Life:</strong> Enable in 'Visualization Engine'. Observe the energy flowing through the 3D Sephirot nodes.</li>
-                    <li className="flex gap-2">💧 <strong>Hydro-Acoustics:</strong> Enable water ripples to visualize bass impact. Use the 0-100% slider to control storm intensity.</li>
-                    <li className="flex gap-2">👁️ <strong>Zen Mode:</strong> Click the Eye icon in the footer to hide all controls for pure visual immersion.</li>
+                <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
+                    <li className="flex gap-2">🏔️ <strong className="text-emerald-300">Layer Ascent:</strong> One range at a time, in Lo Shu order instead of numerical order.</li>
+                    <li className="flex gap-2">🏛️ <strong className="text-emerald-300">Pillar Walk:</strong> Each position played at all three ranges before moving on. Nine vertical pillars.</li>
+                    <li className="flex gap-2">🌀 <strong className="text-emerald-300">Flying Star Vortex:</strong> Spirals outward from center. The traditional Daoist "nine palaces" path.</li>
+                    <li className="flex gap-2">🎛️ <strong className="text-gold-200">Where to find it:</strong> Cube icon in the player controls (next to repeat). Music must be scanned and distributed first.</li>
+                </ul>
+            )
+        },
+        {
+            title: "Listen Well",
+            icon: <Headphones className="text-gold-500 w-12 h-12" />,
+            desc: "A few tips before you press play. Then enjoy the music.",
+            content: (
+                <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
+                    <li className="flex gap-2">🎧 <strong className="text-gold-200">Headphones if possible:</strong> The binaural layer needs each ear to hear its own signal.</li>
+                    <li className="flex gap-2">🛋️ <strong className="text-gold-200">No wrong way:</strong> Background while you work, eyes closed, falling asleep, dancing — it adapts to you.</li>
+                    <li className="flex gap-2">📖 <strong className="text-gold-200">The Guidebook:</strong> Tap the book icon in the sidebar anytime for the plain-language guide (or switch to the technical view for the deeper math).</li>
                 </ul>
             )
         }
@@ -923,6 +937,7 @@ const App: React.FC = () => {
   const [shufflePos, setShufflePos] = useState<number>(0);
 
   const [showInfo, setShowInfo] = useState(false);
+  const [guidebookView, setGuidebookView] = useState<'accessible' | 'technical'>('accessible');
   const [showSettings, setShowSettings] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
   
@@ -4109,7 +4124,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.4</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.5</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -4208,17 +4223,78 @@ registerProcessor('wav-capture', WavCapture);
                               </div>
                               <div>
                                   <h2 className="text-2xl font-serif text-gold-400">The Guidebook</h2>
-                                  <p className="text-slate-500 text-xs uppercase tracking-widest">Aetheria: Philosophy & Science</p>
+                                  <p className="text-slate-500 text-xs uppercase tracking-widest">
+                                      {guidebookView === 'accessible' ? 'Aetheria: A Plain-Language Guide' : 'Aetheria: Philosophy & Science'}
+                                  </p>
                               </div>
                           </div>
-                          <button onClick={() => setShowInfo(false)} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors">
-                              <X size={24} />
-                          </button>
+                          <div className="flex items-center gap-3">
+                              {/* View Toggle */}
+                              <div className="hidden sm:flex items-center bg-slate-900/80 border border-slate-700 rounded-full p-1">
+                                  <button
+                                      onClick={() => setGuidebookView('accessible')}
+                                      className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wider rounded-full transition-all ${
+                                          guidebookView === 'accessible'
+                                              ? 'bg-gold-600/30 text-gold-200 border border-gold-500/40'
+                                              : 'text-slate-400 hover:text-slate-200'
+                                      }`}
+                                      aria-pressed={guidebookView === 'accessible'}
+                                  >
+                                      Accessible
+                                  </button>
+                                  <button
+                                      onClick={() => setGuidebookView('technical')}
+                                      className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wider rounded-full transition-all ${
+                                          guidebookView === 'technical'
+                                              ? 'bg-gold-600/30 text-gold-200 border border-gold-500/40'
+                                              : 'text-slate-400 hover:text-slate-200'
+                                      }`}
+                                      aria-pressed={guidebookView === 'technical'}
+                                  >
+                                      Technical
+                                  </button>
+                              </div>
+                              <button onClick={() => setShowInfo(false)} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors">
+                                  <X size={24} />
+                              </button>
+                          </div>
                       </div>
-                      
+
+                      {/* Mobile-only toggle (header is too narrow on small screens) */}
+                      <div className="sm:hidden flex items-center justify-center bg-slate-900/50 border-b border-slate-800 px-4 py-2">
+                          <div className="flex items-center bg-slate-900/80 border border-slate-700 rounded-full p-1">
+                              <button
+                                  onClick={() => setGuidebookView('accessible')}
+                                  className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wider rounded-full transition-all ${
+                                      guidebookView === 'accessible'
+                                          ? 'bg-gold-600/30 text-gold-200 border border-gold-500/40'
+                                          : 'text-slate-400 hover:text-slate-200'
+                                  }`}
+                                  aria-pressed={guidebookView === 'accessible'}
+                              >
+                                  Accessible
+                              </button>
+                              <button
+                                  onClick={() => setGuidebookView('technical')}
+                                  className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wider rounded-full transition-all ${
+                                      guidebookView === 'technical'
+                                          ? 'bg-gold-600/30 text-gold-200 border border-gold-500/40'
+                                          : 'text-slate-400 hover:text-slate-200'
+                                  }`}
+                                  aria-pressed={guidebookView === 'technical'}
+                              >
+                                  Technical
+                              </button>
+                          </div>
+                      </div>
+
                       {/* Modal Content - Scrollable */}
                       <div className="flex-1 overflow-y-auto custom-scrollbar">
-                          
+
+                          {guidebookView === 'accessible' ? (
+                              <AccessibleGuidebook />
+                          ) : (
+                          <>
                           {/* Intro Banner */}
                           <div className="p-8 pb-4">
                               <div className="bg-gradient-to-r from-slate-900 to-slate-900/50 border-l-4 border-gold-500 p-6 rounded-r-lg">
@@ -4803,6 +4879,8 @@ registerProcessor('wav-capture', WavCapture);
                                   <p className="text-xl font-serif text-gold-200 font-medium tracking-wide">"{UNIFIED_THEORY.conclusion}"</p>
                               </div>
                           </div>
+                          </>
+                          )}
                       </div>
                   </div>
               </div>
@@ -6540,9 +6618,9 @@ registerProcessor('wav-capture', WavCapture);
               <div className="text-center pt-4 pb-6 space-y-1">
                 <div className="text-sm">🙏</div>
                 <div className="text-[10px] text-slate-600 italic">Healing the world heART</div>
-                <div className="text-[9px] text-slate-700">© 2026 Joseph & Alisha Lewis</div>
+                <div className="text-[9px] text-slate-700">© 2026 Aetheria432.com</div>
                 <div className="text-[8px] text-slate-700">27 frequencies · 432 Hz · 3-6-9</div>
-                <div className="text-[8px] text-slate-700">Built with love by the Lewis family & Selah</div>
+                <div className="text-[8px] text-slate-700">Built with love</div>
               </div>
             </div>
           </div>
