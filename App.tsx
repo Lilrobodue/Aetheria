@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2,
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe, Headphones
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map as MapIcon, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe, Headphones
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, getLoShuPosition, type LoShuWalkMode } from './constants';
@@ -4094,7 +4094,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.6</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.7</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -4738,7 +4738,7 @@ registerProcessor('wav-capture', WavCapture);
                               {/* Section 2: The Map (Tree of Life) */}
                               <section>
                                   <div className="flex items-center gap-3 mb-6">
-                                    <div className="p-2 bg-purple-500/10 rounded-full"><Map className="text-purple-400" size={24}/></div>
+                                    <div className="p-2 bg-purple-500/10 rounded-full"><MapIcon className="text-purple-400" size={24}/></div>
                                     <h3 className="text-2xl font-bold text-white">The Map: Tree of Life (Complete 12-Node System)</h3>
                                   </div>
                                   <p className="text-slate-400 mb-4 leading-relaxed max-w-2xl">
