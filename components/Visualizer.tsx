@@ -1384,15 +1384,96 @@ const Visualizer: React.FC<VisualizerProps> = ({
       // --- LAYER 3: TREE OF LIFE (3D Sephirot + High-Vis SUPERCHARGED Flow) ---
       if (settings.showTreeOfLife) {
         ctx.save();
-        const availableHeight = h - 160; // Reduced margin for better fit
-        const treeHeight = 11.5; // Total height span from Malkuth (-3.5) to Ain Soph (8.0) 
-        const scaleUnit = Math.min(35, availableHeight / treeHeight); // Proper scaling for 12 nodes
-        const breathing = Math.sin(timeRef.current * 0.5) * 3; // Reduced breathing for better visibility
-        
-        // Adjust tree position - move center down to ensure top node is visible
-        const treeOffsetY = cy + (scaleUnit * 1.5); // Move tree center down by 1.5 scale units
-        ctx.translate(cx, treeOffsetY);
-        
+        const breathing = Math.sin(timeRef.current * 0.5) * 3;
+
+        // Per-node absolute screen positions. Two modes:
+        //   - cube-aligned: each tree node maps into the matching cube layer
+        //     (GUT / HEART / HEAD) so the tree reads as the cube's internal
+        //     scaffolding rather than a separate diagram floating beside it.
+        //   - default: original centred tree layout.
+        let nodePositions: { sx: number; sy: number }[];
+        let scaleUnit: number;
+
+        if (settings.showLoShuCube) {
+          // Mirror the cube's layout math so the tree fills the cube's
+          // volume — every node is anchored to a specific sub-cube grid
+          // position and rotates with the cube via the same project()
+          // transform used in LAYER 3.5.
+          const STEP = 2;
+          const TOTAL_EXTENT = 3 * STEP - 1; // 5
+          const CUBE_CENTRE_GRID = TOTAL_EXTENT / 2; // 2.5
+          const cellSize = Math.min(22, Math.min(w, h) / 22) * 1.5625;
+          const COS30 = Math.cos(Math.PI / 6);
+          const SIN30 = Math.sin(Math.PI / 6);
+          const isoX = cellSize * COS30;
+          const isoY = cellSize * SIN30;
+          const heightUnit = cellSize;
+          const centreScreenY = (CUBE_CENTRE_GRID + CUBE_CENTRE_GRID) * isoY - CUBE_CENTRE_GRID * heightUnit;
+          const turn = settings.loShuCubeAutoRotate
+            ? timeRef.current * 0.18
+            : (settings.loShuCubeRotation * Math.PI) / 180;
+
+          // Project (gridX, gridY, gridZ) → absolute screen coords. Same
+          // rotation and translation as the cube layer below, so the tree
+          // and cube share one coordinate system.
+          const project = (gxg: number, gyg: number, gzg: number) => {
+            const rx = gxg - CUBE_CENTRE_GRID;
+            const rz = gzg - CUBE_CENTRE_GRID;
+            const cosT = Math.cos(turn);
+            const sinT = Math.sin(turn);
+            const xr = rx * cosT - rz * sinT + CUBE_CENTRE_GRID;
+            const zr = rx * sinT + rz * cosT + CUBE_CENTRE_GRID;
+            return {
+              sx: cx + (xr - zr) * isoX,
+              sy: (cy - centreScreenY) + (xr + zr) * isoY - gyg * heightUnit,
+            };
+          };
+
+          // Each tree node anchored to a specific sub-cube centre (or
+          // beyond the cube for the extreme nodes Ain Soph / Malkuth / Daat).
+          // Grid coords: x and z use the centre of each sub-cube column
+          // (0.5 = left, 2.5 = centre, 4.5 = right). y uses the layer
+          // centres (GUT=0.5, HEART=2.5, HEAD=4.5).
+          const TREE_TO_GRID: Record<string, [number, number, number]> = {
+            'Ain Soph': [2.5, 6.0, 2.5],   // above HEAD center
+            'Keter':    [2.5, 4.5, 2.5],   // HEAD center cube
+            'Daat':     [2.5, 3.5, 2.5],   // between HEART and HEAD layers
+            'Tiferet':  [2.5, 2.5, 2.5],   // HEART center cube (SOURCE)
+            'Yesod':    [2.5, 0.5, 2.5],   // GUT center cube
+            'Malkuth':  [2.5, -1.0, 2.5],  // below GUT
+            'Binah':    [0.5, 4.5, 2.5],   // HEAD left column (gx=0)
+            'Chokhmah': [4.5, 4.5, 2.5],   // HEAD right column (gx=2)
+            'Gevurah':  [0.5, 2.5, 2.5],   // HEART left column
+            'Chesed':   [4.5, 2.5, 2.5],   // HEART right column
+            'Hod':      [0.5, 0.5, 2.5],   // GUT left column
+            'Netzach':  [4.5, 0.5, 2.5],   // GUT right column
+          };
+
+          scaleUnit = cellSize * 0.55; // drives node radius + label offsets
+          nodePositions = treeRef.current.nodes.map((node: TreeNode) => {
+            const anchor = TREE_TO_GRID[node.name];
+            if (!anchor) {
+              // Fallback: project from raw node coords (should not happen
+              // for the 12 named nodes).
+              const p = project(node.x + CUBE_CENTRE_GRID, node.y, CUBE_CENTRE_GRID);
+              return { sx: p.sx, sy: p.sy + breathing };
+            }
+            const [gxg, gyg, gzg] = anchor;
+            const p = project(gxg, gyg, gzg);
+            return { sx: p.sx, sy: p.sy + breathing };
+          });
+        } else {
+          // Default centred layout — the original tree positioning.
+          const availableHeight = h - 160;
+          const treeHeight = 11.5;
+          scaleUnit = Math.min(35, availableHeight / treeHeight);
+          const treeOffsetY = cy + (scaleUnit * 1.5);
+          nodePositions = treeRef.current.nodes.map((node: TreeNode) => ({
+            sx: cx + node.x * scaleUnit,
+            sy: treeOffsetY + (-node.y * scaleUnit + breathing),
+          }));
+        }
+
         // Use additive blending for energy feel
         ctx.globalCompositeOperation = 'lighter';
 
@@ -1400,8 +1481,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
         treeRef.current.edges.forEach(([startIdx, endIdx], i) => {
             const sn = treeRef.current.nodes[startIdx];
             const en = treeRef.current.nodes[endIdx];
-            const sx = sn.x * scaleUnit, sy = -sn.y * scaleUnit + breathing; 
-            const ex = en.x * scaleUnit, ey = -en.y * scaleUnit + breathing;
+            const { sx, sy } = nodePositions[startIdx];
+            const { sx: ex, sy: ey } = nodePositions[endIdx];
 
             // Average energy of the connection
             const connectionEnergy = (sn.currentEnergy + en.currentEnergy) / 2;
@@ -1483,10 +1564,10 @@ const Visualizer: React.FC<VisualizerProps> = ({
         ctx.globalCompositeOperation = 'source-over';
 
         // 2. 3D Spherical Nodes (Sephirot)
-        treeRef.current.nodes.forEach(node => {
-            const nx = node.x * scaleUnit, ny = -node.y * scaleUnit + breathing;
+        treeRef.current.nodes.forEach((node: TreeNode, idx: number) => {
+            const { sx: nx, sy: ny } = nodePositions[idx];
             // Reduced base radius for less crowding on small screens (0.35 -> 0.20)
-            const baseRadius = scaleUnit * 0.20; 
+            const baseRadius = scaleUnit * 0.20;
             const energyPulse = (node.currentEnergy || 0) * 10;
             const r = baseRadius + energyPulse;
             
@@ -1688,6 +1769,12 @@ const Visualizer: React.FC<VisualizerProps> = ({
         ctx.fill();
         ctx.restore();
 
+        // We defer rendering the active sub-cube's Hz label until after the
+        // entire cube has been drawn — otherwise sub-cubes that get painted
+        // later (closer to the viewer) can sit on top of it. This is the
+        // "lift to top of z-order" the label needs to stay readable.
+        let activeLabel: { sx: number; sy: number; freq: number; color: string } | null = null;
+
         for (const sub of subs) {
           const { gx, gy, gz, color, active, freq } = sub;
           // Cube origin in grid space (with gaps applied).
@@ -1747,19 +1834,14 @@ const Visualizer: React.FC<VisualizerProps> = ({
             ctx.stroke();
             ctx.restore();
 
-            // Hz label on the front face.
-            const labelCenter = {
+            // Record the Hz label's screen position — actual drawing
+            // happens after the loop so nothing paints over it.
+            activeLabel = {
               sx: (v001.sx + v101.sx + v111.sx + v011.sx) / 4,
               sy: (v001.sy + v101.sy + v111.sy + v011.sy) / 4,
+              freq,
+              color,
             };
-            ctx.save();
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 10px monospace';
-            ctx.textAlign = 'center';
-            ctx.shadowColor = 'black';
-            ctx.shadowBlur = 3;
-            ctx.fillText(`${freq}`, labelCenter.sx, labelCenter.sy + 3);
-            ctx.restore();
           }
         }
 
@@ -1826,6 +1908,40 @@ const Visualizer: React.FC<VisualizerProps> = ({
             ctx.fillStyle = isCurrent ? '#ffffff' : rgba(col, isPlayed ? 0.85 : 0.35);
             ctx.fill();
           }
+          ctx.restore();
+        }
+
+        // Active Hz label — drawn last so it sits on top of every sub-cube
+        // and the walk-path overlay, no matter which cube is in front of it
+        // in the painter's order.
+        if (activeLabel) {
+          ctx.save();
+          const text = `${activeLabel.freq} Hz`;
+          ctx.font = 'bold 11px monospace';
+          const metrics = ctx.measureText(text);
+          const padX = 6, padY = 3;
+          const w0 = metrics.width + padX * 2;
+          const h0 = 13 + padY * 2;
+          const bx = activeLabel.sx - w0 / 2;
+          const by = activeLabel.sy - h0 / 2;
+          // Soft dark pill so the text stays legible over bright faces.
+          ctx.fillStyle = 'rgba(0,0,0,0.7)';
+          ctx.beginPath();
+          if (typeof (ctx as any).roundRect === 'function') {
+            (ctx as any).roundRect(bx, by, w0, h0, 4);
+          } else {
+            ctx.rect(bx, by, w0, h0);
+          }
+          ctx.fill();
+          ctx.strokeStyle = rgba(activeLabel.color, 0.85);
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.shadowColor = 'black';
+          ctx.shadowBlur = 3;
+          ctx.fillText(text, activeLabel.sx, activeLabel.sy + 1);
           ctx.restore();
         }
 

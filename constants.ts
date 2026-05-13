@@ -355,9 +355,11 @@ export const SEPHIROT_INFO = [
 // in App.tsx to assemble a journey playlist from songs whose closestSolfeggio
 // matches each frequency in turn.
 // 'traditional' covers the classic 9-frequency Solfeggio ascent (GUT only,
-// 174→963). It's surfaced alongside the three Lo Shu walks so the cube
-// overlay and walk indicator can render its path too.
-export type LoShuWalkMode = 'A' | 'B' | 'C' | 'traditional';
+// 174→963). 'combined' is the 81-position omnibus walk: Vortex → Ascent →
+// Pillar in sequence, so the cube gets traced from all three angles in one
+// journey. Both are surfaced alongside the three Lo Shu walks so the cube
+// overlay and walk indicator can render their paths too.
+export type LoShuWalkMode = 'A' | 'B' | 'C' | 'traditional' | 'combined';
 
 // Walk A — Layer Ascent: positions 1→9 through GUT, then HEART, then HEAD.
 // Ground before you rise. Mirrors the existing Alignment journey extended
@@ -398,11 +400,23 @@ export const LO_SHU_WALK_TRADITIONAL: number[] = [
   174, 285, 396, 417, 528, 639, 741, 852, 963,
 ];
 
+// Combined Walk — 81 positions, traversing the cube from all three angles.
+// The order is C → A → B (Vortex → Ascent → Pillar) — "calling a CAB."
+// Centres first, then layers, then pillars. The generator builds a playlist
+// of up to 81 unique tracks (3 distinct songs per frequency), gracefully
+// repeating when the library has fewer matches.
+export const LO_SHU_WALK_COMBINED: number[] = [
+  ...LO_SHU_WALK_C,
+  ...LO_SHU_WALK_A,
+  ...LO_SHU_WALK_B,
+];
+
 export const LO_SHU_WALKS: Record<LoShuWalkMode, number[]> = {
   A: LO_SHU_WALK_A,
   B: LO_SHU_WALK_B,
   C: LO_SHU_WALK_C,
   traditional: LO_SHU_WALK_TRADITIONAL,
+  combined: LO_SHU_WALK_COMBINED,
 };
 
 export const LO_SHU_WALK_INFO: Record<LoShuWalkMode, {
@@ -434,6 +448,12 @@ export const LO_SHU_WALK_INFO: Record<LoShuWalkMode, {
     fullName: 'Traditional Solfeggio',
     tagline: '174→963, GUT-only ascent',
     philosophy: 'The classic 9-frequency Solfeggio scale — Foundation (174) through Divine Consciousness (963). Walks the GUT regime only; HEART and HEAD layers stay quiet on the cube.',
+  },
+  combined: {
+    shortName: 'CAB',
+    fullName: 'Combined Walk — Calling a CAB (C·A·B)',
+    tagline: '81 positions · Vortex → Ascent → Pillar',
+    philosophy: 'Calling a CAB: Centres first (Vortex), then layers (Ascent), then pillars (Pillar). The three walks composed in sequence so the cube is traced from every angle in one journey. Builds up to 81 unique tracks (3 distinct songs per frequency), gracefully repeating where your library has fewer matches.',
   },
 };
 

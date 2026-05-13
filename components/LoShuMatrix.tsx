@@ -339,15 +339,17 @@ interface LoShuMatrixProps {
   onColorModeChange?: (mode: FrequencyColorMode) => void;
 }
 
-// The matrix only surfaces the three Lo Shu walks (A/B/C). The
-// 'traditional' mode is rendered by the existing GUT Alignment button
-// elsewhere, so we type these maps narrowly to the visible subset.
+// The matrix surfaces the three Lo Shu walks (A/B/C) plus the omnibus
+// Combined walk. The 'traditional' mode is rendered by the existing GUT
+// Alignment button elsewhere, so we type these maps narrowly to the
+// visible subset.
 type MatrixWalkMode = Exclude<LoShuWalkMode, 'traditional'>;
 
 const WALK_ICONS: Record<MatrixWalkMode, React.ComponentType<{ size?: number; className?: string }>> = {
   A: ArrowUpCircle,
   B: Layers,
   C: Wind,
+  combined: Sparkles,
 };
 
 const WALK_ACCENTS: Record<MatrixWalkMode, { active: string; idle: string; icon: string }> = {
@@ -365,6 +367,11 @@ const WALK_ACCENTS: Record<MatrixWalkMode, { active: string; idle: string; icon:
     active: 'bg-purple-500/20 border-purple-500/60 text-purple-200 shadow-lg shadow-purple-500/20',
     idle: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-purple-500/40 hover:text-purple-300',
     icon: 'text-purple-400',
+  },
+  combined: {
+    active: 'bg-gradient-to-r from-amber-500/15 via-emerald-500/15 to-purple-500/20 border-gold-500/60 text-gold-200 shadow-lg shadow-gold-500/20',
+    idle: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-gold-500/40 hover:text-gold-300',
+    icon: 'text-gold-400',
   },
 };
 
@@ -574,6 +581,36 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
               );
             })}
           </div>
+
+          {/* Combined walk gets its own full-width row because it's the deepest journey. */}
+          {(() => {
+            const mode: MatrixWalkMode = 'combined';
+            const info = LO_SHU_WALK_INFO[mode];
+            const Icon = WALK_ICONS[mode];
+            const accent = WALK_ACCENTS[mode];
+            const isActive = activeWalkMode === mode;
+            return (
+              <button
+                type="button"
+                onClick={() => onStartWalk(mode)}
+                className={`mt-3 w-full text-left p-4 rounded-lg border transition-all active:scale-[0.98] ${
+                  isActive ? accent.active : accent.idle
+                }`}
+                title={info.philosophy}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Icon size={18} className={accent.icon} />
+                  <div className="font-bold text-sm">{info.fullName}</div>
+                  <div className="ml-auto text-[10px] font-mono text-gold-400/80 uppercase tracking-wider">81 positions</div>
+                </div>
+                <div className="text-[11px] text-slate-400 font-mono mb-2">{info.tagline}</div>
+                <div className="text-[11px] text-slate-300/80 leading-relaxed">
+                  {info.philosophy}
+                </div>
+              </button>
+            );
+          })()}
+
           <div className="mt-3 text-[10px] text-slate-500 italic">
             Walks need analyzed songs across the regime ranges. Run Deep Scan first if your library is unprocessed.
           </div>

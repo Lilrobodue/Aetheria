@@ -569,136 +569,76 @@ const distributeUsingHarmonicOctaves = (songs: Song[], targetFrequencies: number
         };
     });
     
-    // Step 2: Use optimal assignment algorithm to ensure even distribution
-    const assignedFrequencies: number[] = [];
+    // Step 2: Multi-pass distribution that guarantees a CAB ride at 81+ songs.
+    //
+    // Each "pass" walks all 27 target frequencies and, for each one, picks the
+    // single best remaining unassigned song. Run up to 3 passes so libraries
+    // of 81+ end up with exactly 3 distinct songs per frequency (the count
+    // the Combined Walk and other CAB-style journeys need to give three
+    // unique tracks per cube position). Smaller libraries fill as far as
+    // they can — 27-song libraries get 1 song per freq, 54-song libraries
+    // get 2, etc.  Anything left over after pass 3 spills to whichever
+    // frequency it best matches harmonically (no cap), so very large
+    // libraries don't lose tracks.
     const assignments: Array<{song: Song, frequency: number, detectedFreq: number, deviation: number}> = [];
-    const unassignedSongs = [...songAnalysis];
-    
-    // For exact matches (songs = frequencies), use greedy optimal assignment
-    if (songs.length <= targetFrequencies.length) {
-        // Assign each song to its best available frequency
-        while (unassignedSongs.length > 0 && assignedFrequencies.length < targetFrequencies.length) {
-            let bestAssignment = null;
+    const SONGS_PER_FREQ_TARGET = 3;
+    const unassigned = new Set<number>(songAnalysis.map((_, i) => i));
+
+    for (let pass = 0; pass < SONGS_PER_FREQ_TARGET; pass++) {
+        if (unassigned.size === 0) break;
+        for (const freq of targetFrequencies) {
+            if (unassigned.size === 0) break;
+            // Find the best remaining unassigned song for this frequency.
+            let bestIdx = -1;
             let bestScore = Infinity;
-            let bestSongIndex = -1;
-            let bestFreq = -1;
-            
-            // Find the best song-frequency pair among unassigned
-            for (let i = 0; i < unassignedSongs.length; i++) {
-                const songData = unassignedSongs[i];
-                
-                for (const freq of targetFrequencies) {
-                    if (!assignedFrequencies.includes(freq)) {
-                        const score = songData.compatibilityScores[freq];
-                        if (score < bestScore) {
-                            bestScore = score;
-                            bestSongIndex = i;
-                            bestFreq = freq;
-                            bestAssignment = songData;
-                        }
-                    }
+            for (const idx of unassigned) {
+                const score = songAnalysis[idx].compatibilityScores[freq];
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestIdx = idx;
                 }
             }
-            
-            if (bestAssignment && bestFreq > 0) {
-                assignments.push({
-                    song: bestAssignment.song,
-                    frequency: bestFreq,
-                    detectedFreq: bestAssignment.detectedFreq,
-                    deviation: bestScore
-                });
-                
-                assignedFrequencies.push(bestFreq);
-                unassignedSongs.splice(bestSongIndex, 1);
-                
-                console.log(`Optimal assignment: "${bestAssignment.song.name}" (${bestAssignment.detectedFreq.toFixed(1)}Hz) → ${bestFreq}Hz (score: ${bestScore.toFixed(1)})`);
-            } else {
-                break; // Safety break
-            }
-        }
-    }
-    
-    // For larger libraries, sort by harmonic compatibility and assign to best matches first
-    if (songs.length > targetFrequencies.length) {
-        // Sort songs by their natural harmonic affinity to their best frequency match
-        const sortedSongs = songAnalysis.sort((a, b) => {
-            // Find each song's best frequency match
-            const aBestFreq = targetFrequencies.reduce((best, freq) => 
-                a.compatibilityScores[freq] < a.compatibilityScores[best] ? freq : best
-            );
-            const bBestFreq = targetFrequencies.reduce((best, freq) => 
-                b.compatibilityScores[freq] < b.compatibilityScores[best] ? freq : best
-            );
-            
-            // Primary sort: by target frequency (groups songs by their harmonic destination)
-            if (aBestFreq !== bBestFreq) {
-                return aBestFreq - bBestFreq;
-            }
-            
-            // Secondary sort: by harmonic compatibility strength
-            const aScore = a.compatibilityScores[aBestFreq];
-            const bScore = b.compatibilityScores[bBestFreq];
-            if (Math.abs(aScore - bScore) > 0.1) {
-                return aScore - bScore;
-            }
-            
-            // Tertiary sort: by filename for consistent results across sessions
-            return a.song.name.localeCompare(b.song.name);
-        });
-        
-        // PHASE 1: Ensure every frequency gets at least one song (guaranteed coverage)
-        const frequencyCoverage = new Set<number>();
-        const reservedAssignments: typeof assignments = [];
-        
-        // First pass: assign one song to each frequency
-        for (let freqIndex = 0; freqIndex < targetFrequencies.length && freqIndex < sortedSongs.length; freqIndex++) {
-            const freq = targetFrequencies[freqIndex];
-            const songData = sortedSongs[freqIndex];
-            
-            reservedAssignments.push({
+            if (bestIdx === -1) continue;
+            const songData = songAnalysis[bestIdx];
+            assignments.push({
                 song: songData.song,
                 frequency: freq,
                 detectedFreq: songData.detectedFreq,
-                deviation: songData.compatibilityScores[freq]
+                deviation: bestScore,
             });
-            
-            frequencyCoverage.add(freq);
-            console.log(`🎯 GUARANTEED coverage: "${songData.song.name}" → ${freq}Hz`);
-        }
-        
-        // PHASE 2: Distribute remaining songs with harmonic optimization
-        for (let i = targetFrequencies.length; i < sortedSongs.length; i++) {
-            const songData = sortedSongs[i];
-            
-            // Find the best frequency for this song, considering current assignments
-            let bestFreq = targetFrequencies[0];
-            let bestScore = songData.compatibilityScores[bestFreq];
-            
-            for (const freq of targetFrequencies) {
-                const score = songData.compatibilityScores[freq];
-                const currentAssignments = reservedAssignments.filter(a => a.frequency === freq).length;
-                const maxAssignments = Math.ceil(sortedSongs.length / targetFrequencies.length);
-                
-                // Prefer better harmonic matches that aren't oversaturated
-                if (score < bestScore && currentAssignments < maxAssignments) {
-                    bestFreq = freq;
-                    bestScore = score;
-                }
+            unassigned.delete(bestIdx);
+            if (pass === 0) {
+                console.log(`🎯 Pass 1 coverage: "${songData.song.name}" → ${freq}Hz`);
+            } else {
+                console.log(`🎵 Pass ${pass + 1}: "${songData.song.name}" → ${freq}Hz (CAB pick)`);
             }
-            
-            reservedAssignments.push({
-                song: songData.song,
-                frequency: bestFreq,
-                detectedFreq: songData.detectedFreq,
-                deviation: bestScore
-            });
-            
-            console.log(`🎵 Optimized assignment: "${songData.song.name}" → ${bestFreq}Hz`);
         }
-        
-        // Use the reserved assignments
-        assignments.push(...reservedAssignments);
     }
+
+    // Spillover: anything beyond 81 (or beyond what fit in 3 passes) goes
+    // to whichever frequency it best matches. These extras may push some
+    // frequencies above 3 songs, but that's fine — the CAB walk only ever
+    // picks the top 3 per frequency.
+    for (const idx of unassigned) {
+        const songData = songAnalysis[idx];
+        let bestFreq = targetFrequencies[0];
+        let bestScore = songData.compatibilityScores[bestFreq];
+        for (const freq of targetFrequencies) {
+            const score = songData.compatibilityScores[freq];
+            if (score < bestScore) {
+                bestFreq = freq;
+                bestScore = score;
+            }
+        }
+        assignments.push({
+            song: songData.song,
+            frequency: bestFreq,
+            detectedFreq: songData.detectedFreq,
+            deviation: bestScore,
+        });
+        console.log(`🌊 Spillover: "${songData.song.name}" → ${bestFreq}Hz (beyond CAB capacity)`);
+    }
+    unassigned.clear();
     
     // Step 3: Create the final result array maintaining original order
     const result = songs.map(song => {
@@ -2352,32 +2292,62 @@ const App: React.FC = () => {
       }
   };
 
-  // Lo Shu Walk — build a 27-track journey playlist whose ordering follows
-  // one of the three Lo Shu walks (Layer Ascent / Pillar / Flying Star
-  // Vortex). For each frequency in the walk's sequence we pick the best-
-  // matching unused song from `originalPlaylist`. Positions with no matching
-  // song are skipped silently — the walk is reported as "N/27" so the user
-  // knows how complete it is.
+  // Lo Shu Walk — build a journey playlist whose ordering follows one of
+  // the Lo Shu walks (Layer Ascent / Pillar / Flying Star Vortex / Combined).
+  // For the single walks (A/B/C/traditional) we pick the best unused song
+  // per frequency — positions with no matching song are skipped silently.
+  // For the 'combined' walk (81 positions = Vortex + Ascent + Pillar) we
+  // pre-build a per-frequency queue so each pass uses a distinct song where
+  // possible, falling back to repeating the best match when the library has
+  // fewer than 3 candidates for a frequency (graceful degradation).
   const generateLoShuWalk = (mode: LoShuWalkMode) => {
       const sequence = LO_SHU_WALKS[mode];
       const info = LO_SHU_WALK_INFO[mode];
       const walkPlaylist: Song[] = [];
-      const usedIds = new Set<string>();
 
-      sequence.forEach(freq => {
-          const candidates = originalPlaylist.filter(s => s.closestSolfeggio === freq && !usedIds.has(s.id));
-          if (candidates.length > 0) {
-              candidates.sort((a, b) => {
-                  const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
-                  const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
-                  if (Math.abs(aGolden - bGolden) > 0.1) return bGolden - aGolden;
-                  return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
-              });
-              const bestMatch = candidates[0];
-              walkPlaylist.push(bestMatch);
-              usedIds.add(bestMatch.id);
-          }
-      });
+      const sortCandidates = (a: Song, b: Song) => {
+          const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
+          const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
+          if (Math.abs(aGolden - bGolden) > 0.1) return bGolden - aGolden;
+          return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
+      };
+
+      if (mode === 'combined') {
+          // Pre-build sorted candidate queues per unique frequency in the
+          // 81-position sequence. For each occurrence of a frequency, pop
+          // the next song from its queue; when the queue is exhausted,
+          // wrap back to the best match (so the same song never repeats
+          // back-to-back unless that frequency has only one song).
+          const uniqueFreqs = Array.from(new Set(sequence));
+          const queues = new Map<number, Song[]>();
+          uniqueFreqs.forEach(freq => {
+              const candidates = originalPlaylist
+                  .filter((s: Song) => s.closestSolfeggio === freq)
+                  .sort(sortCandidates);
+              queues.set(freq, candidates);
+          });
+          const cursors = new Map<number, number>();
+          sequence.forEach(freq => {
+              const candidates = queues.get(freq) ?? [];
+              if (candidates.length === 0) return; // no songs match — skip
+              const idx = cursors.get(freq) ?? 0;
+              walkPlaylist.push(candidates[idx % candidates.length]);
+              cursors.set(freq, idx + 1);
+          });
+      } else {
+          // Single walks: best unused song per frequency, never repeat.
+          const usedIds = new Set<string>();
+          sequence.forEach(freq => {
+              const candidates = originalPlaylist
+                  .filter((s: Song) => s.closestSolfeggio === freq && !usedIds.has(s.id))
+                  .sort(sortCandidates);
+              if (candidates.length > 0) {
+                  const bestMatch = candidates[0];
+                  walkPlaylist.push(bestMatch);
+                  usedIds.add(bestMatch.id);
+              }
+          });
+      }
 
       if (walkPlaylist.length > 0) {
           setPlaylist(walkPlaylist);
@@ -4124,7 +4094,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.5</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.6</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -5035,10 +5005,19 @@ registerProcessor('wav-capture', WavCapture);
                       console.warn(`⚠️ Missing frequency assignments:`, missingFreqs);
                     }
                     
-                    setAnalysisNotification(`Harmonic Distribution Complete: ${redistributed.length} songs distributed across all 27 frequencies. ${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD. ${missingFreqs.length > 0 ? `Missing: ${missingFreqs.join(', ')}Hz` : 'All frequencies covered!'}`);
-                    setTimeout(() => setAnalysisNotification(null), 7000);
+                    // CAB readiness: count frequencies that hit the 3-song
+                    // target. Any freq with ≥3 songs gives the Combined Walk
+                    // three distinct picks per cube position; the user can
+                    // call a CAB as soon as all 27 are at 3+.
+                    const cabReadyFreqs = allFreqs.filter(f => (frequencyDistribution[f] || 0) >= 3).length;
+                    const cabStatus = cabReadyFreqs === 27
+                      ? '🚖 CAB-ready: all 27 frequencies have 3+ songs.'
+                      : `CAB readiness: ${cabReadyFreqs}/27 frequencies at 3+ songs.`;
+
+                    setAnalysisNotification(`Harmonic Distribution Complete: ${redistributed.length} songs distributed across all 27 frequencies. ${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD. ${missingFreqs.length > 0 ? `Missing: ${missingFreqs.join(', ')}Hz. ` : ''}${cabStatus}`);
+                    setTimeout(() => setAnalysisNotification(null), 8000);
                   } else {
-                    alert(`Harmonic Distribution requires at least 27 tracks for optimal frequency coverage. Current library has ${playlist.length} tracks.`);
+                    alert(`Harmonic Distribution requires at least 27 tracks for optimal frequency coverage. Current library has ${playlist.length} tracks. (A full CAB ride needs 81 tracks for 3 unique songs per frequency.)`);
                   }
                 }}
                 className={`mb-3 w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg font-medium tracking-wide transition-all active:scale-95 bg-gold-900/20 hover:bg-gold-800/30 border border-gold-500/30 hover:border-gold-500/50`}
@@ -6908,7 +6887,7 @@ registerProcessor('wav-capture', WavCapture);
                                         <div className="border-t border-slate-800 pt-3">
                                             <div className="text-[11px] font-bold text-emerald-200 uppercase tracking-wider mb-1">Lo Shu Walks</div>
                                             <p className="text-[10px] text-slate-400 leading-snug mb-2">
-                                                Build a 27-track journey from your library along one of three Lo&nbsp;Shu paths through GUT, HEART, and HEAD.
+                                                Build a 27-track journey along one of three Lo&nbsp;Shu paths, or take the full 81-position Combined walk through all three.
                                             </p>
                                             <div className="space-y-1.5">
                                                 {(['A','B','C'] as LoShuWalkMode[]).map(mode => {
@@ -6929,6 +6908,27 @@ registerProcessor('wav-capture', WavCapture);
                                                         </button>
                                                     );
                                                 })}
+                                                {/* Combined walk — full 81-position omnibus, styled with gold accent. */}
+                                                {(() => {
+                                                    const info = LO_SHU_WALK_INFO.combined;
+                                                    const isActive = loShuWalkMode === 'combined';
+                                                    return (
+                                                        <button
+                                                            onClick={() => generateLoShuWalk('combined')}
+                                                            className={`w-full text-left p-2.5 rounded-lg border text-xs transition-colors ${
+                                                                isActive
+                                                                    ? 'bg-gradient-to-r from-amber-500/15 via-emerald-500/15 to-purple-500/20 border-gold-500/60 text-gold-100'
+                                                                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-gold-500/40 hover:text-gold-200'
+                                                            }`}
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-bold">{info.fullName}</span>
+                                                                <span className="ml-auto text-[9px] font-mono text-gold-400/80 uppercase tracking-wider">81</span>
+                                                            </div>
+                                                            <div className="text-[10px] text-slate-400 font-mono mt-0.5">{info.tagline}</div>
+                                                        </button>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                         {loShuWalkMode && (
