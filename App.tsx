@@ -2309,30 +2309,59 @@ const App: React.FC = () => {
           const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
           const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
           if (Math.abs(aGolden - bGolden) > 0.1) return bGolden - aGolden;
-          return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
+          const devDiff = (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
+          if (Math.abs(devDiff) > 0.1) return devDiff;
+          // Final tiebreaker: song id. Auto-distribute often produces many
+          // ties at deviation 0 (perfect matches); without this the sort
+          // falls back to insertion order and we end up playing songs
+          // alphabetically by upload order. Song ids are timestamp+random
+          // strings, so this spreads tied songs unpredictably.
+          return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
       };
 
       if (mode === 'combined') {
-          // Pre-build sorted candidate queues per unique frequency in the
-          // 81-position sequence. For each occurrence of a frequency, pop
-          // the next song from its queue; when the queue is exhausted,
-          // wrap back to the best match (so the same song never repeats
-          // back-to-back unless that frequency has only one song).
+          // Three-tier pick per frequency. Sort each frequency's candidates
+          // by deviation (best first), then for the three CAB passes draw
+          // from the top, middle, and lower thirds of the queue. With a
+          // 357-song library that's ~13 candidates per freq, so the three
+          // passes give the user three meaningfully different songs at
+          // each cube position instead of three near-duplicates. For
+          // smaller libraries the tiers collapse gracefully (cap to the
+          // last available candidate).
           const uniqueFreqs = Array.from(new Set(sequence));
-          const queues = new Map<number, Song[]>();
+          // Each frequency stores three picks indexed by pass (0, 1, 2).
+          const tieredPicks = new Map<number, (Song | undefined)[]>();
           uniqueFreqs.forEach(freq => {
               const candidates = originalPlaylist
                   .filter((s: Song) => s.closestSolfeggio === freq)
                   .sort(sortCandidates);
-              queues.set(freq, candidates);
+              const n = candidates.length;
+              if (n === 0) {
+                  tieredPicks.set(freq, [undefined, undefined, undefined]);
+                  return;
+              }
+              // Spread the 3 picks across the queue: top, middle, lower.
+              // For n < 3, indices collapse and tiers repeat the best match.
+              const i0 = 0;
+              const i1 = Math.min(n - 1, Math.floor(n / 3));
+              const i2 = Math.min(n - 1, Math.floor((2 * n) / 3));
+              tieredPicks.set(freq, [candidates[i0], candidates[i1], candidates[i2]]);
           });
-          const cursors = new Map<number, number>();
-          sequence.forEach(freq => {
-              const candidates = queues.get(freq) ?? [];
-              if (candidates.length === 0) return; // no songs match — skip
-              const idx = cursors.get(freq) ?? 0;
-              walkPlaylist.push(candidates[idx % candidates.length]);
-              cursors.set(freq, idx + 1);
+
+          // sequence = C (0..26) + A (27..53) + B (54..80). Pillar gets the
+          // strongest matches because it threads GUT→HEART→HEAD vertically
+          // at each position — it IS the cube's central axis, the still
+          // point a toroidal flow wraps around. CAB ends on Pillar, so the
+          // walk builds to its peak with the most resonant songs.
+          //   Pass 0 (Vortex, opening flow)        → tier 1 (mid)
+          //   Pass 1 (Ascent,  grounding ladder)   → tier 2 (lower)
+          //   Pass 2 (Pillar,  integrating axis)   → tier 0 (top)
+          const PASS_TO_TIER = [1, 2, 0] as const;
+          sequence.forEach((freq, i) => {
+              const pass = Math.floor(i / 27); // 0, 1, or 2
+              const tier = PASS_TO_TIER[pass];
+              const pick = tieredPicks.get(freq)?.[tier];
+              if (pick) walkPlaylist.push(pick);
           });
       } else {
           // Single walks: best unused song per frequency, never repeat.
@@ -3265,22 +3294,29 @@ const App: React.FC = () => {
 
       // Load and analyze the audio
       await mainAudioRef.current.load();
-      
-      // For frequency analysis, we still need the buffer
-      const arrayBuffer = await song.file.arrayBuffer();
-      const audioBuffer = await audioCtxRef.current!.decodeAudioData(arrayBuffer);
-      audioBufferRef.current = audioBuffer;
 
       let freq = song.harmonicFreq;
       let existingFractalAnalysis = song.fractalAnalysis;
-      
+
       if (!freq) {
-          // Try advanced analysis first, fallback to basic if needed
+          // Need to decode in order to run frequency detection. Decoding a
+          // 4-minute MP3 allocates ~80 MB of PCM, so we only pay that cost
+          // when we actually have to analyse — songs assigned a frequency
+          // by Auto-Distribute or Deep Scan skip this entirely. (Holding
+          // those buffers per-track is what caused the freeze around
+          // song 57 of a long playlist.)
+          const arrayBuffer = await song.file.arrayBuffer();
+          const audioBuffer = await audioCtxRef.current!.decodeAudioData(arrayBuffer);
+          audioBufferRef.current = audioBuffer;
           freq = await detectDominantFrequencyAdvanced(audioBuffer);
-      } else if (existingFractalAnalysis) {
-          // Use stored fractal analysis
-          setFractalAnalysis(existingFractalAnalysis);
-          console.log('Using stored fractal analysis for:', song.name);
+      } else {
+          // Release any prior decoded buffer so it can be GC'd while the
+          // next track plays.
+          audioBufferRef.current = null;
+          if (existingFractalAnalysis) {
+              setFractalAnalysis(existingFractalAnalysis);
+              console.log('Using stored fractal analysis for:', song.name);
+          }
       }
       
       // Use pre-assigned frequency from harmonic distribution if available
@@ -4094,7 +4130,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.7</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.8</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
