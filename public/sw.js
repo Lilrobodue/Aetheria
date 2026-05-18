@@ -1,4 +1,4 @@
-const CACHE_NAME = 'aetheria-v3';
+const CACHE_NAME = 'aetheria-v9.2';
 const OFFLINE_URL = '/';
 
 // Files to cache for offline support
