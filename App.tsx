@@ -615,19 +615,40 @@ const distributeUsingHarmonicOctaves = (songs: Song[], targetFrequencies: number
         }
     }
 
-    // Spillover: anything beyond 81 (or beyond what fit in 3 passes) goes
-    // to whichever frequency it best matches. These extras may push some
-    // frequencies above 3 songs, but that's fine — the CAB walk only ever
-    // picks the top 3 per frequency.
+    // Balanced spillover: anything beyond 81 (the 3-per-freq CAB pool)
+    // gets routed to the frequency with the *lowest current count*, ties
+    // broken by the song's compatibility score for that freq. Previously
+    // each spillover song went to its single globally-best-match freq,
+    // which dumped almost everything onto GUT/HEART — most music
+    // fundamentals sit in 80–1000 Hz and naturally score best against
+    // those regimes via direct or +1-octave matches. That left HEAD
+    // (3504–6336 Hz) permanently stuck at 27 (the pass 1–3 count) even
+    // for libraries with hundreds of tracks. Balancing by count instead
+    // spreads spillover roughly evenly across all 27 freqs (~1/3 to each
+    // regime), so HEAD frequencies are populated for browsing/filters
+    // even when no song is a strong octave-down match to them.
+    const counts: Record<number, number> = {};
+    targetFrequencies.forEach(f => counts[f] = 0);
+    assignments.forEach(a => counts[a.frequency]++);
+
     for (const idx of unassigned) {
         const songData = songAnalysis[idx];
-        let bestFreq = targetFrequencies[0];
-        let bestScore = songData.compatibilityScores[bestFreq];
+        // Find the minimum count across all freqs.
+        let minCount = Infinity;
         for (const freq of targetFrequencies) {
+            if (counts[freq] < minCount) minCount = counts[freq];
+        }
+        // Among freqs at min count, route this song to the one it best
+        // matches. Tie-break by score keeps assignments as harmonically
+        // sensible as possible while still respecting the count balance.
+        let bestFreq = targetFrequencies[0];
+        let bestScore = Infinity;
+        for (const freq of targetFrequencies) {
+            if (counts[freq] !== minCount) continue;
             const score = songData.compatibilityScores[freq];
             if (score < bestScore) {
-                bestFreq = freq;
                 bestScore = score;
+                bestFreq = freq;
             }
         }
         assignments.push({
@@ -636,7 +657,8 @@ const distributeUsingHarmonicOctaves = (songs: Song[], targetFrequencies: number
             detectedFreq: songData.detectedFreq,
             deviation: bestScore,
         });
-        console.log(`🌊 Spillover: "${songData.song.name}" → ${bestFreq}Hz (beyond CAB capacity)`);
+        counts[bestFreq]++;
+        console.log(`⚖️ Balanced fill: "${songData.song.name}" → ${bestFreq}Hz (count ${counts[bestFreq]})`);
     }
     unassigned.clear();
     
@@ -2345,14 +2367,25 @@ const App: React.FC = () => {
           // With n ≥ 3 each walk gets a distinct song; n = 2 → one
           // repeats; n = 1 → plays in all three walks.
           const uniqueFreqs = Array.from(new Set(sequence));
+          // Restrict the shuffle pool to the top-K best-matching candidates
+          // per frequency. With balanced auto-distribute filling each freq
+          // with ~13 songs (3 from passes 1–3 + ~10 from balanced spillover),
+          // shuffling the full pool would let weakly-matched spillover picks
+          // land on Vortex/Ascent. Top-K keeps CAB quality high while still
+          // giving 6 candidates worth of shuffle variety — C(6,3) × 3! = 120
+          // possible trio arrangements per freq.
+          const CAB_POOL_SIZE = 6;
           const passPicks = new Map<number, (Song | undefined)[]>();
           uniqueFreqs.forEach(freq => {
-              const candidates = originalPlaylist.filter((s: Song) => s.closestSolfeggio === freq);
-              const n = candidates.length;
-              if (n === 0) {
+              const allCandidates = originalPlaylist.filter((s: Song) => s.closestSolfeggio === freq);
+              if (allCandidates.length === 0) {
                   passPicks.set(freq, [undefined, undefined, undefined]);
                   return;
               }
+              const candidates = [...allCandidates]
+                  .sort(sortCandidates)
+                  .slice(0, Math.min(allCandidates.length, CAB_POOL_SIZE));
+              const n = candidates.length;
               const order = getShuffledIndices(n);
               const trio: Song[] = [
                   candidates[order[0 % n]],
@@ -4151,7 +4184,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.9</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.0</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
