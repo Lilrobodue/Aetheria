@@ -469,6 +469,8 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
+            id="frequency-search"
+            name="frequency-search"
             type="text"
             placeholder="Search frequencies..."
             value={searchTerm}
@@ -525,6 +527,8 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
       {/* Custom Frequency Input */}
       <div className="flex gap-3 mb-6">
         <input
+          id="custom-frequency"
+          name="custom-frequency"
           type="number"
           placeholder="Custom frequency (Hz)"
           value={customFrequency}
