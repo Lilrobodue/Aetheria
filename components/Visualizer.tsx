@@ -1845,25 +1845,41 @@ const Visualizer: React.FC<VisualizerProps> = ({
           }
         }
 
-        // Walk-path overlay: when a Lo Shu walk is active, draw a polyline
-        // through the centres of the 27 cubes in the walk's order. The
-        // played-so-far portion glows brighter; the upcoming portion is a
-        // faint thread. Drawn after all cubes so the line reads as light
-        // passing through the (translucent) cube. The path persists through
-        // pause and after the walk's last track ends — only clearing when
-        // the walk mode itself is turned off.
-        if (loShuWalkMode) {
-          const walk = LO_SHU_WALKS[loShuWalkMode];
-          // Find the index of the currently-playing cube in the walk.
-          const currentStep = walk.indexOf(selectedFrequency);
-          // Project each walk frequency to its cube centre on screen.
+        // Walk-path overlay helper. Used for the active walk (with
+        // played/leading/upcoming highlighting) AND for preview paths
+        // toggled from the Lo Shu card (currentStep = -1 → a traveling
+        // glow walks each path on a continuous loop, showing direction
+        // and order without a playlist). Drawn after all cubes so the
+        // line reads as light passing through the (translucent) cube.
+        //
+        // Preview-glow timing: phase advances ~1.35 segments/sec at
+        // default tempo (timeRef.current rises ~0.75/sec). A 27-step
+        // walk loops every ~20 seconds. Three preview walks share the
+        // same phase so the user can see all three walks' "position N"
+        // light up simultaneously when multiple toggles are on.
+        const PREVIEW_GLOW_WINDOW = 2.5; // segments either side of phase to glow
+        const drawWalkPath = (walkFreqs: number[], currentStep: number) => {
           type Pt = { sx: number; sy: number; depth: number; freq: number };
-          const points: Pt[] = walk.map((freq: number) => {
-            const c = cubeByFreq.get(freq);
-            if (!c) return null;
-            const p = project(c.gx * STEP + 0.5, c.gy * STEP + 0.5, c.gz * STEP + 0.5);
-            return { sx: p.sx, sy: p.sy, depth: p.depth, freq };
-          }).filter((x: Pt | null): x is Pt => x !== null);
+          const points: Pt[] = walkFreqs
+            .map((freq: number) => {
+              const c = cubeByFreq.get(freq);
+              if (!c) return null;
+              const p = project(c.gx * STEP + 0.5, c.gy * STEP + 0.5, c.gz * STEP + 0.5);
+              return { sx: p.sx, sy: p.sy, depth: p.depth, freq } as Pt;
+            })
+            .filter((x: Pt | null): x is Pt => x !== null);
+
+          const isPreview = currentStep < 0;
+          const previewPhase = isPreview
+            ? (timeRef.current * 1.8) % walkFreqs.length
+            : -1;
+          // Glow strength for segment index i — gaussian-ish falloff from
+          // the traveling phase. Returns 0..1.
+          const glowAt = (i: number): number => {
+            if (!isPreview) return 0;
+            const dist = Math.abs(i - previewPhase);
+            return Math.max(0, 1 - dist / PREVIEW_GLOW_WINDOW);
+          };
 
           ctx.save();
           ctx.lineCap = 'round';
@@ -1873,17 +1889,34 @@ const Visualizer: React.FC<VisualizerProps> = ({
             const b = points[i + 1];
             const isPlayed = currentStep >= 0 && i < currentStep;
             const isLeading = currentStep >= 0 && i === currentStep - 1;
-            // Gradient between the two cubes' colours so the line picks up
-            // the chakra/spectrum tint of each end.
             const aColor = cubeByFreq.get(a.freq)!.color;
             const bColor = cubeByFreq.get(b.freq)!.color;
             const grad = ctx.createLinearGradient(a.sx, a.sy, b.sx, b.sy);
-            const alpha = isLeading ? 0.95 : isPlayed ? 0.7 : 0.22;
-            grad.addColorStop(0, hexToRgb(aColor) ? `rgba(${hexToRgb(aColor).r},${hexToRgb(aColor).g},${hexToRgb(aColor).b},${alpha})` : `rgba(255,215,0,${alpha})`);
-            grad.addColorStop(1, hexToRgb(bColor) ? `rgba(${hexToRgb(bColor).r},${hexToRgb(bColor).g},${hexToRgb(bColor).b},${alpha})` : `rgba(255,215,0,${alpha})`);
+            let alpha: number;
+            let width: number;
+            if (isPreview) {
+              // Static dim base so the whole shape is visible, plus a
+              // traveling glow boost near previewPhase.
+              const glow = glowAt(i);
+              alpha = 0.38 + 0.55 * glow;
+              width = 1.6 + 1.6 * glow;
+            } else {
+              alpha = isLeading ? 0.95 : isPlayed ? 0.7 : 0.22;
+              width = isLeading ? 3 : isPlayed ? 2 : 1;
+            }
+            grad.addColorStop(0, `rgba(${hexToRgb(aColor).r},${hexToRgb(aColor).g},${hexToRgb(aColor).b},${alpha})`);
+            grad.addColorStop(1, `rgba(${hexToRgb(bColor).r},${hexToRgb(bColor).g},${hexToRgb(bColor).b},${alpha})`);
             ctx.strokeStyle = grad;
-            ctx.lineWidth = isLeading ? 3 : isPlayed ? 2 : 1;
-            if (isPlayed || isLeading) {
+            ctx.lineWidth = width;
+            if (isPreview) {
+              const glow = glowAt(i);
+              if (glow > 0.2) {
+                ctx.shadowColor = bColor;
+                ctx.shadowBlur = 10 * glow;
+              } else {
+                ctx.shadowBlur = 0;
+              }
+            } else if (isPlayed || isLeading) {
               ctx.shadowColor = bColor;
               ctx.shadowBlur = isLeading ? 14 + 6 * pulse : 8;
             } else {
@@ -1896,20 +1929,47 @@ const Visualizer: React.FC<VisualizerProps> = ({
           }
           ctx.shadowBlur = 0;
 
-          // Small dots at each cube centre — like beads on the thread —
-          // brightest at the leading edge.
+          // Small dots at each cube centre — like beads on the thread.
+          // Preview mode swells/brightens the dot under the traveling phase;
+          // active mode highlights played and current positions.
           for (let i = 0; i < points.length; i++) {
             const p = points[i];
             const isPlayed = currentStep >= 0 && i <= currentStep;
             const isCurrent = i === currentStep;
-            ctx.beginPath();
-            ctx.arc(p.sx, p.sy, isCurrent ? 4 : isPlayed ? 2.4 : 1.4, 0, Math.PI * 2);
             const col = cubeByFreq.get(p.freq)!.color;
-            ctx.fillStyle = isCurrent ? '#ffffff' : rgba(col, isPlayed ? 0.85 : 0.35);
+            let dotR: number;
+            let dotFill: string;
+            if (isPreview) {
+              const glow = glowAt(i);
+              dotR = 1.4 + 2.4 * glow;
+              dotFill = rgba(col, 0.5 + 0.45 * glow);
+            } else {
+              dotR = isCurrent ? 4 : isPlayed ? 2.4 : 1.4;
+              dotFill = isCurrent ? '#ffffff' : rgba(col, isPlayed ? 0.85 : 0.35);
+            }
+            ctx.beginPath();
+            ctx.arc(p.sx, p.sy, dotR, 0, Math.PI * 2);
+            ctx.fillStyle = dotFill;
             ctx.fill();
           }
           ctx.restore();
+        };
+
+        // Active walk path — drawn first so preview overlays layer above
+        // it (dim alpha keeps them from drowning out the active walk).
+        // The path persists through pause and after the walk's last track
+        // ends — only clearing when the walk mode itself is turned off.
+        if (loShuWalkMode) {
+          const walk = LO_SHU_WALKS[loShuWalkMode];
+          drawWalkPath(walk, walk.indexOf(selectedFrequency));
         }
+
+        // Preview paths — illuminated independent of any active walk so
+        // users can see each walk's shape without loading a playlist.
+        // Skip a preview that would duplicate the currently-active walk.
+        if (settings.loShuShowVortex && loShuWalkMode !== 'C') drawWalkPath(LO_SHU_WALKS.C, -1);
+        if (settings.loShuShowAscent && loShuWalkMode !== 'A') drawWalkPath(LO_SHU_WALKS.A, -1);
+        if (settings.loShuShowPillar && loShuWalkMode !== 'B') drawWalkPath(LO_SHU_WALKS.B, -1);
 
         // Active Hz label — drawn last so it sits on top of every sub-cube
         // and the walk-path overlay, no matter which cube is in front of it

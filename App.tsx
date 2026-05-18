@@ -943,6 +943,9 @@ const App: React.FC = () => {
     showLoShuCube: false,
     loShuCubeAutoRotate: true,
     loShuCubeRotation: 0,
+    loShuShowVortex: false,
+    loShuShowAscent: false,
+    loShuShowPillar: false,
     colorMode: 'chakra',
     autoRotate: true,
     invertPerspective: false,
@@ -1052,6 +1055,11 @@ const App: React.FC = () => {
   // mode — used to detect "this playlist isn't the walk anymore" without
   // having to instrument every other journey generator.
   const loShuWalkSnapshotRef = useRef<string>('');
+  // For 'combined' walk only: per-segment track counts [Vortex, Ascent, Pillar].
+  // Used by the footer chip to show "Vortex 14/27 · Step 41/81" — values can
+  // be < 27 each if some frequencies in the library had zero matching songs.
+  // Null for non-combined walks (single-walk segment count is just playlist.length).
+  const [loShuWalkSegments, setLoShuWalkSegments] = useState<[number, number, number] | null>(null);
   // Local UI state — controls whether the toolbar walk popover is open.
   const [showLoShuWalkMenu, setShowLoShuWalkMenu] = useState(false);
 
@@ -1065,6 +1073,7 @@ const App: React.FC = () => {
     const currentIds = playlist.map((s: Song) => s.id).join('|');
     if (currentIds !== loShuWalkSnapshotRef.current) {
       setLoShuWalkMode(null);
+      setLoShuWalkSegments(null);
     }
   }, [playlist, loShuWalkMode]);
   const [useChakraOrder, setUseChakraOrder] = useState(false);
@@ -2320,50 +2329,61 @@ const App: React.FC = () => {
       };
 
       if (mode === 'combined') {
-          // Three-tier pick per frequency. Sort each frequency's candidates
-          // by deviation (best first), then for the three CAB passes draw
-          // from the top, middle, and lower thirds of the queue. With a
-          // 357-song library that's ~13 candidates per freq, so the three
-          // passes give the user three meaningfully different songs at
-          // each cube position instead of three near-duplicates. For
-          // smaller libraries the tiers collapse gracefully (cap to the
-          // last available candidate).
+          // Two-stage pick per frequency:
+          //   1. Fisher-Yates shuffle the candidate list and take the first
+          //      three indices — this prevents the same trio from being
+          //      drawn every regen, fixing the alphabetical clustering that
+          //      surfaced when the deterministic sort tied many candidates.
+          //   2. Within that trio, sort by goldenRatioAlignment then
+          //      harmonicDeviation (best first) and assign so Pillar (the
+          //      integrating axis at the end of CAB) gets the strongest
+          //      match, Vortex (the opening flow) the middle, and Ascent
+          //      (the grounding ladder) the weakest of the three. Mirrors
+          //      the prior PASS_TO_TIER = [1, 2, 0] intent — the walk still
+          //      builds to its peak on the Pillar — without re-introducing
+          //      upload-order clustering.
+          // With n ≥ 3 each walk gets a distinct song; n = 2 → one
+          // repeats; n = 1 → plays in all three walks.
           const uniqueFreqs = Array.from(new Set(sequence));
-          // Each frequency stores three picks indexed by pass (0, 1, 2).
-          const tieredPicks = new Map<number, (Song | undefined)[]>();
+          const passPicks = new Map<number, (Song | undefined)[]>();
           uniqueFreqs.forEach(freq => {
-              const candidates = originalPlaylist
-                  .filter((s: Song) => s.closestSolfeggio === freq)
-                  .sort(sortCandidates);
+              const candidates = originalPlaylist.filter((s: Song) => s.closestSolfeggio === freq);
               const n = candidates.length;
               if (n === 0) {
-                  tieredPicks.set(freq, [undefined, undefined, undefined]);
+                  passPicks.set(freq, [undefined, undefined, undefined]);
                   return;
               }
-              // Spread the 3 picks across the queue: top, middle, lower.
-              // For n < 3, indices collapse and tiers repeat the best match.
-              const i0 = 0;
-              const i1 = Math.min(n - 1, Math.floor(n / 3));
-              const i2 = Math.min(n - 1, Math.floor((2 * n) / 3));
-              tieredPicks.set(freq, [candidates[i0], candidates[i1], candidates[i2]]);
+              const order = getShuffledIndices(n);
+              const trio: Song[] = [
+                  candidates[order[0 % n]],
+                  candidates[order[1 % n]],
+                  candidates[order[2 % n]],
+              ];
+              const sortedTrio = [...trio].sort(sortCandidates);
+              // sortedTrio[0] = best, [1] = mid, [2] = weakest
+              // Pass 0 (Vortex / C) → mid
+              // Pass 1 (Ascent / A) → weakest
+              // Pass 2 (Pillar / B) → best
+              passPicks.set(freq, [sortedTrio[1], sortedTrio[2], sortedTrio[0]]);
           });
 
-          // sequence = C (0..26) + A (27..53) + B (54..80). Pillar gets the
-          // strongest matches because it threads GUT→HEART→HEAD vertically
-          // at each position — it IS the cube's central axis, the still
-          // point a toroidal flow wraps around. CAB ends on Pillar, so the
-          // walk builds to its peak with the most resonant songs.
-          //   Pass 0 (Vortex, opening flow)        → tier 1 (mid)
-          //   Pass 1 (Ascent,  grounding ladder)   → tier 2 (lower)
-          //   Pass 2 (Pillar,  integrating axis)   → tier 0 (top)
-          const PASS_TO_TIER = [1, 2, 0] as const;
+          // sequence = C (0..26) + A (27..53) + B (54..80).
+          //   Pass 0 = Vortex (C), Pass 1 = Ascent (A), Pass 2 = Pillar (B).
+          // Track per-segment counts so the footer chip can show
+          // "Vortex N/27 · Step M/total" — counts can be < 27 if some
+          // frequencies in the library had zero matching songs.
+          const segmentCounts: [number, number, number] = [0, 0, 0];
           sequence.forEach((freq, i) => {
-              const pass = Math.floor(i / 27); // 0, 1, or 2
-              const tier = PASS_TO_TIER[pass];
-              const pick = tieredPicks.get(freq)?.[tier];
-              if (pick) walkPlaylist.push(pick);
+              const pass = Math.floor(i / 27);
+              const pick = passPicks.get(freq)?.[pass];
+              if (pick) {
+                  walkPlaylist.push(pick);
+                  segmentCounts[pass]++;
+              }
           });
+          setLoShuWalkSegments(segmentCounts);
       } else {
+          setLoShuWalkSegments(null);
           // Single walks: best unused song per frequency, never repeat.
           const usedIds = new Set<string>();
           sequence.forEach(freq => {
@@ -2394,7 +2414,8 @@ const App: React.FC = () => {
           if (userExperienceLevel === 'beginner') setUserExperienceLevel('intermediate');
 
           setAnalysisNotification(
-              `Lo Shu · ${info.fullName} — ${walkPlaylist.length}/${sequence.length} positions filled.`
+              `Lo Shu · ${info.fullName} — ${walkPlaylist.length}/${sequence.length} positions filled.` +
+              (mode === 'combined' ? ' Click CAB again for a different shuffle.' : '')
           );
           setTimeout(() => setAnalysisNotification(null), 5000);
 
@@ -4130,7 +4151,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.8</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v8.9</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -5576,6 +5597,40 @@ registerProcessor('wav-capture', WavCapture);
                                                     disabled={vizSettings.loShuCubeAutoRotate}
                                                 />
                                             </div>
+
+                                            {/* Path Illumination — toggle any of the three Lo Shu walks
+                                             * to draw its 27-frequency path through the cube without
+                                             * needing a playlist active. The shapes themselves
+                                             * (vortex spiral / linear ascent / vertical pillars) are
+                                             * the visual identifier. */}
+                                            <div className="pt-2 border-t border-slate-800">
+                                                <div className="text-[10px] text-emerald-300/80 uppercase tracking-wider mb-1.5">Path Illumination</div>
+                                                <p className="text-[9px] text-slate-500 mb-2">
+                                                    Light up walk paths without loading a playlist. Toggle individually or combine.
+                                                </p>
+                                                {([
+                                                    { key: 'loShuShowVortex' as const, label: 'Vortex', sub: 'C · 5→6→7→8→9→1→2→3→4 spiral' },
+                                                    { key: 'loShuShowAscent' as const, label: 'Ascent', sub: 'A · 1→9 per layer' },
+                                                    { key: 'loShuShowPillar' as const, label: 'Pillar', sub: 'B · vertical GUT→HEART→HEAD' },
+                                                ]).map(({ key, label, sub }) => {
+                                                    const on = vizSettings[key];
+                                                    return (
+                                                        <div key={key} className="flex items-center justify-between py-1">
+                                                            <div className="flex flex-col">
+                                                                <span className="text-[10px] text-slate-200 font-medium">{label}</span>
+                                                                <span className="text-[9px] text-slate-500 font-mono">{sub}</span>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => setVizSettings({ ...vizSettings, [key]: !on })}
+                                                                className={`w-8 h-4 rounded-full relative transition-colors ${on ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                                                                title={on ? `Hide the ${label} walk path overlay` : `Show the ${label} walk path overlay`}
+                                                            >
+                                                                <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${on ? 'left-4.5' : 'left-0.5'}`}></div>
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -6737,6 +6792,52 @@ registerProcessor('wav-capture', WavCapture);
                                    · {pos.regime} {pos.position} ({pos.direction})
                                  </span>
                                )}
+                             </span>
+                           );
+                         })()}
+                         {loShuWalkMode && currentSongIndex >= 0 && playlist.length > 0 && (() => {
+                           // Walk-progress chip — shows position within the current
+                           // walk segment, and (for CAB / combined) the overall
+                           // 41/81 step counter. Counts come from loShuWalkSegments
+                           // (set when the walk is generated) for combined mode,
+                           // or fall back to playlist.length for single walks.
+                           const stepIdx = currentSongIndex + 1;
+                           const total = playlist.length;
+                           if (loShuWalkMode === 'combined' && loShuWalkSegments) {
+                             const [vEnd, aLen, pLen] = loShuWalkSegments;
+                             const aEnd = vEnd + aLen;
+                             let segName: 'Vortex' | 'Ascent' | 'Pillar';
+                             let segPos: number;
+                             let segLen: number;
+                             if (currentSongIndex < vEnd) {
+                               segName = 'Vortex';
+                               segPos = currentSongIndex + 1;
+                               segLen = vEnd;
+                             } else if (currentSongIndex < aEnd) {
+                               segName = 'Ascent';
+                               segPos = currentSongIndex - vEnd + 1;
+                               segLen = aLen;
+                             } else {
+                               segName = 'Pillar';
+                               segPos = currentSongIndex - aEnd + 1;
+                               segLen = pLen;
+                             }
+                             return (
+                               <span
+                                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-emerald-500/5 text-emerald-300/90 border-emerald-500/20 text-[10px] font-mono"
+                                 title={`Currently in the ${segName} segment of CAB. Overall step ${stepIdx} of ${total}.`}
+                               >
+                                 {segName} {segPos}/{segLen}
+                                 <span className="text-emerald-400/60">· {stepIdx}/{total}</span>
+                               </span>
+                             );
+                           }
+                           return (
+                             <span
+                               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-emerald-500/5 text-emerald-300/90 border-emerald-500/20 text-[10px] font-mono"
+                               title={`Step ${stepIdx} of ${total} in this walk.`}
+                             >
+                               {stepIdx}/{total}
                              </span>
                            );
                          })()}

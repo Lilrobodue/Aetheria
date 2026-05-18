@@ -61,6 +61,13 @@ export interface VizSettings {
   showLoShuCube: boolean; // Render the 3x3x3 Lo Shu cube overlay (27 sub-cubes by frequency)
   loShuCubeAutoRotate: boolean; // When true, the cube turntables; when false, holds at loShuCubeRotation
   loShuCubeRotation: number; // Manual rotation angle in degrees (0–360), used when auto-rotate is off
+  // Walk-path illumination — when on, the cube draws a faint polyline along
+  // that walk's 27-frequency path even when no walk playlist is active. Lets
+  // the user preview each walk's shape without loading songs. Multiple paths
+  // can be on at once; the shapes themselves are the visual identifier.
+  loShuShowVortex: boolean; // Walk C — Flying Star Vortex (5→6→7→8→9→1→2→3→4 per layer)
+  loShuShowAscent: boolean; // Walk A — Layer Ascent (1→9 per layer, GUT→HEART→HEAD)
+  loShuShowPillar: boolean; // Walk B — Pillar Walk (GUT→HEART→HEAD per Lo Shu position)
   
   // Color Logic — 'spectrum' is the 4th mode: visible-light wavelength of
   // the active frequency (still audio-reactive via HSL modulation).
