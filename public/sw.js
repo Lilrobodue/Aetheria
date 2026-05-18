@@ -1,4 +1,4 @@
-const CACHE_NAME = 'aetheria-v2';
+const CACHE_NAME = 'aetheria-v3';
 const OFFLINE_URL = '/';
 
 // Files to cache for offline support
@@ -9,7 +9,8 @@ const STATIC_CACHE_URLS = [
   '/App.tsx',
   '/src/index.css',
   '/manifest.json',
-  '/images/icon-192x192.png'
+  '/images/icon-192x192.png',
+  '/images/icon-512x512.png'
 ];
 
 // External CDN resources to cache
