@@ -733,14 +733,22 @@ const distributeUsingHarmonicOctavesMaster = (songs: Song[], targetFrequencies: 
     return result;
 };
 
-// Fisher-Yates Shuffle
-const getShuffledIndices = (count: number) => {
-    const indices = Array.from({length: count}, (_, i) => i);
-    for (let i = indices.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [indices[i], indices[j]] = [indices[j], indices[i]];
-    }
-    return indices;
+// LRU-weighted shuffle. Sort indices by [lastPlayed ASC, random tiebreaker]
+// so never-played songs come first (in random order among themselves), then
+// the longest-not-heard songs, and so on. Same call twice with the same
+// history produces fresh tiebreaker permutations — variety is preserved
+// while rotation guarantees every song eventually surfaces before any
+// repeats. Used by shuffle playback so a long session doesn't loop the
+// same favorites while back-catalogue tracks never play.
+const getLruShuffledIndices = (songs: { id: string }[], history: Record<string, number>): number[] => {
+    return songs
+        .map((_, i) => i)
+        .sort((ai, bi) => {
+            const aLast = history[songs[ai].id] || 0;
+            const bLast = history[songs[bi].id] || 0;
+            if (aLast !== bLast) return aLast - bLast;
+            return Math.random() - 0.5;
+        });
 };
 
 // --- Tutorial Component ---
@@ -900,6 +908,18 @@ const App: React.FC = () => {
   // Advanced Shuffle State
   const [shuffledIndices, setShuffledIndices] = useState<number[]>([]);
   const [shufflePos, setShufflePos] = useState<number>(0);
+
+  // Play history — { songId: lastPlayedTimestamp(ms) }. Drives LRU shuffle
+  // ordering and the rotation-aware sort in CAB/Ouroboros pickers so a
+  // long listening session cycles through the whole library before
+  // repeating favourites. In-memory only: song ids regenerate on every
+  // upload (id = `${Date.now()}-${random}` at upload time), so persisting
+  // across reloads wouldn't survive re-import anyway. Stale ids are
+  // harmless — they just don't match anything.
+  const playHistoryRef = useRef<Record<string, number>>({});
+  const recordPlay = (songId: string) => {
+    playHistoryRef.current[songId] = Date.now();
+  };
 
   const [showInfo, setShowInfo] = useState(false);
   const [guidebookView, setGuidebookView] = useState<'accessible' | 'technical'>('accessible');
@@ -1422,7 +1442,11 @@ const App: React.FC = () => {
     if (isShuffle && playlist.length > 0) {
         // If we just toggled shuffle or playlist changed size
         if (shuffledIndices.length !== playlist.length) {
-            const newIndices = getShuffledIndices(playlist.length);
+            // LRU-weighted shuffle — never-played first, then longest-not-heard.
+            // Replaces pure Fisher-Yates so a 6-hour shuffle session cycles
+            // the whole library before any song repeats, instead of letting
+            // chance favour the same handful of tracks.
+            const newIndices = getLruShuffledIndices(playlist, playHistoryRef.current);
             setShuffledIndices(newIndices);
             // Try to keep the current song playing without jumping
             const currentIdxInShuffle = newIndices.indexOf(currentSongIndex);
@@ -2419,6 +2443,18 @@ const App: React.FC = () => {
       // special phase token. Ouroboros emits ♾️/✕ at the SOURCE visits.
       const walkPhases: string[] = [];
 
+      // LRU comparator — sorts by [lastPlayed ASC, random tiebreaker].
+      // Never-played songs (timestamp 0) always come first, in random order
+      // among themselves; played songs follow with oldest first. Random
+      // tiebreaker preserves the user's "click again for variety" feel
+      // when the candidate pool is fresh (all timestamps zero).
+      const lruCompare = (a: Song, b: Song): number => {
+          const aLast = playHistoryRef.current[a.id] || 0;
+          const bLast = playHistoryRef.current[b.id] || 0;
+          if (aLast !== bLast) return aLast - bLast;
+          return Math.random() - 0.5;
+      };
+
       // Top-K candidate cap for CAB-style pickers. Balanced auto-distribute
       // can place ~13 candidates per freq; the cap keeps shuffle picks
       // among the strongest matches while still giving C(6,3) × 3! = 120
@@ -2437,15 +2473,24 @@ const App: React.FC = () => {
                   passPicks.set(freq, [undefined, undefined, undefined]);
                   return;
               }
+              // Top-K by quality stays the same — the candidate pool is
+              // still the 6 best-matching songs at this freq.
               const candidates = [...allCandidates]
                   .sort(sortCandidates)
                   .slice(0, Math.min(allCandidates.length, CAB_POOL_SIZE));
               const n = candidates.length;
-              const order = getShuffledIndices(n);
+              // Within the top-K pool, pick by LRU instead of pure random.
+              // Never-played candidates surface first (random tiebreak keeps
+              // the "click again for variety" feel when the pool is fresh);
+              // once everyone in the pool has been heard at least once, the
+              // 3 longest-not-heard win — guaranteeing rotation through all
+              // 6 quality candidates over a few CAB sessions instead of
+              // letting random chance favour the same 3 forever.
+              const lruOrdered = [...candidates].sort(lruCompare);
               const trio: Song[] = [
-                  candidates[order[0 % n]],
-                  candidates[order[1 % n]],
-                  candidates[order[2 % n]],
+                  lruOrdered[0 % n],
+                  lruOrdered[1 % n],
+                  lruOrdered[2 % n],
               ];
               const sortedTrio = [...trio].sort(sortCandidates);
               // sortedTrio[0] = best, [1] = mid, [2] = weakest
@@ -2483,7 +2528,16 @@ const App: React.FC = () => {
           ouroSequence.forEach(freq => {
               const allCandidates = originalPlaylist.filter((s: Song) => s.closestSolfeggio === freq);
               if (allCandidates.length === 0) return; // no songs at all → skip
-              const unused = allCandidates.filter((s: Song) => !usedIds.has(s.id)).sort(sortCandidates);
+              // Unused-at-this-freq sorted LRU first, quality second.
+              // Means the figure-8's traversal naturally cycles through
+              // the user's library at each freq across sessions, instead
+              // of always picking the same deviation-best song first.
+              const unused = allCandidates
+                  .filter((s: Song) => !usedIds.has(s.id))
+                  .sort((a: Song, b: Song) => {
+                      const cmp = lruCompare(a, b);
+                      return cmp !== 0 ? cmp : sortCandidates(a, b);
+                  });
               let pick: Song;
               if (unused.length > 0) {
                   pick = unused[0];
@@ -3522,9 +3576,15 @@ const App: React.FC = () => {
       // Set a conservative volume on the element itself as additional safety
       // Don't set volume on the element - we want pure Web Audio output only
       await mainAudioRef.current.play();
-      
+
       setIsPlaying(true);
       setCurrentSongIndex(index);
+
+      // Record this play in the rotation history so subsequent LRU
+      // shuffles and CAB/Ouroboros pickers deprioritize this song until
+      // others have caught up. Same call covers all flows that route
+      // through playTrack — shuffle next, walk progression, manual click.
+      recordPlay(song.id);
       
       // Don't revoke blob URLs immediately - they need to stay valid
       // We'll clean them up when creating new ones or on unmount
@@ -3552,7 +3612,7 @@ const App: React.FC = () => {
 
         // Ensure indices match playlist length (Sync check)
         if (currentIndices.length !== playlist.length) {
-             currentIndices = getShuffledIndices(playlist.length);
+             currentIndices = getLruShuffledIndices(playlist, playHistoryRef.current);
              setShuffledIndices(currentIndices);
         }
 
@@ -3567,8 +3627,11 @@ const App: React.FC = () => {
         if (nextShufflePos >= currentIndices.length) {
             // End of Shuffle List
             if (isLoop) {
-                // Loop: Generate NEW random order and start from 0
-                const newIndices = getShuffledIndices(playlist.length);
+                // Loop: Generate NEW LRU-weighted order and start from 0.
+                // After a full pass, every song will have been played
+                // recently — the next ordering re-cycles oldest-played
+                // first, with random tiebreakers among ties.
+                const newIndices = getLruShuffledIndices(playlist, playHistoryRef.current);
                 setShuffledIndices(newIndices);
                 setShufflePos(0);
                 playTrack(newIndices[0]);
@@ -4306,7 +4369,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.4</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
