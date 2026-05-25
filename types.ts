@@ -9,6 +9,11 @@ export interface Song {
   closestSolfeggio?: number;   // The calculated nearest Solfeggio tone
   harmonicDeviation?: number;  // How close it is to the target (lower is better)
   fractalAnalysis?: import('./utils/fractalFrequencyAnalysis').FractalAnalysisResult; // Complete fractal analysis
+  intervalAnalysis?: import('./utils/intervalAnalysis').IntervalAnalysisResult; // Gap-between-peaks harmonic coherence
+  // True iff harmonicFreq itself satisfies the Aetheria filter (div-by-3,
+  // digital root 3/6/9, within 150–6500 Hz). Distinguishes "track's dominant
+  // tone IS an Aetheria number" from "matched only via harmonic relationship".
+  isAetheriaCandidate?: boolean;
 }
 
 export enum SolfeggioFreq {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2,
@@ -13,11 +14,18 @@ import ExperienceTracker from './components/ExperienceTracker';
 import OfflineIndicator from './components/OfflineIndicator';
 import LoShuMatrix from './components/LoShuMatrix';
 import AccessibleGuidebook from './components/AccessibleGuidebook';
-import { 
-  analyzeFractalFrequencies, 
-  assessFrequencySafety, 
-  type FractalAnalysisResult 
+import {
+  analyzeFractalFrequencies,
+  assessFrequencySafety,
+  type FractalAnalysisResult
 } from './utils/fractalFrequencyAnalysis';
+import {
+  analyzeIntervals,
+  classificationLabel,
+  couldBeAetheria,
+  type IntervalAnalysisResult,
+  type Peak as IntervalPeak,
+} from './utils/intervalAnalysis';
 import { 
   effectsManager, 
   experienceTracker, 
@@ -129,6 +137,47 @@ const detectDominantFrequency = async (buffer: AudioBuffer): Promise<number> => 
       clearTimeout(timeout);
       console.error("Enhanced analysis setup failed", e);
       resolve(440); // Fallback frequency
+    }
+  });
+};
+
+// Peak-extracting variant of detectDominantFrequency. Runs the same FFT but
+// returns the full peak array (one peak per octave range) so the interval
+// analysis layer can examine the gaps between peaks. Intentionally a sibling
+// rather than a refactor — keeps the existing detector untouched.
+const detectFrequencyPeaks = async (buffer: AudioBuffer): Promise<IntervalPeak[]> => {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve([]), 10000);
+    try {
+      const sampleDuration = Math.min(5, buffer.duration / 2);
+      const offlineCtx = new OfflineAudioContext(1, 44100 * sampleDuration, 44100);
+      const source = offlineCtx.createBufferSource();
+      source.buffer = buffer;
+
+      const analyser = offlineCtx.createAnalyser();
+      analyser.fftSize = 32768;
+      analyser.smoothingTimeConstant = 0.1;
+
+      source.connect(analyser);
+      analyser.connect(offlineCtx.destination);
+
+      const startOffset = Math.min(buffer.duration / 3, 15);
+      source.start(0, startOffset, sampleDuration);
+
+      offlineCtx.startRendering().then(() => {
+        clearTimeout(timeout);
+        const data = new Float32Array(analyser.frequencyBinCount);
+        analyser.getFloatFrequencyData(data);
+        const detected = analyzeExtendedOctaveRanges(data, 44100 / analyser.fftSize);
+        // Already shaped as {frequency, score, octaveRange} — compatible with IntervalPeak.
+        resolve(detected as IntervalPeak[]);
+      }).catch(() => {
+        clearTimeout(timeout);
+        resolve([]);
+      });
+    } catch {
+      clearTimeout(timeout);
+      resolve([]);
     }
   });
 };
@@ -2091,13 +2140,27 @@ const App: React.FC = () => {
           
           const solfeggio = getHarmonicSolfeggio(freq);
           const deviation = Math.abs(freq - solfeggio);
-          
+
+          // Additive: interval/gap analysis on the FFT peak set. Failures here
+          // must not break the primary scan, so we swallow errors and proceed.
+          let intervalData: IntervalAnalysisResult | undefined;
+          try {
+            const peaks = await detectFrequencyPeaks(audioBuffer);
+            if (peaks.length >= 2) {
+              intervalData = analyzeIntervals(peaks);
+            }
+          } catch (intervalErr) {
+            console.warn('Interval analysis failed for', newPlaylist[i].name, intervalErr);
+          }
+
           newPlaylist[i] = {
             ...newPlaylist[i],
             harmonicFreq: freq,
             closestSolfeggio: solfeggio,
             harmonicDeviation: deviation,
-            fractalAnalysis: fractalData
+            fractalAnalysis: fractalData,
+            intervalAnalysis: intervalData,
+            isAetheriaCandidate: couldBeAetheria(freq),
           };
           
         } catch (e) {
@@ -3002,6 +3065,22 @@ const App: React.FC = () => {
           const harmonics = currentSong.fractalAnalysis.infiniteOrderHarmonics.slice(0, 10);
           analysisInfo += harmonics.map(h => `${h.toFixed(1)}Hz`).join(', ') + '\n';
         }
+      }
+
+      if (currentSong.intervalAnalysis) {
+        const ia = currentSong.intervalAnalysis;
+        analysisInfo += `\n🌊 INTERVAL / GAP ANALYSIS:\n`;
+        analysisInfo += `• Coherence Score: ${ia.coherenceScore}/100\n`;
+        analysisInfo += `• Classification: ${classificationLabel(ia.classification)}\n`;
+        analysisInfo += `• 3-6-9 Ratio: ${Math.round(ia.fingerprint.ratio369 * 100)}%\n`;
+        analysisInfo += `• Aetheria Intervals: ${ia.fingerprint.aetheriaMatches}/${ia.fingerprint.totalIntervals}\n`;
+        analysisInfo += `• Harmonic Ratios: ${ia.fingerprint.harmonicMatches}/${ia.fingerprint.totalIntervals}\n`;
+      }
+
+      if (currentSong.isAetheriaCandidate !== undefined) {
+        analysisInfo += `\n🎯 AETHERIA CANDIDATE: ${currentSong.isAetheriaCandidate
+          ? 'YES — dominant frequency is itself an Aetheria number'
+          : 'No — matched via harmonic relationship'}\n`;
       }
       
       // Add recommendations
@@ -4369,7 +4448,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.4</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.5</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -7209,7 +7288,7 @@ registerProcessor('wav-capture', WavCapture);
                             >
                                 <Box size={14}/>
                             </button>
-                            {showLoShuWalkMenu && (
+                            {showLoShuWalkMenu && createPortal(
                                 <>
                                     {/* Click-away catcher */}
                                     <div
@@ -7218,7 +7297,7 @@ registerProcessor('wav-capture', WavCapture);
                                         aria-hidden="true"
                                     />
                                     <div
-                                        className="absolute bottom-full right-0 mb-2 w-72 z-50 p-3 rounded-xl bg-slate-950/95 backdrop-blur-md border border-emerald-500/40 shadow-2xl shadow-emerald-900/40"
+                                        className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-80 max-h-[85vh] overflow-y-auto z-50 p-3 rounded-xl bg-slate-950/95 backdrop-blur-md border border-emerald-500/40 shadow-2xl shadow-emerald-900/40"
                                         role="menu"
                                     >
                                         <div className="flex items-center gap-2 mb-2">
@@ -7347,7 +7426,8 @@ registerProcessor('wav-capture', WavCapture);
                                             </button>
                                         )}
                                     </div>
-                                </>
+                                </>,
+                                document.body
                             )}
                         </div>
 
