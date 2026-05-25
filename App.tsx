@@ -4448,7 +4448,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.5</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.6</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -6157,12 +6157,12 @@ registerProcessor('wav-capture', WavCapture);
                           </div>
                         </div>
 
-                        {/* Ninth Order - SOURCE */}
+                        {/* Ninth Order - Ascension */}
                         <div className="mb-4">
                           <div className="text-[10px] text-pink-400 mb-2 uppercase tracking-widest flex items-center gap-1">
                             <AlertTriangle size={10} />
                             <Sparkles size={10} />
-                            Ninth Order (SOURCE - Gates 4-6)
+                            Ninth Order (Ascension - Gates 4-6)
                           </div>
                           <div className="grid grid-cols-3 gap-2">
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Ninth').map((s) => (
@@ -6614,7 +6614,7 @@ registerProcessor('wav-capture', WavCapture);
                           <h4 className="text-sm font-bold text-pink-400 mb-2 flex items-center gap-1">
                             <AlertTriangle size={14} />
                             <Sparkles size={14} />
-                            Ninth Order (SOURCE)
+                            Ninth Order (Ascension)
                           </h4>
                           <div className="grid grid-cols-3 gap-2">
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Ninth').map((s) => {

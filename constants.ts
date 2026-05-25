@@ -230,7 +230,7 @@ export const SOLFEGGIO_INFO = [
     order: 'Eighth'
   },
 
-  // Ninth Order Frequencies (5274 + 354 steady progression) - SOURCE HEAD  
+  // Ninth Order Frequencies (5274 + 354 steady progression) - Ascension HEAD
   { 
     freq: 5628, 
     chakra: 'Galactic Center', 
