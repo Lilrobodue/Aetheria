@@ -17,6 +17,12 @@ interface VisualizerProps {
    *  path through the sub-cubes. Segments up to the currently-playing cube glow
    *  brighter than the upcoming portion. */
   loShuWalkMode?: LoShuWalkMode | null;
+  /** Current playlist index in the active walk. Used as the sequence-step for
+   *  played/leading highlighting. Needed because walks like Ouroboros and CABI
+   *  visit some frequencies (SOURCE) more than once — looking up the current
+   *  freq via indexOf would always return the first occurrence. -1 disables
+   *  active highlighting (falls back to selectedFrequency lookup). */
+  loShuWalkStep?: number;
 }
 
 // 27 Aetheria frequencies arranged into [GUT, HEART, HEAD] layers, ordered
@@ -713,6 +719,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
   selectedFrequency,
   frequencyColorMode = 'chakra',
   loShuWalkMode = null,
+  loShuWalkStep = -1,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -1959,17 +1966,31 @@ const Visualizer: React.FC<VisualizerProps> = ({
         // it (dim alpha keeps them from drowning out the active walk).
         // The path persists through pause and after the walk's last track
         // ends — only clearing when the walk mode itself is turned off.
+        // For walks that visit a freq more than once (ouroboros, cabi at
+        // SOURCE), prefer the explicit loShuWalkStep prop over freq-based
+        // lookup so the highlight tracks the actual playlist position
+        // through each crossing instead of snapping back to the first
+        // occurrence.
         if (loShuWalkMode) {
           const walk = LO_SHU_WALKS[loShuWalkMode];
-          drawWalkPath(walk, walk.indexOf(selectedFrequency));
+          const currentStep = loShuWalkStep >= 0 && loShuWalkStep < walk.length
+            ? loShuWalkStep
+            : walk.indexOf(selectedFrequency);
+          drawWalkPath(walk, currentStep);
         }
 
         // Preview paths — illuminated independent of any active walk so
         // users can see each walk's shape without loading a playlist.
         // Skip a preview that would duplicate the currently-active walk.
-        if (settings.loShuShowVortex && loShuWalkMode !== 'C') drawWalkPath(LO_SHU_WALKS.C, -1);
-        if (settings.loShuShowAscent && loShuWalkMode !== 'A') drawWalkPath(LO_SHU_WALKS.A, -1);
-        if (settings.loShuShowPillar && loShuWalkMode !== 'B') drawWalkPath(LO_SHU_WALKS.B, -1);
+        // Ouroboros's 29-step sequence repeats SOURCE 3 times, so the
+        // polyline traces the figure-8 naturally; the traveling glow has
+        // a different cycle length (29 vs 27) which subtly desyncs it
+        // from the other three previews when multiple are on — a useful
+        // cue that this walk lives in a different topology.
+        if (settings.loShuShowVortex    && loShuWalkMode !== 'C')         drawWalkPath(LO_SHU_WALKS.C,         -1);
+        if (settings.loShuShowAscent    && loShuWalkMode !== 'A')         drawWalkPath(LO_SHU_WALKS.A,         -1);
+        if (settings.loShuShowPillar    && loShuWalkMode !== 'B')         drawWalkPath(LO_SHU_WALKS.B,         -1);
+        if (settings.loShuShowOuroboros && loShuWalkMode !== 'ouroboros') drawWalkPath(LO_SHU_WALKS.ouroboros, -1);
 
         // Active Hz label — drawn last so it sits on top of every sub-cube
         // and the walk-path overlay, no matter which cube is in front of it

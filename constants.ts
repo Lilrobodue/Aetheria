@@ -357,9 +357,12 @@ export const SEPHIROT_INFO = [
 // 'traditional' covers the classic 9-frequency Solfeggio ascent (GUT only,
 // 174→963). 'combined' is the 81-position omnibus walk: Vortex → Ascent →
 // Pillar in sequence, so the cube gets traced from all three angles in one
-// journey. Both are surfaced alongside the three Lo Shu walks so the cube
-// overlay and walk indicator can render their paths too.
-export type LoShuWalkMode = 'A' | 'B' | 'C' | 'traditional' | 'combined';
+// journey. 'ouroboros' is the 29-step closed figure-8 through all 27 cells
+// crossing at SOURCE (2178 Hz) three times — start, centre crossing,
+// return. 'cabi' is CAB + Ouroboros (110 steps): open every channel, then
+// close the loop. All walks are surfaced through the same registry so the
+// cube overlay, walk indicator, and playlist picker share one shape.
+export type LoShuWalkMode = 'A' | 'B' | 'C' | 'traditional' | 'combined' | 'ouroboros' | 'cabi';
 
 // Walk A — Layer Ascent: positions 1→9 through GUT, then HEART, then HEAD.
 // Ground before you rise. Mirrors the existing Alignment journey extended
@@ -411,12 +414,54 @@ export const LO_SHU_WALK_COMBINED: number[] = [
   ...LO_SHU_WALK_B,
 ];
 
+// Ouroboros — 29-step closed figure-8 through all 27 cells, crossing at
+// SOURCE (2178 Hz, HEART pos 5) three times: start, centre crossing,
+// return. The two lobes occupy the left half of the cube (steps 2–14)
+// and the right half (steps 16–28), producing the ∞ shape when traced
+// in 3D. SOURCE_FREQ marks the steps that picker logic must treat as
+// repeats — see the OUROBOROS_PHASES export for the ♾️/✕ tokens. The
+// playlist generator must NOT deduplicate by song id for this walk; the
+// 3 SOURCE visits are intentional, even if the same song plays each time
+// (libraries with multiple SOURCE candidates get distinct picks).
+export const SOURCE_FREQ = 2178;
+export const LO_SHU_WALK_OUROBOROS: number[] = [
+  2178,                                            //  1  SOURCE start (♾️)
+  // ─── Lobe 1 (left half) ───
+  528, 396, 852, 174, 2907, 5982, 4212, 4566,      //  2– 9
+  1935, 417, 963, 1692, 1206,                      // 10–14
+  // ─── Crossing ───
+  2178,                                            // 15  SOURCE crossing (✕)
+  // ─── Lobe 2 (right half) ───
+  4920, 5628, 3858, 6336, 1449, 285, 3150,         // 16–22
+  741, 639, 2421, 5274, 3504, 2664,                // 23–28
+  // ─── Return ───
+  2178,                                            // 29  SOURCE return (♾️)
+];
+
+// Phase tokens for the three SOURCE visits in the Ouroboros walk. Index
+// into the OUROBOROS sequence: visit 1 = start, visit 2 = crossing,
+// visit 3 = return. Used by the player's progress chip to surface
+// where in the figure-8 the listener is.
+export const OUROBOROS_PHASES: readonly string[] = ['♾️', '✕', '♾️'];
+
+// CABI — Calling a CABI. CAB (81 steps) followed by Ouroboros (29 steps).
+// 110 steps total: open every channel through the three-phase CAB sweep,
+// then close the loop into infinity through the figure-8. The dragon eats
+// its tail. SOURCE (2178 Hz) appears 6 times total — 3 from CAB phases
+// (steps 10, 41, 68) and 3 from Ouroboros (steps 82, 96, 110).
+export const LO_SHU_WALK_CABI: number[] = [
+  ...LO_SHU_WALK_COMBINED,
+  ...LO_SHU_WALK_OUROBOROS,
+];
+
 export const LO_SHU_WALKS: Record<LoShuWalkMode, number[]> = {
   A: LO_SHU_WALK_A,
   B: LO_SHU_WALK_B,
   C: LO_SHU_WALK_C,
   traditional: LO_SHU_WALK_TRADITIONAL,
   combined: LO_SHU_WALK_COMBINED,
+  ouroboros: LO_SHU_WALK_OUROBOROS,
+  cabi: LO_SHU_WALK_CABI,
 };
 
 export const LO_SHU_WALK_INFO: Record<LoShuWalkMode, {
@@ -454,6 +499,18 @@ export const LO_SHU_WALK_INFO: Record<LoShuWalkMode, {
     fullName: 'Combined Walk — Calling a CAB (C·A·B)',
     tagline: '81 positions · Vortex → Ascent → Pillar',
     philosophy: 'Calling a CAB: Centres first (Vortex), then layers (Ascent), then pillars (Pillar). The three walks composed in sequence so the cube is traced from every angle in one journey. Builds up to 81 unique tracks (3 distinct songs per frequency), gracefully repeating where your library has fewer matches.',
+  },
+  ouroboros: {
+    shortName: 'Ouroboros',
+    fullName: 'Ouroboros ♾️',
+    tagline: '29 positions · closed figure-8 crossing SOURCE three times',
+    philosophy: 'Closed figure-8 through all 27 frequencies, crossing at 2178 Hz (HEART pos 5, SOURCE) three times — start, centre crossing, return. The dragon eating its tail. Two lobes occupy the left and right halves of the cube; the diagonal-view symmetry produces the ∞ shape. The orbit must close — energy that does not return does not accumulate.',
+  },
+  cabi: {
+    shortName: 'CABI',
+    fullName: 'Calling a CABI · C·A·B·I',
+    tagline: '110 positions · CAB then Ouroboros',
+    philosophy: 'The full circuit. CAB (81 steps) opens every channel through the three-phase sweep, then Ouroboros (29 steps) closes the loop into infinity. SOURCE is visited six times — three through CAB, three through the figure-8 — beginnings and ends recognized as the same point.',
   },
 };
 

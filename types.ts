@@ -65,9 +65,10 @@ export interface VizSettings {
   // that walk's 27-frequency path even when no walk playlist is active. Lets
   // the user preview each walk's shape without loading songs. Multiple paths
   // can be on at once; the shapes themselves are the visual identifier.
-  loShuShowVortex: boolean; // Walk C — Flying Star Vortex (5→6→7→8→9→1→2→3→4 per layer)
-  loShuShowAscent: boolean; // Walk A — Layer Ascent (1→9 per layer, GUT→HEART→HEAD)
-  loShuShowPillar: boolean; // Walk B — Pillar Walk (GUT→HEART→HEAD per Lo Shu position)
+  loShuShowVortex: boolean;    // Walk C — Flying Star Vortex (5→6→7→8→9→1→2→3→4 per layer)
+  loShuShowAscent: boolean;    // Walk A — Layer Ascent (1→9 per layer, GUT→HEART→HEAD)
+  loShuShowPillar: boolean;    // Walk B — Pillar Walk (GUT→HEART→HEAD per Lo Shu position)
+  loShuShowOuroboros: boolean; // Walk I — Ouroboros figure-8 (29 steps, crosses SOURCE 3×)
   
   // Color Logic — 'spectrum' is the 4th mode: visible-light wavelength of
   // the active frequency (still audio-reactive via HSL modulation).

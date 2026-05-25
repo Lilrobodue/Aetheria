@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Calculator, Sparkles, CheckCircle2, AlertCircle, Box, Volume2, ArrowUpCircle, Layers, Wind } from 'lucide-react';
+import { Calculator, Sparkles, CheckCircle2, AlertCircle, Box, Volume2, ArrowUpCircle, Layers, Wind, Infinity as InfinityIcon, Atom } from 'lucide-react';
 import { LO_SHU_WALK_INFO, type LoShuWalkMode } from '../constants';
 import { frequencyToSpectrumColor, type FrequencyColorMode } from '../utils/spectrumColor';
 
@@ -350,6 +350,8 @@ const WALK_ICONS: Record<MatrixWalkMode, React.ComponentType<{ size?: number; cl
   B: Layers,
   C: Wind,
   combined: Sparkles,
+  ouroboros: InfinityIcon,
+  cabi: Atom,
 };
 
 const WALK_ACCENTS: Record<MatrixWalkMode, { active: string; idle: string; icon: string }> = {
@@ -372,6 +374,16 @@ const WALK_ACCENTS: Record<MatrixWalkMode, { active: string; idle: string; icon:
     active: 'bg-gradient-to-r from-amber-500/15 via-emerald-500/15 to-purple-500/20 border-gold-500/60 text-gold-200 shadow-lg shadow-gold-500/20',
     idle: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-gold-500/40 hover:text-gold-300',
     icon: 'text-gold-400',
+  },
+  ouroboros: {
+    active: 'bg-cyan-500/20 border-cyan-500/60 text-cyan-100 shadow-lg shadow-cyan-500/20',
+    idle: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-cyan-500/40 hover:text-cyan-300',
+    icon: 'text-cyan-300',
+  },
+  cabi: {
+    active: 'bg-gradient-to-r from-gold-500/15 via-cyan-500/15 to-purple-500/20 border-gold-500/60 text-gold-100 shadow-lg shadow-gold-500/30',
+    idle: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-gold-500/40 hover:text-gold-300',
+    icon: 'text-gold-300',
   },
 };
 
@@ -582,15 +594,20 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
             })}
           </div>
 
-          {/* Combined walk gets its own full-width row because it's the deepest journey. */}
-          {(() => {
-            const mode: MatrixWalkMode = 'combined';
+          {/* Deeper journeys — CAB, Ouroboros, and CABI — each gets its own
+              full-width row because each is its own complete progression. */}
+          {(['combined', 'ouroboros', 'cabi'] as MatrixWalkMode[]).map(mode => {
             const info = LO_SHU_WALK_INFO[mode];
             const Icon = WALK_ICONS[mode];
             const accent = WALK_ACCENTS[mode];
             const isActive = activeWalkMode === mode;
+            const positionCount =
+              mode === 'combined' ? '81 positions'
+              : mode === 'ouroboros' ? '29 positions'
+              : '110 positions';
             return (
               <button
+                key={mode}
                 type="button"
                 onClick={() => onStartWalk(mode)}
                 className={`mt-3 w-full text-left p-4 rounded-lg border transition-all active:scale-[0.98] ${
@@ -601,7 +618,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
                 <div className="flex items-center gap-2 mb-2">
                   <Icon size={18} className={accent.icon} />
                   <div className="font-bold text-sm">{info.fullName}</div>
-                  <div className="ml-auto text-[10px] font-mono text-gold-400/80 uppercase tracking-wider">81 positions</div>
+                  <div className="ml-auto text-[10px] font-mono text-gold-400/80 uppercase tracking-wider">{positionCount}</div>
                 </div>
                 <div className="text-[11px] text-slate-400 font-mono mb-2">{info.tagline}</div>
                 <div className="text-[11px] text-slate-300/80 leading-relaxed">
@@ -609,7 +626,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
                 </div>
               </button>
             );
-          })()}
+          })}
 
           <div className="mt-3 text-[10px] text-slate-500 italic">
             Walks need analyzed songs across the regime ranges. Run Deep Scan first if your library is unprocessed.
@@ -692,6 +709,75 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
         <div className="text-center text-xs text-slate-500 mt-3 italic">
           Harmony → Completion → Harmony
         </div>
+      </div>
+
+      {/* The Closed Circuit — Ouroboros as Inheritance.
+          Condensed from the_closed_circuit_ouroboros_inheritance.md.
+          Frames why one of the six Aetheria walks is closed and surfaces
+          the cross-cultural correspondences that converge on the same shape. */}
+      <div className="mt-6 p-6 bg-gradient-to-br from-cyan-900/15 via-slate-900/40 to-purple-900/15 border border-cyan-500/30 rounded-xl">
+        <div className="flex items-center gap-2 mb-3">
+          <InfinityIcon className="text-cyan-300" size={20} />
+          <h4 className="text-lg font-bold text-cyan-200 uppercase tracking-wider">The Closed Circuit · 周天</h4>
+          <span className="ml-auto text-[10px] text-cyan-400/70 font-mono italic">Ouroboros as Inheritance</span>
+        </div>
+        <p className="text-sm text-slate-300 mb-3 leading-relaxed">
+          Two of the Aetheria walks are closed: the <span className="text-cyan-200 font-semibold">Ouroboros</span> (29 steps)
+          and <span className="text-cyan-200 font-semibold">CABI</span> (110 steps). Each is a figure-8 through the cube that
+          begins, crosses, and returns at <span className="text-purple-300 font-bold">2178 Hz</span> — HEART position 5, SOURCE.
+          The cube has exactly one geometric centre, and a closed lemniscate has exactly one self-intersection. Both converge
+          on the same cell.
+        </p>
+        <p className="text-sm text-slate-300 mb-4 leading-relaxed">
+          We did not invent this topology. We translated it. Across cultures the closed circuit is the form unified things take:
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4 text-[11px]">
+          <div className="bg-slate-950/50 border border-cyan-500/20 rounded-lg p-3">
+            <div className="text-cyan-300 font-bold uppercase tracking-wider mb-1">Taoist · <span className="font-mono text-cyan-200/90 normal-case">小周天</span></div>
+            <div className="text-slate-300 leading-relaxed">The Microcosmic Orbit circulates qi up the Governing Vessel and down the Conception Vessel, always returning to the <span className="italic">dantian</span>. SOURCE is the cube's <span className="italic">dantian</span>. Energy that does not return does not accumulate.</div>
+          </div>
+          <div className="bg-slate-950/50 border border-cyan-500/20 rounded-lg p-3">
+            <div className="text-cyan-300 font-bold uppercase tracking-wider mb-1">Tao Te Ching · <span className="font-mono text-cyan-200/90 normal-case">反者道之動</span></div>
+            <div className="text-slate-300 leading-relaxed">Chapter 40 opens with <span className="italic">fǎn zhě Dào zhī dòng</span> — "returning is the motion of the Tao." SOURCE is not the summit. SOURCE is the point of return.</div>
+          </div>
+          <div className="bg-slate-950/50 border border-cyan-500/20 rounded-lg p-3">
+            <div className="text-cyan-300 font-bold uppercase tracking-wider mb-1">Yijing · <span className="font-mono text-cyan-200/90 normal-case">復 · Hexagram 24</span></div>
+            <div className="text-slate-300 leading-relaxed"><span className="italic">Fù</span>, "Return" — a single yang line returning beneath five yin. The smallest light at the winter solstice; the turning point of any cycle. Each centre crossing traces this gesture.</div>
+          </div>
+          <div className="bg-slate-950/50 border border-cyan-500/20 rounded-lg p-3">
+            <div className="text-cyan-300 font-bold uppercase tracking-wider mb-1">Hellenistic Alchemy</div>
+            <div className="text-slate-300 leading-relaxed">Cleopatra's <span className="italic">Chrysopoeia</span>, c. 2nd–3rd century CE Alexandria — ouroboros inscribed with <span className="font-mono text-cyan-200/90">ἓν τὸ πᾶν</span>, <span className="italic">hen to pan</span>, "one is the all." The unified-field claim written explicitly inside the loop.</div>
+          </div>
+          <div className="bg-slate-950/50 border border-cyan-500/20 rounded-lg p-3">
+            <div className="text-cyan-300 font-bold uppercase tracking-wider mb-1">Egyptian · Tutankhamun, c. 1325 BCE</div>
+            <div className="text-slate-300 leading-relaxed">Earliest known depiction, on the second gilded shrine — the serpent encircles the body of the sun god, the cycle of solar death and rebirth made into a closed form.</div>
+          </div>
+          <div className="bg-slate-950/50 border border-cyan-500/20 rounded-lg p-3">
+            <div className="text-cyan-300 font-bold uppercase tracking-wider mb-1">Norse · Jörmungandr</div>
+            <div className="text-slate-300 leading-relaxed">The world serpent who encircles Midgard, biting his own tail. While he holds it, the world remains; when he releases it, Ragnarök begins.</div>
+          </div>
+          <div className="bg-slate-950/50 border border-cyan-500/20 rounded-lg p-3">
+            <div className="text-cyan-300 font-bold uppercase tracking-wider mb-1">Buddhist · <span className="font-mono text-cyan-200/90 normal-case">Pratītyasamutpāda</span></div>
+            <div className="text-slate-300 leading-relaxed">Twelve <span className="italic">nidānas</span> form a closed chain where ignorance leads, through craving and becoming, back to ignorance. A closed loop with a privileged crossing where the cycle can be transformed.</div>
+          </div>
+          <div className="bg-slate-950/50 border border-cyan-500/20 rounded-lg p-3">
+            <div className="text-cyan-300 font-bold uppercase tracking-wider mb-1">Jungian · the Red Book</div>
+            <div className="text-slate-300 leading-relaxed">Adopted as a symbol of psychic wholeness — the integration of opposites where swallower and swallowed are recognized as one being.</div>
+          </div>
+        </div>
+
+        <div className="bg-purple-950/30 border-l-2 border-purple-400/60 rounded-r-lg px-4 py-3 mb-3">
+          <p className="text-sm text-purple-100 italic leading-relaxed">
+            Healing is not a journey to a destination. It is a circulation that returns to source.
+          </p>
+        </div>
+
+        <p className="text-[11px] text-slate-500 italic leading-relaxed">
+          We offer this lineage as a correspondence, not a derivation. The traditions stand on their own; so does the geometry.
+          What Aetheria observes is that when the closed walks are laid alongside the closed teachings, the shape is already
+          shared. The figure-8 was waiting for the frequencies. The frequencies were waiting for the figure-8.
+        </p>
       </div>
 
       {/* Solfeggio offset analysis */}

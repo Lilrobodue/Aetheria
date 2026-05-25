@@ -5,7 +5,7 @@ import {
   Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map as MapIcon, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe, Headphones
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
-import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, getLoShuPosition, type LoShuWalkMode } from './constants';
+import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, LO_SHU_WALK_COMBINED, LO_SHU_WALK_OUROBOROS, OUROBOROS_PHASES, SOURCE_FREQ, getLoShuPosition, type LoShuWalkMode } from './constants';
 import Visualizer from './components/Visualizer';
 import FrequencySelector from './components/FrequencySelector';
 import SafetyProtocols from './components/SafetyProtocols';
@@ -799,12 +799,15 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         {
             title: "4. Lo Shu Walks (Optional)",
             icon: <Box className="text-emerald-400 w-12 h-12" />,
-            desc: "An ancient pattern from a 4,000-year-old Chinese magic square — three different paths through the frequencies.",
+            desc: "An ancient pattern from a 4,000-year-old Chinese magic square — six different paths through the 27 frequencies.",
             content: (
                 <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
-                    <li className="flex gap-2">🏔️ <strong className="text-emerald-300">Layer Ascent:</strong> One range at a time, in Lo Shu order instead of numerical order.</li>
-                    <li className="flex gap-2">🏛️ <strong className="text-emerald-300">Pillar Walk:</strong> Each position played at all three ranges before moving on. Nine vertical pillars.</li>
-                    <li className="flex gap-2">🌀 <strong className="text-emerald-300">Flying Star Vortex:</strong> Spirals outward from center. The traditional Daoist "nine palaces" path.</li>
+                    <li className="flex gap-2">🏔️ <strong className="text-emerald-300">Layer Ascent:</strong> 27 tracks. One range at a time, in Lo Shu order instead of numerical order.</li>
+                    <li className="flex gap-2">🏛️ <strong className="text-emerald-300">Pillar Walk:</strong> 27 tracks. Each position played at all three ranges before moving on. Nine vertical pillars.</li>
+                    <li className="flex gap-2">🌀 <strong className="text-emerald-300">Flying Star Vortex:</strong> 27 tracks. Spirals outward from center. The traditional Daoist "nine palaces" path.</li>
+                    <li className="flex gap-2">🚖 <strong className="text-gold-300">Calling a CAB:</strong> 81 tracks. Vortex → Ascent → Pillar — the cube traced from every angle in one journey.</li>
+                    <li className="flex gap-2">♾️ <strong className="text-cyan-300">Ouroboros:</strong> 29 tracks. Closed figure-8 through all 27 frequencies, crossing SOURCE three times. The dragon eats its tail.</li>
+                    <li className="flex gap-2">⚛️ <strong className="text-gold-300">Calling a CABI:</strong> 110 tracks. CAB + Ouroboros — open every channel, then close the loop into infinity.</li>
                     <li className="flex gap-2">🎛️ <strong className="text-gold-200">Where to find it:</strong> Cube icon in the player controls (next to repeat). Music must be scanned and distributed first.</li>
                 </ul>
             )
@@ -968,6 +971,7 @@ const App: React.FC = () => {
     loShuShowVortex: false,
     loShuShowAscent: false,
     loShuShowPillar: false,
+    loShuShowOuroboros: false,
     colorMode: 'chakra',
     autoRotate: true,
     invertPerspective: false,
@@ -1077,11 +1081,20 @@ const App: React.FC = () => {
   // mode — used to detect "this playlist isn't the walk anymore" without
   // having to instrument every other journey generator.
   const loShuWalkSnapshotRef = useRef<string>('');
-  // For 'combined' walk only: per-segment track counts [Vortex, Ascent, Pillar].
-  // Used by the footer chip to show "Vortex 14/27 · Step 41/81" — values can
-  // be < 27 each if some frequencies in the library had zero matching songs.
-  // Null for non-combined walks (single-walk segment count is just playlist.length).
-  const [loShuWalkSegments, setLoShuWalkSegments] = useState<[number, number, number] | null>(null);
+  // For multi-segment walks (combined, ouroboros, cabi): per-segment track
+  // counts in playback order. Used by the footer chip to show "Vortex 14/27"
+  // and similar. Lengths can be < the theoretical segment length if some
+  // frequencies in the library had zero matching songs. Schema by mode:
+  //   combined  → [Vortex, Ascent, Pillar]                              (3)
+  //   ouroboros → [Ouroboros]                                           (1)
+  //   cabi      → [Vortex, Ascent, Pillar, Ouroboros]                   (4)
+  // Null for single walks (A/B/C/traditional) — chip falls back to total.
+  const [loShuWalkSegments, setLoShuWalkSegments] = useState<number[] | null>(null);
+  // Parallel to the walk playlist: phase tokens (♾️, ✕) that surface at
+  // notable positions like the Ouroboros SOURCE crossings. Empty string for
+  // positions with no special phase. Null when the active walk has no
+  // phase tokens to display.
+  const [loShuWalkPhases, setLoShuWalkPhases] = useState<string[] | null>(null);
   // Local UI state — controls whether the toolbar walk popover is open.
   const [showLoShuWalkMenu, setShowLoShuWalkMenu] = useState(false);
 
@@ -1096,6 +1109,7 @@ const App: React.FC = () => {
     if (currentIds !== loShuWalkSnapshotRef.current) {
       setLoShuWalkMode(null);
       setLoShuWalkSegments(null);
+      setLoShuWalkPhases(null);
     }
   }, [playlist, loShuWalkMode]);
   const [useChakraOrder, setUseChakraOrder] = useState(false);
@@ -1106,7 +1120,35 @@ const App: React.FC = () => {
   const [fractalAnalysis, setFractalAnalysis] = useState<FractalAnalysisResult | null>(null);
   const [showFrequencySelector, setShowFrequencySelector] = useState(false);
   const [showSafetyProtocols, setShowSafetyProtocols] = useState(false);
-  const [userExperienceLevel, setUserExperienceLevel] = useState<'beginner' | 'intermediate' | 'advanced' | 'expert'>('beginner');
+  // Safety protocol / experience level — persisted to localStorage so the
+  // user's chosen tier survives reloads. The level is also auto-bumped by
+  // certain journeys (HEAD alignment, 111-pattern journey, etc.); when
+  // that happens the bumped value is what gets saved, so refreshing after
+  // an Expert-level walk keeps the user at Expert until they explicitly
+  // step down via the shield-icon header or Harmonic Settings.
+  const EXPERIENCE_LEVEL_STORAGE_KEY = 'aetheria.experienceLevel.v1';
+  const isValidExperienceLevel = (v: unknown): v is 'beginner' | 'intermediate' | 'advanced' | 'expert' =>
+    v === 'beginner' || v === 'intermediate' || v === 'advanced' || v === 'expert';
+  const [userExperienceLevel, setUserExperienceLevel] = useState<'beginner' | 'intermediate' | 'advanced' | 'expert'>(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem(EXPERIENCE_LEVEL_STORAGE_KEY);
+        if (isValidExperienceLevel(raw)) return raw;
+      }
+    } catch {
+      // localStorage may be unavailable (private mode / SSR) — fall through.
+    }
+    return 'beginner';
+  });
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(EXPERIENCE_LEVEL_STORAGE_KEY, userExperienceLevel);
+      }
+    } catch {
+      // Best-effort persistence — silent failure is fine.
+    }
+  }, [userExperienceLevel]);
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
   const [sessionDuration, setSessionDuration] = useState(0);
   const [isDocumentingEffects, setIsDocumentingEffects] = useState(false);
@@ -1227,6 +1269,12 @@ const App: React.FC = () => {
   const binauralRightOscRef = useRef<OscillatorNode | null>(null);
   const binauralMergerRef = useRef<ChannelMergerNode | null>(null);
   const binauralGainRef = useRef<GainNode | null>(null);
+  // Phase-modulation nodes (ConstantSources used for golden-angle binaural
+  // offset). Tracked here so updateBinaural's cleanup can stop+disconnect
+  // them — otherwise every volume change orphans two ConstantSources on
+  // the AudioContext graph.
+  const binauralLeftPhaseRef = useRef<ConstantSourceNode | null>(null);
+  const binauralRightPhaseRef = useRef<ConstantSourceNode | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const destNodeRef = useRef<MediaStreamAudioDestinationNode | null>(null);
@@ -1491,9 +1539,15 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Octave-shift frequencies above 963Hz down to sub-bass range (20-60Hz)
+  // Octave-shift frequencies above 639Hz down to sub-bass range (20-60Hz).
+  // Threshold was 963 originally; lowered to 639 so the GUT band's upper
+  // three positions (741/852/963) also drop to sub-bass during playback.
+  // The UI still displays the canonical Hz (741/852/963) — only the
+  // oscillator's actual frequency is shifted, preserving the frequency's
+  // identity while keeping it out of the harsh upper range. Sub-bass
+  // mapping for these three: 741→46.3Hz, 852→53.25Hz, 963→30.1Hz.
   const toSubBass = (freq: number): number => {
-    if (freq <= 963) return freq;
+    if (freq <= 639) return freq;
     let f = freq;
     while (f > 60) f /= 2;
     if (f < 20) f *= 2;
@@ -1570,8 +1624,8 @@ const App: React.FC = () => {
     if (!audioCtxRef.current) return;
     const ctx = audioCtxRef.current;
     
-    [binauralLeftOscRef, binauralRightOscRef].forEach(ref => {
-      if (ref.current) { try { ref.current.stop(); } catch(e){} ref.current.disconnect(); }
+    [binauralLeftOscRef, binauralRightOscRef, binauralLeftPhaseRef, binauralRightPhaseRef].forEach(ref => {
+      if (ref.current) { try { ref.current.stop(); } catch(e){} ref.current.disconnect(); ref.current = null; }
     });
     if (binauralGainRef.current) binauralGainRef.current.disconnect();
     if (binauralMergerRef.current) binauralMergerRef.current.disconnect();
@@ -1625,6 +1679,8 @@ const App: React.FC = () => {
     binauralRightOscRef.current = rightOsc;
     binauralMergerRef.current = merger;
     binauralGainRef.current = mainGain;
+    binauralLeftPhaseRef.current = leftPhaseNode;
+    binauralRightPhaseRef.current = rightPhaseNode;
   }, [isPlaying, selectedBinaural, enablePhiMode, volume, binauralVolume, solfeggioVolume]); 
 
   useEffect(() => { updateSolfeggio(); }, [updateSolfeggio]);
@@ -2324,13 +2380,18 @@ const App: React.FC = () => {
   };
 
   // Lo Shu Walk — build a journey playlist whose ordering follows one of
-  // the Lo Shu walks (Layer Ascent / Pillar / Flying Star Vortex / Combined).
-  // For the single walks (A/B/C/traditional) we pick the best unused song
-  // per frequency — positions with no matching song are skipped silently.
-  // For the 'combined' walk (81 positions = Vortex + Ascent + Pillar) we
-  // pre-build a per-frequency queue so each pass uses a distinct song where
-  // possible, falling back to repeating the best match when the library has
-  // fewer than 3 candidates for a frequency (graceful degradation).
+  // the Lo Shu walks. Picker behaviour by mode:
+  //   A / B / C / traditional → best unused per freq, never repeats.
+  //   combined (CAB, 81 steps) → top-K shuffle per freq, Pillar gets the
+  //     deviation peak of each trio; CAB still builds to its peak even
+  //     when balanced auto-distribute fills each freq with ~13 candidates.
+  //   ouroboros (29 steps) → best unused per freq from the shared pool;
+  //     SOURCE (visited 3×) repeats the best match when out of unused, so
+  //     the figure-8 always closes. Emits ♾️/✕ phase tokens.
+  //   cabi (110 steps) → CAB then Ouroboros, sharing usedIds across both
+  //     so the closing Ouroboros doesn't replay songs heard in the CAB
+  //     sweep. SOURCE may be visited up to 6 times total; up to 6 distinct
+  //     songs play if the library has them, then repeats.
   const generateLoShuWalk = (mode: LoShuWalkMode) => {
       const sequence = LO_SHU_WALKS[mode];
       const info = LO_SHU_WALK_INFO[mode];
@@ -2350,31 +2411,25 @@ const App: React.FC = () => {
           return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
       };
 
-      if (mode === 'combined') {
-          // Two-stage pick per frequency:
-          //   1. Fisher-Yates shuffle the candidate list and take the first
-          //      three indices — this prevents the same trio from being
-          //      drawn every regen, fixing the alphabetical clustering that
-          //      surfaced when the deterministic sort tied many candidates.
-          //   2. Within that trio, sort by goldenRatioAlignment then
-          //      harmonicDeviation (best first) and assign so Pillar (the
-          //      integrating axis at the end of CAB) gets the strongest
-          //      match, Vortex (the opening flow) the middle, and Ascent
-          //      (the grounding ladder) the weakest of the three. Mirrors
-          //      the prior PASS_TO_TIER = [1, 2, 0] intent — the walk still
-          //      builds to its peak on the Pillar — without re-introducing
-          //      upload-order clustering.
-          // With n ≥ 3 each walk gets a distinct song; n = 2 → one
-          // repeats; n = 1 → plays in all three walks.
-          const uniqueFreqs = Array.from(new Set(sequence));
-          // Restrict the shuffle pool to the top-K best-matching candidates
-          // per frequency. With balanced auto-distribute filling each freq
-          // with ~13 songs (3 from passes 1–3 + ~10 from balanced spillover),
-          // shuffling the full pool would let weakly-matched spillover picks
-          // land on Vortex/Ascent. Top-K keeps CAB quality high while still
-          // giving 6 candidates worth of shuffle variety — C(6,3) × 3! = 120
-          // possible trio arrangements per freq.
-          const CAB_POOL_SIZE = 6;
+      // Used song IDs accumulated across the whole walk. Shared between
+      // pickers so cabi's Ouroboros tail avoids replaying songs heard in
+      // its CAB head.
+      const usedIds = new Set<string>();
+      // Parallel to walkPlaylist — same length, '' for steps with no
+      // special phase token. Ouroboros emits ♾️/✕ at the SOURCE visits.
+      const walkPhases: string[] = [];
+
+      // Top-K candidate cap for CAB-style pickers. Balanced auto-distribute
+      // can place ~13 candidates per freq; the cap keeps shuffle picks
+      // among the strongest matches while still giving C(6,3) × 3! = 120
+      // possible trio arrangements per freq for the user's "regen" variety.
+      const CAB_POOL_SIZE = 6;
+
+      // CAB picker — drives 'combined' and the first 81 steps of 'cabi'.
+      // Returns the per-segment counts [Vortex, Ascent, Pillar] so the
+      // footer chip can show "Vortex 14/27".
+      const runCabPicker = (cabSequence: number[]): [number, number, number] => {
+          const uniqueFreqs = Array.from(new Set(cabSequence));
           const passPicks = new Map<number, (Song | undefined)[]>();
           uniqueFreqs.forEach(freq => {
               const allCandidates = originalPlaylist.filter((s: Song) => s.closestSolfeggio === freq);
@@ -2400,25 +2455,77 @@ const App: React.FC = () => {
               passPicks.set(freq, [sortedTrio[1], sortedTrio[2], sortedTrio[0]]);
           });
 
-          // sequence = C (0..26) + A (27..53) + B (54..80).
+          // cabSequence = C (0..26) + A (27..53) + B (54..80).
           //   Pass 0 = Vortex (C), Pass 1 = Ascent (A), Pass 2 = Pillar (B).
-          // Track per-segment counts so the footer chip can show
-          // "Vortex N/27 · Step M/total" — counts can be < 27 if some
-          // frequencies in the library had zero matching songs.
           const segmentCounts: [number, number, number] = [0, 0, 0];
-          sequence.forEach((freq, i) => {
+          cabSequence.forEach((freq, i) => {
               const pass = Math.floor(i / 27);
               const pick = passPicks.get(freq)?.[pass];
               if (pick) {
                   walkPlaylist.push(pick);
+                  walkPhases.push('');
+                  usedIds.add(pick.id);
                   segmentCounts[pass]++;
               }
           });
-          setLoShuWalkSegments(segmentCounts);
+          return segmentCounts;
+      };
+
+      // Ouroboros picker — best-unused-per-freq from the shared usedIds.
+      // When a freq has no unused songs left (typical at the 2nd/3rd
+      // SOURCE visit), it REPEATS the best match instead of skipping —
+      // this is the spec's "do not deduplicate" rule made concrete. The
+      // figure-8's three crossings at SOURCE always produce a playlist
+      // entry. Emits ♾️/✕ tokens into walkPhases at SOURCE visits.
+      const runOuroborosPicker = (ouroSequence: number[]): number => {
+          let pushed = 0;
+          let sourceVisit = 0;
+          ouroSequence.forEach(freq => {
+              const allCandidates = originalPlaylist.filter((s: Song) => s.closestSolfeggio === freq);
+              if (allCandidates.length === 0) return; // no songs at all → skip
+              const unused = allCandidates.filter((s: Song) => !usedIds.has(s.id)).sort(sortCandidates);
+              let pick: Song;
+              if (unused.length > 0) {
+                  pick = unused[0];
+                  usedIds.add(pick.id);
+              } else {
+                  // Fresh pool exhausted at this freq — repeat the best
+                  // match. Intentional at the three SOURCE visits when
+                  // the library has fewer distinct SOURCE songs than the
+                  // walk requires.
+                  pick = [...allCandidates].sort(sortCandidates)[0];
+              }
+              walkPlaylist.push(pick);
+              let phase = '';
+              if (freq === SOURCE_FREQ) {
+                  phase = OUROBOROS_PHASES[sourceVisit] ?? '';
+                  sourceVisit++;
+              }
+              walkPhases.push(phase);
+              pushed++;
+          });
+          return pushed;
+      };
+
+      if (mode === 'combined') {
+          const cabCounts = runCabPicker(sequence);
+          setLoShuWalkSegments([...cabCounts]);
+          setLoShuWalkPhases(null);
+      } else if (mode === 'ouroboros') {
+          const oCount = runOuroborosPicker(sequence);
+          setLoShuWalkSegments([oCount]);
+          setLoShuWalkPhases([...walkPhases]);
+      } else if (mode === 'cabi') {
+          // CABI = CAB (81 steps) + Ouroboros (29 steps), shared usedIds
+          // so the closing Ouroboros doesn't replay songs heard in CAB.
+          const cabCounts = runCabPicker(LO_SHU_WALK_COMBINED);
+          const oCount = runOuroborosPicker(LO_SHU_WALK_OUROBOROS);
+          setLoShuWalkSegments([cabCounts[0], cabCounts[1], cabCounts[2], oCount]);
+          setLoShuWalkPhases([...walkPhases]);
       } else {
           setLoShuWalkSegments(null);
-          // Single walks: best unused song per frequency, never repeat.
-          const usedIds = new Set<string>();
+          setLoShuWalkPhases(null);
+          // Single walks (A / B / C / traditional): best unused per freq.
           sequence.forEach(freq => {
               const candidates = originalPlaylist
                   .filter((s: Song) => s.closestSolfeggio === freq && !usedIds.has(s.id))
@@ -2448,7 +2555,7 @@ const App: React.FC = () => {
 
           setAnalysisNotification(
               `Lo Shu · ${info.fullName} — ${walkPlaylist.length}/${sequence.length} positions filled.` +
-              (mode === 'combined' ? ' Click CAB again for a different shuffle.' : '')
+              ((mode === 'combined' || mode === 'cabi') ? ' Click again for a different shuffle.' : '')
           );
           setTimeout(() => setAnalysisNotification(null), 5000);
 
@@ -2466,7 +2573,11 @@ const App: React.FC = () => {
   // Clear the active Lo Shu walk indicator without otherwise touching the
   // playlist. Called by other journey generators (alignment, mood, etc.) so
   // the walk badge doesn't linger after the user starts a different journey.
-  const clearLoShuWalkMode = () => setLoShuWalkMode(null);
+  const clearLoShuWalkMode = () => {
+      setLoShuWalkMode(null);
+      setLoShuWalkSegments(null);
+      setLoShuWalkPhases(null);
+  };
 
   // Generate full library alignment ordered by frequency
   const generateFullLibraryAlignment = () => {
@@ -3317,25 +3428,33 @@ const App: React.FC = () => {
         });
       }
 
-      // Create or reuse blob URL for the audio file
-      let audioUrl = blobUrlsRef.current[song.id];
-      
-      // If we don't have a blob URL or it might be expired, create a new one
-      if (!audioUrl) {
-        // Clean up any old URL for this song
-        const oldUrl = blobUrlsRef.current[song.id];
-        if (oldUrl) {
-          URL.revokeObjectURL(oldUrl);
+      // Revoke and drop blob URLs for any song we're not about to play.
+      // URL.createObjectURL pins the underlying File until its URL is
+      // revoked, so without this every track played in a long walk keeps
+      // its MP3 (5–50 MB) alive for the rest of the session. At ~30 MB
+      // × 110 tracks of a CABI walk that's ~3.3 GB of unfreeable memory,
+      // which is what caused Chrome to freeze around the 6-hour mark on
+      // shuffle. Keeping at most one blob URL alive at a time caps
+      // session memory at one track's worth regardless of walk length.
+      // (Previous code attempted a per-song revoke but checked the same
+      // key twice in a row, making the revoke branch unreachable.)
+      Object.keys(blobUrlsRef.current).forEach(id => {
+        if (id !== song.id) {
+          URL.revokeObjectURL(blobUrlsRef.current[id]);
+          delete blobUrlsRef.current[id];
         }
-        
-        // Create new blob URL
+      });
+
+      // Create or reuse the current song's blob URL.
+      let audioUrl = blobUrlsRef.current[song.id];
+      if (!audioUrl) {
         audioUrl = URL.createObjectURL(song.file);
         blobUrlsRef.current[song.id] = audioUrl;
         console.log('Created new blob URL for:', song.name);
       } else {
         console.log('Reusing existing blob URL for:', song.name);
       }
-      
+
       mainAudioRef.current.src = audioUrl;
 
       // Connect audio element to Web Audio API
@@ -4027,6 +4146,8 @@ registerProcessor('wav-capture', WavCapture);
   useMediaSession({
     track: currentTrack,
     isPlaying,
+    currentTime: currTime,
+    duration: currDuration,
     onPlay: handlePlayPause,
     onPause: handlePlayPause,
     onNext: handleNext,
@@ -4169,6 +4290,7 @@ registerProcessor('wav-capture', WavCapture);
             settings={vizSettings}
             frequencyColorMode={frequencyColorMode}
             loShuWalkMode={loShuWalkMode}
+            loShuWalkStep={loShuWalkMode ? currentSongIndex : -1}
         />
       </div>
 
@@ -4184,7 +4306,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -4377,7 +4499,7 @@ registerProcessor('wav-capture', WavCapture);
                                 </div>
                                 <LoShuMatrix
                                   currentFrequency={selectedSolfeggio}
-                                  onSelectFrequency={setSelectedSolfeggio}
+                                  onSelectFrequency={selectFrequency}
                                   loShuPerfectGUT={loShuPerfectGUT}
                                   onLoShuPerfectChange={setLoShuPerfectGUT}
                                   onStartWalk={generateLoShuWalk}
@@ -5645,6 +5767,7 @@ registerProcessor('wav-capture', WavCapture);
                                                     { key: 'loShuShowVortex' as const, label: 'Vortex', sub: 'C · 5→6→7→8→9→1→2→3→4 spiral' },
                                                     { key: 'loShuShowAscent' as const, label: 'Ascent', sub: 'A · 1→9 per layer' },
                                                     { key: 'loShuShowPillar' as const, label: 'Pillar', sub: 'B · vertical GUT→HEART→HEAD' },
+                                                    { key: 'loShuShowOuroboros' as const, label: 'Ouroboros', sub: 'I · figure-8 crossing SOURCE 3×' },
                                                 ]).map(({ key, label, sub }) => {
                                                     const on = vizSettings[key];
                                                     return (
@@ -6161,27 +6284,42 @@ registerProcessor('wav-capture', WavCapture);
                 </div>
                 
                 <div className="p-4">
-                  {/* Temporary fallback content for testing */}
                   <div className="text-white">
-                    <h3 className="text-lg font-bold mb-4">Frequency Selection</h3>
-                    <p className="mb-4">Advanced frequency selector loading...</p>
-                    
-                    {/* Traditional Solfeggio */}
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-bold">Frequency Selection</h3>
+                      {loShuPerfectGUT && (
+                        <span className="text-[10px] font-medium text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded uppercase tracking-wider">
+                          Lo Shu Perfect
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Traditional Solfeggio (First / Second / Third order — GUT band).
+                        Labels swap to Lo Shu Perfect counterparts when Perfect GUT mode
+                        is on, matching the inline selector's behaviour. Active state
+                        highlights whichever frequency is currently playing. */}
                     <div className="mb-4">
                       <h4 className="text-sm font-bold text-slate-300 mb-2">Traditional Solfeggio</h4>
                       <div className="grid grid-cols-3 gap-2">
-                        {SOLFEGGIO_INFO.filter(s => ['First', 'Second', 'Third'].includes(s.order)).map((s) => (
-                          <button
-                            key={s.freq}
-                            onClick={() => {
-                              selectFrequency(s.freq);
-                              setShowFrequencySelector(false);
-                            }}
-                            className="py-2 px-2 bg-slate-800 hover:bg-gold-600 text-white rounded border border-slate-600 transition-colors text-xs"
-                          >
-                            {s.freq}Hz
-                          </button>
-                        ))}
+                        {SOLFEGGIO_INFO.filter(s => ['First', 'Second', 'Third'].includes(s.order)).map((s) => {
+                          const isActive = selectedSolfeggio === applyLoShuPerfectMap(s.freq);
+                          return (
+                            <button
+                              key={s.freq}
+                              onClick={() => {
+                                selectFrequency(s.freq);
+                                setShowFrequencySelector(false);
+                              }}
+                              className={`py-2 px-2 rounded border transition-colors text-xs ${
+                                isActive
+                                  ? 'bg-gold-600 text-black border-gold-500 shadow-lg shadow-gold-500/30'
+                                  : 'bg-slate-800 hover:bg-gold-600 text-white border-slate-600'
+                              }`}
+                            >
+                              {applyLoShuPerfectMap(s.freq)}Hz
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -6193,18 +6331,25 @@ registerProcessor('wav-capture', WavCapture);
                           Fourth Order (Advanced)
                         </h4>
                         <div className="grid grid-cols-3 gap-2">
-                          {SOLFEGGIO_INFO.filter(s => s.order === 'Fourth').map((s) => (
-                            <button
-                              key={s.freq}
-                              onClick={() => {
-                                selectFrequency(s.freq);
-                                setShowFrequencySelector(false);
-                              }}
-                              className="py-2 px-2 bg-yellow-900/30 hover:bg-yellow-600 text-yellow-300 hover:text-black rounded border border-yellow-600 transition-colors text-xs"
-                            >
-                              {s.freq}Hz
-                            </button>
-                          ))}
+                          {SOLFEGGIO_INFO.filter(s => s.order === 'Fourth').map((s) => {
+                            const isActive = selectedSolfeggio === applyLoShuPerfectMap(s.freq);
+                            return (
+                              <button
+                                key={s.freq}
+                                onClick={() => {
+                                  selectFrequency(s.freq);
+                                  setShowFrequencySelector(false);
+                                }}
+                                className={`py-2 px-2 rounded border transition-colors text-xs ${
+                                  isActive
+                                    ? 'bg-yellow-600 text-black border-yellow-500 shadow-lg shadow-yellow-500/30'
+                                    : 'bg-yellow-900/30 hover:bg-yellow-600 text-yellow-300 hover:text-black border-yellow-600'
+                                }`}
+                              >
+                                {applyLoShuPerfectMap(s.freq)}Hz
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -6217,18 +6362,25 @@ registerProcessor('wav-capture', WavCapture);
                             Fifth Order (Expert)
                           </h4>
                           <div className="grid grid-cols-3 gap-2">
-                            {SOLFEGGIO_INFO.filter(s => s.order === 'Fifth').map((s) => (
-                              <button
-                                key={s.freq}
-                                onClick={() => {
-                                  selectFrequency(s.freq);
-                                  setShowFrequencySelector(false);
-                                }}
-                                className="py-2 px-2 bg-orange-900/30 hover:bg-orange-600 text-orange-300 hover:text-black rounded border border-orange-600 transition-colors text-xs"
-                              >
-                                {s.freq}Hz
-                              </button>
-                            ))}
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Fifth').map((s) => {
+                              const isActive = selectedSolfeggio === applyLoShuPerfectMap(s.freq);
+                              return (
+                                <button
+                                  key={s.freq}
+                                  onClick={() => {
+                                    selectFrequency(s.freq);
+                                    setShowFrequencySelector(false);
+                                  }}
+                                  className={`py-2 px-2 rounded border transition-colors text-xs ${
+                                    isActive
+                                      ? 'bg-orange-600 text-black border-orange-500 shadow-lg shadow-orange-500/30'
+                                      : 'bg-orange-900/30 hover:bg-orange-600 text-orange-300 hover:text-black border-orange-600'
+                                  }`}
+                                >
+                                  {applyLoShuPerfectMap(s.freq)}Hz
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
 
@@ -6238,18 +6390,25 @@ registerProcessor('wav-capture', WavCapture);
                             Sixth Order (Research)
                           </h4>
                           <div className="grid grid-cols-3 gap-2">
-                            {SOLFEGGIO_INFO.filter(s => s.order === 'Sixth').map((s) => (
-                              <button
-                                key={s.freq}
-                                onClick={() => {
-                                  selectFrequency(s.freq);
-                                  setShowFrequencySelector(false);
-                                }}
-                                className="py-2 px-2 bg-red-900/30 hover:bg-red-600 text-red-300 hover:text-white rounded border border-red-600 transition-colors text-xs"
-                              >
-                                {s.freq}Hz
-                              </button>
-                            ))}
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Sixth').map((s) => {
+                              const isActive = selectedSolfeggio === applyLoShuPerfectMap(s.freq);
+                              return (
+                                <button
+                                  key={s.freq}
+                                  onClick={() => {
+                                    selectFrequency(s.freq);
+                                    setShowFrequencySelector(false);
+                                  }}
+                                  className={`py-2 px-2 rounded border transition-colors text-xs ${
+                                    isActive
+                                      ? 'bg-red-600 text-white border-red-500 shadow-lg shadow-red-500/30'
+                                      : 'bg-red-900/30 hover:bg-red-600 text-red-300 hover:text-white border-red-600'
+                                  }`}
+                                >
+                                  {applyLoShuPerfectMap(s.freq)}Hz
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
 
@@ -6259,18 +6418,25 @@ registerProcessor('wav-capture', WavCapture);
                             Seventh Order (Master)
                           </h4>
                           <div className="grid grid-cols-3 gap-2">
-                            {SOLFEGGIO_INFO.filter(s => s.order === 'Seventh').map((s) => (
-                              <button
-                                key={s.freq}
-                                onClick={() => {
-                                  selectFrequency(s.freq);
-                                  setShowFrequencySelector(false);
-                                }}
-                                className="py-2 px-2 bg-violet-900/30 hover:bg-violet-600 text-violet-300 hover:text-white rounded border border-violet-600 transition-colors text-xs"
-                              >
-                                {s.freq}Hz
-                              </button>
-                            ))}
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Seventh').map((s) => {
+                              const isActive = selectedSolfeggio === applyLoShuPerfectMap(s.freq);
+                              return (
+                                <button
+                                  key={s.freq}
+                                  onClick={() => {
+                                    selectFrequency(s.freq);
+                                    setShowFrequencySelector(false);
+                                  }}
+                                  className={`py-2 px-2 rounded border transition-colors text-xs ${
+                                    isActive
+                                      ? 'bg-violet-600 text-white border-violet-500 shadow-lg shadow-violet-500/30'
+                                      : 'bg-violet-900/30 hover:bg-violet-600 text-violet-300 hover:text-white border-violet-600'
+                                  }`}
+                                >
+                                  {applyLoShuPerfectMap(s.freq)}Hz
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
 
@@ -6280,18 +6446,25 @@ registerProcessor('wav-capture', WavCapture);
                             Eighth Order (Transpersonal)
                           </h4>
                           <div className="grid grid-cols-3 gap-2">
-                            {SOLFEGGIO_INFO.filter(s => s.order === 'Eighth').map((s) => (
-                              <button
-                                key={s.freq}
-                                onClick={() => {
-                                  selectFrequency(s.freq);
-                                  setShowFrequencySelector(false);
-                                }}
-                                className="py-2 px-2 bg-cyan-900/30 hover:bg-cyan-600 text-cyan-300 hover:text-white rounded border border-cyan-600 transition-colors text-xs"
-                              >
-                                {s.freq}Hz
-                              </button>
-                            ))}
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Eighth').map((s) => {
+                              const isActive = selectedSolfeggio === applyLoShuPerfectMap(s.freq);
+                              return (
+                                <button
+                                  key={s.freq}
+                                  onClick={() => {
+                                    selectFrequency(s.freq);
+                                    setShowFrequencySelector(false);
+                                  }}
+                                  className={`py-2 px-2 rounded border transition-colors text-xs ${
+                                    isActive
+                                      ? 'bg-cyan-600 text-white border-cyan-500 shadow-lg shadow-cyan-500/30'
+                                      : 'bg-cyan-900/30 hover:bg-cyan-600 text-cyan-300 hover:text-white border-cyan-600'
+                                  }`}
+                                >
+                                  {applyLoShuPerfectMap(s.freq)}Hz
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
 
@@ -6302,21 +6475,29 @@ registerProcessor('wav-capture', WavCapture);
                             Ninth Order (SOURCE)
                           </h4>
                           <div className="grid grid-cols-3 gap-2">
-                            {SOLFEGGIO_INFO.filter(s => s.order === 'Ninth').map((s) => (
-                              <button
-                                key={s.freq}
-                                onClick={() => {
-                                  selectFrequency(s.freq);
-                                  setShowFrequencySelector(false);
-                                }}
-                                className={`py-2 px-2 bg-pink-900/30 hover:bg-pink-600 text-pink-300 hover:text-white rounded border border-pink-600 transition-colors text-xs relative ${s.freq === 5031 ? 'ring-2 ring-gold-500/50' : ''}`}
-                              >
-                                {s.freq}Hz
-                                {s.freq === 5031 && (
-                                  <div className="absolute -top-1 -right-1 w-2 h-2 bg-gold-500 rounded-full"></div>
-                                )}
-                              </button>
-                            ))}
+                            {SOLFEGGIO_INFO.filter(s => s.order === 'Ninth').map((s) => {
+                              const isActive = selectedSolfeggio === applyLoShuPerfectMap(s.freq);
+                              const isSourceMarker = s.freq === 5031;
+                              return (
+                                <button
+                                  key={s.freq}
+                                  onClick={() => {
+                                    selectFrequency(s.freq);
+                                    setShowFrequencySelector(false);
+                                  }}
+                                  className={`py-2 px-2 rounded border transition-colors text-xs relative ${
+                                    isActive
+                                      ? 'bg-pink-600 text-white border-pink-500 shadow-lg shadow-pink-500/30'
+                                      : 'bg-pink-900/30 hover:bg-pink-600 text-pink-300 hover:text-white border-pink-600'
+                                  } ${isSourceMarker ? 'ring-2 ring-gold-500/50' : ''}`}
+                                >
+                                  {applyLoShuPerfectMap(s.freq)}Hz
+                                  {isSourceMarker && (
+                                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-gold-500 rounded-full"></div>
+                                  )}
+                                </button>
+                              );
+                            })}
                           </div>
                           <div className="mt-2 text-xs text-pink-300 bg-pink-900/20 p-2 rounded border border-pink-800">
                             ⚠️ Transpersonal frequencies - Use extreme caution
@@ -6830,36 +7011,41 @@ registerProcessor('wav-capture', WavCapture);
                          })()}
                          {loShuWalkMode && currentSongIndex >= 0 && playlist.length > 0 && (() => {
                            // Walk-progress chip — shows position within the current
-                           // walk segment, and (for CAB / combined) the overall
-                           // 41/81 step counter. Counts come from loShuWalkSegments
-                           // (set when the walk is generated) for combined mode,
-                           // or fall back to playlist.length for single walks.
+                           // walk segment + overall step. Segment names by mode:
+                           //   combined  → Vortex / Ascent / Pillar          (3 segs)
+                           //   ouroboros → Ouroboros                          (1 seg)
+                           //   cabi      → Vortex / Ascent / Pillar / Ouroboros (4 segs)
+                           // Single walks fall back to a plain "M/total" counter.
+                           // For Ouroboros/CABI we also surface ♾️/✕ phase tokens
+                           // at the SOURCE crossings via loShuWalkPhases.
                            const stepIdx = currentSongIndex + 1;
                            const total = playlist.length;
-                           if (loShuWalkMode === 'combined' && loShuWalkSegments) {
-                             const [vEnd, aLen, pLen] = loShuWalkSegments;
-                             const aEnd = vEnd + aLen;
-                             let segName: 'Vortex' | 'Ascent' | 'Pillar';
-                             let segPos: number;
-                             let segLen: number;
-                             if (currentSongIndex < vEnd) {
-                               segName = 'Vortex';
-                               segPos = currentSongIndex + 1;
-                               segLen = vEnd;
-                             } else if (currentSongIndex < aEnd) {
-                               segName = 'Ascent';
-                               segPos = currentSongIndex - vEnd + 1;
-                               segLen = aLen;
-                             } else {
-                               segName = 'Pillar';
-                               segPos = currentSongIndex - aEnd + 1;
-                               segLen = pLen;
+                           const SEGMENT_NAMES: Partial<Record<LoShuWalkMode, string[]>> = {
+                             combined: ['Vortex', 'Ascent', 'Pillar'],
+                             ouroboros: ['Ouroboros'],
+                             cabi: ['Vortex', 'Ascent', 'Pillar', 'Ouroboros'],
+                           };
+                           const segments = SEGMENT_NAMES[loShuWalkMode];
+                           const phaseToken = loShuWalkPhases?.[currentSongIndex] || '';
+                           if (segments && loShuWalkSegments && loShuWalkSegments.length === segments.length) {
+                             let accumulated = 0;
+                             let segIdx = 0;
+                             for (let i = 0; i < loShuWalkSegments.length; i++) {
+                               if (currentSongIndex < accumulated + loShuWalkSegments[i]) {
+                                 segIdx = i;
+                                 break;
+                               }
+                               accumulated += loShuWalkSegments[i];
                              }
+                             const segName = segments[segIdx];
+                             const segLen = loShuWalkSegments[segIdx];
+                             const segPos = currentSongIndex - accumulated + 1;
                              return (
                                <span
                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-emerald-500/5 text-emerald-300/90 border-emerald-500/20 text-[10px] font-mono"
-                                 title={`Currently in the ${segName} segment of CAB. Overall step ${stepIdx} of ${total}.`}
+                                 title={`Currently in the ${segName} segment. Overall step ${stepIdx} of ${total}.${phaseToken ? ` Phase: ${phaseToken}` : ''}`}
                                >
+                                 {phaseToken && <span className="text-emerald-200">{phaseToken}</span>}
                                  {segName} {segPos}/{segLen}
                                  <span className="text-emerald-400/60">· {stepIdx}/{total}</span>
                                </span>
@@ -7057,48 +7243,36 @@ registerProcessor('wav-capture', WavCapture);
                                         <div className="border-t border-slate-800 pt-3">
                                             <div className="text-[11px] font-bold text-emerald-200 uppercase tracking-wider mb-1">Lo Shu Walks</div>
                                             <p className="text-[10px] text-slate-400 leading-snug mb-2">
-                                                Build a 27-track journey along one of three Lo&nbsp;Shu paths, or take the full 81-position Combined walk through all three.
+                                                Six paths through the cube — three 27-track walks, the 81-step CAB, the 29-step Ouroboros figure-8, and the 110-step CABI that closes the loop.
                                             </p>
-                                            <div className="space-y-1.5">
-                                                {(['A','B','C'] as LoShuWalkMode[]).map(mode => {
-                                                    const info = LO_SHU_WALK_INFO[mode];
-                                                    const isActive = loShuWalkMode === mode;
+                                            {/* 3x2 grid — short walks (A/B/C) on top row, deeper journeys
+                                                (CAB/Ouroboros/CABI) on bottom row. Compact form keeps the
+                                                whole card on-screen; tooltips carry the longer descriptions. */}
+                                            <div className="grid grid-cols-3 gap-1.5">
+                                                {([
+                                                    { mode: 'A' as LoShuWalkMode, steps: '27', activeClass: 'bg-amber-500/20 border-amber-500/60 text-amber-100', idleClass: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-amber-500/40 hover:text-amber-200', stepColor: 'text-amber-400/80' },
+                                                    { mode: 'B' as LoShuWalkMode, steps: '27', activeClass: 'bg-emerald-500/20 border-emerald-500/60 text-emerald-100', idleClass: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-emerald-500/40 hover:text-emerald-200', stepColor: 'text-emerald-400/80' },
+                                                    { mode: 'C' as LoShuWalkMode, steps: '27', activeClass: 'bg-purple-500/20 border-purple-500/60 text-purple-100', idleClass: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-purple-500/40 hover:text-purple-200', stepColor: 'text-purple-400/80' },
+                                                    { mode: 'combined' as LoShuWalkMode, steps: '81', activeClass: 'bg-gradient-to-br from-amber-500/15 via-emerald-500/15 to-purple-500/20 border-gold-500/60 text-gold-100', idleClass: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-gold-500/40 hover:text-gold-200', stepColor: 'text-gold-400/80' },
+                                                    { mode: 'ouroboros' as LoShuWalkMode, steps: '29', activeClass: 'bg-gradient-to-br from-cyan-500/15 to-cyan-700/20 border-cyan-500/60 text-cyan-100', idleClass: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-cyan-500/40 hover:text-cyan-200', stepColor: 'text-cyan-300/80' },
+                                                    { mode: 'cabi' as LoShuWalkMode, steps: '110', activeClass: 'bg-gradient-to-br from-gold-500/15 via-cyan-500/15 to-purple-500/20 border-gold-500/60 text-gold-100', idleClass: 'bg-slate-900 border-slate-700 text-slate-300 hover:border-gold-500/40 hover:text-gold-200', stepColor: 'text-gold-400/80' },
+                                                ]).map(cfg => {
+                                                    const info = LO_SHU_WALK_INFO[cfg.mode];
+                                                    const isActive = loShuWalkMode === cfg.mode;
                                                     return (
                                                         <button
-                                                            key={mode}
-                                                            onClick={() => generateLoShuWalk(mode)}
-                                                            className={`w-full text-left p-2.5 rounded-lg border text-xs transition-colors ${
-                                                                isActive
-                                                                    ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-100'
-                                                                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-emerald-500/40 hover:text-emerald-200'
+                                                            key={cfg.mode}
+                                                            onClick={() => generateLoShuWalk(cfg.mode)}
+                                                            title={`${info.fullName} — ${info.tagline}`}
+                                                            className={`flex flex-col items-center justify-center gap-0.5 p-2 rounded-lg border text-xs transition-colors min-h-[58px] ${
+                                                                isActive ? cfg.activeClass : cfg.idleClass
                                                             }`}
                                                         >
-                                                            <div className="font-bold">{info.fullName}</div>
-                                                            <div className="text-[10px] text-slate-400 font-mono mt-0.5">{info.tagline}</div>
+                                                            <span className="font-bold text-[11px] leading-tight text-center">{info.shortName}</span>
+                                                            <span className={`text-[9px] font-mono uppercase tracking-wider ${cfg.stepColor}`}>{cfg.steps}</span>
                                                         </button>
                                                     );
                                                 })}
-                                                {/* Combined walk — full 81-position omnibus, styled with gold accent. */}
-                                                {(() => {
-                                                    const info = LO_SHU_WALK_INFO.combined;
-                                                    const isActive = loShuWalkMode === 'combined';
-                                                    return (
-                                                        <button
-                                                            onClick={() => generateLoShuWalk('combined')}
-                                                            className={`w-full text-left p-2.5 rounded-lg border text-xs transition-colors ${
-                                                                isActive
-                                                                    ? 'bg-gradient-to-r from-amber-500/15 via-emerald-500/15 to-purple-500/20 border-gold-500/60 text-gold-100'
-                                                                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-gold-500/40 hover:text-gold-200'
-                                                            }`}
-                                                        >
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="font-bold">{info.fullName}</span>
-                                                                <span className="ml-auto text-[9px] font-mono text-gold-400/80 uppercase tracking-wider">81</span>
-                                                            </div>
-                                                            <div className="text-[10px] text-slate-400 font-mono mt-0.5">{info.tagline}</div>
-                                                        </button>
-                                                    );
-                                                })()}
                                             </div>
                                         </div>
                                         {loShuWalkMode && (

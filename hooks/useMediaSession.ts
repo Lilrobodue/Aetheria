@@ -1,5 +1,5 @@
 // useMediaSession.ts
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 export interface Track {
   title: string;
@@ -11,6 +11,13 @@ export interface Track {
 interface UseMediaSessionOptions {
   track: Track | null;
   isPlaying: boolean;
+  /** Current playback time in seconds. Passed to setPositionState so the
+   *  lock-screen / car-display scrubber shows accurate progress. */
+  currentTime?: number;
+  /** Track duration in seconds. */
+  duration?: number;
+  /** Playback rate (1 = normal, 0.98 = 432Hz pitch shift, etc.). Defaults to 1. */
+  playbackRate?: number;
   onPlay: () => void;
   onPause: () => void;
   onNext: () => void;
@@ -20,6 +27,9 @@ interface UseMediaSessionOptions {
 export function useMediaSession({
   track,
   isPlaying,
+  currentTime,
+  duration,
+  playbackRate = 1,
   onPlay,
   onPause,
   onNext,
@@ -173,20 +183,51 @@ export function useMediaSession({
     }
   }, [isPlaying]);
 
-  // Position state update (if you have duration/position info)
+  // Position state — drives the lock-screen / car-display scrubber.
+  // Without these calls the OS has no reliable position info and falls
+  // back to extrapolation that visibly glitches on every React render
+  // that touches the media session (we were seeing this every ~1s).
+  //
+  // Throttling matters: timeupdate fires ~4×/sec in the foreground and
+  // App.tsx ticks setCurrTime even more often via the audio analysis
+  // loop. Calling setPositionState every tick itself causes the lock
+  // screen to flicker. Instead: update unconditionally on track/play
+  // changes (sub-second responsiveness for skip + play/pause) and
+  // throttle continuous time-ticks to once per second (smooth enough
+  // that the OS's own extrapolation handles the in-between frames).
+  const lastPositionUpdateRef = useRef<number>(0);
+  const lastReportedTrackRef = useRef<Track | null>(null);
+  const lastReportedPlayingRef = useRef<boolean>(false);
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
-    
-    // This would need actual position/duration from your app
-    // For now, we'll just set a placeholder
+    if (typeof navigator.mediaSession.setPositionState !== "function") return;
+    if (duration === undefined || currentTime === undefined) return;
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    if (!Number.isFinite(currentTime) || currentTime < 0) return;
+
+    const trackChanged = lastReportedTrackRef.current !== track;
+    const playStateChanged = lastReportedPlayingRef.current !== isPlaying;
+    const now = Date.now();
+    const sinceLast = now - lastPositionUpdateRef.current;
+
+    // Force-update on track or play-state change. Otherwise throttle to
+    // 1 Hz — fast enough to keep the scrubber honest under playback
+    // drift, slow enough not to fight the OS's own interpolation.
+    if (!trackChanged && !playStateChanged && sinceLast < 1000) return;
+
     try {
-      // navigator.mediaSession.setPositionState({
-      //   duration: 180, // 3 minutes
-      //   playbackRate: 1,
-      //   position: 0
-      // });
+      navigator.mediaSession.setPositionState({
+        duration,
+        position: Math.min(currentTime, duration),
+        playbackRate: playbackRate || 1,
+      });
+      lastPositionUpdateRef.current = now;
+      lastReportedTrackRef.current = track;
+      lastReportedPlayingRef.current = isPlaying;
     } catch (error) {
-      console.log("setPositionState not supported");
+      // Some browsers throw if values are invalid (e.g. NaN duration on
+      // a still-loading track). Safe to ignore — the next valid update
+      // will succeed.
     }
-  }, [track]);
+  }, [track, isPlaying, currentTime, duration, playbackRate]);
 }
