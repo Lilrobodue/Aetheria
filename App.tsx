@@ -790,14 +790,35 @@ const distributeUsingHarmonicOctavesMaster = (songs: Song[], targetFrequencies: 
 // repeats. Used by shuffle playback so a long session doesn't loop the
 // same favorites while back-catalogue tracks never play.
 const getLruShuffledIndices = (songs: { id: string }[], history: Record<string, number>): number[] => {
-    return songs
-        .map((_, i) => i)
-        .sort((ai, bi) => {
-            const aLast = history[songs[ai].id] || 0;
-            const bLast = history[songs[bi].id] || 0;
-            if (aLast !== bLast) return aLast - bLast;
-            return Math.random() - 0.5;
-        });
+    // Group indices into LRU tiers by play timestamp, then Fisher-Yates
+    // shuffle WITHIN each tier, concatenating oldest tier first.
+    //
+    // The previous `arr.sort(() => Math.random() - 0.5)` approach is the
+    // textbook example of a broken shuffle: V8's TimSort with a random
+    // comparator produces a heavily non-uniform distribution. On a freshly
+    // scanned library where every track has history[id] = 0 (one big tier
+    // of equals), this clustered items near their original positions and
+    // made shuffle pick the same alphabetical neighbourhood every time.
+    // Fisher-Yates is the only O(n) algorithm that produces a uniformly
+    // random permutation.
+    const buckets = new Map<number, number[]>();
+    for (let i = 0; i < songs.length; i++) {
+        const t = history[songs[i].id] || 0;
+        const arr = buckets.get(t);
+        if (arr) arr.push(i);
+        else buckets.set(t, [i]);
+    }
+    const orderedTimestamps = [...buckets.keys()].sort((a, b) => a - b);
+    const result: number[] = [];
+    for (const t of orderedTimestamps) {
+        const group = buckets.get(t)!;
+        for (let i = group.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [group[i], group[j]] = [group[j], group[i]];
+        }
+        result.push(...group);
+    }
+    return result;
 };
 
 // --- Tutorial Component ---
@@ -4450,7 +4471,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.8</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.9</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -6835,7 +6856,24 @@ registerProcessor('wav-capture', WavCapture);
           </button>
 
           {/* Links & Resources Panel */}
-          <div className={`fixed inset-y-0 right-0 z-[54] w-[340px] sm:w-[380px] bg-black/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shadow-2xl transition-transform duration-300 ${
+          {/* Click delegation: when Aetheria is installed as a PWA and run
+              in standalone mode, browsers ignore target="_blank" and
+              navigate inside the PWA window — replacing the player with
+              the linked site and killing playback. Explicitly calling
+              window.open() forces the system browser to handle external
+              HTTP(S) links. mailto: / tel: pass through untouched so
+              they still hand off to the OS handler. */}
+          <div
+            onClick={(e: React.MouseEvent<HTMLDivElement>) => {
+              const anchor = (e.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null;
+              if (!anchor) return;
+              const href = anchor.getAttribute('href') || '';
+              if (href.startsWith('http://') || href.startsWith('https://')) {
+                e.preventDefault();
+                window.open(href, '_blank', 'noopener,noreferrer');
+              }
+            }}
+            className={`fixed inset-y-0 right-0 z-[54] w-[340px] sm:w-[380px] bg-black/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shadow-2xl transition-transform duration-300 ${
             showLinks ? 'translate-x-0' : 'translate-x-full'
           }`}>
             <div className="flex justify-between items-center p-5 border-b border-slate-800">

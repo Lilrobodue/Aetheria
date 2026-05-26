@@ -169,7 +169,23 @@ export class StabilityManager {
   }
 
   // Restore from checkpoint
-  private restoreFromCheckpoint() {
+  //
+  // Gated on `force`: only true crash recovery should restore unconditionally.
+  // visibilitychange / freeze-resume callers leave `force=false`, which makes
+  // the restore a no-op once we have in-memory state for the session.
+  //
+  // Why: localStorage is updated by a periodic checkpoint interval that lags
+  // React state by up to a few seconds. If the user tabs away and back while
+  // a song is playing, the visibilitychange-visible path used to read that
+  // slightly-stale state and `setCurrentSongIndex` to a value behind the
+  // current track — rewinding the shuffle queue and causing the same tracks
+  // to play again on the next advance. React state already survives tab
+  // switches and page freezes, so restoring localStorage on those events was
+  // never load-bearing; only an actual page reload after a crash needs it.
+  private restoreFromCheckpoint(force = false) {
+    if (this.lastCheckpoint && !force) {
+      return;
+    }
     try {
       const saved = localStorage.getItem('aetheria_checkpoint');
       if (saved) {
@@ -184,15 +200,18 @@ export class StabilityManager {
   // Crash recovery
   private recoverFromCrash() {
     console.log('Initiating crash recovery');
-    
+
     // Reset error count
     this.errorCount = 0;
 
     // Clear problematic data
     this.clearCaches();
 
-    // Restore from checkpoint
-    this.restoreFromCheckpoint();
+    // Force-restore from localStorage. This is the only caller that
+    // legitimately needs to overwrite in-memory state — visibility/resume
+    // events leave the default `force=false` so they skip if we already
+    // have current state for the session.
+    this.restoreFromCheckpoint(true);
 
     // Reload if necessary
     if (this.errorCount > this.MAX_ERROR_COUNT * 2) {
