@@ -3478,19 +3478,25 @@ const App: React.FC = () => {
 
 
 
-  const playTrack = async (index: number, playlistOverride?: Song[]) => {
+  const playTrack = async (index: number, playlistOverride?: Song[], preserveShuffleOrder = false) => {
     initAudio();
-    
+
     const tracks = playlistOverride || (stateRef.current.playlist.length > 0 ? stateRef.current.playlist : playlist);
-    
+
     if (index < 0 || index >= tracks.length) return;
-    
-    // Sync Shuffle Position if we are jumping to a specific track manually
-    if (stateRef.current.isShuffle && !playlistOverride) {
-        const shuffleIdx = stateRef.current.shuffledIndices.indexOf(index);
-        if (shuffleIdx !== -1) {
-             setShufflePos(shuffleIdx);
-        }
+
+    // Manual track pick under shuffle: regenerate the shuffle order so the
+    // picked song sits at position 0 and the rest of the shuffle plays from
+    // there. Previously this synced shufflePos to wherever the picked song
+    // happened to land in the existing LRU shuffle order — if that was the
+    // last position, playback dead-ended the moment the song finished
+    // (looked like "shuffle is broken"). Auto-advance (playNext / Prev /
+    // loop wrap) passes preserveShuffleOrder=true to keep the same order.
+    if (stateRef.current.isShuffle && !playlistOverride && !preserveShuffleOrder) {
+        const fresh = getLruShuffledIndices(stateRef.current.playlist, playHistoryRef.current);
+        const newOrder = [index, ...fresh.filter(i => i !== index)];
+        setShuffledIndices(newOrder);
+        setShufflePos(0);
     }
 
     setCurrTime(0);
@@ -3697,31 +3703,27 @@ const App: React.FC = () => {
 
         // Determine where we are in the shuffle list
         let currentShufflePos = currentIndices.indexOf(currentSongIndex);
-        
+
         // If track is not found or invalid, reset
         if (currentShufflePos === -1) currentShufflePos = -1;
 
         const nextShufflePos = currentShufflePos + 1;
 
         if (nextShufflePos >= currentIndices.length) {
-            // End of Shuffle List
-            if (isLoop) {
-                // Loop: Generate NEW LRU-weighted order and start from 0.
-                // After a full pass, every song will have been played
-                // recently — the next ordering re-cycles oldest-played
-                // first, with random tiebreakers among ties.
-                const newIndices = getLruShuffledIndices(playlist, playHistoryRef.current);
-                setShuffledIndices(newIndices);
-                setShufflePos(0);
-                playTrack(newIndices[0]);
-            } else {
-                // No Loop: Stop
-                setIsPlaying(false);
-            }
+            // End of Shuffle List — shuffle is inherently endless. Generate
+            // a fresh LRU-weighted order and continue. After a full pass,
+            // every song has been played recently, so the next ordering
+            // re-cycles oldest-played first with random tiebreakers among
+            // ties. Loop toggle is irrelevant here — once shuffle is on,
+            // playback continues indefinitely until the user stops it.
+            const newIndices = getLruShuffledIndices(playlist, playHistoryRef.current);
+            setShuffledIndices(newIndices);
+            setShufflePos(0);
+            playTrack(newIndices[0], undefined, true);
         } else {
             // Next in shuffled list
             setShufflePos(nextShufflePos);
-            playTrack(currentIndices[nextShufflePos]);
+            playTrack(currentIndices[nextShufflePos], undefined, true);
         }
     } else {
         // Normal Sequential Logic
@@ -3987,7 +3989,7 @@ const App: React.FC = () => {
     if (isShuffle && shufflePos > 0) {
         const prevPos = shufflePos - 1;
         setShufflePos(prevPos);
-        playTrack(shuffledIndices[prevPos]);
+        playTrack(shuffledIndices[prevPos], undefined, true);
     } else {
         let prev = currentSongIndex - 1;
         if (prev < 0) prev = playlist.length - 1;
@@ -4448,7 +4450,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.7</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.8</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
