@@ -1350,7 +1350,12 @@ const App: React.FC = () => {
   const pausedAtRef = useRef<number>(0);
   const rafRef = useRef<number>(0);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
-  const audioKeepAliveRef = useRef<number | null>(null);
+  // One persistent silent oscillator that keeps the AudioContext from
+  // suspending. Previously we created a fresh oscillator + gain pair every
+  // 20s and never .disconnect()'d them, leaking ~3,400 routed native nodes
+  // over a 19-hour session. A single long-running pair serves the same
+  // purpose with zero churn.
+  const silentKeepAliveRef = useRef<{ osc: OscillatorNode; gain: GainNode } | null>(null);
   const blobUrlsRef = useRef<{ [key: string]: string }>({});
 
   const solfeggioOscRef = useRef<OscillatorNode | null>(null);
@@ -1433,9 +1438,17 @@ const App: React.FC = () => {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      // Clean up audio keep-alive timer
-      if (audioKeepAliveRef.current) {
-        clearInterval(audioKeepAliveRef.current);
+      // Disconnect the persistent silent keep-alive oscillator so it
+      // doesn't outlive the AudioContext.
+      if (silentKeepAliveRef.current) {
+        try {
+          silentKeepAliveRef.current.osc.stop();
+          silentKeepAliveRef.current.osc.disconnect();
+          silentKeepAliveRef.current.gain.disconnect();
+        } catch {
+          // Already stopped/disconnected — safe to ignore.
+        }
+        silentKeepAliveRef.current = null;
       }
       
       // Clean up blob URLs
@@ -1917,37 +1930,30 @@ const App: React.FC = () => {
     };
   }, [currentSongIndex, isPlaying, volume, selectedSolfeggio, playlist]);
 
-  // Wake lock management for playback
+  // Wake lock + AudioContext keep-alive management for playback
   useEffect(() => {
     if (isPlaying) {
       wakeLockManager.requestWakeLock();
-      
-      // Start audio context keep-alive timer
-      if (audioKeepAliveRef.current) {
-        clearInterval(audioKeepAliveRef.current);
+
+      // Lazily create a single long-running silent oscillator to keep the
+      // AudioContext from suspending during gaps between tracks. Created
+      // once for the whole session; never re-allocated. The gain is 0 so
+      // it produces no audible output; an oscillator continuously feeding
+      // the destination is the standard "keep context active" pattern.
+      if (audioCtxRef.current && !silentKeepAliveRef.current) {
+        const osc = audioCtxRef.current.createOscillator();
+        const gain = audioCtxRef.current.createGain();
+        gain.gain.value = 0;
+        osc.connect(gain);
+        gain.connect(audioCtxRef.current.destination);
+        osc.start();
+        silentKeepAliveRef.current = { osc, gain };
       }
-      
-      // Keep audio context alive by periodically creating a silent oscillator
-      audioKeepAliveRef.current = window.setInterval(() => {
-        if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
-          // Create a silent oscillator to keep context active
-          const silentOsc = audioCtxRef.current.createOscillator();
-          const silentGain = audioCtxRef.current.createGain();
-          silentGain.gain.value = 0;
-          silentOsc.connect(silentGain);
-          silentGain.connect(audioCtxRef.current.destination);
-          silentOsc.start();
-          silentOsc.stop(audioCtxRef.current.currentTime + 0.01);
-        }
-      }, 20000); // Every 20 seconds
     } else {
       wakeLockManager.releaseWakeLock();
-      
-      // Clear keep-alive timer when not playing
-      if (audioKeepAliveRef.current) {
-        clearInterval(audioKeepAliveRef.current);
-        audioKeepAliveRef.current = null;
-      }
+      // Leave the silent oscillator running — it's a fixed, tiny cost and
+      // recreating it would re-introduce the very leak we're avoiding
+      // (an oscillator can only be .start()'d once per the Web Audio spec).
     }
   }, [isPlaying]);
 
@@ -4471,7 +4477,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v9.9</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.0</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

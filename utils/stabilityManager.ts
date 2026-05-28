@@ -300,6 +300,28 @@ export class StabilityManager {
 export class WakeLockManager {
   private wakeLock: any = null;
   private isSupported = 'wakeLock' in navigator;
+  private visibilityHandlerInstalled = false;
+
+  // Install the visibilitychange re-acquire handler exactly once per page
+  // lifetime. The handler reads `this.wakeLock` at call time, so a single
+  // listener covers every future acquire/release cycle.
+  //
+  // The previous code attached a fresh listener inside every
+  // requestWakeLock() call. Over a 19-hour 240-track session that produced
+  // ~240 stacked listeners on document; when the browser auto-released
+  // the lock on tab-hide, all 240 fired on tab-return and each one called
+  // requestWakeLock() in parallel — adding 240 more listeners. Exponential
+  // growth, console flooded, and (suspected) native-memory accumulation
+  // from the stale handler closures and re-issued wake lock sentinels.
+  private ensureVisibilityHandler() {
+    if (this.visibilityHandlerInstalled) return;
+    document.addEventListener('visibilitychange', async () => {
+      if (!document.hidden && this.wakeLock !== null && this.wakeLock.released) {
+        await this.requestWakeLock();
+      }
+    });
+    this.visibilityHandlerInstalled = true;
+  }
 
   async requestWakeLock() {
     if (!this.isSupported) {
@@ -307,22 +329,24 @@ export class WakeLockManager {
       return false;
     }
 
+    // If we already hold a live (non-released) lock, do nothing. Prevents
+    // redundant `navigator.wakeLock.request()` calls and the resulting
+    // duplicate sentinels.
+    if (this.wakeLock !== null && !this.wakeLock.released) {
+      return true;
+    }
+
     try {
       this.wakeLock = await (navigator as any).wakeLock.request('screen');
       console.log('Wake lock acquired');
-      
-      // Re-acquire wake lock if released
+
+      // Release listener is attached to the sentinel object itself, so it
+      // GCs with the sentinel on release — no document-level accumulation.
       this.wakeLock.addEventListener('release', () => {
         console.log('Wake lock released');
       });
 
-      // Re-acquire on visibility change
-      document.addEventListener('visibilitychange', async () => {
-        if (!document.hidden && this.wakeLock !== null && this.wakeLock.released) {
-          await this.requestWakeLock();
-        }
-      });
-
+      this.ensureVisibilityHandler();
       return true;
     } catch (error) {
       console.error('Failed to acquire wake lock:', error);
