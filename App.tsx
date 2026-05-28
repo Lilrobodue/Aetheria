@@ -4310,7 +4310,7 @@ registerProcessor('wav-capture', WavCapture);
         title: playlist[currentSongIndex].name,
         artist: 'Aetheria Harmonic Player',
         album: `${playlist[currentSongIndex].closestSolfeggio || selectedSolfeggio}Hz • ${getFrequencyRegime(playlist[currentSongIndex].closestSolfeggio || selectedSolfeggio)} Regime`,
-        artworkUrl: '/icon-192x192.png'
+        artworkUrl: '/images/icon-192x192.png'
       }
     : null;
 
