@@ -301,22 +301,30 @@ export class WakeLockManager {
   private wakeLock: any = null;
   private isSupported = 'wakeLock' in navigator;
   private visibilityHandlerInstalled = false;
+  // Tracks whether we *want* to be holding a lock right now. Separate from
+  // `this.wakeLock` because the browser can deny the request (hidden tab)
+  // or auto-release the lock (also tab-hide). Intent drives the retry on
+  // visibility return.
+  private intendedHeld = false;
 
   // Install the visibilitychange re-acquire handler exactly once per page
-  // lifetime. The handler reads `this.wakeLock` at call time, so a single
-  // listener covers every future acquire/release cycle.
+  // lifetime. The handler reads `this.wakeLock` and `this.intendedHeld`
+  // at call time, so a single listener covers every future acquire/release
+  // cycle.
   //
   // The previous code attached a fresh listener inside every
   // requestWakeLock() call. Over a 19-hour 240-track session that produced
   // ~240 stacked listeners on document; when the browser auto-released
   // the lock on tab-hide, all 240 fired on tab-return and each one called
   // requestWakeLock() in parallel — adding 240 more listeners. Exponential
-  // growth, console flooded, and (suspected) native-memory accumulation
-  // from the stale handler closures and re-issued wake lock sentinels.
+  // growth, console flooded, native-memory accumulation.
   private ensureVisibilityHandler() {
     if (this.visibilityHandlerInstalled) return;
     document.addEventListener('visibilitychange', async () => {
-      if (!document.hidden && this.wakeLock !== null && this.wakeLock.released) {
+      // On return-to-visible: if we're supposed to hold a lock but don't,
+      // re-acquire. Covers both the auto-release-on-hide case and the
+      // request-denied-while-hidden case.
+      if (!document.hidden && this.intendedHeld && (this.wakeLock === null || this.wakeLock.released)) {
         await this.requestWakeLock();
       }
     });
@@ -329,11 +337,20 @@ export class WakeLockManager {
       return false;
     }
 
-    // If we already hold a live (non-released) lock, do nothing. Prevents
-    // redundant `navigator.wakeLock.request()` calls and the resulting
-    // duplicate sentinels.
+    this.intendedHeld = true;
+    this.ensureVisibilityHandler();
+
+    // Already holding a live lock — nothing to do.
     if (this.wakeLock !== null && !this.wakeLock.released) {
       return true;
+    }
+
+    // Browsers reject wake lock requests when the page is hidden. Trying
+    // would log a NotAllowedError per attempt — and during background
+    // playback we get one attempt per track. Bail silently; the visibility
+    // handler above will re-issue once the user returns to the tab.
+    if (document.hidden) {
+      return false;
     }
 
     try {
@@ -346,7 +363,6 @@ export class WakeLockManager {
         console.log('Wake lock released');
       });
 
-      this.ensureVisibilityHandler();
       return true;
     } catch (error) {
       console.error('Failed to acquire wake lock:', error);
@@ -355,6 +371,7 @@ export class WakeLockManager {
   }
 
   async releaseWakeLock() {
+    this.intendedHeld = false;
     if (this.wakeLock && !this.wakeLock.released) {
       await this.wakeLock.release();
       this.wakeLock = null;
