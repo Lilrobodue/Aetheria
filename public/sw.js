@@ -1,4 +1,4 @@
-const CACHE_NAME = 'aetheria-v10.0-pwa-icons';
+const CACHE_NAME = 'aetheria-v10.1-pwa-icons';
 const OFFLINE_URL = '/';
 
 // Files to cache for offline support

@@ -4477,7 +4477,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.0</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -5397,7 +5397,19 @@ registerProcessor('wav-capture', WavCapture);
                       ? '🚖 CAB-ready: all 27 frequencies have 3+ songs.'
                       : `CAB readiness: ${cabReadyFreqs}/27 frequencies at 3+ songs.`;
 
-                    setAnalysisNotification(`Harmonic Distribution Complete: ${redistributed.length} songs distributed across all 27 frequencies. ${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD. ${missingFreqs.length > 0 ? `Missing: ${missingFreqs.join(', ')}Hz. ` : ''}${cabStatus}`);
+                    // CABI readiness: CAB (81) + Ouroboros (29) share song
+                    // pools, so each non-SOURCE freq needs 4 unique songs
+                    // (3 CAB visits + 1 Ouroboros visit) and SOURCE/2178 Hz
+                    // needs 6 (3 CAB visits + 3 Ouroboros crossings).
+                    const cabiReadyFreqs = allFreqs.filter(f => {
+                      const need = f === SOURCE_FREQ ? 6 : 4;
+                      return (frequencyDistribution[f] || 0) >= need;
+                    }).length;
+                    const cabiStatus = cabiReadyFreqs === 27
+                      ? ' ⚛️ CABI-ready: all 27 frequencies have enough unique songs to close the loop (SOURCE has 6+, others have 4+).'
+                      : ` CABI readiness: ${cabiReadyFreqs}/27 frequencies meet the unique-song threshold (SOURCE needs 6, others need 4).`;
+
+                    setAnalysisNotification(`Harmonic Distribution Complete: ${redistributed.length} songs distributed across all 27 frequencies. ${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD. ${missingFreqs.length > 0 ? `Missing: ${missingFreqs.join(', ')}Hz. ` : ''}${cabStatus}${cabiStatus}`);
                     setTimeout(() => setAnalysisNotification(null), 8000);
                   } else {
                     alert(`Harmonic Distribution requires at least 27 tracks for optimal frequency coverage. Current library has ${playlist.length} tracks. (A full CAB ride needs 81 tracks for 3 unique songs per frequency.)`);
