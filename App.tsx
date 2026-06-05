@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
@@ -1408,6 +1408,61 @@ const App: React.FC = () => {
     }
   }, [searchTerm, playlist]);
 
+  // Precompute song.id -> playlist index once per playlist change. The library
+  // list render used to call playlist.findIndex() per row (O(n²) per render);
+  // with large libraries that scan was a measurable contributor to the
+  // "requestAnimationFrame handler took N ms" violations when the sidebar
+  // was open. A Map lookup is O(1) per row.
+  const playlistIndexById = useMemo(() => {
+    const m = new Map<string, number>();
+    playlist.forEach((s, i) => m.set(s.id, i));
+    return m;
+  }, [playlist]);
+
+  // --- Library list virtualization ---
+  // The library can hold hundreds of songs; rendering every row mounted a full
+  // DOM subtree plus a lucide SVG icon each — that was the dominant heap cost in
+  // the snapshot (the {ref,xmlns,viewBox,...} icon objects and the SVGAnimated*
+  // arrays) and slowed every list re-render. We window the list: only rows
+  // within the scroll viewport (plus a small overscan) are mounted; off-screen
+  // rows are replaced by two spacer divs that preserve total scroll height, so
+  // the scrollbar and scroll behavior are unchanged. Rows are a fixed height so
+  // the scroll math stays exact. The sidebar remains a single shared scroll
+  // container (header + list scroll together) exactly as before.
+  const SONG_ROW_HEIGHT = 64; // px stride per row (60px row body + 4px gap)
+  const sidebarScrollRef = useRef<HTMLElement>(null);
+  const songListRef = useRef<HTMLDivElement>(null);
+  const [songListRange, setSongListRange] = useState({ start: 0, end: 40 });
+
+  const recomputeSongListRange = useCallback(() => {
+    const scrollEl = sidebarScrollRef.current;
+    const listEl = songListRef.current;
+    if (!scrollEl || !listEl) return;
+    const n = (searchTerm ? filteredPlaylist : playlist).length;
+    if (n === 0) {
+      setSongListRange(r => (r.start === 0 && r.end === 0) ? r : { start: 0, end: 0 });
+      return;
+    }
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const listRect = listEl.getBoundingClientRect();
+    const overscan = 6;
+    // How far the top of the list has scrolled above the viewport top. The
+    // list sits below a tall header inside the same scroll container, so this
+    // is naturally 0 until the header scrolls away.
+    const scrolledIntoList = Math.max(0, scrollRect.top - listRect.top);
+    const start = Math.max(0, Math.floor(scrolledIntoList / SONG_ROW_HEIGHT) - overscan);
+    const visibleCount = Math.ceil(scrollEl.clientHeight / SONG_ROW_HEIGHT);
+    const end = Math.min(n, start + visibleCount + overscan * 2);
+    setSongListRange(r => (r.start === start && r.end === end) ? r : { start, end });
+  }, [searchTerm, filteredPlaylist, playlist]);
+
+  // Recompute when the rendered list changes, the sidebar opens, or on resize.
+  useEffect(() => {
+    recomputeSongListRange();
+    window.addEventListener('resize', recomputeSongListRange);
+    return () => window.removeEventListener('resize', recomputeSongListRange);
+  }, [recomputeSongListRange, showSidebar]);
+
   // Delete song function
   const deleteSong = useCallback((songId: string) => {
     const updatePlaylist = (prev: Song[]) => prev.filter(song => song.id !== songId);
@@ -1957,6 +2012,62 @@ const App: React.FC = () => {
     }
   }, [isPlaying]);
 
+  // Background-playback watchdog.
+  //
+  // All sound is routed through the AudioContext (the <audio> element feeds a
+  // MediaElementSource, not the speakers directly), so if the browser suspends
+  // a backgrounded tab's AudioContext — OS audio-focus changes, energy saver,
+  // memory pressure — playback goes silent and the track position freezes.
+  // resume() was previously wired ONLY to user gestures (play/pause, frequency
+  // select, track change), so once the context was suspended while the tab sat
+  // in the background, nothing brought it back: playback stopped after a few
+  // minutes and stayed stopped until the user returned and interacted. The
+  // silent keep-alive oscillator prevents the *idle* auto-suspend but not this
+  // externally-forced one.
+  //
+  // This watchdog runs only while we intend to be playing. It resumes the
+  // context (and re-starts the element if it was paused but not finished)
+  // whenever it finds them stopped — driven by the context's own statechange
+  // event (immediate), a periodic check (throttled to ~once/min in the
+  // background, which is an acceptable recovery latency), and the tab becoming
+  // visible again (instant recovery on return). It never calls pause(), so it
+  // cannot fight a deliberate user pause — that flips isPlaying false and tears
+  // this down.
+  useEffect(() => {
+    if (!isPlaying) return;
+    const ctx = audioCtxRef.current;
+
+    const recover = () => {
+      const c = audioCtxRef.current;
+      if (c && (c.state === 'suspended' || (c.state as string) === 'interrupted')) {
+        c.resume()
+          .then(() => {
+            // Visible confirmation the background watchdog actually had to step
+            // in (the context was suspended while the tab sat in the
+            // background). Reuses the existing notification toast.
+            setAnalysisNotification('🔊 Audio reconnected after running in the background');
+            window.setTimeout(() => setAnalysisNotification(null), 3500);
+          })
+          .catch(() => {});
+      }
+      const el = mainAudioRef.current;
+      if (el && el.paused && !el.ended && el.src) {
+        el.play().catch(() => {});
+      }
+    };
+
+    ctx?.addEventListener('statechange', recover);
+    const watchdog = setInterval(recover, 10000);
+    const onVisible = () => { if (!document.hidden) recover(); };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      ctx?.removeEventListener('statechange', recover);
+      clearInterval(watchdog);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isPlaying]);
+
 
 
   useEffect(() => {
@@ -2174,7 +2285,15 @@ const App: React.FC = () => {
           try {
             const peaks = await detectFrequencyPeaks(audioBuffer);
             if (peaks.length >= 2) {
-              intervalData = analyzeIntervals(peaks);
+              const full = analyzeIntervals(peaks);
+              // Drop the per-interval records before storing on the song.
+              // `full.intervals` is an O(n²) array of every frequency-pair
+              // record; the app only ever reads coherenceScore, classification,
+              // and fingerprint.* (see the INTERVAL/GAP ANALYSIS panel). Keeping
+              // the records on every analyzed song was the bulk of the heap
+              // growth seen in the snapshot — the fingerprint already carries
+              // totalIntervals / aetheriaMatches / harmonicMatches.
+              intervalData = { ...full, intervals: [] };
             }
           } catch (intervalErr) {
             console.warn('Interval analysis failed for', newPlaylist[i].name, intervalErr);
@@ -4477,7 +4596,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -5239,9 +5358,12 @@ registerProcessor('wav-capture', WavCapture);
               </div>
           )}
 
-          <aside className={`
-            absolute inset-y-0 left-0 w-[85%] sm:w-80 md:relative 
-            bg-black/90 md:bg-black/80 border-r border-slate-800 
+          <aside
+            ref={sidebarScrollRef}
+            onScroll={recomputeSongListRange}
+            className={`
+            absolute inset-y-0 left-0 w-[85%] sm:w-80 md:relative
+            bg-black/90 md:bg-black/80 border-r border-slate-800
             transition-transform duration-300 backdrop-blur-lg shadow-2xl
             z-[60] overflow-y-auto custom-scrollbar
             ${showSidebar ? 'translate-x-0' : '-translate-x-full'}
@@ -5584,7 +5706,7 @@ registerProcessor('wav-capture', WavCapture);
                </button>
             </div>
             
-            <div className="p-2 space-y-1 pb-32">
+            <div ref={songListRef} className="p-2 pb-32">
               {playlist.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-48 text-center text-slate-600 p-6">
                   <p>Library Empty</p>
@@ -5597,15 +5719,27 @@ registerProcessor('wav-capture', WavCapture);
                   <p className="text-xs mt-2">Try a different search term.</p>
                 </div>
               )}
-              {(searchTerm ? filteredPlaylist : playlist).map((song, displayIdx) => {
-                // Find the actual index in the full playlist
-                const actualIdx = playlist.findIndex(s => s.id === song.id);
+              {(() => {
+                const displayList = searchTerm ? filteredPlaylist : playlist;
+                const safeStart = Math.min(Math.max(0, songListRange.start), displayList.length);
+                const safeEnd = Math.min(Math.max(safeStart, songListRange.end), displayList.length);
                 return (
-                  <div 
+                  <>
+                    {/* Top spacer reserves the height of the rows scrolled above the viewport */}
+                    {safeStart > 0 && (
+                      <div aria-hidden style={{ height: safeStart * SONG_ROW_HEIGHT }} />
+                    )}
+                    {displayList.slice(safeStart, safeEnd).map((song, sliceIdx) => {
+                      const displayIdx = safeStart + sliceIdx;
+                      // O(1) lookup of the song's index in the full playlist
+                      const actualIdx = playlistIndexById.get(song.id) ?? -1;
+                      return (
+                  <div
                     key={song.id}
-                    className={`p-3 rounded-lg text-sm flex items-center gap-3 transition-all group ${
-                      currentSongIndex === actualIdx 
-                        ? 'bg-gold-600/20 text-gold-400 border-l-4 border-gold-500 pl-2' 
+                    style={{ height: SONG_ROW_HEIGHT - 4, marginBottom: 4 }}
+                    className={`p-3 rounded-lg text-sm flex items-center gap-3 overflow-hidden transition-all group ${
+                      currentSongIndex === actualIdx
+                        ? 'bg-gold-600/20 text-gold-400 border-l-4 border-gold-500 pl-2'
                         : 'hover:bg-slate-800 text-slate-400'
                     }`}
                   >
@@ -5667,8 +5801,15 @@ registerProcessor('wav-capture', WavCapture);
                       <Trash2 size={14} />
                     </button>
                   </div>
+                      );
+                    })}
+                    {/* Bottom spacer reserves the height of the rows below the viewport */}
+                    {safeEnd < displayList.length && (
+                      <div aria-hidden style={{ height: (displayList.length - safeEnd) * SONG_ROW_HEIGHT }} />
+                    )}
+                  </>
                 );
-              })}
+              })()}
             </div>
             <div className="p-3 bg-black/95 backdrop-blur text-center text-xs text-slate-500 border-t border-slate-900 flex justify-between px-6 shrink-0 z-20 mb-20">
                 <span>
