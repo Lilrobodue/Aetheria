@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2,
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map as MapIcon, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe, Headphones
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map as MapIcon, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe, Headphones, CheckCircle2
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, LO_SHU_WALK_COMBINED, LO_SHU_WALK_OUROBOROS, OUROBOROS_PHASES, SOURCE_FREQ, getLoShuPosition, type LoShuWalkMode } from './constants';
@@ -1245,6 +1245,9 @@ const App: React.FC = () => {
   const [currentEffectsSession, setCurrentEffectsSession] = useState<string | null>(null);
   const [subtleResonanceMode, setSubtleResonanceMode] = useState(false);
   const [analysisNotification, setAnalysisNotification] = useState<string | null>(null);
+  // Offline-ready confirmation. Separate from analysisNotification so it can
+  // persist until the user taps it away (analysis toasts auto-fade).
+  const [offlineReadyNotice, setOfflineReadyNotice] = useState<string | null>(null);
   const [showExperienceHistory, setShowExperienceHistory] = useState(false);
   
   // Phi integration state
@@ -2077,8 +2080,8 @@ const App: React.FC = () => {
     if (!('serviceWorker' in navigator)) return;
     const onSWMessage = (event: MessageEvent) => {
       if (event.data && event.data.type === 'OFFLINE_READY' && event.data.added > 0) {
-        setAnalysisNotification('✓ Aetheria is ready to use offline');
-        window.setTimeout(() => setAnalysisNotification(null), 4000);
+        // Persist until the user acknowledges it (no auto-fade).
+        setOfflineReadyNotice('Aetheria is ready to use offline');
       }
     };
     navigator.serviceWorker.addEventListener('message', onSWMessage);
@@ -4584,6 +4587,30 @@ registerProcessor('wav-capture', WavCapture);
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Offline-ready confirmation — persists until the user taps it away.
+              The whole banner is the dismiss target (mobile-friendly), not just
+              a small corner X. */}
+          {offlineReadyNotice && (
+            <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[101] w-[90%] max-w-lg px-2">
+              <button
+                type="button"
+                aria-label="Dismiss offline-ready notice"
+                onClick={() => setOfflineReadyNotice(null)}
+                className="w-full text-left bg-emerald-900/90 border border-emerald-500 text-emerald-100 p-4 rounded-lg shadow-lg backdrop-blur-md active:scale-[0.99] transition-transform"
+              >
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <div className="font-bold text-sm mb-1">Ready Offline</div>
+                    <div className="text-xs leading-relaxed">{offlineReadyNotice}</div>
+                    <div className="mt-2 text-[10px] text-emerald-300/80">Tap anywhere to dismiss</div>
+                  </div>
+                  <X size={16} className="text-emerald-300 flex-shrink-0" />
+                </div>
+              </button>
             </div>
           )}
 
