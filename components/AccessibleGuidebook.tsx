@@ -1,7 +1,9 @@
 import React from 'react';
-import { Heart, Music, Sparkles, Box, Headphones, Compass, Flag, AlertTriangle, BookOpen, Mountain, Columns3, Wind } from 'lucide-react';
+import { Heart, Music, Sparkles, Box, Headphones, Compass, Flag, AlertTriangle, BookOpen, Mountain, Columns3, Wind, Activity } from 'lucide-react';
 
 const AccessibleGuidebook: React.FC = () => {
+  // Shared style for outbound reference links in the "Music Is Medicine" section.
+  const linkCls = "text-sky-400 hover:text-sky-300 underline decoration-sky-500/40 hover:decoration-sky-300 transition-colors";
   return (
     <div className="px-8 pb-12 space-y-10">
       {/* Title block */}
@@ -23,6 +25,129 @@ const AccessibleGuidebook: React.FC = () => {
           deeper companion guide called <em>The Aetheria Technical Guide</em> that explores the math and
           history behind the system, whenever you're curious. But you don't need it to enjoy the music.
         </p>
+      </section>
+
+      {/* Music Is Medicine — bridge grounding readers in established research */}
+      <section>
+        <div className="flex items-center gap-2 mb-4">
+          <Activity size={20} className="text-sky-400" />
+          <h2 className="text-2xl font-serif text-sky-300">Music Is Medicine. The Science Already Knows This.</h2>
+        </div>
+        <p className="text-slate-300 leading-relaxed mb-4">
+          Before we discuss anything specific about the Aetheria approach to frequency, it's worth pausing to
+          recognize what mainstream medicine has already established about music itself. The healing effects of
+          music are not fringe ideas. They are documented, replicated, and accepted at some of the most respected
+          medical institutions in the world.
+        </p>
+
+        <div className="p-5 bg-sky-900/15 border border-sky-500/30 rounded-lg mb-3">
+          <h3 className="text-sky-200 font-bold mb-2">Harvard Medical School</h3>
+          <p className="text-sm text-slate-300 leading-relaxed">
+            Researchers describe music as engaging more parts of the brain than almost any other human activity.
+            Studies coming out of Harvard-affiliated hospitals show that music can lower heart rate, reduce blood
+            pressure, decrease levels of stress hormones, and provide measurable relief to patients recovering
+            from heart attacks, strokes, and surgery. A 2021 research review in <em>Psychiatry Research</em>{' '}
+            concluded that music-based interventions provide important relief by reducing anxiety during medical
+            treatment.
+          </p>
+          <p className="text-xs text-slate-500 mt-3">
+            Sources:{' '}
+            <a href="https://www.health.harvard.edu/mind-and-mood/music-as-medicine" target="_blank" rel="noopener noreferrer" className={linkCls}>Music as Medicine (Harvard Health)</a>
+            {' · '}
+            <a href="https://hms.harvard.edu/news-events/publications-archive/brain/music-brain" target="_blank" rel="noopener noreferrer" className={linkCls}>Music and the Brain (HMS)</a>
+          </p>
+        </div>
+
+        <div className="p-5 bg-sky-900/15 border border-sky-500/30 rounded-lg mb-4">
+          <h3 className="text-sky-200 font-bold mb-2">Johns Hopkins</h3>
+          <p className="text-sm text-slate-300 leading-relaxed">
+            The Center for Music and Medicine — an entire research center dedicated to this work — investigates
+            how music affects Parkinson's disease, Alzheimer's disease, stroke recovery, and a range of other
+            disorders. Johns Hopkins Medicine has run a music therapy program in its children's hospital since
+            1993, with over 22,000 documented patient interactions. Its Department of Psychiatry and Behavioral
+            Sciences describes music-based therapies as a recognized clinical approach for cognitive disorders,
+            including Alzheimer's and memory disorders.
+          </p>
+          <p className="text-xs text-slate-500 mt-3">
+            Sources:{' '}
+            <a href="https://www.hopkinsmedicine.org/center-for-music-and-medicine/music-as-medicine" target="_blank" rel="noopener noreferrer" className={linkCls}>Music as Medicine</a>
+            {' · '}
+            <a href="https://www.hopkinsmedicine.org/center-for-music-and-medicine/research" target="_blank" rel="noopener noreferrer" className={linkCls}>Center for Music and Medicine (Research)</a>
+            {' · '}
+            <a href="https://www.hopkinsmedicine.org/all-childrens-hospital/services/music-therapy" target="_blank" rel="noopener noreferrer" className={linkCls}>All Children's Music Therapy</a>
+          </p>
+        </div>
+
+        <p className="text-slate-300 leading-relaxed mb-3">
+          The body of research is broad and growing. Studies have documented that music can:
+        </p>
+        <ul className="space-y-2 mb-4">
+          {[
+            <><strong className="text-slate-100">Lower cortisol</strong>, the body's primary stress hormone, particularly through individually-tailored listening interventions</>,
+            <><strong className="text-slate-100">Reduce anxiety symptoms</strong> in clinical and non-clinical populations, with effects measurable through both subjective scales and physiological markers</>,
+            <><strong className="text-slate-100">Ease depression</strong>, with most randomized controlled trials showing significant reduction in depressive symptoms after structured music therapy</>,
+            <><strong className="text-slate-100">Decrease perceived pain</strong> in post-operative patients and people managing chronic conditions</>,
+            <><strong className="text-slate-100">Lower blood pressure and slow heart rate</strong>, with sustained effects observable beyond the listening session itself</>,
+            <><strong className="text-slate-100">Engage the brain's reward system</strong>, releasing dopamine in patterns similar to other pleasurable and life-supporting activities</>,
+            <><strong className="text-slate-100">Support recovery from neurological injury</strong> through rhythm-based therapies that help retrain motor function</>,
+          ].map((content, i) => (
+            <li key={i} className="flex gap-3 p-3 bg-slate-900/40 border border-slate-800 rounded-lg">
+              <span className="flex-shrink-0 text-sky-400 leading-relaxed">•</span>
+              <span className="text-sm text-slate-300 leading-relaxed">{content}</span>
+            </li>
+          ))}
+        </ul>
+
+        <p className="text-slate-300 leading-relaxed mb-3">
+          This is not alternative medicine. This is mainstream medicine acknowledging what the human body
+          already knows.
+        </p>
+        <p className="text-slate-300 leading-relaxed mb-4">
+          The question Aetheria asks is not <em>whether</em> sound and frequency affect human health — that
+          question has been answered, by Harvard, by Johns Hopkins, and by hundreds of other institutions. The
+          question Aetheria asks is <em>how specifically</em>: which frequencies, in which combinations, organized
+          in which patterns, produce which effects, in which people? That question is more particular, and the
+          research is younger. But it begins from a foundation that is already solid.
+        </p>
+        <div className="p-4 bg-sky-900/10 border-l-4 border-sky-500/60 rounded-r-lg">
+          <p className="text-sm text-slate-300 leading-relaxed">
+            If you find yourself wondering whether sound can really change how a body feels, you are not asking a
+            strange question. You are asking a question that respected medical institutions have already begun to
+            answer. Aetheria simply extends the inquiry into territory that mainstream research has not yet had
+            time to fully map.
+          </p>
+        </div>
+
+        <div className="mt-6 pt-5 border-t border-slate-800">
+          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-3">Selected References</h3>
+          <ul className="space-y-2">
+            {[
+              { cite: 'Harvard Health Publishing. (2024). Music as medicine. Harvard Medical School.', url: 'https://www.health.harvard.edu/mind-and-mood/music-as-medicine' },
+              { cite: 'Harvard Medical School. (n.d.). Music and the brain.', url: 'https://hms.harvard.edu/news-events/publications-archive/brain/music-brain' },
+              { cite: 'Johns Hopkins Medicine. (n.d.). Center for Music and Medicine — Research.', url: 'https://www.hopkinsmedicine.org/center-for-music-and-medicine/research' },
+              { cite: 'Johns Hopkins Medicine. (n.d.). Music as Medicine.', url: 'https://www.hopkinsmedicine.org/center-for-music-and-medicine/music-as-medicine' },
+              { cite: "Johns Hopkins All Children's Hospital. (n.d.). Music Therapy Program.", url: 'https://www.hopkinsmedicine.org/all-childrens-hospital/services/music-therapy' },
+              { cite: 'Koelsch, S. (2014). Brain correlates of music-evoked emotions. Nature Reviews Neuroscience, 15(3), 170–180.' },
+              { cite: 'de Witte, M., Spruit, A., van Hooren, S., Moonen, X., & Stams, G.-J. (2020). Effects of music interventions on stress-related outcomes: A systematic review and two meta-analyses. Health Psychology Review, 14(2), 294–324.' },
+              { cite: 'JMIR Mental Health. (2025). Effects of sound interventions on the mental stress response in adults: Scoping review.', url: 'https://mental.jmir.org/2025/1/e69120' },
+              { cite: 'Mojtabavi, H., et al. (2020). Music therapy for postoperative outcomes following coronary artery bypass grafting (Review).' },
+              { cite: 'Pantelyat, A., et al. (2016). The use of group drumming for non-pharmacological treatment of Parkinson disease.' },
+            ].map((r, i) => (
+              <li key={i} className="text-xs text-slate-500 leading-relaxed">
+                {r.cite}
+                {r.url && (
+                  <>
+                    {' '}
+                    <a href={r.url} target="_blank" rel="noopener noreferrer" className={`${linkCls} whitespace-nowrap`}>↗ View</a>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="text-slate-600 text-[11px] italic mt-3">
+            External links open in a new tab and lead to the cited institutions and journals.
+          </p>
+        </div>
       </section>
 
       {/* What is Aetheria */}
