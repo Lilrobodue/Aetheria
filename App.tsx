@@ -4640,7 +4640,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.6</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.7</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -5775,11 +5775,22 @@ registerProcessor('wav-capture', WavCapture);
                     )}
                     {displayList.slice(safeStart, safeEnd).map((song, sliceIdx) => {
                       const displayIdx = safeStart + sliceIdx;
-                      // O(1) lookup of the song's index in the full playlist
-                      const actualIdx = playlistIndexById.get(song.id) ?? -1;
+                      // Position in the full playlist. Generated walks (Lo Shu,
+                      // Ultimate, 111 Sequence) repeat the SAME track at many
+                      // positions, so song.id is NOT unique — an id-based lookup
+                      // would collapse every duplicate to one index (every row
+                      // showing the same number) and duplicate React keys would
+                      // make the virtualized list reuse the wrong rows while
+                      // scrolling. When not searching, the displayed list IS the
+                      // playlist so the position maps directly; when searching we
+                      // fall back to first-occurrence by id (any instance plays
+                      // the same track).
+                      const actualIdx = searchTerm
+                        ? (playlistIndexById.get(song.id) ?? -1)
+                        : displayIdx;
                       return (
                   <div
-                    key={song.id}
+                    key={`${song.id}::${displayIdx}`}
                     style={{ height: SONG_ROW_HEIGHT - 4, marginBottom: 4 }}
                     className={`p-3 rounded-lg text-sm flex items-center gap-3 overflow-hidden transition-all group ${
                       currentSongIndex === actualIdx
