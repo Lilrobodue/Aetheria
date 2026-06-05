@@ -2068,6 +2068,23 @@ const App: React.FC = () => {
     };
   }, [isPlaying]);
 
+  // "Ready offline" confirmation. The service worker posts OFFLINE_READY once
+  // it finishes caching the full asset set (see sw.js CACHE_URLS handler). We
+  // only surface the toast when something new was actually cached (added > 0),
+  // so it appears on the first visit and after deploys that add files — not on
+  // every steady-state load. Reuses the existing notification toast.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const onSWMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'OFFLINE_READY' && event.data.added > 0) {
+        setAnalysisNotification('✓ Aetheria is ready to use offline');
+        window.setTimeout(() => setAnalysisNotification(null), 4000);
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', onSWMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onSWMessage);
+  }, []);
+
 
 
   useEffect(() => {
@@ -4596,7 +4613,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.5</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'aetheria-v10.3-pwa-icons';
+const CACHE_NAME = 'aetheria-v10.5-offline';
 const OFFLINE_URL = '/';
 
 // Files to cache for offline support
@@ -28,20 +28,22 @@ self.addEventListener('install', (event) => {
     (async () => {
       try {
         const cache = await caches.open(CACHE_NAME);
-        
-        // Cache static files
-        await cache.addAll(STATIC_CACHE_URLS);
-        
-        // Cache CDN resources with error handling
-        for (const url of CDN_CACHE_URLS) {
+
+        // Cache each URL individually. We deliberately do NOT use
+        // cache.addAll(): it is atomic, so a single 404 (e.g. a path that
+        // doesn't exist at this deploy's web root) rejects the whole install
+        // with "Failed to fetch" and leaves the cache empty. Per-URL
+        // try/catch lets the install succeed with whatever is reachable and
+        // just logs the rest.
+        for (const url of [...STATIC_CACHE_URLS, ...CDN_CACHE_URLS]) {
           try {
             await cache.add(url);
           } catch (error) {
-            console.warn(`[SW] Failed to cache ${url}:`, error);
+            console.warn(`[SW] Skipped caching ${url}:`, error);
           }
         }
-        
-        console.log('[SW] All files cached successfully');
+
+        console.log('[SW] Install caching complete');
       } catch (error) {
         console.error('[SW] Cache installation failed:', error);
       }
@@ -74,6 +76,28 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Graceful last-resort response when BOTH network and cache miss. Returns a
+// content-type-correct stub for CSS/JS modules so the page degrades instead of
+// hard-erroring, otherwise a 503. Never throws, so respondWith() can't reject.
+function offlineFallback(url, request, error) {
+  if (url.pathname.endsWith('.css')) {
+    return new Response('/* Offline - CSS unavailable */', {
+      headers: { 'Content-Type': 'text/css' }
+    });
+  }
+  if (/\.(m?js|tsx?|jsx)$/i.test(url.pathname)) {
+    return new Response('// Offline - module unavailable', {
+      headers: { 'Content-Type': 'text/javascript' }
+    });
+  }
+  console.warn('[SW] No cache and network failed for:', request.url, error);
+  return new Response('Service temporarily unavailable', {
+    status: 503,
+    statusText: 'Service Unavailable',
+    headers: { 'Content-Type': 'text/plain' }
+  });
+}
+
 // Fetch event - serve cached content when offline
 self.addEventListener('fetch', (event) => {
   const { request } = event;
@@ -89,17 +113,30 @@ self.addEventListener('fetch', (event) => {
         try {
           // Try to fetch from network first
           const networkResponse = await fetch(request);
+          // Keep the offline shell fresh: stash the latest index.html under
+          // '/' so an offline navigation always gets the current shell.
+          if (networkResponse && networkResponse.ok) {
+            const shellCopy = networkResponse.clone();
+            caches.open(CACHE_NAME).then(c => c.put('/', shellCopy)).catch(() => {});
+          }
           return networkResponse;
         } catch (error) {
-          // If network fails, serve from cache or offline page
-          const cache = await caches.open(CACHE_NAME);
-          const cachedResponse = await cache.match('/');
-          
-          if (cachedResponse) {
-            return cachedResponse;
-          } else {
-            // Return a basic offline page if nothing is cached
-            return new Response(`
+          // Network failed — serve the cached shell, falling back to a
+          // built-in offline page. Every branch here is guarded so the
+          // promise passed to respondWith() can NEVER reject: an unguarded
+          // throw is what shows up as "FetchEvent ... resulted in a network
+          // error response: the promise was rejected."
+          try {
+            const cache = await caches.open(CACHE_NAME);
+            const cachedResponse = await cache.match('/');
+            if (cachedResponse) {
+              return cachedResponse;
+            }
+          } catch (cacheError) {
+            console.warn('[SW] Cache lookup failed during navigation fallback:', cacheError);
+          }
+          // Return a basic offline page if nothing is cached
+          return new Response(`
               <!DOCTYPE html>
               <html lang="en">
               <head>
@@ -131,60 +168,65 @@ self.addEventListener('fetch', (event) => {
             `, {
               headers: { 'Content-Type': 'text/html' }
             });
-          }
         }
       })()
     );
     return;
   }
 
-  // Handle other requests (CSS, JS, images, etc.)
+  // Same-origin app source (HTML / TS / JS / CSS) changes on every deploy, so
+  // serve it NETWORK-FIRST: always try the network and only fall back to cache
+  // when offline. This is what makes a fresh deploy show up on the first reload
+  // instead of the second. Version-pinned CDN libraries (react, lucide,
+  // tailwind) and static media (images, manifest, fonts) stay CACHE-FIRST for
+  // speed — they don't change between deploys.
+  const isSameOrigin = url.origin === self.location.origin;
+  const isAppSource = isSameOrigin && /\.(html|tsx?|jsx?|mjs|css)$/i.test(url.pathname);
+
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE_NAME);
-      
+
+      // --- NETWORK-FIRST: app source ---
+      if (isAppSource) {
+        try {
+          const networkResponse = await fetch(request);
+          if (networkResponse && networkResponse.ok) {
+            // Keep the cached copy fresh as an offline fallback.
+            cache.put(request, networkResponse.clone());
+          }
+          return networkResponse;
+        } catch (error) {
+          const cachedResponse = await cache.match(request);
+          if (cachedResponse) return cachedResponse;
+          return offlineFallback(url, request, error);
+        }
+      }
+
+      // --- CACHE-FIRST: CDN libraries, images, manifest, fonts, etc. ---
       try {
-        // Try cache first (cache-first strategy for assets)
         const cachedResponse = await cache.match(request);
         if (cachedResponse) {
-          // Update cache in background for next time
+          // Revalidate in the background for next time (best-effort).
           fetch(request).then(response => {
-            if (response.ok) {
-              cache.put(request, response.clone());
-            }
+            if (response.ok) cache.put(request, response.clone());
           }).catch(() => {
             // Ignore network errors in background update
           });
-          
           return cachedResponse;
         }
 
-        // If not in cache, try network
+        // Not cached yet — fetch and cache the successful response.
         const networkResponse = await fetch(request);
-        
-        // Cache successful responses
         if (networkResponse.ok) {
-          // Don't cache POST requests or non-successful responses
-          if (request.method === 'GET') {
-            cache.put(request, networkResponse.clone());
-          }
+          cache.put(request, networkResponse.clone());
         }
-        
         return networkResponse;
       } catch (error) {
-        // If both cache and network fail, return a fallback for essential files
-        if (url.pathname.endsWith('.css')) {
-          return new Response('/* Offline - CSS unavailable */', {
-            headers: { 'Content-Type': 'text/css' }
-          });
-        } else if (url.pathname.endsWith('.js')) {
-          return new Response('// Offline - JS unavailable', {
-            headers: { 'Content-Type': 'text/javascript' }
-          });
-        }
-        
-        // For other files, just throw the error
-        throw error;
+        // Both cache and network failed — return a graceful response rather
+        // than throwing (a throw rejects respondWith() and logs as
+        // "Uncaught (in promise) Failed to fetch").
+        return offlineFallback(url, request, error);
       }
     })()
   );
@@ -265,6 +307,47 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'AUDIO_STATE') {
     // Store audio state for recovery
     self.audioState = event.data.state;
+  }
+
+  // Offline precache: the page sends the full list of resource URLs it
+  // actually loaded (the whole module graph + CDN deps, gathered from the
+  // Performance API). We fetch and cache any not already stored. This is what
+  // makes the app TRULY work offline for a no-build app — we can't enumerate
+  // every .tsx/.ts module by hand, so we let a successful online visit tell us
+  // exactly what to keep. Best-effort and idempotent (skips already-cached).
+  if (event.data && event.data.type === 'CACHE_URLS' && Array.isArray(event.data.urls)) {
+    event.waitUntil((async () => {
+      const cache = await caches.open(CACHE_NAME);
+      let added = 0;
+      await Promise.all(event.data.urls.map(async (rawUrl) => {
+        try {
+          const existing = await cache.match(rawUrl);
+          if (existing) return;
+          const resp = await fetch(rawUrl);
+          // Cache CORS-readable (ok) and opaque cross-origin responses alike.
+          if (resp && (resp.ok || resp.type === 'opaque')) {
+            await cache.put(rawUrl, resp.clone());
+            added++;
+          }
+        } catch (err) {
+          // Best-effort: a single unreachable URL must not abort the rest.
+        }
+      }));
+      const total = event.data.urls.length;
+      console.log(`[SW] Offline precache: cached ${added} new of ${total} requested`);
+
+      // Tell the page caching is done so it can confirm offline-readiness.
+      // `added` lets the UI show the toast only when something new was cached
+      // (first visit / after a deploy), not on every steady-state load.
+      const readyMsg = { type: 'OFFLINE_READY', added, total };
+      const source = event.source;
+      if (source) {
+        source.postMessage(readyMsg);
+      } else {
+        const clientsList = await self.clients.matchAll({ includeUncontrolled: true });
+        clientsList.forEach((client) => client.postMessage(readyMsg));
+      }
+    })());
   }
 });
 

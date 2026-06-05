@@ -15,6 +15,49 @@ type Config = {
   onNeedRefresh?: () => void;
 };
 
+// Precache the exact set of assets this page loaded, so the app works fully
+// offline on the next visit. For a no-build app the runtime module graph
+// (every imported .tsx/.ts plus the CDN modules) can't be listed by hand, so we
+// read it back from the Performance API and hand it to the active service
+// worker to cache. Best-effort and safe to call repeatedly.
+function precacheLoadedAssets(): void {
+  if (!('serviceWorker' in navigator) || typeof performance === 'undefined') return;
+
+  navigator.serviceWorker.ready
+    .then((registration) => {
+      const target = registration.active || navigator.serviceWorker.controller;
+      if (!target) return;
+
+      const sameOrigin = window.location.origin;
+      // Cross-origin hosts whose assets are part of the app (not user data).
+      const cdnOrigins = [
+        'https://aistudiocdn.com',
+        'https://cdn.tailwindcss.com',
+        'https://fonts.googleapis.com',
+        'https://fonts.gstatic.com',
+      ];
+      // Never cache the user's audio — it can be huge and isn't app shell.
+      const audioExt = /\.(mp3|wav|flac|ogg|oga|m4a|aac|opus|weba)(\?|$)/i;
+
+      const urls = new Set<string>();
+      urls.add(sameOrigin + '/');                    // the offline shell
+      urls.add(window.location.href.split('#')[0]);  // the current document
+
+      for (const entry of performance.getEntriesByType('resource')) {
+        const name = entry.name;
+        if (!name || !/^https?:/i.test(name) || audioExt.test(name)) continue;
+        let origin: string;
+        try { origin = new URL(name).origin; } catch { continue; }
+        if (origin === sameOrigin || cdnOrigins.includes(origin)) {
+          urls.add(name);
+        }
+      }
+
+      target.postMessage({ type: 'CACHE_URLS', urls: Array.from(urls) });
+    })
+    .catch(() => { /* offline or no active SW — nothing to precache */ });
+}
+
 export function register(config?: Config): void {
   if ('serviceWorker' in navigator) {
     const publicUrl = new URL(process.env.PUBLIC_URL || '/', window.location.href);
@@ -38,6 +81,12 @@ export function register(config?: Config): void {
         // Is not localhost. Just register service worker
         registerValidSW(swUrl, config);
       }
+
+      // Once the page has fully loaded, hand the SW the complete set of assets
+      // this visit pulled in so the NEXT visit works fully offline. Runs again
+      // shortly after to catch any resources that finished just after 'load'.
+      precacheLoadedAssets();
+      setTimeout(precacheLoadedAssets, 4000);
     });
   }
 }
