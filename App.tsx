@@ -3754,7 +3754,14 @@ const App: React.FC = () => {
         
         // Set up audio element events
         mainAudioRef.current.addEventListener('ended', () => {
-          setIsPlaying(false);
+          // Do NOT flip isPlaying to false here. Setting playbackState to
+          // 'paused' mid-playlist (together with the element's 'ended' state)
+          // makes the OS tear down the lock-screen / car media notification,
+          // and on mobile it does not reliably reappear when the next track
+          // starts. Keeping playback "playing" across the auto-advance lets the
+          // notification persist and simply swap its metadata. The terminal
+          // case (end of a non-looping playlist) is handled inside playNext,
+          // which flips isPlaying(false) when there is nothing left to play.
           playNextRef.current();
         });
         
@@ -3891,6 +3898,14 @@ const App: React.FC = () => {
       // Set a conservative volume on the element itself as additional safety
       // Don't set volume on the element - we want pure Web Audio output only
       await mainAudioRef.current.play();
+
+      // Assert the media session is playing immediately on the new track so the
+      // lock-screen / car notification stays up across an auto-advance. The
+      // isPlaying effect won't re-fire here (isPlaying stays true through the
+      // transition), so set it explicitly.
+      if ('mediaSession' in navigator) {
+        try { navigator.mediaSession.playbackState = 'playing'; } catch {}
+      }
 
       setIsPlaying(true);
       setCurrentSongIndex(index);
@@ -4730,7 +4745,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.8</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.9</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
