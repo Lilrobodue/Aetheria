@@ -1,4 +1,4 @@
-const CACHE_NAME = 'aetheria-v10.9-offline';
+const CACHE_NAME = 'aetheria-v11.0-offline';
 const OFFLINE_URL = '/';
 
 // Files to cache for offline support
@@ -21,6 +21,42 @@ const CDN_CACHE_URLS = [
   'https://aistudiocdn.com/lucide-react@^0.554.0'
 ];
 
+// Cache a single URL, choosing the correct fetch mode by origin.
+//
+// Same-origin assets and the ES-module CDN (aistudiocdn) MUST use a normal CORS
+// fetch so the cached response can satisfy module imports. Other cross-origin
+// assets — notably cdn.tailwindcss.com, which is loaded as a classic <script>
+// and sends no Access-Control-Allow-Origin header — are blocked by a default
+// (cors) fetch ("No 'Access-Control-Allow-Origin' header is present"). We fetch
+// those with mode:'no-cors', yielding an opaque response that caches fine and
+// replays for the classic no-cors request. Returns true if something was cached.
+async function cacheUrl(cache, rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl, self.location.origin);
+  } catch {
+    return false;
+  }
+  const needsCors =
+    parsed.origin === self.location.origin ||
+    parsed.origin === 'https://aistudiocdn.com';
+  try {
+    const request = needsCors
+      ? new Request(rawUrl)
+      : new Request(rawUrl, { mode: 'no-cors' });
+    const response = await fetch(request);
+    // CORS / same-origin responses must be ok; opaque (no-cors) responses
+    // report ok=false but are still valid to cache and replay.
+    if (response.ok || response.type === 'opaque') {
+      await cache.put(rawUrl, response);
+      return true;
+    }
+  } catch (err) {
+    // Unreachable or blocked — caller decides whether to log.
+  }
+  return false;
+}
+
 // Install event - cache resources
 self.addEventListener('install', (event) => {
   console.log('[SW] Install event');
@@ -36,11 +72,8 @@ self.addEventListener('install', (event) => {
         // try/catch lets the install succeed with whatever is reachable and
         // just logs the rest.
         for (const url of [...STATIC_CACHE_URLS, ...CDN_CACHE_URLS]) {
-          try {
-            await cache.add(url);
-          } catch (error) {
-            console.warn(`[SW] Skipped caching ${url}:`, error);
-          }
+          const cached = await cacheUrl(cache, url);
+          if (!cached) console.warn(`[SW] Skipped caching ${url}`);
         }
 
         console.log('[SW] Install caching complete');
@@ -320,18 +353,11 @@ self.addEventListener('message', (event) => {
       const cache = await caches.open(CACHE_NAME);
       let added = 0;
       await Promise.all(event.data.urls.map(async (rawUrl) => {
-        try {
-          const existing = await cache.match(rawUrl);
-          if (existing) return;
-          const resp = await fetch(rawUrl);
-          // Cache CORS-readable (ok) and opaque cross-origin responses alike.
-          if (resp && (resp.ok || resp.type === 'opaque')) {
-            await cache.put(rawUrl, resp.clone());
-            added++;
-          }
-        } catch (err) {
-          // Best-effort: a single unreachable URL must not abort the rest.
-        }
+        const existing = await cache.match(rawUrl);
+        if (existing) return;
+        // cacheUrl picks cors vs no-cors by origin, so cross-origin classic
+        // scripts (e.g. Tailwind) cache as opaque instead of CORS-failing.
+        if (await cacheUrl(cache, rawUrl)) added++;
       }));
       const total = event.data.urls.length;
       console.log(`[SW] Offline precache: cached ${added} new of ${total} requested`);

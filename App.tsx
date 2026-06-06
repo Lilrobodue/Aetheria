@@ -3841,8 +3841,15 @@ const App: React.FC = () => {
         mediaSourceRef.current.connect(gainNodeRef.current!);
       }
 
-      // Load and analyze the audio
-      await mainAudioRef.current.load();
+      // NOTE: no explicit load() here on purpose. Setting .src above already
+      // starts the media resource load, and play() below waits for enough
+      // data. Calling load() additionally does a HARD reset of the element to
+      // its initial (empty) state, which on mobile tears down the OS
+      // media-session notification — and because our audio is redirected
+      // through Web Audio (the element is silent to the OS), the notification
+      // did not reliably reappear on the next track. Dropping the redundant
+      // reset is what keeps the lock-screen / car controls alive across an
+      // auto-advance.
 
       let freq = song.harmonicFreq;
       let existingFractalAnalysis = song.fractalAnalysis;
@@ -4745,7 +4752,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.9</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.0</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
