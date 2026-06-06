@@ -1401,6 +1401,9 @@ const App: React.FC = () => {
   // purpose with zero churn.
   const silentKeepAliveRef = useRef<{ osc: OscillatorNode; gain: GainNode } | null>(null);
   const blobUrlsRef = useRef<{ [key: string]: string }>({});
+  // Guards against double auto-advance. Set when the preemptive (near-end)
+  // advance OR the 'ended' fallback fires, reset when the next track starts.
+  const advanceLockRef = useRef(false);
 
   const solfeggioOscRef = useRef<OscillatorNode | null>(null);
   const solfeggioGainRef = useRef<GainNode | null>(null);
@@ -3732,7 +3735,11 @@ const App: React.FC = () => {
     setCurrTime(0);
     pausedAtRef.current = 0;
     setIsAnalyzing(true);
-    
+    // Clear the auto-advance guard for the new track. The previous track's
+    // element is paused below, so its timeupdate/ended can't fire again; the
+    // new track will re-arm the guard only when it nears its own end.
+    advanceLockRef.current = false;
+
     const song = tracks[index];
     if (!song) return;
 
@@ -3752,16 +3759,39 @@ const App: React.FC = () => {
         // DON'T mute the element - createMediaElementSource will redirect all audio through Web Audio
         // The element needs to play normally to feed the Web Audio graph
         
-        // Set up audio element events
+        // Set up audio element events.
+        //
+        // PREEMPTIVE auto-advance: switch to the next track a hair BEFORE the
+        // current one ends, while the element is still in its 'playing' state.
+        // Letting the element actually reach 'ended' on a locked screen is a
+        // gesture-less event the OS treats as "playback finished" — it
+        // deactivates the media session, so the lock-screen card vanishes and,
+        // with no active session keeping the tab alive, the backgrounded
+        // AudioContext then suspends and the playlist dies after one hop.
+        // Advancing from 'timeupdate' just short of the end keeps playback
+        // continuous so the session stays active, the card updates, and the
+        // chain keeps going with the screen off.
+        const ADVANCE_LEAD_SECONDS = 0.7;
+        mainAudioRef.current.addEventListener('timeupdate', () => {
+          const el = mainAudioRef.current;
+          if (!el || advanceLockRef.current) return;
+          const dur = el.duration;
+          if (!Number.isFinite(dur) || dur <= 0) return;
+          if (dur - el.currentTime <= ADVANCE_LEAD_SECONDS) {
+            advanceLockRef.current = true;
+            playNextRef.current();
+          }
+        });
+
+        // Fallback: if the track is shorter than the lead time, or a
+        // 'timeupdate' never lands in the window, the natural 'ended' still
+        // advances. Guarded so it never double-fires with the preemptive path.
+        // We do NOT flip isPlaying to false here — that would tell the OS
+        // 'paused' mid-playlist and tear the notification down. The terminal
+        // case (end of a non-looping playlist) is handled inside playNext.
         mainAudioRef.current.addEventListener('ended', () => {
-          // Do NOT flip isPlaying to false here. Setting playbackState to
-          // 'paused' mid-playlist (together with the element's 'ended' state)
-          // makes the OS tear down the lock-screen / car media notification,
-          // and on mobile it does not reliably reappear when the next track
-          // starts. Keeping playback "playing" across the auto-advance lets the
-          // notification persist and simply swap its metadata. The terminal
-          // case (end of a non-looping playlist) is handled inside playNext,
-          // which flips isPlaying(false) when there is nothing left to play.
+          if (advanceLockRef.current) return;
+          advanceLockRef.current = true;
           playNextRef.current();
         });
         
@@ -4776,7 +4806,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
