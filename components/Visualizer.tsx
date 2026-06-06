@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { VizSettings } from '../types';
+import { VizSettings, BandEnvelope } from '../types';
 import { frequencyToSpectrumColor, type FrequencyColorMode } from '../utils/spectrumColor';
 import { LO_SHU_WALKS, type LoShuWalkMode } from '../constants';
 
@@ -23,6 +23,16 @@ interface VisualizerProps {
    *  freq via indexOf would always return the first occurrence. -1 disables
    *  active highlighting (falls back to selectedFrequency lookup). */
   loShuWalkStep?: number;
+  /** Pre-scanned per-band energy envelope for the currently-playing track. When
+   *  present, the visualizer samples it at the live playback position so the
+   *  motion tracks the real song and every bass drop fires on time. Null when
+   *  the track hasn't been scanned (yet) — the visualizer falls back to a calm
+   *  deterministic pulse. */
+  bandEnvelope?: BandEnvelope | null;
+  /** Ref to the music <audio> element, read each frame for the playback
+   *  position used to index bandEnvelope. A ref (stable identity) rather than a
+   *  prop value so frame-accurate time reads don't churn React state. */
+  audioElementRef?: React.RefObject<HTMLAudioElement | null>;
 }
 
 // 27 Aetheria frequencies arranged into [GUT, HEART, HEAD] layers, ordered
@@ -70,7 +80,8 @@ interface HexCell {
   y: number;
   size: number;
   dist: number; // Distance from center for radial pulse
-  activeLevel: number; 
+  activeLevel: number;
+  liftLevel: number; // Smoothed ripple wave-lift, so the hex swells with the wave instead of popping on the beat
   pulseSpeed: number;
   freqIndex: number;
   colorType: 'primary' | 'shade1' | 'shade2'; 
@@ -105,8 +116,11 @@ const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5)); // ~2.399 rad
 // energy, accumulating into hundreds of live entries within seconds — the
 // per-hex inner loop becomes O(hexes × ripples) and the constant
 // allocation/decay churn triggers GC pauses that look like the "smooth
-// for a second then jerky" stutter the user reported.
-const MAX_ACTIVE_RIPPLES = 80;
+// for a second then jerky" stutter the user reported. Lowered 80→40: each
+// large center ripple lights a full ring of hexes (extra stroke/fill draws),
+// so fewer concurrent ripples = lighter kick frames = no dropped frames on the
+// beat, while 40 is still well above what's visible at once.
+const MAX_ACTIVE_RIPPLES = 40;
 
 // Convert Hex to HSL for color math
 const hexToHSL = (hex: string): { h: number; s: number; l: number } => {
@@ -720,6 +734,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
   frequencyColorMode = 'chakra',
   loShuWalkMode = null,
   loShuWalkStep = -1,
+  bandEnvelope = null,
+  audioElementRef,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -733,7 +749,22 @@ const Visualizer: React.FC<VisualizerProps> = ({
   
   // Audio History
   const prevBassRef = useRef(0);
+  const prevSubBassRef = useRef(0);
   const prevHighRef = useRef(0);
+
+  // Smoothed band energies for CONTINUOUS motion (particle push/size/colour).
+  // The raw energies keep their sharp envelope transients for ripple ONSET
+  // detection, but feeding those transients straight into particle POSITIONS
+  // makes the whole field lurch forward on every kick. These low-passed values
+  // (~180 ms time constant) keep the motion fluid while still breathing.
+  const smoothEnergyRef = useRef({ bass: 0, sub: 0, mid: 0, high: 0, spec: 0.5 });
+
+  // Pre-scanned band envelope for the current track, mirrored into a ref so the
+  // RAF loop (whose effect deliberately doesn't depend on it) always reads the
+  // latest without tearing down and rebuilding the animation on every track
+  // change. audioElementRef is already a stable ref, read directly in the loop.
+  const bandEnvelopeRef = useRef<BandEnvelope | null>(bandEnvelope);
+  useEffect(() => { bandEnvelopeRef.current = bandEnvelope; }, [bandEnvelope]);
   
   // Tempo Detection
   const beatHistoryRef = useRef<number[]>([]);
@@ -793,7 +824,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
              const mathType = (Math.abs((c * r * PHI) + index) * PHI) % 1;
              let colorType: 'primary' | 'shade1' | 'shade2' = 'primary';
              if (mathType > 0.69) { colorType = mathType > 0.85 ? 'shade2' : 'shade1'; }
-             hexCells.push({ col: c, row: r, x, y, size, dist, activeLevel: 0, pulseSpeed: 0.02 + Math.random() * 0.05, freqIndex, colorType, phaseOffset: Math.random() * Math.PI * 2 });
+             hexCells.push({ col: c, row: r, x, y, size, dist, activeLevel: 0, liftLevel: 0, pulseSpeed: 0.02 + Math.random() * 0.05, freqIndex, colorType, phaseOffset: Math.random() * Math.PI * 2 });
              index++;
         }
     }
@@ -942,16 +973,26 @@ const Visualizer: React.FC<VisualizerProps> = ({
           return;
         }
 
-        // Account for multiple frames if we're running slow, but cap at 3
-        // so that returning from a backgrounded tab (or an effect re-mount)
-        // doesn't cause a huge time-jump in the animation.
-        const framesToCatch = Math.min(3, Math.floor(deltaTime / targetFrameTime));
+        // ALWAYS advance time by exactly ONE step per rendered frame — never
+        // "catch up" multiple steps after a slow frame. This is the fix for the
+        // per-kick jerk: a bass kick spawns a ripple and lights a ring of hexes,
+        // which spikes that frame's draw cost past the 33 ms budget; the old
+        // catch-up then jumped timeRef 2–3× in a single displayed frame, lurching
+        // the ENTIRE procedural scene (Tree sine-pulse, hex waves, particle flow,
+        // rotation — all keyed off timeRef) at once. No amount of energy-smoothing
+        // could fix it because it was the TIME variable jumping, not the energy.
+        // A slow frame now just holds a touch longer on screen instead of
+        // snapping. Audio reactivity is unaffected (the envelope is sampled from
+        // the real audioElement.currentTime, not timeRef).
         lastFrameTimeRef.current = timestamp - (deltaTime % targetFrameTime);
-
-        // Increment time based on actual frames rendered and music tempo
-        // Base speed scaled up by 2.5x so that 1.0 = old 2.5
         const tempoSpeed = isPlaying ? dynamicSpeed : settings.speed;
-        timeRef.current += (0.025 * tempoSpeed) * framesToCatch; // Changed from 0.01 to 0.025 (2.5x)
+        // Advance time PROPORTIONAL to real elapsed time (clamped), not a fixed
+        // step. Frames currently arrive unevenly (~38–44ms), so a fixed step made
+        // motion judder (equal visual deltas over unequal real time). Scaling by
+        // deltaTime keeps motion real-time-smooth across that jitter; the 1.6 cap
+        // bounds any rare slow frame so it eases instead of lurching.
+        const stepScale = Math.min(1.6, deltaTime / targetFrameTime);
+        timeRef.current += (0.025 * tempoSpeed) * stepScale; // 1.0 = old 2.5
       }
 
       // 1. Resize Handling
@@ -969,7 +1010,10 @@ const Visualizer: React.FC<VisualizerProps> = ({
       if (dataArray.length !== bufferLength) {
         dataArray = new Uint8Array(bufferLength);
       }
-      if (analyser) analyser.getByteFrequencyData(dataArray);
+      // Live FFT intentionally NOT read: the music now plays directly through
+      // the <audio> element (OS-owned media session for reliable background
+      // playback), so there's no music signal in the analyser. Reactivity is
+      // synthesized from a deterministic tempo just below.
 
       // More detailed frequency band analysis
       let bassEnergy = 0, midEnergy = 0, highEnergy = 0, subBassEnergy = 0;
@@ -1062,13 +1106,100 @@ const Visualizer: React.FC<VisualizerProps> = ({
           }
       }
 
-      // 3. Tree of Life Energy Updates - Enhanced frequency analysis
+      // --- ENVELOPE-DRIVEN BAND ENERGIES ---
+      // The music plays direct-to-OS (no live FFT in the analyser), so we drive
+      // the band energies from the per-track envelope that was pre-computed
+      // offline during the library scan (see analyzeBandEnvelopes). Sampled at
+      // the live playback position, this makes the whole visual — ripples,
+      // hex breathing, particle pulse, geometry, colours — track the actual
+      // song, and because the entire file was scanned up front, every big bass
+      // drop is known in advance and fires on time. We linearly interpolate
+      // between envelope samples so the stepped 20 fps data reads smoothly at
+      // the render's frame rate.
+      const env = bandEnvelopeRef.current;
+      const el = audioElementRef?.current;
+      if (isPlaying && env && el && env.bass.length > 0) {
+        const sens = settings.sensitivity || 1;
+        const pos = el.currentTime * env.fps;             // fractional sample index
+        const i0 = Math.max(0, Math.min(env.bass.length - 1, Math.floor(pos)));
+        const i1 = Math.min(env.bass.length - 1, i0 + 1);
+        const frac = pos - Math.floor(pos);
+        const sample = (a: Uint8Array) => (a[i0] + (a[i1] - a[i0]) * frac) / 255;
+        subBassEnergy = Math.min(1, sample(env.sub)  * sens * 1.5);
+        bassEnergy    = Math.min(1, sample(env.bass) * sens * 1.2);
+        midEnergy     = Math.min(1, sample(env.mid)  * sens);
+        highEnergy    = Math.min(1, sample(env.high) * sens * 0.8);
+        spectralCentroid = 0.3 + 0.5 * highEnergy;        // brightness follows real high content
+        peakValue = 255 * bassEnergy;                     // for colour code that reads peaks
+      } else if (isPlaying) {
+        // FALLBACK — track not scanned (no envelope). Keep the calm deterministic
+        // pulse so the visual still breathes instead of going dead.
+        const sens = settings.sensitivity || 1;
+        const bpm = 48 + (Math.round(selectedFrequency) % 25);
+        const beatsPerSec = bpm / 60;
+        const tt = timeRef.current;
+        const beatPhase = (tt * beatsPerSec) % 1;          // 0..1 within a beat
+        const pulse = Math.pow(1 - beatPhase, 3);          // sharp attack, smooth decay
+        const subPulse = Math.pow(1 - ((tt * beatsPerSec * 0.5) % 1), 4); // half-time swell
+        bassEnergy    = Math.min(1, (0.18 + 0.82 * pulse) * sens * 1.2);
+        subBassEnergy = Math.min(1, (0.12 + 0.70 * subPulse) * sens * 1.5);
+        midEnergy     = Math.min(1, (0.25 + 0.30 * (0.5 + 0.5 * Math.sin(tt * beatsPerSec * Math.PI * 4))) * sens);
+        highEnergy    = Math.min(1, (0.18 + 0.25 * (0.5 + 0.5 * Math.sin(tt * beatsPerSec * Math.PI * 8))) * sens * 0.8);
+        spectralCentroid = 0.5 + 0.35 * Math.sin(tt * 0.15); // slow brightness sweep
+        peakValue = 255 * pulse;                              // for colour code that reads peaks
+      } else {
+        bassEnergy = 0; midEnergy = 0; highEnergy = 0; subBassEnergy = 0;
+        peakValue = 0; spectralCentroid = 0;
+      }
+
+      // Low-pass the band energies for continuous motion. ~0.18 mix ≈ 180 ms
+      // time constant at 30 fps: a kick's forward shove now eases in over a few
+      // frames instead of popping the particle field in a single frame.
+      // GEOMETRY ↔ AUDIO COUPLING. 0 = the morphing particle geometry is fully
+      // DECOUPLED from the audio: it moves only by its own time-based morph /
+      // flow / float / rotation, never pulsing/pushing/zooming/colour-shifting
+      // with the bass. The bass is acknowledged ONLY by the ripples (and the
+      // hexes they lift) — those read the RAW energy and are untouched by this.
+      // Raise toward 1 to bring geometry reactivity back (it was 1 before, then
+      // heavily smoothed; the residual per-kick motion is what we're killing).
+      const GEOMETRY_AUDIO_REACTIVITY = 0;
+
+      const se = smoothEnergyRef.current;
+      se.bass = se.bass * 0.91 + bassEnergy * 0.09;
+      se.sub  = se.sub  * 0.91 + subBassEnergy * 0.09;
+      se.mid  = se.mid  * 0.91 + midEnergy * 0.09;
+      se.high = se.high * 0.91 + highEnergy * 0.09;
+      // Gated by the coupling knob → 0 means the particle layer's pulse, sub-bass
+      // push, size boost, colour modulation and alpha all see zero audio energy.
+      const smBass = se.bass * GEOMETRY_AUDIO_REACTIVITY;
+      const smSub  = se.sub  * GEOMETRY_AUDIO_REACTIVITY;
+      const smMid  = se.mid  * GEOMETRY_AUDIO_REACTIVITY;
+      const smHigh = se.high * GEOMETRY_AUDIO_REACTIVITY;
+      // Spectral centroid drives the projection FOV (whole-scene zoom) and some
+      // hues; anchor it at a neutral 0.4 and let the knob fade the audio response
+      // back in. Decoupled → constant FOV, no per-beat zoom.
+      se.spec = se.spec * 0.82 + spectralCentroid * 0.18;
+      spectralCentroid = 0.4 + (se.spec - 0.4) * GEOMETRY_AUDIO_REACTIVITY;
+
+      // 3. Tree of Life Energy Updates - synthetic, frequency-proximity driven
       let activeNodeColor: string | null = null;
       let highestNodeEnergy = 0;
       
       treeRef.current.nodes.forEach(node => {
          let nodeEnergy = 0;
-         if (analyser && bufferLength > 0) {
+         if (isPlaying) {
+            // Synthetic: a node lights up by how close the currently-playing
+            // frequency sits to its band, gently animated over time — keeps the
+            // Tree breathing deterministically without live FFT.
+            const [lo, hi] = node.freqRange;
+            const center = (lo + hi) / 2;
+            const proximity = (selectedFrequency >= lo && selectedFrequency <= hi)
+              ? 1
+              : Math.max(0, 1 - Math.abs(Math.log2((selectedFrequency || 1) / (center || 1))) / 2);
+            nodeEnergy = proximity * (0.6 + 0.4 * Math.sin(timeRef.current * 0.8 + center));
+         }
+         // Legacy live-FFT path retained but disabled (no music in analyser now).
+         if (false && analyser && bufferLength > 0) {
             const nyquist = 22050;
             const binSize = nyquist / bufferLength;
             const startBin = Math.floor(node.freqRange[0] / binSize);
@@ -1124,17 +1255,36 @@ const Visualizer: React.FC<VisualizerProps> = ({
            // Peak detection - looking for sudden increases
            const bassDelta = 0.08; // Clear jump required
            
-           // Cooldown between ripples
+           // Cooldown between ordinary ripples. Energies are now real envelope
+           // transients (a kick is a brief spike, not a sustained plateau), so a
+           // short cooldown is enough to stop one drop double-firing without
+           // merging genuinely separate drops.
            const now = Date.now();
            const lastBassRipple = (window as any).lastBassRipple || 0;
-           const cooldown = 250 - (normalizedLinear * 100); // At 50%: 200ms
-           
-           // Enhanced ripple triggering with multiple frequency responses
-           const bassIncreased = bassEnergy > prevBassRef.current + bassDelta;
-           const subBassHit = subBassEnergy > 0.6; // Deep bass creates center ripples
+           const cooldown = 200 - (normalizedLinear * 80); // ~120–200ms
+
+           // ONSET-based triggering. Everything keys off the RISING EDGE of the
+           // energy, never its sustained level — a heavy-bass section holds
+           // sub-bass high for seconds, and a level test (e.g. subBass > 0.6)
+           // would re-fire center ripples every cooldown for the whole section,
+           // flooding the ripple pool and jerking the particles. A rising-edge
+           // test fires once per actual kick/drop and goes quiet on the plateau.
+           const bassRise = bassEnergy - prevBassRef.current;
+           const subBassRise = subBassEnergy - prevSubBassRef.current;
+           const bassIncreased = bassRise > bassDelta;
+           // Deep-bass HIT = a sub-bass onset (rising into a meaningful level),
+           // not merely a high sustained level.
+           const subBassHit = subBassRise > 0.12 && subBassEnergy > 0.45;
            const aboveThreshold = bassEnergy > bassThreshold;
            const cooldownMet = (now - lastBassRipple) > cooldown;
-           
+
+           // A BIG drop must NEVER be missed: a large sudden RISE in bass or
+           // sub-bass fires a center ripple on just a short anti-double-fire
+           // guard, regardless of the normal cooldown. Rise-based (not level) so
+           // it lands on the drop's attack and then stays quiet while it sustains.
+           const bigDrop = bassRise > 0.22 || subBassRise > 0.20;
+           const bigDropGuard = (now - lastBassRipple) > 90;
+
            // Cap-respecting push so we never let the ripple pool grow unbounded.
            const pushRipple = (r: Ripple) => {
               if (ripplesRef.current.length < MAX_ACTIVE_RIPPLES) {
@@ -1142,7 +1292,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
               }
            };
 
-           if ((bassIncreased && aboveThreshold && cooldownMet) || (subBassHit && cooldownMet)) {
+           if ((bigDrop && bigDropGuard) || (bassIncreased && aboveThreshold && cooldownMet) || (subBassHit && cooldownMet)) {
               (window as any).lastBassRipple = now;
 
               // Create expanding wave ripple with frequency-based characteristics
@@ -1150,12 +1300,12 @@ const Visualizer: React.FC<VisualizerProps> = ({
               const rippleSize = subBassHit ? 0.9 : 0.7;
 
               pushRipple({
-                  x: cx + (subBassHit ? 0 : (Math.random() - 0.5) * 100), // Sub-bass always center
-                  y: cy + (subBassHit ? 0 : (Math.random() - 0.5) * 100),
+                  x: cx, // Main bass ripple always emanates from dead center
+                  y: cy,
                   radius: 20 * (1 + rippleStrength),
                   maxRadius: Math.max(w, h) * rippleSize,
                   alpha: 0.5 + rippleStrength * 0.3,
-                  speed: 8.75 * settings.speed * (1 + rippleStrength * 0.5), // 3.5 * 2.5 = 8.75
+                  speed: 8.75 * (2/3) * settings.speed * (1 + rippleStrength * 0.5), // travel speed cut by a third
                   color: subBassHit ? shade1Str : primaryStr,
                   type: 'bass'
               });
@@ -1170,7 +1320,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
                   radius: 10,
                   maxRadius: Math.max(w, h) * 0.5,
                   alpha: 0.3 + rippleStrength * 0.2,
-                  speed: 7.5 * settings.speed, // 3 * 2.5 = 7.5
+                  speed: 7.5 * (2/3) * settings.speed, // travel speed cut by a third
                   color: primaryStr,
                   type: 'bass'
               });
@@ -1190,11 +1340,13 @@ const Visualizer: React.FC<VisualizerProps> = ({
               });
            }
 
-           // Rain ripples - continuous at 50% and above
-           const rainThreshold = 0.3 - normalizedLinear * 0.25; // Very low threshold
-
-           // At 50%, create rain effect continuously
-           if (normalizedLinear >= 0.5 || (highEnergy > rainThreshold && Math.random() < normalizedLinear)) {
+           // Rain ripples - density scales smoothly with intensity (no hard
+           // 50% switch). Low intensity => occasional sparse drops layered over
+           // the center bass ripple; raising intensity steadily adds density.
+           // sqrt term lifts the low end (more rain at 5%) while leaving the
+           // top of the range about where it was (~0.75 at 100%).
+           const rainChance = normalizedLinear * 0.6 + Math.sqrt(normalizedLinear) * 0.15;
+           if (Math.random() < rainChance) {
               const numDrops = 1 + Math.floor(normalizedLinear * 2); // 1-3 drops
               for (let i = 0; i < numDrops; i++) {
                   pushRipple({
@@ -1250,6 +1402,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
       dynamicSpeed = settings.speed * tempoMultiplier; // Update the existing variable
       
       prevBassRef.current = bassEnergy;
+      prevSubBassRef.current = subBassEnergy;
       prevHighRef.current = highEnergy;
 
       // CLEAR SCREEN
@@ -1324,7 +1477,18 @@ const Visualizer: React.FC<VisualizerProps> = ({
                       const maxReach = r.radius + waveWidth;
                       // Square-bounds rejection — no sqrt, no Math.abs, just two compares.
                       if (dx > maxReach || dx < -maxReach || dy > maxReach || dy < -maxReach) continue;
-                      const distToWaveFront = Math.abs(Math.sqrt(dx * dx + dy * dy) - r.radius);
+                      const d2 = dx * dx + dy * dy;
+                      // Annulus cull in SQUARED space — also reject hexes deep
+                      // INSIDE the ring, no sqrt. Without this, a big center
+                      // ripple (radius → whole screen) passes the box test for
+                      // every hex and forces a sqrt on each; only the thin
+                      // wavefront annulus actually contributes lift. This is what
+                      // keeps the per-frame cost flat when many bass ripples are
+                      // alive during a heavy section.
+                      if (d2 > maxReach * maxReach) continue;
+                      const innerEdge = r.radius - waveWidth;
+                      if (innerEdge > 0 && d2 < innerEdge * innerEdge) continue;
+                      const distToWaveFront = Math.abs(Math.sqrt(d2) - r.radius);
                       if (distToWaveFront < waveWidth) {
                           waveLift += (1 - (distToWaveFront / waveWidth)) * r.alpha;
                       }
@@ -1332,11 +1496,17 @@ const Visualizer: React.FC<VisualizerProps> = ({
               }
               active = Math.min(1.5, active + waveLift * 0.8);
               hex.activeLevel = hex.activeLevel * 0.9 + active * 0.1;
+              // Smooth the ripple lift so the hex SWELLS with the passing wave
+              // instead of popping the instant a ripple is born on the kick —
+              // raw waveLift drove the size/opacity directly, which read as a
+              // jerk locked to every bass hit. The ripple ring itself (Layer 2)
+              // still draws crisply; only the grid's response is eased.
+              hex.liftLevel = hex.liftLevel * 0.86 + waveLift * 0.14;
               let opacity = Math.min(1, hex.activeLevel * settings.hexOpacity);
 
               if (opacity > 0.05) {
                 ctx.beginPath();
-                const liftScale = 1 + (waveLift * 0.4); 
+                const liftScale = 1 + (hex.liftLevel * 0.28);
                 const drawSize = hex.size * 0.95 * liftScale;
                 for (let i = 0; i < 6; i++) {
                     const angle = (Math.PI / 3) * i;
@@ -1348,7 +1518,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
                 let fillStr = primaryStr;
                 if (hex.colorType === 'shade1') { strokeStr = fillStr = shade1Str; opacity *= 1.5; } 
                 else if (hex.colorType === 'shade2') { strokeStr = fillStr = shade2Str; opacity *= 1.2; }
-                if (waveLift > 0.2) opacity = Math.min(1, opacity + 0.3);
+                if (hex.liftLevel > 0.2) opacity = Math.min(1, opacity + 0.3);
 
                 ctx.strokeStyle = strokeStr + opacity + ')';
                 ctx.lineWidth = hex.colorType === 'primary' ? 1 : 2;
@@ -1547,8 +1717,13 @@ const Visualizer: React.FC<VisualizerProps> = ({
                     const thickness = 4 + (boost * 8); // Simpler calculation
                     ctx.lineWidth = thickness;
                     ctx.lineCap = 'round';
-                    // Glow effect varies with energy
-                    ctx.shadowBlur = 10 + (boost * 25);
+                    // Glow effect varies with energy. Capped HARD: shadowBlur is
+                    // a compositor-side Gaussian blur (shows up as frame "gap",
+                    // not JS "work"); the old 10+boost*25 reached ~60px on ~28
+                    // edges every frame and was the main reason we were pinned
+                    // below 30fps. 12px still reads as a glow for a fraction of
+                    // the fill cost.
+                    ctx.shadowBlur = Math.min(12, 5 + boost * 5);
                     ctx.shadowColor = isSupercharged ? headColor : sn.colorHex;
                     ctx.stroke();
                 }
@@ -1559,7 +1734,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
                 const headSize = 3 + (boost * 5);
                 ctx.arc(px, py, headSize, 0, Math.PI * 2);
                 ctx.fillStyle = headColor;
-                ctx.shadowBlur = 20 + (boost * 30);
+                ctx.shadowBlur = Math.min(16, 7 + boost * 6); // capped (was 20+boost*30 ≈ up to 80px)
                 ctx.shadowColor = isSupercharged ? '#ffffff' : headColor;
                 ctx.fill();
                 
@@ -1815,7 +1990,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
           if (active) {
             ctx.save();
             ctx.shadowColor = color;
-            ctx.shadowBlur = 22 + 14 * pulse;
+            ctx.shadowBlur = 10 + 6 * pulse; // capped (was 22+14*pulse)
             ctx.strokeStyle = rgba(color, 0.95);
             ctx.lineWidth = 2.5;
             ctx.beginPath();
@@ -2094,10 +2269,11 @@ const Visualizer: React.FC<VisualizerProps> = ({
             } 
             
             if (settings.enablePulse) {
-                // Multi-frequency pulsing
-                const bassPulse = 1 + Math.sin(timeRef.current * 3 + index * 0.1) * 0.4 * bassEnergy;
-                const midPulse = 1 + Math.cos(timeRef.current * 5 + index * 0.15) * 0.2 * midEnergy;
-                const highPulse = 1 + Math.sin(timeRef.current * 8 + index * 0.2) * 0.1 * highEnergy;
+                // Multi-frequency pulsing — uses SMOOTHED energies so particle
+                // positions ease with the music instead of jerking on each kick.
+                const bassPulse = 1 + Math.sin(timeRef.current * 3 + index * 0.1) * 0.4 * smBass;
+                const midPulse = 1 + Math.cos(timeRef.current * 5 + index * 0.15) * 0.2 * smMid;
+                const highPulse = 1 + Math.sin(timeRef.current * 8 + index * 0.2) * 0.1 * smHigh;
                 const combinedPulse = (bassPulse * 0.5 + midPulse * 0.3 + highPulse * 0.2);
                 
                 mx += p.x * (combinedPulse - 1);
@@ -2109,11 +2285,11 @@ const Visualizer: React.FC<VisualizerProps> = ({
             if (settings.colorMode === 'cycle') {
                 const cycleSpeed = 50 * settings.speed;
                 const baseHue = (timeRef.current * cycleSpeed + (index / particlesRef.current.length) * 360) % 360;
-                // Color shifts based on spectral content
-                const hueShift = bassEnergy * 30 + midEnergy * 20 + highEnergy * 10;
+                // Color shifts based on spectral content (smoothed → no per-kick flash)
+                const hueShift = smBass * 30 + smMid * 20 + smHigh * 10;
                 const hue = (baseHue + hueShift + spectralCentroid * 60) % 360;
-                const sat = 70 + midEnergy * 20 + highEnergy * 10;
-                const lit = 50 + bassEnergy * 10 + midEnergy * 15 + highEnergy * 25; 
+                const sat = 70 + smMid * 20 + smHigh * 10;
+                const lit = 50 + smBass * 10 + smMid * 15 + smHigh * 25;
                 p.color = `hsl(${hue}, ${sat}%, ${lit}%)`;
             } else if (settings.colorMode === 'chakra') {
                 const phiResidue = (index * PHI) % 1;
@@ -2145,8 +2321,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
                 const specHSL = hexToHSL(specHex);
                 const hueJitter = (((index * PHI) % 1) - 0.5) * 12; // ±6°
                 const hue = (specHSL.h + hueJitter + spectralCentroid * 8 + 360) % 360;
-                const sat = Math.min(100, Math.max(45, specHSL.s + midEnergy * 25 + highEnergy * 15));
-                const lit = Math.min(75, Math.max(35, specHSL.l + bassEnergy * 12 + midEnergy * 15 + highEnergy * 18));
+                const sat = Math.min(100, Math.max(45, specHSL.s + smMid * 25 + smHigh * 15));
+                const lit = Math.min(75, Math.max(35, specHSL.l + smBass * 12 + smMid * 15 + smHigh * 18));
                 p.color = `hsl(${hue}, ${sat}%, ${lit}%)`;
             } else {
                 p.color = primaryColor;
@@ -2156,24 +2332,26 @@ const Visualizer: React.FC<VisualizerProps> = ({
             const fov = 400 - spectralCentroid * 100; // FOV changes with brightness
             const finalX = p.x + mx;
             const finalY = p.y + my;
-            const finalZ = p.z + mz + (subBassEnergy * 100); // Sub-bass pushes particles forward
+            const finalZ = p.z + mz + (smSub * 100); // Sub-bass pushes particles forward (smoothed → no per-kick pop)
             
             const scale = fov / (fov + finalZ + 200);
-            
+
             if (scale > 0 && scale < 20) {
                 const px = finalX * scale;
                 const py = finalY * scale;
                 
-                // Size responds to frequency content
-                const audioSizeBoost = 1 + (bassEnergy * 0.3 + midEnergy * 0.2 + highEnergy * 0.1);
+                // Size responds to frequency content (smoothed → no per-kick pop)
+                const audioSizeBoost = 1 + (smBass * 0.3 + smMid * 0.2 + smHigh * 0.1);
                 const size = Math.max(0.5, p.size * particleBaseSize * scale * audioSizeBoost);
                 
-                // Depth alpha with audio brightness
+                // Depth alpha with audio brightness — SMOOTHED energies so the
+                // field doesn't flash/pulse on every kick (raw mid/high spike on
+                // transients; the brightness pop reads as a per-kick pulse).
                 const depthAlpha = Math.min(1, Math.max(0, (finalZ + 800) / 1000));
-                const audioAlpha = 0.4 + (midEnergy * 0.3 + highEnergy * 0.3);
-                
+                const audioAlpha = 0.4 + (smMid * 0.3 + smHigh * 0.3);
+
                 // Draw particles with glow effect for bright sounds
-                if (highEnergy > 0.5) {
+                if (smHigh > 0.5) {
                     // Add glow for high frequencies
                     ctx.beginPath();
                     ctx.arc(px, py, size * 2, 0, Math.PI * 2);
@@ -2203,7 +2381,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
         ctx.fillText(`${Math.round(smoothedBPMRef.current)} BPM`, w - 10, h - 10);
         ctx.restore();
       }
-      
+
       rafRef.current = requestAnimationFrame(render);
     };
 

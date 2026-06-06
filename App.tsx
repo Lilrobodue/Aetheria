@@ -5,7 +5,7 @@ import {
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2,
   Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map as MapIcon, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe, Headphones, CheckCircle2
 } from 'lucide-react';
-import { Song, SolfeggioFreq, BinauralPreset, VizSettings } from './types';
+import { Song, SolfeggioFreq, BinauralPreset, VizSettings, BandEnvelope } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, LO_SHU_WALK_COMBINED, LO_SHU_WALK_OUROBOROS, OUROBOROS_PHASES, SOURCE_FREQ, getLoShuPosition, type LoShuWalkMode } from './constants';
 import Visualizer from './components/Visualizer';
 import FrequencySelector from './components/FrequencySelector';
@@ -217,6 +217,76 @@ const detectFrequencyPeaks = async (buffer: AudioBuffer): Promise<IntervalPeak[]
       resolve([]);
     }
   });
+};
+
+// Pre-compute a per-band energy envelope for the WHOLE track, offline, during
+// the library scan. The visualizer later samples this at the live playback
+// position so the visuals track the actual song — and because the entire file
+// is scanned up front, every big bass drop is known in advance and none is ever
+// missed. Cheap at playback time (a Uint8 lookup), and it needs NO live audio
+// tap, so direct-to-OS playback stays untouched.
+//
+// Method: render the decoded buffer through a band filter in an
+// OfflineAudioContext (downsampled to 8 kHz — well above the highest band), then
+// take the RMS of the filtered PCM over short hops. One render per band. Each
+// band is normalised to its own peak so quiet bands still read; truly silent
+// bands stay at zero. Wrapped by the caller in try/catch — analysis failure
+// must never break a scan (the visualizer falls back to a deterministic pulse).
+const analyzeBandEnvelopes = async (buffer: AudioBuffer, fps = 20): Promise<BandEnvelope | undefined> => {
+  const SR = 8000;                                   // Nyquist 4 kHz — covers sub/bass/mid and the ≥2 kHz "high" proxy
+  const MAX_SECONDS = 1800;                           // cap absurdly long files so envelopes stay small
+  const seconds = Math.min(buffer.duration || 0, MAX_SECONDS);
+  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+  const length = Math.max(1, Math.ceil(seconds * SR));
+  const hop = Math.max(1, Math.floor(SR / fps));
+
+  const renderBand = async (
+    wire: (ctx: OfflineAudioContext, src: AudioBufferSourceNode) => AudioNode
+  ): Promise<Uint8Array> => {
+    const ctx = new OfflineAudioContext(1, length, SR);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;                              // bufferSource resamples the input to the 8 kHz context
+    const out = wire(ctx, src);
+    out.connect(ctx.destination);
+    src.start();
+    const data = (await ctx.startRendering()).getChannelData(0);
+    const n = Math.ceil(data.length / hop);
+    const rms = new Float32Array(n);
+    let max = 0;
+    for (let k = 0; k < n; k++) {
+      const start = k * hop;
+      const end = Math.min(start + hop, data.length);
+      let sum = 0;
+      for (let j = start; j < end; j++) sum += data[j] * data[j];
+      const v = Math.sqrt(sum / Math.max(1, end - start));
+      rms[k] = v;
+      if (v > max) max = v;
+    }
+    const u = new Uint8Array(n);
+    if (max < 1e-4) return u;                          // effectively silent in this band → leave zeros
+    for (let k = 0; k < n; k++) u[k] = Math.min(255, Math.round((rms[k] / max) * 255));
+    return u;
+  };
+
+  const sub = await renderBand((ctx, src) => {
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 60; f.Q.value = 0.7;
+    src.connect(f); return f;
+  });
+  const bass = await renderBand((ctx, src) => {
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 60;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 250;
+    src.connect(hp); hp.connect(lp); return lp;
+  });
+  const mid = await renderBand((ctx, src) => {
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 700; f.Q.value = 0.7;
+    src.connect(f); return f;
+  });
+  const high = await renderBand((ctx, src) => {
+    const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 2000;
+    src.connect(f); return f;
+  });
+
+  return { fps, sub, bass, mid, high };
 };
 
 // Extended octave range analysis function
@@ -1401,9 +1471,6 @@ const App: React.FC = () => {
   // purpose with zero churn.
   const silentKeepAliveRef = useRef<{ osc: OscillatorNode; gain: GainNode } | null>(null);
   const blobUrlsRef = useRef<{ [key: string]: string }>({});
-  // Guards against double auto-advance. Set when the preemptive (near-end)
-  // advance OR the 'ended' fallback fires, reset when the next track starts.
-  const advanceLockRef = useRef(false);
 
   const solfeggioOscRef = useRef<OscillatorNode | null>(null);
   const solfeggioGainRef = useRef<GainNode | null>(null);
@@ -1427,6 +1494,12 @@ const App: React.FC = () => {
     stop: () => void;
   } | null>(null);
   const wavWorkletReadyRef = useRef<Promise<void> | null>(null);
+  // Music tap for recordings. With direct playback the music no longer flows
+  // through Web Audio, so we re-introduce it for capture ONLY via the element's
+  // captureStream() (which doesn't interrupt direct-to-OS playback). These hold
+  // the live tap node and its teardown so a recording mixes music + layers.
+  const recordMusicSrcRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const recordMusicDetachRef = useRef<(() => void) | null>(null);
   const mainAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
@@ -1895,18 +1968,49 @@ const App: React.FC = () => {
   useEffect(() => { updateSolfeggio(); }, [updateSolfeggio]);
   useEffect(() => { updateBinaural(); }, [updateBinaural]);
 
+  // TUNING KNOB — relative loudness of the binaural/solfeggio layers.
+  // With direct playback, music left the Web Audio bus, so `gainNodeRef` now
+  // carries ONLY the binaural + solfeggio layers. Previously those layers
+  // shared the bus with the music and loud music peaks clipped/masked them
+  // together; on their own clean path they sit forward in the mix. This factor
+  // pushes them back behind the music the way they used to sit. 1.0 = exposed
+  // (clean-path level), lower = more recessed. Music loudness is unaffected.
+  const LAYER_BALANCE_ATTEN = 0.5;
+
+  // Apply the music volume directly on the <audio> element. With direct
+  // playback the element is the music output (not the Web Audio gain node), so
+  // its volume IS the music level. We keep the same * 0.18 scaling the old
+  // Web Audio master used, so perceived music loudness is unchanged.
+  const applyMusicElementVolume = useCallback(() => {
+    const el = mainAudioRef.current;
+    if (!el) return;
+    const vols = enablePhiMode
+      ? calculatePhiVolumeRatios(volume)
+      : { music: volume };
+    el.volume = Math.max(0, Math.min(1, vols.music * 0.18));
+  }, [enablePhiMode, volume]);
+
   useEffect(() => {
+    // Music level now lives on the audio element (direct playback).
+    applyMusicElementVolume();
+
+    // The gain node no longer carries the music — only the binaural / solfeggio
+    // layers route through it — but it stays the master for THOSE layers, and
+    // they were always scaled by this same music*0.18 master, so their balance
+    // is unchanged.
     if(gainNodeRef.current && audioCtxRef.current) {
         // Apply phi relationships if enabled
-        const volumes = enablePhiMode 
-          ? calculatePhiVolumeRatios(volume) 
+        const volumes = enablePhiMode
+          ? calculatePhiVolumeRatios(volume)
           : { music: volume, binaural: binauralVolume, solfeggio: solfeggioVolume };
-        
-        // Ultra-conservative volume scaling to prevent any distortion
-        const safeVolume = volumes.music * 0.18; // Match the initial gain setting
+
+        // Ultra-conservative volume scaling to prevent any distortion. The
+        // extra LAYER_BALANCE_ATTEN factor recesses the binaural/solfeggio
+        // layers (the only signals on this bus now) back behind the music.
+        const safeVolume = volumes.music * 0.18 * LAYER_BALANCE_ATTEN; // Match the initial gain setting
         gainNodeRef.current.gain.setTargetAtTime(safeVolume, audioCtxRef.current.currentTime, 0.1);
     }
-  }, [volume, enablePhiMode]);
+  }, [volume, enablePhiMode, applyMusicElementVolume]);
 
   useEffect(() => {
     if (!isAdaptiveBinaural || !isPlaying || !analyserNode) return;
@@ -2386,6 +2490,18 @@ const App: React.FC = () => {
             console.warn('Interval analysis failed for', newPlaylist[i].name, intervalErr);
           }
 
+          // Additive: pre-compute the per-band energy envelope so the
+          // visualizer can track the real song (and never miss a bass drop) at
+          // playback time. Failures here must not break the scan.
+          let bandEnvelope: BandEnvelope | undefined;
+          try {
+            bandEnvelope = await analyzeBandEnvelopes(audioBuffer);
+          } catch (envErr) {
+            console.warn('Band envelope analysis failed for', newPlaylist[i].name, envErr);
+          }
+          // Yield so the heavy offline renders don't lock the scan UI.
+          await new Promise(resolve => setTimeout(resolve, 10));
+
           newPlaylist[i] = {
             ...newPlaylist[i],
             harmonicFreq: freq,
@@ -2394,6 +2510,7 @@ const App: React.FC = () => {
             fractalAnalysis: fractalData,
             intervalAnalysis: intervalData,
             isAetheriaCandidate: couldBeAetheria(freq),
+            bandEnvelope,
           };
           
         } catch (e) {
@@ -3735,10 +3852,6 @@ const App: React.FC = () => {
     setCurrTime(0);
     pausedAtRef.current = 0;
     setIsAnalyzing(true);
-    // Clear the auto-advance guard for the new track. The previous track's
-    // element is paused below, so its timeupdate/ended can't fire again; the
-    // new track will re-arm the guard only when it nears its own end.
-    advanceLockRef.current = false;
 
     const song = tracks[index];
     if (!song) return;
@@ -3759,39 +3872,11 @@ const App: React.FC = () => {
         // DON'T mute the element - createMediaElementSource will redirect all audio through Web Audio
         // The element needs to play normally to feed the Web Audio graph
         
-        // Set up audio element events.
-        //
-        // PREEMPTIVE auto-advance: switch to the next track a hair BEFORE the
-        // current one ends, while the element is still in its 'playing' state.
-        // Letting the element actually reach 'ended' on a locked screen is a
-        // gesture-less event the OS treats as "playback finished" — it
-        // deactivates the media session, so the lock-screen card vanishes and,
-        // with no active session keeping the tab alive, the backgrounded
-        // AudioContext then suspends and the playlist dies after one hop.
-        // Advancing from 'timeupdate' just short of the end keeps playback
-        // continuous so the session stays active, the card updates, and the
-        // chain keeps going with the screen off.
-        const ADVANCE_LEAD_SECONDS = 0.7;
-        mainAudioRef.current.addEventListener('timeupdate', () => {
-          const el = mainAudioRef.current;
-          if (!el || advanceLockRef.current) return;
-          const dur = el.duration;
-          if (!Number.isFinite(dur) || dur <= 0) return;
-          if (dur - el.currentTime <= ADVANCE_LEAD_SECONDS) {
-            advanceLockRef.current = true;
-            playNextRef.current();
-          }
-        });
-
-        // Fallback: if the track is shorter than the lead time, or a
-        // 'timeupdate' never lands in the window, the natural 'ended' still
-        // advances. Guarded so it never double-fires with the preemptive path.
-        // We do NOT flip isPlaying to false here — that would tell the OS
-        // 'paused' mid-playlist and tear the notification down. The terminal
+        // Set up audio element events. Auto-advance when the track finishes.
+        // We do NOT flip isPlaying to false here — setting playbackState to
+        // 'paused' mid-playlist tears down the media notification. The terminal
         // case (end of a non-looping playlist) is handled inside playNext.
         mainAudioRef.current.addEventListener('ended', () => {
-          if (advanceLockRef.current) return;
-          advanceLockRef.current = true;
           playNextRef.current();
         });
         
@@ -3863,13 +3948,17 @@ const App: React.FC = () => {
 
       mainAudioRef.current.src = audioUrl;
 
-      // Connect audio element to Web Audio API
-      // IMPORTANT: The audio element is muted and only serves as a media source
-      // All sound output comes through the Web Audio processing chain
-      if (!mediaSourceRef.current && audioCtxRef.current) {
-        mediaSourceRef.current = audioCtxRef.current.createMediaElementSource(mainAudioRef.current);
-        mediaSourceRef.current.connect(gainNodeRef.current!);
-      }
+      // DIRECT PLAYBACK: the music plays straight through the <audio> element to
+      // the OS — we deliberately DO NOT route it through
+      // createMediaElementSource. Redirecting it into Web Audio made the
+      // element "silent to the OS", which is what made the lock-screen / car
+      // media session fragile (the card vanished on gesture-less auto-advance).
+      // Playing direct lets the OS own the media session, so background
+      // auto-advance, the card, and the lock-screen controls all work reliably.
+      // The binaural / solfeggio layers stay in Web Audio and mix with the
+      // music at the device output, so the layered experience is unchanged.
+      // Volume is applied on the element itself (see applyMusicElementVolume).
+      applyMusicElementVolume();
 
       // NOTE: no explicit load() here on purpose. Setting .src above already
       // starts the media resource load, and play() below waits for enough
@@ -4374,6 +4463,32 @@ registerProcessor('wav-capture', WavCapture);
       return wavWorkletReadyRef.current;
   };
 
+  // Tap the music straight off the <audio> element and feed it into a recording
+  // target node. captureStream() does NOT reroute the element (unlike
+  // createMediaElementSource), so direct-to-OS playback keeps running — this
+  // only adds the music into the recording mix alongside the binaural/solfeggio
+  // bus. Returns a teardown that disconnects the tap. Degrades gracefully to
+  // layers-only if the browser can't capture the element.
+  const attachMusicToRecording = (target: AudioNode): (() => void) => {
+      const ctx = audioCtxRef.current;
+      const el = mainAudioRef.current as (HTMLAudioElement & { captureStream?: () => MediaStream }) | null;
+      if (!ctx || !el || typeof el.captureStream !== 'function') return () => {};
+      try {
+          const stream = el.captureStream();
+          if (!stream.getAudioTracks().length) return () => {};
+          const src = ctx.createMediaStreamSource(stream);
+          src.connect(target);
+          recordMusicSrcRef.current = src;
+          return () => {
+              try { src.disconnect(); } catch {}
+              if (recordMusicSrcRef.current === src) recordMusicSrcRef.current = null;
+          };
+      } catch (e) {
+          console.warn('Music capture for recording unavailable; recording layers only.', e);
+          return () => {};
+      }
+  };
+
   const startWavRecording = async () => {
       const ctx = audioCtxRef.current;
       if (!ctx || !gainNodeRef.current) return;
@@ -4394,7 +4509,8 @@ registerProcessor('wav-capture', WavCapture);
               chunks[c].push(data[c] || new Float32Array(0));
           }
       };
-      gainNodeRef.current.connect(node);
+      gainNodeRef.current.connect(node); // binaural / solfeggio layers
+      const detachMusic = attachMusicToRecording(node); // + music (direct-playback tap)
       // Worklet output is silent — connect to a muted sink so the graph stays alive.
       const sink = ctx.createGain();
       sink.gain.value = 0;
@@ -4405,6 +4521,7 @@ registerProcessor('wav-capture', WavCapture);
           channels,
           sampleRate: ctx.sampleRate,
           stop: () => {
+              detachMusic();
               try { gainNodeRef.current?.disconnect(node); } catch {}
               try { node.disconnect(); } catch {}
               try { sink.disconnect(); } catch {}
@@ -4435,6 +4552,10 @@ registerProcessor('wav-capture', WavCapture);
       let mimeType = '';
 
       if (type === 'both' && destNodeRef.current) {
+          // destNode already carries the binaural/solfeggio bus (wired at init).
+          // Add the music tap so the recorded audio track is the full mix, then
+          // remember the teardown for stopRecording.
+          recordMusicDetachRef.current = attachMusicToRecording(destNodeRef.current);
           tracks.push(...destNodeRef.current.stream.getAudioTracks());
       }
 
@@ -4494,6 +4615,9 @@ registerProcessor('wav-capture', WavCapture);
       }
       mediaRecorderRef.current?.stop();
       mediaRecorderRef.current = null;
+      // Release the video/both-path music tap (the WAV path tears down its own).
+      recordMusicDetachRef.current?.();
+      recordMusicDetachRef.current = null;
       setIsRecording(false);
   };
 
@@ -4791,6 +4915,8 @@ registerProcessor('wav-capture', WavCapture);
             frequencyColorMode={frequencyColorMode}
             loShuWalkMode={loShuWalkMode}
             loShuWalkStep={loShuWalkMode ? currentSongIndex : -1}
+            bandEnvelope={currentSongIndex >= 0 ? (playlist[currentSongIndex]?.bandEnvelope ?? null) : null}
+            audioElementRef={mainAudioRef}
         />
       </div>
 
@@ -4806,7 +4932,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

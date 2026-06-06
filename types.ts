@@ -14,6 +14,25 @@ export interface Song {
   // digital root 3/6/9, within 150–6500 Hz). Distinguishes "track's dominant
   // tone IS an Aetheria number" from "matched only via harmonic relationship".
   isAetheriaCandidate?: boolean;
+  // Pre-computed band-energy envelope extracted offline during the library
+  // scan (see analyzeBandEnvelopes). The visualizer samples this at the live
+  // playback position so the visuals track the actual song moment-to-moment —
+  // deterministic, perfectly synced, and free at playback time (no live tap,
+  // so direct-to-OS playback is untouched). Every big bass drop is known in
+  // advance, so none are ever missed.
+  bandEnvelope?: BandEnvelope;
+}
+
+/** Per-band energy over time, sampled at `fps` frames/sec. Each array holds
+ *  0–255 energy values across the track (Uint8 to stay memory-light — a 5-min
+ *  track is ~24 KB total). Bands: sub-bass (≤60 Hz), bass (60–250 Hz),
+ *  mid (250 Hz–~2 kHz), high (≥2 kHz). */
+export interface BandEnvelope {
+  fps: number;
+  sub: Uint8Array;
+  bass: Uint8Array;
+  mid: Uint8Array;
+  high: Uint8Array;
 }
 
 export enum SolfeggioFreq {
