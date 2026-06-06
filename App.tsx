@@ -3906,12 +3906,27 @@ const App: React.FC = () => {
       // Don't set volume on the element - we want pure Web Audio output only
       await mainAudioRef.current.play();
 
-      // Assert the media session is playing immediately on the new track so the
-      // lock-screen / car notification stays up across an auto-advance. The
-      // isPlaying effect won't re-fire here (isPlaying stays true through the
-      // transition), so set it explicitly.
+      // Re-assert the FULL media session synchronously on the new track —
+      // metadata AND playing state — at the instant playback starts. The
+      // React-effect path (useMediaSession) only updates after
+      // setCurrentSongIndex re-renders, a tick later. That left a window where
+      // the element had ended and restarted carrying song-1's stale session
+      // info, and the OS dropped the lock-screen / car notification instead of
+      // re-showing it. Setting it here, in the same turn as play(), gives the
+      // OS complete, current session data the moment the new media begins.
       if ('mediaSession' in navigator) {
-        try { navigator.mediaSession.playbackState = 'playing'; } catch {}
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: song.name || 'Unknown Track',
+            artist: 'Aetheria Harmonic Player',
+            album: `${targetFreq}Hz • ${getFrequencyRegime(targetFreq)} Regime`,
+            artwork: [
+              { src: '/images/icon-192x192.png', sizes: '192x192', type: 'image/png' },
+              { src: '/images/icon-512x512.png', sizes: '512x512', type: 'image/png' },
+            ],
+          });
+          navigator.mediaSession.playbackState = 'playing';
+        } catch {}
       }
 
       setIsPlaying(true);
@@ -3927,10 +3942,14 @@ const App: React.FC = () => {
       // We'll clean them up when creating new ones or on unmount
       
     } catch (error) {
+      // No alert() here. A blocking dialog fired from a backgrounded / locked
+      // screen (e.g. a transient play() rejection during an auto-advance or a
+      // lock-screen skip) is invisible and unmissable until the app is
+      // foregrounded — it wedged the lock-screen controls. Log instead and let
+      // the next user action or the background watchdog recover.
       console.error('Playback error:', error);
       setIsAnalyzing(false);
       setIsPlaying(false);
-      alert('Failed to play track. Please try again.');
     }
   };
 
@@ -3998,12 +4017,17 @@ const App: React.FC = () => {
   const handlePlayPause = async () => {
     initAudio();
     if (isPlaying) {
-      // Pause the audio element
+      // Pause the audio element. We deliberately DO NOT suspend the
+      // AudioContext here. On a locked mobile screen a suspended context
+      // cannot be resumed (resume() only succeeds with the page visible or a
+      // gesture the OS honors), so suspending on pause left the lock-screen
+      // PLAY button dead — and broke NEXT too, because playTrack then tried to
+      // play into a context it couldn't resume. Pausing the element already
+      // stops all audible output; the context stays warm (the silent
+      // keep-alive oscillator costs nothing), so play resumes instantly from
+      // the lock screen.
       if (mainAudioRef.current) {
         mainAudioRef.current.pause();
-      }
-      if (audioCtxRef.current) {
-        await audioCtxRef.current.suspend();
       }
       setIsPlaying(false);
       // Pressing the main pause button stops everything — including any
@@ -4752,7 +4776,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.0</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
