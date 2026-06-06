@@ -22,6 +22,14 @@ interface UseMediaSessionOptions {
   onPause: () => void;
   onNext: () => void;
   onPrevious: () => void;
+  /** Relative skip in seconds (negative = backward). Wired to the
+   *  seekbackward / seekforward media actions (car & lock-screen ±skip). */
+  onSeek?: (deltaSeconds: number) => void;
+  /** Absolute seek as a fraction (0..1) of duration. Wired to the seekto
+   *  action the OS fires when the user drags the lock-screen / car scrubber.
+   *  A fraction keeps the seek accurate regardless of the pitch-shift factor
+   *  baked into the reported duration. */
+  onSeekToFraction?: (fraction: number) => void;
 }
 
 export function useMediaSession({
@@ -34,6 +42,8 @@ export function useMediaSession({
   onPause,
   onNext,
   onPrevious,
+  onSeek,
+  onSeekToFraction,
 }: UseMediaSessionOptions) {
   // Update metadata when track changes
   useEffect(() => {
@@ -66,7 +76,20 @@ export function useMediaSession({
     }
   }, [track]);
 
-  // Wire media controls with enhanced mobile support
+  // Keep the latest callbacks in a ref so the action handlers can be
+  // registered ONCE and still call the current functions. Previously the
+  // handlers were re-registered on every render (onPlay/onPause/onNext/
+  // onPrevious are new function identities each render), and each
+  // re-registration briefly nulled the handlers in cleanup — which made the
+  // lock-screen controls (notably the previous-track button) flicker in and
+  // out.
+  const callbacksRef = useRef({ onPlay, onPause, onNext, onPrevious, onSeek, onSeekToFraction, duration });
+  useEffect(() => {
+    callbacksRef.current = { onPlay, onPause, onNext, onPrevious, onSeek, onSeekToFraction, duration };
+  }, [onPlay, onPause, onNext, onPrevious, onSeek, onSeekToFraction, duration]);
+
+  // Wire media controls ONCE. Handlers read callbacksRef, so they never go
+  // stale and never need to be torn down on a normal render.
   useEffect(() => {
     if (!("mediaSession" in navigator)) {
       console.log("Media Session API not supported");
@@ -77,59 +100,38 @@ export function useMediaSession({
       action: MediaSessionAction;
       handler: MediaSessionActionHandler;
     }> = [
-      { 
-        action: "play", 
-        handler: () => {
-          console.log("Media session: play");
-          onPlay();
-        }
-      },
-      { 
-        action: "pause", 
-        handler: () => {
-          console.log("Media session: pause");
-          onPause();
-        }
-      },
-      { 
-        action: "previoustrack", 
-        handler: () => {
-          console.log("Media session: previous");
-          onPrevious();
-        }
-      },
-      { 
-        action: "nexttrack", 
-        handler: () => {
-          console.log("Media session: next");
-          onNext();
-        }
-      },
-      // Additional actions for better mobile support
-      { 
-        action: "stop", 
-        handler: () => {
-          console.log("Media session: stop");
-          onPause();
-        }
-      },
-      { 
-        action: "seekbackward", 
+      { action: "play", handler: () => callbacksRef.current.onPlay() },
+      { action: "pause", handler: () => callbacksRef.current.onPause() },
+      { action: "previoustrack", handler: () => callbacksRef.current.onPrevious() },
+      { action: "nexttrack", handler: () => callbacksRef.current.onNext() },
+      { action: "stop", handler: () => callbacksRef.current.onPause() },
+      {
+        action: "seekbackward",
         handler: (details) => {
-          console.log("Media session: seek backward", details);
-          // Could implement 10s backward seek here if needed
-        }
+          const offset = (details && (details as any).seekOffset) || 10;
+          callbacksRef.current.onSeek?.(-offset);
+        },
       },
-      { 
-        action: "seekforward", 
+      {
+        action: "seekforward",
         handler: (details) => {
-          console.log("Media session: seek forward", details);
-          // Could implement 10s forward seek here if needed
-        }
-      }
+          const offset = (details && (details as any).seekOffset) || 10;
+          callbacksRef.current.onSeek?.(offset);
+        },
+      },
+      {
+        action: "seekto",
+        handler: (details) => {
+          const seekTime = (details as any)?.seekTime;
+          const dur = callbacksRef.current.duration;
+          if (typeof seekTime === "number" && typeof dur === "number" && dur > 0) {
+            const fraction = Math.max(0, Math.min(1, seekTime / dur));
+            callbacksRef.current.onSeekToFraction?.(fraction);
+          }
+        },
+      },
     ];
 
-    // Set all action handlers
     actions.forEach(({ action, handler }) => {
       try {
         navigator.mediaSession.setActionHandler(action, handler);
@@ -139,7 +141,6 @@ export function useMediaSession({
     });
 
     return () => {
-      // Cleanup
       actions.forEach(({ action }) => {
         try {
           navigator.mediaSession.setActionHandler(action, null);
@@ -148,36 +149,22 @@ export function useMediaSession({
         }
       });
     };
-  }, [onPlay, onPause, onNext, onPrevious]);
+    // Register once — handlers are stable (they call callbacksRef.current).
+  }, []);
 
-  // Update playback state with mobile-specific handling
+  // Keep the lock-screen play/pause icon in sync with the real player.
+  //
+  // NOTE: we intentionally do NOT spin up a throwaway "silent" <audio> element
+  // here. That old trick created a second media element on every play, which on
+  // mobile stole the media-session focus from the real player — causing the
+  // lock-screen controls to detach (previous-track button flickering), the
+  // play/pause button to work only once, and playback to die after a track or
+  // two with the screen off. The real <audio> element driving the Web Audio
+  // graph is what holds the session; nothing else is needed.
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
-    
     try {
       navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
-      
-      // For mobile devices, we may need to trigger a fake audio play
-      // to ensure the media session is recognized
-      if (isPlaying && 'Audio' in window) {
-        // Create a silent audio element to ensure media session is active
-        const silentAudio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn9rrvmMhBSuBzvLZiTQIG2m98OScTgwOUarm7blmFgU7k9n1unEiBC13yO/eizEIHWq+8+OWT' +
-                          'AsQVqzn67JlHQU+k9j0t3EqAyd1yPDbkj0JFV+05+2mVBEKQJve6b1hIAUrf87y2IkwBBxqwO7fnEoHDlag5OmyYBYDPJjY9Lh5J' +
-                          'Qcve8vz5IUqCRJdt+DopFEZDj+a3uS9YSEGMoDD7tiJOQkcaLvs45hNFgtTqOPwtmYcBTuS1/XNeSYGLHfH+N+ROwkUXrTm66pVFQ' +
-                          'pGnt/rvmQiBCuAyu/diTQGGWm+8OKcTwUMUqnl7rllHQY3kNn1unElBSh6yu7fjjEIHGq98uOYSgwPVKzm67hkGgU9k9n0uHIlBCt3' +
-                          'yPDdjzwLF1+y5+umVRYJPpza6btgIAUpfs/02YkyBRpqvu/gnEwNDlOq5O22ZBwFN5DY88p3KAcuhM330YQpBh1ywu3enEwHC1eq' +
-                          '4+u0YhMJPZva6b1iIwUufc/y14k7Bhto');
-        silentAudio.volume = 0.001; // Very quiet
-        silentAudio.play().catch(() => {
-          // Ignore autoplay errors
-        });
-        
-        // Stop it immediately
-        setTimeout(() => {
-          silentAudio.pause();
-          silentAudio.remove();
-        }, 100);
-      }
     } catch (error) {
       console.error("Failed to set playback state:", error);
     }

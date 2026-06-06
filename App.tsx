@@ -66,16 +66,53 @@ const getAudioDuration = (file: File): Promise<number> => {
   return new Promise((resolve) => {
     const objectUrl = URL.createObjectURL(file);
     const audio = document.createElement("audio");
-    audio.src = objectUrl;
+    let settled = false;
+
+    const finish = (value: number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      audio.onloadedmetadata = null;
+      audio.ondurationchange = null;
+      audio.ontimeupdate = null;
+      audio.onerror = null;
+      try { URL.revokeObjectURL(objectUrl); } catch {}
+      // Only accept a real, positive, finite duration; anything else → 0
+      // (the UI renders 0 as "..." rather than "NaN"/"Infinity").
+      resolve(Number.isFinite(value) && value > 0 ? value : 0);
+    };
+
+    // Hard timeout so a single unreadable file can't stall the whole
+    // background duration queue. The batch awaits every file, so a
+    // never-resolving promise would freeze duration analysis for every
+    // later song (the bug that left tracks stuck on "...").
+    const timer = setTimeout(() => finish(0), 15000);
+
+    const onMeta = () => {
+      // VBR MP3s (and some other encodings) report Infinity on
+      // loadedmetadata because there's no duration header. Seeking past the
+      // end forces the browser to compute the real duration, which then
+      // arrives via durationchange / timeupdate.
+      if (audio.duration === Infinity || Number.isNaN(audio.duration)) {
+        const onResolved = () => {
+          if (Number.isFinite(audio.duration)) finish(audio.duration);
+        };
+        audio.ondurationchange = onResolved;
+        audio.ontimeupdate = onResolved;
+        try {
+          audio.currentTime = 24 * 60 * 60; // 24h — beyond any real track
+        } catch {
+          finish(0);
+        }
+      } else {
+        finish(audio.duration);
+      }
+    };
+
     audio.preload = "metadata";
-    audio.onloadedmetadata = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(audio.duration);
-    };
-    audio.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(0);
-    };
+    audio.onloadedmetadata = onMeta;
+    audio.onerror = () => finish(0);
+    audio.src = objectUrl;
   });
 };
 
@@ -1013,6 +1050,10 @@ const App: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [pendingDurationAnalysis, setPendingDurationAnalysis] = useState<string[]>([]);
+  // Song ids the duration analyzer has already attempted this session. The
+  // auto-rescan below uses this to retry each stuck track at most once, so a
+  // genuinely unreadable file can't get re-queued in an endless loop.
+  const triedDurationIdsRef = useRef<Set<string>>(new Set());
   
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
@@ -2143,9 +2184,12 @@ const App: React.FC = () => {
        
        // Process batch
        await Promise.all(processing.map(async (id) => {
+          // Mark attempted up front so the auto-rescan won't re-queue this id
+          // even if it ends up resolving to 0 (unreadable file).
+          triedDurationIdsRef.current.add(id);
           // Find song object in current playlist state (via ref or effect dependence) - using functional update below
-          const song = originalPlaylist.find(s => s.id === id); 
-          if (song) {
+          const song = originalPlaylist.find(s => s.id === id);
+          if (song && song.file) {
               const dur = await getAudioDuration(song.file);
               updates.push({ id, duration: dur });
           }
@@ -2168,6 +2212,26 @@ const App: React.FC = () => {
     const timer = setTimeout(processNextBatch, 100);
     return () => clearTimeout(timer);
   }, [pendingDurationAnalysis, originalPlaylist]);
+
+  // AUTO RE-SCAN FOR MISSING DURATIONS
+  // Whenever the library changes (import, restore, reorder), re-queue any track
+  // still missing a duration — but only ones that have a file and haven't been
+  // attempted yet this session. This heals tracks left on "..." by an
+  // unreadable file or (before the timeout fix) a stalled queue, without a
+  // re-import. triedDurationIdsRef gates the retry to once per track, so a
+  // genuinely unreadable file converges instead of looping.
+  useEffect(() => {
+    const stuck = originalPlaylist
+      .filter(s => (!s.duration || s.duration === 0) && s.file && !triedDurationIdsRef.current.has(s.id))
+      .map(s => s.id);
+    if (stuck.length === 0) return;
+
+    setPendingDurationAnalysis(prev => {
+      const merged = new Set(prev);
+      stuck.forEach(id => merged.add(id));
+      return merged.size === prev.length ? prev : Array.from(merged);
+    });
+  }, [originalPlaylist]);
 
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -4443,15 +4507,22 @@ registerProcessor('wav-capture', WavCapture);
     return formatDuration(totalSeconds);
   };
 
-  // Media Session Integration for Vehicle Controls
-  const currentTrack: Track | null = currentSongIndex >= 0 && playlist[currentSongIndex]
-    ? {
-        title: playlist[currentSongIndex].name,
-        artist: 'Aetheria Harmonic Player',
-        album: `${playlist[currentSongIndex].closestSolfeggio || selectedSolfeggio}Hz • ${getFrequencyRegime(playlist[currentSongIndex].closestSolfeggio || selectedSolfeggio)} Regime`,
-        artworkUrl: '/images/icon-192x192.png'
-      }
-    : null;
+  // Media Session Integration for Vehicle Controls.
+  // Memoized so the object identity only changes when the track or frequency
+  // actually changes. A fresh object every render reset the lock-screen
+  // metadata and forced a position-state update on every render — both visible
+  // as lock-screen flicker.
+  const currentTrack: Track | null = useMemo(() => {
+    const song = currentSongIndex >= 0 ? playlist[currentSongIndex] : null;
+    if (!song) return null;
+    const freq = song.closestSolfeggio || selectedSolfeggio;
+    return {
+      title: song.name,
+      artist: 'Aetheria Harmonic Player',
+      album: `${freq}Hz • ${getFrequencyRegime(freq)} Regime`,
+      artworkUrl: '/images/icon-192x192.png',
+    };
+  }, [currentSongIndex, playlist, selectedSolfeggio]);
 
   useMediaSession({
     track: currentTrack,
@@ -4461,7 +4532,26 @@ registerProcessor('wav-capture', WavCapture);
     onPlay: handlePlayPause,
     onPause: handlePlayPause,
     onNext: handleNext,
-    onPrevious: handlePrev
+    onPrevious: handlePrev,
+    // ±skip (car / lock-screen seek buttons). Operates on the real audio
+    // element in element-time, which is what currTime reflects.
+    onSeek: (delta) => {
+      const el = mainAudioRef.current;
+      if (!el || !Number.isFinite(el.duration)) return;
+      const t = Math.max(0, Math.min(el.duration, el.currentTime + delta));
+      el.currentTime = t;
+      setCurrTime(t);
+    },
+    // Absolute scrubber drag. The hook hands us a 0..1 fraction (computed
+    // against the duration reported to the OS), so we map it onto the actual
+    // element duration — accurate regardless of the pitch-shift factor.
+    onSeekToFraction: (fraction) => {
+      const el = mainAudioRef.current;
+      if (!el || !Number.isFinite(el.duration)) return;
+      const t = Math.max(0, Math.min(el.duration, fraction * el.duration));
+      el.currentTime = t;
+      setCurrTime(t);
+    },
   });
 
   return (
@@ -4640,7 +4730,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.7</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v10.8</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
