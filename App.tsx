@@ -1501,6 +1501,14 @@ const App: React.FC = () => {
   const recordMusicSrcRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const recordMusicDetachRef = useRef<(() => void) | null>(null);
   const mainAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Second <audio> element for GAPLESS HANDOFF. The next track is preloaded into
+  // this standby element and started WHILE the active element is still playing,
+  // so the OS media session sees uninterrupted audio and transfers the
+  // lock-screen card to the new element instead of tearing it down. On handoff
+  // the two refs swap roles (mainAudioRef always points at the active element).
+  // standbySongIdRef tracks which song is currently buffered into the standby.
+  const standbyAudioRef = useRef<HTMLAudioElement | null>(null);
+  const standbySongIdRef = useRef<string | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   const stateRef = useRef({
@@ -1640,6 +1648,13 @@ const App: React.FC = () => {
         mainAudioRef.current.src = '';
         mainAudioRef.current = null;
       }
+      // Clean up the gapless-handoff standby element too.
+      if (standbyAudioRef.current) {
+        standbyAudioRef.current.pause();
+        standbyAudioRef.current.src = '';
+        standbyAudioRef.current = null;
+      }
+      standbySongIdRef.current = null;
       
       // Clean up media source
       if (mediaSourceRef.current) {
@@ -3838,7 +3853,270 @@ const App: React.FC = () => {
     return 'HEAD';
   };
 
+  // How far before a track's natural end we hand off to the next one. Letting
+  // the element reach `ended` tears down the OS media session, and a gesture-
+  // less rebuild of the lock-screen card is not permitted — so we never let it
+  // end during a playlist.
+  const AUTO_ADVANCE_LOOKAHEAD_S = 0.6;
 
+  // --- GAPLESS HANDOFF MACHINERY ---------------------------------------------
+  // Resolve the index of the next track to play, mirroring playNext's shuffle /
+  // loop / sequential logic. With commit=false it's a pure peek (used to decide
+  // what to preload); with commit=true it applies the shuffle bookkeeping
+  // (setShufflePos / setShuffledIndices) exactly as playNext would. Returns null
+  // at the terminal end of a non-looping playlist, on an empty playlist, or —
+  // when only peeking — at a shuffle-list wrap (the regenerated order can't be
+  // peeked without mutating, so that single transition falls back to non-gapless).
+  type NextSnapshot = {
+    playlist: Song[];
+    currentSongIndex: number;
+    isShuffle: boolean;
+    isLoop: boolean;
+    shuffledIndices: number[];
+  };
+  // Core resolver against an explicit snapshot. The `fromIndex` override matters
+  // because React state (and therefore stateRef, which mirrors it) only updates
+  // a render later: right after a handoff commits setCurrentSongIndex, peeking
+  // off stateRef would still see the OLD index and preload the now-playing track
+  // again. Callers that have just advanced pass the freshly-played index so the
+  // peek looks one step further. Shuffle position is derived from the index via
+  // indexOf, so it doesn't suffer the same lag.
+  const resolveNextFrom = (snap: NextSnapshot, commit: boolean): number | null => {
+    const { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices } = snap;
+    if (playlist.length === 0) return null;
+    if (isShuffle) {
+      let currentIndices = shuffledIndices;
+      if (currentIndices.length !== playlist.length) {
+        currentIndices = getLruShuffledIndices(playlist, playHistoryRef.current);
+        if (commit) setShuffledIndices(currentIndices);
+      }
+      const pos = currentIndices.indexOf(currentSongIndex);
+      const nextPos = pos + 1;
+      if (nextPos >= currentIndices.length) {
+        if (!commit) return null; // can't peek a not-yet-generated order
+        const newIndices = getLruShuffledIndices(playlist, playHistoryRef.current);
+        setShuffledIndices(newIndices);
+        setShufflePos(0);
+        return newIndices[0];
+      }
+      if (commit) setShufflePos(nextPos);
+      return currentIndices[nextPos];
+    }
+    let nextIndex = currentSongIndex + 1;
+    if (nextIndex >= playlist.length) {
+      if (isLoop) nextIndex = 0;
+      else return null; // terminal — end of a non-looping playlist
+    }
+    return nextIndex;
+  };
+  const resolveNext = (commit: boolean): number | null => resolveNextFrom(stateRef.current, commit);
+
+  // Buffer the upcoming track into the standby element so a future handoff is
+  // instantaneous (no load gap, which would re-introduce the silence that drops
+  // the card). Keeps at most the active + next song's blob URLs alive.
+  const preloadNext = (fromIndex?: number) => {
+    const standby = standbyAudioRef.current;
+    if (!standby) return;
+    // Peek from the just-played index when supplied (stateRef lags a render);
+    // otherwise from the live state.
+    const snap: NextSnapshot = fromIndex === undefined
+      ? stateRef.current
+      : { ...stateRef.current, currentSongIndex: fromIndex };
+    const peek = resolveNextFrom(snap, false);
+    if (peek === null) { standbySongIdRef.current = null; return; }
+    const nextSong = snap.playlist[peek];
+    if (!nextSong) { standbySongIdRef.current = null; return; }
+    if (standbySongIdRef.current !== nextSong.id) {
+      let url = blobUrlsRef.current[nextSong.id];
+      if (!url) {
+        url = URL.createObjectURL(nextSong.file);
+        blobUrlsRef.current[nextSong.id] = url;
+      }
+      standby.src = url;
+      standby.playbackRate = 1.0;
+      try { standby.load(); } catch {}
+      standbySongIdRef.current = nextSong.id;
+    }
+    // Revoke any blob that isn't the active (just-played) or the preloaded-next.
+    const keep = new Set<string>();
+    const active = snap.playlist[snap.currentSongIndex];
+    if (active) keep.add(active.id);
+    keep.add(nextSong.id);
+    Object.keys(blobUrlsRef.current).forEach(id => {
+      if (!keep.has(id)) {
+        URL.revokeObjectURL(blobUrlsRef.current[id]);
+        delete blobUrlsRef.current[id];
+      }
+    });
+  };
+
+  // The gapless handoff itself. Returns true if it took over the advance, false
+  // to let the caller fall back to the normal (non-gapless) playNext path —
+  // which happens at a terminal stop, a shuffle wrap, an un-analyzed next track
+  // (needs a decode we don't want to block on), or if the preload isn't ready.
+  const tryGaplessAdvance = (): boolean => {
+    const oldActive = mainAudioRef.current;
+    const standby = standbyAudioRef.current;
+    if (!oldActive || !standby) return false;
+
+    const peek = resolveNext(false);
+    if (peek === null) return false;
+    const nextSong = stateRef.current.playlist[peek];
+    // Require a pre-assigned frequency (Deep-Scanned) so we don't have to decode
+    // on the critical path, and require the preload to be buffered enough to
+    // start without a gap (HAVE_CURRENT_DATA = 2).
+    if (!nextSong || !nextSong.closestSolfeggio) return false;
+    if (standbySongIdRef.current !== nextSong.id || standby.readyState < 2) return false;
+
+    // Commit the shuffle/index bookkeeping (peek and commit agree — stateRef is
+    // unchanged between these two synchronous calls).
+    resolveNext(true);
+
+    const targetFreq = nextSong.closestSolfeggio;
+
+    // Start the preloaded standby WHILE the old element is still playing. The
+    // overlapping audio is what keeps the OS session continuous so the card
+    // transfers instead of dropping.
+    standby.playbackRate = 1.0;
+    try { standby.currentTime = 0; } catch {}
+    standby.volume = oldActive.volume;
+    const p = standby.play();
+    if (p) p.catch((err: unknown) => console.error('Gapless handoff play() failed:', err));
+
+    // Swap roles: standby is now the active element; old active becomes standby.
+    mainAudioRef.current = standby;
+    standbyAudioRef.current = oldActive;
+    standbySongIdRef.current = null; // the retired element no longer holds a valid preload
+    // Re-arm auto-advance for the new active element.
+    autoAdvanceTriggeredRef.current = false;
+
+    // Assert the media session for the new track immediately.
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: nextSong.name || 'Unknown Track',
+          artist: 'Aetheria Harmonic Player',
+          album: `${targetFreq}Hz • ${getFrequencyRegime(targetFreq)} Regime`,
+          artwork: [
+            { src: '/images/icon-192x192.png', sizes: '192x192', type: 'image/png' },
+            { src: '/images/icon-512x512.png', sizes: '512x512', type: 'image/png' },
+          ],
+        });
+        navigator.mediaSession.playbackState = 'playing';
+      } catch {}
+    }
+
+    // Mirror playTrack's state updates for the new track.
+    setCurrTime(0);
+    pausedAtRef.current = 0;
+    if (Number.isFinite(standby.duration) && standby.duration > 0) {
+      setCurrDuration(standby.duration / PITCH_SHIFT_FACTOR);
+    }
+    setSelectedSolfeggio(targetFreq);
+    setSubtleResonanceMode(targetFreq > 963);
+    audioBufferRef.current = null;
+    if (nextSong.fractalAnalysis) setFractalAnalysis(nextSong.fractalAnalysis);
+    setCurrentSongIndex(peek);
+    recordPlay(nextSong.id);
+
+    // Gentle crossfade-out of the retiring element, then stop & repurpose it.
+    crossfadeOutAndRetire(oldActive);
+
+    // Preload the track AFTER this one into the freed-up standby element. Pass
+    // `peek` (the just-activated index) because stateRef still holds the old one.
+    preloadNext(peek);
+
+    return true;
+  };
+
+  // Fade the retiring element to silence over ~320 ms (so the brief overlap with
+  // the incoming track is a soft crossfade, not a doubled-volume bump), then
+  // pause and reset it. It's already within AUTO_ADVANCE_LOOKAHEAD_S of its end.
+  const crossfadeOutAndRetire = (el: HTMLAudioElement) => {
+    const startVol = el.volume;
+    const steps = 8;
+    let i = 0;
+    const id = window.setInterval(() => {
+      i++;
+      try { el.volume = Math.max(0, startVol * (1 - i / steps)); } catch {}
+      if (i >= steps) {
+        window.clearInterval(id);
+        try { el.pause(); el.currentTime = 0; } catch {}
+        try { el.volume = startVol; } catch {} // restore for its next life as the active element
+      }
+    }, 40);
+  };
+
+  // Called by both audio elements' end-of-track listeners (the active one only —
+  // see the guard in setupAudioElement). Gapless if possible, else normal advance.
+  const handleAutoAdvance = () => {
+    if (!tryGaplessAdvance()) {
+      playNextRef.current();
+    }
+  };
+  const handleAutoAdvanceRef = useRef(handleAutoAdvance);
+  useEffect(() => { handleAutoAdvanceRef.current = handleAutoAdvance; });
+
+  // Attach the standard listeners to an <audio> element. Both the active and the
+  // standby element get these; the auto-advance / duration / error-recovery
+  // behaviors are gated to whichever element is currently active
+  // (el === mainAudioRef.current), so the retired element's late `ended` (it
+  // finishes its tail ~AUTO_ADVANCE_LOOKAHEAD_S after handoff) is harmlessly
+  // ignored instead of triggering a second advance.
+  const setupAudioElement = (el: HTMLAudioElement) => {
+    el.crossOrigin = 'anonymous';
+    el.preload = 'auto';
+
+    // PRE-END AUTO-ADVANCE — the primary path. Fires ~AUTO_ADVANCE_LOOKAHEAD_S
+    // before the end, while still playing, so the handoff overlaps audio and the
+    // lock-screen card survives. timeupdate keeps firing on a locked screen
+    // because the active element owns the media session.
+    el.addEventListener('timeupdate', () => {
+      if (el !== mainAudioRef.current) return;
+      if (el.paused || autoAdvanceTriggeredRef.current) return;
+      const dur = el.duration;
+      if (!Number.isFinite(dur) || dur <= 0) return;
+      if (dur - el.currentTime <= AUTO_ADVANCE_LOOKAHEAD_S) {
+        autoAdvanceTriggeredRef.current = true;
+        handleAutoAdvanceRef.current();
+      }
+    });
+
+    // FALLBACK — if timeupdate's ~4 Hz granularity overshoots the window the
+    // track reaches its natural end; advance then (the once-guard prevents a
+    // double-fire with the timeupdate path).
+    el.addEventListener('ended', () => {
+      if (el !== mainAudioRef.current) return;
+      if (autoAdvanceTriggeredRef.current) return;
+      autoAdvanceTriggeredRef.current = true;
+      handleAutoAdvanceRef.current();
+    });
+
+    el.addEventListener('error', (e) => {
+      const audio = e.target as HTMLAudioElement;
+      console.error('Audio element error:', e);
+      console.error('Error details:', {
+        error: audio.error,
+        code: audio.error?.code,
+        message: audio.error?.message,
+        networkState: audio.networkState,
+        readyState: audio.readyState,
+        currentSrc: audio.currentSrc,
+      });
+      if (el !== mainAudioRef.current) return; // a standby error is not fatal
+      setIsPlaying(false);
+      // Auto-recovery for common blob errors — clear src so the next play reloads.
+      if (audio.error?.code === 2 || audio.error?.code === 4) {
+        (el as any).needsReload = true;
+        el.src = '';
+      }
+    });
+
+    el.addEventListener('loadedmetadata', () => {
+      if (el !== mainAudioRef.current) return;
+      setCurrDuration(el.duration / PITCH_SHIFT_FACTOR);
+    });
+  };
 
   const playTrack = async (index: number, playlistOverride?: Song[], preserveShuffleOrder = false) => {
     initAudio();
@@ -3871,94 +4149,28 @@ const App: React.FC = () => {
     if (!song) return;
 
     try {
-      // Stop previous audio element if exists
+      // Stop the current active element before reusing it for a manual /
+      // initial play. NOTE: automatic end-of-track advance does NOT come through
+      // here — it uses the gapless handoff (tryGaplessAdvance), which never
+      // pauses the outgoing element until the incoming one is already playing,
+      // so the media session stays continuous and the lock-screen card survives.
+      // This pause() path is only hit by user-gesture plays (clicks, manual
+      // next/prev, lock-screen skip), where a brief stop is fine.
       if (mainAudioRef.current) {
         mainAudioRef.current.pause();
         mainAudioRef.current.currentTime = 0;
       }
 
-      // Create or reuse audio element
+      // Create the active + standby elements once, with shared listeners. The
+      // standby is what makes the gapless handoff possible (see setupAudioElement
+      // and tryGaplessAdvance above).
       if (!mainAudioRef.current) {
         mainAudioRef.current = new Audio();
-        mainAudioRef.current.crossOrigin = 'anonymous';
-        mainAudioRef.current.preload = 'auto';
-        
-        // DON'T mute the element - createMediaElementSource will redirect all audio through Web Audio
-        // The element needs to play normally to feed the Web Audio graph
-        
-        // PRE-END AUTO-ADVANCE (keeps the lock-screen card alive).
-        // We advance ~AUTO_ADVANCE_LOOKAHEAD_S before the track's natural end,
-        // while the element is still actively playing. Letting it reach `ended`
-        // makes the OS tear down the media session, and the gesture-less `ended`
-        // handler cannot rebuild the lock-screen card (only a user-activation
-        // context — e.g. a manual headphone skip — can), so the card vanished on
-        // every auto-transition. Swapping the src mid-playback never signals
-        // end-of-stream, so the session (and the card) survives. `timeupdate`
-        // keeps firing on a locked screen because this is the active media
-        // element. The once-guard (autoAdvanceTriggeredRef) is reset per track
-        // in playTrack. The 'ended' listener below stays as a safety net for the
-        // rare case timeupdate's ~4 Hz granularity overshoots the window.
-        const AUTO_ADVANCE_LOOKAHEAD_S = 0.4;
-        mainAudioRef.current.addEventListener('timeupdate', () => {
-          const el = mainAudioRef.current;
-          if (!el || el.paused || autoAdvanceTriggeredRef.current) return;
-          const dur = el.duration;
-          if (!Number.isFinite(dur) || dur <= 0) return;
-          if (dur - el.currentTime <= AUTO_ADVANCE_LOOKAHEAD_S) {
-            autoAdvanceTriggeredRef.current = true;
-            playNextRef.current();
-          }
-        });
-
-        // Set up audio element events. Auto-advance when the track finishes.
-        // We do NOT flip isPlaying to false here — setting playbackState to
-        // 'paused' mid-playlist tears down the media notification. The terminal
-        // case (end of a non-looping playlist) is handled inside playNext.
-        // This is the FALLBACK path — the pre-end timeupdate swap above is the
-        // primary auto-advance; the once-guard keeps them from double-firing.
-        mainAudioRef.current.addEventListener('ended', () => {
-          if (autoAdvanceTriggeredRef.current) return;
-          autoAdvanceTriggeredRef.current = true;
-          playNextRef.current();
-        });
-        
-        mainAudioRef.current.addEventListener('error', (e) => {
-          const audio = e.target as HTMLAudioElement;
-          console.error('Audio element error:', e);
-          console.error('Error details:', {
-            error: audio.error,
-            code: audio.error?.code,
-            message: audio.error?.message,
-            networkState: audio.networkState,
-            readyState: audio.readyState,
-            currentSrc: audio.currentSrc
-          });
-          
-          setIsPlaying(false);
-          
-          // Auto-recovery attempt for common errors
-          if (audio.error?.code === 2) { // MEDIA_ERR_NETWORK
-            console.log('Network/Blob error detected - marking for reload');
-            // Mark that we need to reload on next play attempt
-            (mainAudioRef.current as any).needsReload = true;
-            // Clear the source to prevent further errors
-            if (mainAudioRef.current) {
-              mainAudioRef.current.src = '';
-            }
-          } else if (audio.error?.code === 4) { // MEDIA_ERR_SRC_NOT_SUPPORTED
-            console.log('Source not supported - likely expired blob URL');
-            (mainAudioRef.current as any).needsReload = true;
-            // Clear the reference so next play will reload
-            if (mainAudioRef.current) {
-              mainAudioRef.current.src = '';
-            }
-          }
-        });
-        
-        mainAudioRef.current.addEventListener('loadedmetadata', () => {
-          const duration = mainAudioRef.current!.duration;
-          setCurrDuration(duration / PITCH_SHIFT_FACTOR);
-        });
+        setupAudioElement(mainAudioRef.current);
+      }
+      if (!standbyAudioRef.current) {
+        standbyAudioRef.current = new Audio();
+        setupAudioElement(standbyAudioRef.current);
       }
 
       // Revoke and drop blob URLs for any song we're not about to play.
@@ -3971,8 +4183,11 @@ const App: React.FC = () => {
       // session memory at one track's worth regardless of walk length.
       // (Previous code attempted a per-song revoke but checked the same
       // key twice in a row, making the revoke branch unreachable.)
+      // Keep BOTH the song we're about to play and whatever the standby element
+      // has preloaded for the gapless handoff (otherwise we'd revoke the
+      // standby's blob out from under it and the handoff would fail to load).
       Object.keys(blobUrlsRef.current).forEach(id => {
-        if (id !== song.id) {
+        if (id !== song.id && id !== standbySongIdRef.current) {
           URL.revokeObjectURL(blobUrlsRef.current[id]);
           delete blobUrlsRef.current[id];
         }
@@ -4127,10 +4342,17 @@ const App: React.FC = () => {
       // others have caught up. Same call covers all flows that route
       // through playTrack — shuffle next, walk progression, manual click.
       recordPlay(song.id);
-      
+
+      // Preload the NEXT track into the standby element so the upcoming
+      // end-of-track transition can be a gapless handoff that keeps the
+      // lock-screen card alive. Pass the just-played `index` because stateRef's
+      // currentSongIndex still holds the previous value this render. Best-effort
+      // — failures just fall back to the normal advance.
+      try { preloadNext(index); } catch {}
+
       // Don't revoke blob URLs immediately - they need to stay valid
       // We'll clean them up when creating new ones or on unmount
-      
+
     } catch (error) {
       // No alert() here. A blocking dialog fired from a backgrounded / locked
       // screen (e.g. a transient play() rejection during an auto-advance or a
@@ -4147,57 +4369,21 @@ const App: React.FC = () => {
       playTrackRef.current = playTrack;
   }, [playTrack]);
 
-  // Centralized Play Next Logic for Shuffle/Loop
+  // Centralized Play Next Logic for Shuffle/Loop. Delegates the index/shuffle/
+  // loop math to resolveNext (the SAME resolver the gapless preload + handoff
+  // use, so the three never diverge). This is the non-gapless advance path —
+  // used for the terminal stop, shuffle wraps, and un-analyzed tracks, and as
+  // the fallback whenever a gapless handoff can't run.
   const playNext = useCallback(() => {
-    const { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices } = stateRef.current;
-    if (playlist.length === 0) return;
-
-    if (isShuffle) {
-        // Robust Shuffle Logic: Always find current position dynamically
-        let currentIndices = shuffledIndices;
-
-        // Ensure indices match playlist length (Sync check)
-        if (currentIndices.length !== playlist.length) {
-             currentIndices = getLruShuffledIndices(playlist, playHistoryRef.current);
-             setShuffledIndices(currentIndices);
-        }
-
-        // Determine where we are in the shuffle list
-        let currentShufflePos = currentIndices.indexOf(currentSongIndex);
-
-        // If track is not found or invalid, reset
-        if (currentShufflePos === -1) currentShufflePos = -1;
-
-        const nextShufflePos = currentShufflePos + 1;
-
-        if (nextShufflePos >= currentIndices.length) {
-            // End of Shuffle List — shuffle is inherently endless. Generate
-            // a fresh LRU-weighted order and continue. After a full pass,
-            // every song has been played recently, so the next ordering
-            // re-cycles oldest-played first with random tiebreakers among
-            // ties. Loop toggle is irrelevant here — once shuffle is on,
-            // playback continues indefinitely until the user stops it.
-            const newIndices = getLruShuffledIndices(playlist, playHistoryRef.current);
-            setShuffledIndices(newIndices);
-            setShufflePos(0);
-            playTrack(newIndices[0], undefined, true);
-        } else {
-            // Next in shuffled list
-            setShufflePos(nextShufflePos);
-            playTrack(currentIndices[nextShufflePos], undefined, true);
-        }
-    } else {
-        // Normal Sequential Logic
-        let nextIndex = currentSongIndex + 1;
-        if (nextIndex >= playlist.length) {
-            if (isLoop) nextIndex = 0;
-            else {
-                setIsPlaying(false);
-                return;
-            }
-        }
-        playTrack(nextIndex);
+    const next = resolveNext(true); // commits shuffle bookkeeping, like before
+    if (next === null) {
+      // Empty playlist, or the terminal end of a non-looping playlist.
+      setIsPlaying(false);
+      return;
     }
+    // Auto-advance preserves the existing shuffle order (resolveNext already
+    // advanced/committed the shuffle position); sequential plays ignore it.
+    playTrack(next, undefined, stateRef.current.isShuffle);
   }, [playTrack]);
 
   useEffect(() => {
@@ -5003,7 +5189,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.5</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.6</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
