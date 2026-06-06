@@ -1501,14 +1501,6 @@ const App: React.FC = () => {
   const recordMusicSrcRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const recordMusicDetachRef = useRef<(() => void) | null>(null);
   const mainAudioRef = useRef<HTMLAudioElement | null>(null);
-  // Second <audio> element for GAPLESS HANDOFF. The next track is preloaded into
-  // this standby element and started WHILE the active element is still playing,
-  // so the OS media session sees uninterrupted audio and transfers the
-  // lock-screen card to the new element instead of tearing it down. On handoff
-  // the two refs swap roles (mainAudioRef always points at the active element).
-  // standbySongIdRef tracks which song is currently buffered into the standby.
-  const standbyAudioRef = useRef<HTMLAudioElement | null>(null);
-  const standbySongIdRef = useRef<string | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   const stateRef = useRef({
@@ -1648,13 +1640,6 @@ const App: React.FC = () => {
         mainAudioRef.current.src = '';
         mainAudioRef.current = null;
       }
-      // Clean up the gapless-handoff standby element too.
-      if (standbyAudioRef.current) {
-        standbyAudioRef.current.pause();
-        standbyAudioRef.current.src = '';
-        standbyAudioRef.current = null;
-      }
-      standbySongIdRef.current = null;
       
       // Clean up media source
       if (mediaSourceRef.current) {
@@ -3853,36 +3838,27 @@ const App: React.FC = () => {
     return 'HEAD';
   };
 
-  // How far before a track's natural end we hand off to the next one. Letting
-  // the element reach `ended` tears down the OS media session, and a gesture-
-  // less rebuild of the lock-screen card is not permitted — so we never let it
-  // end during a playlist.
-  const AUTO_ADVANCE_LOOKAHEAD_S = 0.6;
+  // How far before a track's natural end we swap to the next one. We never let
+  // the element reach `ended`: that terminal state tears down the OS media
+  // session, and a gesture-less rebuild of the lock-screen card is not permitted.
+  const AUTO_ADVANCE_LOOKAHEAD_S = 0.35;
 
-  // --- GAPLESS HANDOFF MACHINERY ---------------------------------------------
-  // Resolve the index of the next track to play, mirroring playNext's shuffle /
-  // loop / sequential logic. With commit=false it's a pure peek (used to decide
-  // what to preload); with commit=true it applies the shuffle bookkeeping
-  // (setShufflePos / setShuffledIndices) exactly as playNext would. Returns null
-  // at the terminal end of a non-looping playlist, on an empty playlist, or —
-  // when only peeking — at a shuffle-list wrap (the regenerated order can't be
-  // peeked without mutating, so that single transition falls back to non-gapless).
-  type NextSnapshot = {
-    playlist: Song[];
-    currentSongIndex: number;
-    isShuffle: boolean;
-    isLoop: boolean;
-    shuffledIndices: number[];
-  };
-  // Core resolver against an explicit snapshot. The `fromIndex` override matters
-  // because React state (and therefore stateRef, which mirrors it) only updates
-  // a render later: right after a handoff commits setCurrentSongIndex, peeking
-  // off stateRef would still see the OLD index and preload the now-playing track
-  // again. Callers that have just advanced pass the freshly-played index so the
-  // peek looks one step further. Shuffle position is derived from the index via
-  // indexOf, so it doesn't suffer the same lag.
-  const resolveNextFrom = (snap: NextSnapshot, commit: boolean): number | null => {
-    const { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices } = snap;
+  // --- SINGLE-ELEMENT GAPLESS ADVANCE ----------------------------------------
+  // Per the platform guidance (web.dev / Chrome Media Session), the way to keep
+  // the lock-screen notification alive across a playlist is to REUSE ONE audio
+  // element: set .src, call play(), update metadata, assert playbackState. We
+  // tried two alternating elements; it kept the card across the first auto-
+  // advance but the OS dropped it on the second (switching the active element is
+  // the documented anti-pattern). So: one element, clean swap, no pause().
+  //
+  // Resolve the index of the next track, mirroring playNext's shuffle / loop /
+  // sequential logic. commit=false is a pure peek; commit=true applies the
+  // shuffle bookkeeping (setShufflePos / setShuffledIndices). Returns null at the
+  // terminal end of a non-looping playlist, on an empty playlist, or — when only
+  // peeking — at a shuffle-list wrap (the regenerated order can't be peeked
+  // without mutating, so that single transition falls back to non-gapless).
+  const resolveNext = (commit: boolean): number | null => {
+    const { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices } = stateRef.current;
     if (playlist.length === 0) return null;
     if (isShuffle) {
       let currentIndices = shuffledIndices;
@@ -3909,88 +3885,52 @@ const App: React.FC = () => {
     }
     return nextIndex;
   };
-  const resolveNext = (commit: boolean): number | null => resolveNextFrom(stateRef.current, commit);
 
-  // Buffer the upcoming track into the standby element so a future handoff is
-  // instantaneous (no load gap, which would re-introduce the silence that drops
-  // the card). Keeps at most the active + next song's blob URLs alive.
-  const preloadNext = (fromIndex?: number) => {
-    const standby = standbyAudioRef.current;
-    if (!standby) return;
-    // Peek from the just-played index when supplied (stateRef lags a render);
-    // otherwise from the live state.
-    const snap: NextSnapshot = fromIndex === undefined
-      ? stateRef.current
-      : { ...stateRef.current, currentSongIndex: fromIndex };
-    const peek = resolveNextFrom(snap, false);
-    if (peek === null) { standbySongIdRef.current = null; return; }
-    const nextSong = snap.playlist[peek];
-    if (!nextSong) { standbySongIdRef.current = null; return; }
-    if (standbySongIdRef.current !== nextSong.id) {
-      let url = blobUrlsRef.current[nextSong.id];
-      if (!url) {
-        url = URL.createObjectURL(nextSong.file);
-        blobUrlsRef.current[nextSong.id] = url;
-      }
-      standby.src = url;
-      standby.playbackRate = 1.0;
-      try { standby.load(); } catch {}
-      standbySongIdRef.current = nextSong.id;
-    }
-    // Revoke any blob that isn't the active (just-played) or the preloaded-next.
-    const keep = new Set<string>();
-    const active = snap.playlist[snap.currentSongIndex];
-    if (active) keep.add(active.id);
-    keep.add(nextSong.id);
-    Object.keys(blobUrlsRef.current).forEach(id => {
-      if (!keep.has(id)) {
-        URL.revokeObjectURL(blobUrlsRef.current[id]);
-        delete blobUrlsRef.current[id];
-      }
-    });
-  };
-
-  // The gapless handoff itself. Returns true if it took over the advance, false
-  // to let the caller fall back to the normal (non-gapless) playNext path —
-  // which happens at a terminal stop, a shuffle wrap, an un-analyzed next track
-  // (needs a decode we don't want to block on), or if the preload isn't ready.
+  // The clean single-element advance. Returns true if it handled the advance,
+  // false to fall back to the normal playNext path (terminal stop, shuffle wrap,
+  // or an un-analyzed next track that would need a blocking decode).
+  //
+  // The whole point: do the MINIMUM on the one active, user-activated element —
+  // set .src, play(), update metadata, assert playbackState='playing' — with NO
+  // pause(), NO load(), and NO awaited work in between. A pause() or an async gap
+  // is what signalled "stopped" to the OS and dropped the lock-screen card. This
+  // is fired ~AUTO_ADVANCE_LOOKAHEAD_S BEFORE the natural end so the element never
+  // reaches the terminal `ended` state (another teardown trigger).
   const tryGaplessAdvance = (): boolean => {
-    const oldActive = mainAudioRef.current;
-    const standby = standbyAudioRef.current;
-    if (!oldActive || !standby) return false;
+    const el = mainAudioRef.current;
+    if (!el) return false;
 
     const peek = resolveNext(false);
     if (peek === null) return false;
     const nextSong = stateRef.current.playlist[peek];
     // Require a pre-assigned frequency (Deep-Scanned) so we don't have to decode
-    // on the critical path, and require the preload to be buffered enough to
-    // start without a gap (HAVE_CURRENT_DATA = 2).
+    // on the critical path (a multi-second await here would drop the card).
     if (!nextSong || !nextSong.closestSolfeggio) return false;
-    if (standbySongIdRef.current !== nextSong.id || standby.readyState < 2) return false;
 
-    // Commit the shuffle/index bookkeeping (peek and commit agree — stateRef is
-    // unchanged between these two synchronous calls).
+    // Commit the shuffle/index bookkeeping.
     resolveNext(true);
-
     const targetFreq = nextSong.closestSolfeggio;
 
-    // Start the preloaded standby WHILE the old element is still playing. The
-    // overlapping audio is what keeps the OS session continuous so the card
-    // transfers instead of dropping.
-    standby.playbackRate = 1.0;
-    try { standby.currentTime = 0; } catch {}
-    standby.volume = oldActive.volume;
-    const p = standby.play();
-    if (p) p.catch((err: unknown) => console.error('Gapless handoff play() failed:', err));
+    // Reuse the current song's blob URL or mint one (local file → instant).
+    let url = blobUrlsRef.current[nextSong.id];
+    if (!url) {
+      url = URL.createObjectURL(nextSong.file);
+      blobUrlsRef.current[nextSong.id] = url;
+    }
 
-    // Swap roles: standby is now the active element; old active becomes standby.
-    mainAudioRef.current = standby;
-    standbyAudioRef.current = oldActive;
-    standbySongIdRef.current = null; // the retired element no longer holds a valid preload
-    // Re-arm auto-advance for the new active element.
+    // THE SWAP — same element, no pause, no load, no await.
+    el.src = url;
+    el.playbackRate = 1.0;
+    const p = el.play();
+    if (p) p.catch((err: unknown) => console.error('Gapless swap play() failed:', err));
+    applyMusicElementVolume();
+
+    // Re-arm auto-advance for the new track.
     autoAdvanceTriggeredRef.current = false;
 
-    // Assert the media session for the new track immediately.
+    // Assert the media session for the new track in the SAME synchronous turn as
+    // play(), and force playbackState='playing' so the OS doesn't treat the brief
+    // src reload as a stop.
     if ('mediaSession' in navigator) {
       try {
         navigator.mediaSession.metadata = new MediaMetadata({
@@ -4006,12 +3946,10 @@ const App: React.FC = () => {
       } catch {}
     }
 
-    // Mirror playTrack's state updates for the new track.
+    // Mirror playTrack's state updates for the new track. (currDuration follows
+    // from the element's loadedmetadata listener once the new src loads.)
     setCurrTime(0);
     pausedAtRef.current = 0;
-    if (Number.isFinite(standby.duration) && standby.duration > 0) {
-      setCurrDuration(standby.duration / PITCH_SHIFT_FACTOR);
-    }
     setSelectedSolfeggio(targetFreq);
     setSubtleResonanceMode(targetFreq > 963);
     audioBufferRef.current = null;
@@ -4019,36 +3957,20 @@ const App: React.FC = () => {
     setCurrentSongIndex(peek);
     recordPlay(nextSong.id);
 
-    // Gentle crossfade-out of the retiring element, then stop & repurpose it.
-    crossfadeOutAndRetire(oldActive);
-
-    // Preload the track AFTER this one into the freed-up standby element. Pass
-    // `peek` (the just-activated index) because stateRef still holds the old one.
-    preloadNext(peek);
+    // Drop every other song's blob URL (memory cap — one track's worth alive).
+    Object.keys(blobUrlsRef.current).forEach(id => {
+      if (id !== nextSong.id) {
+        URL.revokeObjectURL(blobUrlsRef.current[id]);
+        delete blobUrlsRef.current[id];
+      }
+    });
 
     return true;
   };
 
-  // Fade the retiring element to silence over ~320 ms (so the brief overlap with
-  // the incoming track is a soft crossfade, not a doubled-volume bump), then
-  // pause and reset it. It's already within AUTO_ADVANCE_LOOKAHEAD_S of its end.
-  const crossfadeOutAndRetire = (el: HTMLAudioElement) => {
-    const startVol = el.volume;
-    const steps = 8;
-    let i = 0;
-    const id = window.setInterval(() => {
-      i++;
-      try { el.volume = Math.max(0, startVol * (1 - i / steps)); } catch {}
-      if (i >= steps) {
-        window.clearInterval(id);
-        try { el.pause(); el.currentTime = 0; } catch {}
-        try { el.volume = startVol; } catch {} // restore for its next life as the active element
-      }
-    }, 40);
-  };
-
-  // Called by both audio elements' end-of-track listeners (the active one only —
-  // see the guard in setupAudioElement). Gapless if possible, else normal advance.
+  // Called by the active element's end-of-track listeners. Clean single-element
+  // swap if possible, else the normal advance (terminal stop / shuffle wrap /
+  // un-analyzed track).
   const handleAutoAdvance = () => {
     if (!tryGaplessAdvance()) {
       playNextRef.current();
@@ -4057,20 +3979,17 @@ const App: React.FC = () => {
   const handleAutoAdvanceRef = useRef(handleAutoAdvance);
   useEffect(() => { handleAutoAdvanceRef.current = handleAutoAdvance; });
 
-  // Attach the standard listeners to an <audio> element. Both the active and the
-  // standby element get these; the auto-advance / duration / error-recovery
-  // behaviors are gated to whichever element is currently active
-  // (el === mainAudioRef.current), so the retired element's late `ended` (it
-  // finishes its tail ~AUTO_ADVANCE_LOOKAHEAD_S after handoff) is harmlessly
-  // ignored instead of triggering a second advance.
+  // Attach the standard listeners to the audio element. The `el === mainAudioRef
+  // .current` guards are belt-and-suspenders (there is a single element today)
+  // so a stray event from a replaced element could never drive a second advance.
   const setupAudioElement = (el: HTMLAudioElement) => {
     el.crossOrigin = 'anonymous';
     el.preload = 'auto';
 
     // PRE-END AUTO-ADVANCE — the primary path. Fires ~AUTO_ADVANCE_LOOKAHEAD_S
-    // before the end, while still playing, so the handoff overlaps audio and the
-    // lock-screen card survives. timeupdate keeps firing on a locked screen
-    // because the active element owns the media session.
+    // before the end, while still playing, so the swap happens before the element
+    // reaches the terminal `ended` state (which would drop the card). timeupdate
+    // keeps firing on a locked screen because this element owns the media session.
     el.addEventListener('timeupdate', () => {
       if (el !== mainAudioRef.current) return;
       if (el.paused || autoAdvanceTriggeredRef.current) return;
@@ -4103,7 +4022,7 @@ const App: React.FC = () => {
         readyState: audio.readyState,
         currentSrc: audio.currentSrc,
       });
-      if (el !== mainAudioRef.current) return; // a standby error is not fatal
+      if (el !== mainAudioRef.current) return; // ignore events from a replaced element
       setIsPlaying(false);
       // Auto-recovery for common blob errors — clear src so the next play reloads.
       if (audio.error?.code === 2 || audio.error?.code === 4) {
@@ -4161,16 +4080,10 @@ const App: React.FC = () => {
         mainAudioRef.current.currentTime = 0;
       }
 
-      // Create the active + standby elements once, with shared listeners. The
-      // standby is what makes the gapless handoff possible (see setupAudioElement
-      // and tryGaplessAdvance above).
+      // Create the single audio element once, with its listeners.
       if (!mainAudioRef.current) {
         mainAudioRef.current = new Audio();
         setupAudioElement(mainAudioRef.current);
-      }
-      if (!standbyAudioRef.current) {
-        standbyAudioRef.current = new Audio();
-        setupAudioElement(standbyAudioRef.current);
       }
 
       // Revoke and drop blob URLs for any song we're not about to play.
@@ -4183,11 +4096,8 @@ const App: React.FC = () => {
       // session memory at one track's worth regardless of walk length.
       // (Previous code attempted a per-song revoke but checked the same
       // key twice in a row, making the revoke branch unreachable.)
-      // Keep BOTH the song we're about to play and whatever the standby element
-      // has preloaded for the gapless handoff (otherwise we'd revoke the
-      // standby's blob out from under it and the handoff would fail to load).
       Object.keys(blobUrlsRef.current).forEach(id => {
-        if (id !== song.id && id !== standbySongIdRef.current) {
+        if (id !== song.id) {
           URL.revokeObjectURL(blobUrlsRef.current[id]);
           delete blobUrlsRef.current[id];
         }
@@ -4342,13 +4252,6 @@ const App: React.FC = () => {
       // others have caught up. Same call covers all flows that route
       // through playTrack — shuffle next, walk progression, manual click.
       recordPlay(song.id);
-
-      // Preload the NEXT track into the standby element so the upcoming
-      // end-of-track transition can be a gapless handoff that keeps the
-      // lock-screen card alive. Pass the just-played `index` because stateRef's
-      // currentSongIndex still holds the previous value this render. Best-effort
-      // — failures just fall back to the normal advance.
-      try { preloadNext(index); } catch {}
 
       // Don't revoke blob URLs immediately - they need to stay valid
       // We'll clean them up when creating new ones or on unmount
@@ -5189,7 +5092,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.6</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.7</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

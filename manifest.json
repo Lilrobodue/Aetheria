@@ -42,7 +42,7 @@
   ],
   "related_applications": [],
   "offline_enabled": true,
-  "permissions": ["microphone", "notifications"],
+  "permissions": ["notifications"],
   "handle_links": "preferred",
   "launch_handler": {
     "client_mode": "navigate-existing"
