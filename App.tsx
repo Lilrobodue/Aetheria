@@ -1720,6 +1720,16 @@ const App: React.FC = () => {
   const playTrackRef = useRef<(index: number, list?: Song[]) => Promise<void>>(async () => {});
   const playNextRef = useRef<() => void>(() => {});
 
+  // Guards the pre-end auto-advance so it fires at most once per track. We swap
+  // to the next track a hair BEFORE the element reaches its natural `ended`
+  // state (see the 'timeupdate' listener in playTrack) — letting it actually
+  // end tears down the OS media session, and rebuilding the lock-screen card
+  // from the gesture-less `ended` handler is not permitted, so the card
+  // vanished on every auto-transition (while a manual headphone skip, which
+  // runs in a user-activation context, kept it). Reset to false in playTrack
+  // each time a new src is armed.
+  const autoAdvanceTriggeredRef = useRef(false);
+
   // --- Audio Initialization ---
   const initAudio = useCallback(() => {
     try {
@@ -3853,6 +3863,8 @@ const App: React.FC = () => {
 
     setCurrTime(0);
     pausedAtRef.current = 0;
+    // Re-arm the pre-end auto-advance for this new track.
+    autoAdvanceTriggeredRef.current = false;
     setIsAnalyzing(true);
 
     const song = tracks[index];
@@ -3874,11 +3886,39 @@ const App: React.FC = () => {
         // DON'T mute the element - createMediaElementSource will redirect all audio through Web Audio
         // The element needs to play normally to feed the Web Audio graph
         
+        // PRE-END AUTO-ADVANCE (keeps the lock-screen card alive).
+        // We advance ~AUTO_ADVANCE_LOOKAHEAD_S before the track's natural end,
+        // while the element is still actively playing. Letting it reach `ended`
+        // makes the OS tear down the media session, and the gesture-less `ended`
+        // handler cannot rebuild the lock-screen card (only a user-activation
+        // context — e.g. a manual headphone skip — can), so the card vanished on
+        // every auto-transition. Swapping the src mid-playback never signals
+        // end-of-stream, so the session (and the card) survives. `timeupdate`
+        // keeps firing on a locked screen because this is the active media
+        // element. The once-guard (autoAdvanceTriggeredRef) is reset per track
+        // in playTrack. The 'ended' listener below stays as a safety net for the
+        // rare case timeupdate's ~4 Hz granularity overshoots the window.
+        const AUTO_ADVANCE_LOOKAHEAD_S = 0.4;
+        mainAudioRef.current.addEventListener('timeupdate', () => {
+          const el = mainAudioRef.current;
+          if (!el || el.paused || autoAdvanceTriggeredRef.current) return;
+          const dur = el.duration;
+          if (!Number.isFinite(dur) || dur <= 0) return;
+          if (dur - el.currentTime <= AUTO_ADVANCE_LOOKAHEAD_S) {
+            autoAdvanceTriggeredRef.current = true;
+            playNextRef.current();
+          }
+        });
+
         // Set up audio element events. Auto-advance when the track finishes.
         // We do NOT flip isPlaying to false here — setting playbackState to
         // 'paused' mid-playlist tears down the media notification. The terminal
         // case (end of a non-looping playlist) is handled inside playNext.
+        // This is the FALLBACK path — the pre-end timeupdate swap above is the
+        // primary auto-advance; the once-guard keeps them from double-firing.
         mainAudioRef.current.addEventListener('ended', () => {
+          if (autoAdvanceTriggeredRef.current) return;
+          autoAdvanceTriggeredRef.current = true;
           playNextRef.current();
         });
         
@@ -4963,7 +5003,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.4</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.5</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
