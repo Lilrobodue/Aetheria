@@ -2165,16 +2165,18 @@ const App: React.FC = () => {
 
   // Background-playback watchdog.
   //
-  // All sound is routed through the AudioContext (the <audio> element feeds a
-  // MediaElementSource, not the speakers directly), so if the browser suspends
-  // a backgrounded tab's AudioContext — OS audio-focus changes, energy saver,
-  // memory pressure — playback goes silent and the track position freezes.
-  // resume() was previously wired ONLY to user gestures (play/pause, frequency
-  // select, track change), so once the context was suspended while the tab sat
-  // in the background, nothing brought it back: playback stopped after a few
-  // minutes and stayed stopped until the user returned and interacted. The
-  // silent keep-alive oscillator prevents the *idle* auto-suspend but not this
-  // externally-forced one.
+  // The music itself plays DIRECT through the <audio> element to the OS (it is
+  // deliberately NOT routed through a MediaElementSource — see the DIRECT
+  // PLAYBACK note in playTrack), so the element keeps playing even if the
+  // AudioContext suspends. But the binaural / solfeggio layers DO run through
+  // the AudioContext, so if the browser suspends a backgrounded tab's context —
+  // OS audio-focus changes, energy saver, memory pressure — those layers go
+  // silent and the analysis/position loop (which is driven off the context)
+  // freezes. resume() was previously wired ONLY to user gestures (play/pause,
+  // frequency select, track change), so once the context was suspended while
+  // the tab sat in the background, nothing brought it back until the user
+  // returned and interacted. The silent keep-alive oscillator prevents the
+  // *idle* auto-suspend but not this externally-forced one.
   //
   // This watchdog runs only while we intend to be playing. It resumes the
   // context (and re-starts the element if it was paused but not finished)
@@ -3960,6 +3962,35 @@ const App: React.FC = () => {
       // Volume is applied on the element itself (see applyMusicElementVolume).
       applyMusicElementVolume();
 
+      // Re-assert the OS media session SYNCHRONOUSLY, the instant the new src
+      // is set — BEFORE we await play() below. On a locked mobile screen the OS
+      // dismisses the Now-Playing card the moment the *previous* element fires
+      // `ended`. We also re-assert AFTER play() resolves (further down), but by
+      // then there's an idle window in which the OS has already torn the card
+      // down — and once the card is gone the page loses media focus and the OS
+      // FREEZES our JS, so the *next* track's `ended` never fires and the
+      // playlist dead-ends after a single auto-advance (the "next song is the
+      // last until you reopen the app" bug). Asserting here closes that window
+      // so the card never drops and the page is never frozen. We use the
+      // pre-assigned frequency (closestSolfeggio) when available — true for any
+      // Deep-Scanned track — and fall back to the current selection otherwise;
+      // the post-play assertion further down corrects it with the final value.
+      if ('mediaSession' in navigator) {
+        try {
+          const earlyFreq = song.closestSolfeggio || selectedSolfeggio;
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: song.name || 'Unknown Track',
+            artist: 'Aetheria Harmonic Player',
+            album: `${earlyFreq}Hz • ${getFrequencyRegime(earlyFreq)} Regime`,
+            artwork: [
+              { src: '/images/icon-192x192.png', sizes: '192x192', type: 'image/png' },
+              { src: '/images/icon-512x512.png', sizes: '512x512', type: 'image/png' },
+            ],
+          });
+          navigator.mediaSession.playbackState = 'playing';
+        } catch {}
+      }
+
       // NOTE: no explicit load() here on purpose. Setting .src above already
       // starts the media resource load, and play() below waits for enough
       // data. Calling load() additionally does a HARD reset of the element to
@@ -4932,7 +4963,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.4</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

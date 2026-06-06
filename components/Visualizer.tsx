@@ -947,6 +947,18 @@ const Visualizer: React.FC<VisualizerProps> = ({
       // Initialize dynamic speed variable
       let dynamicSpeed = settings.speed;
 
+      // TEMPO ↔ SPEED COUPLING. 0 = the flow/particle/morph speeds are fully
+      // DECOUPLED from the detected musical tempo: they move only at the user's
+      // Speed-slider rate (settings.speed), constant regardless of the song.
+      // This kills the surging the BPM detector caused — during bass-dense
+      // passages it read a high BPM and pushed the multiplier up toward 1.67×,
+      // rapidly speeding up the Tree-of-Life energy flow and the geometry
+      // particles ("pulse in/out fast"). The detector below still runs (so this
+      // is a one-line re-enable), but its result is scaled by this knob before
+      // it touches dynamicSpeed. Raise toward 1 to bring tempo reactivity back;
+      // mirrors the GEOMETRY_AUDIO_REACTIVITY knob used for the bass coupling.
+      const TEMPO_SPEED_COUPLING = 0;
+
       // Performance optimization: Stable frame rate limiting
       if (timestamp) {
         // First frame after mount/restart: seed lastFrameTime to avoid a
@@ -1397,9 +1409,10 @@ const Visualizer: React.FC<VisualizerProps> = ({
       // Smooth BPM changes
       smoothedBPMRef.current = smoothedBPMRef.current * 0.9 + detectedBPMRef.current * 0.1;
       
-      // Calculate tempo-based speed multiplier
+      // Calculate tempo-based speed multiplier, faded in by the coupling knob.
+      // At TEMPO_SPEED_COUPLING = 0 this collapses to settings.speed (constant).
       const tempoMultiplier = smoothedBPMRef.current / 120; // Normalized to 120 BPM baseline
-      dynamicSpeed = settings.speed * tempoMultiplier; // Update the existing variable
+      dynamicSpeed = settings.speed * (1 + (tempoMultiplier - 1) * TEMPO_SPEED_COUPLING);
       
       prevBassRef.current = bassEnergy;
       prevSubBassRef.current = subBassEnergy;
@@ -2217,10 +2230,11 @@ const Visualizer: React.FC<VisualizerProps> = ({
         const morphSpeed = 0.375 * dynamicSpeed; // Use tempo-based speed (0.15 * 2.5 = 0.375)
         const particleBaseSize = settings.particleBaseSize || 2.5;
         
-      // Update dynamic speed based on tempo
+      // Update dynamic speed based on tempo (faded in by the coupling knob;
+      // 0 => stays settings.speed, see TEMPO_SPEED_COUPLING above).
       if (isPlaying) {
         const tempoMultiplier = smoothedBPMRef.current / 120; // Normalized to 120 BPM baseline
-        dynamicSpeed = settings.speed * tempoMultiplier;
+        dynamicSpeed = settings.speed * (1 + (tempoMultiplier - 1) * TEMPO_SPEED_COUPLING);
       }
       
       // Performance optimization based on FPS
