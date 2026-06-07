@@ -1511,14 +1511,11 @@ const App: React.FC = () => {
   // direct-to-OS on mainAudioRef as before.
   const anchorAudioRef = useRef<HTMLAudioElement | null>(null);
   const silentWavUrlRef = useRef<string | null>(null);
-  // Bridge state: the anchor runs ONLY around a track transition (it covers the
-  // music element's brief load gap on auto-advance) instead of continuously —
-  // otherwise its second audio stream makes Chrome duck the music the whole time
-  // (audible volume drop). bridgeActiveRef = anchor currently bridging;
-  // anchorPrimedRef = anchor has been unlocked by a user-gesture play (required
-  // before we can start it gesture-lessly at the 98% mark in the background).
+  // Bridge state: the anchor plays continuously but is only UNMUTED around a track
+  // transition (to cover the music element's brief load gap on auto-advance);
+  // muted the rest of the time so its second audio stream doesn't make Chrome duck
+  // the music. bridgeActiveRef = anchor currently unmuted/bridging.
   const bridgeActiveRef = useRef(false);
-  const anchorPrimedRef = useRef(false);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   const stateRef = useRef({
@@ -4022,19 +4019,22 @@ const App: React.FC = () => {
       const remaining = dur - el.currentTime;
       const frac = el.currentTime / dur;
 
-      // SILENT-ANCHOR BRIDGE. Run the anchor only AROUND the transition so it
-      // isn't ducking the music during steady playback (a continuously-playing
-      // second audio source makes Chrome quietly lower the music volume). Start
-      // it near the end — by fraction (98%) or, for short tracks where 98% would
-      // land after the swap, by a time floor that guarantees it's up before the
-      // auto-advance gap — and stop it once the next track passes 2%.
-      if (SILENT_ANCHOR_ENABLED && anchorPrimedRef.current) {
-        if (!bridgeActiveRef.current &&
+      // SILENT-ANCHOR BRIDGE. The anchor plays continuously but stays MUTED during
+      // steady playback (no ducking). We UNMUTE it only AROUND the transition so
+      // it's audible-to-Chrome and holds the media session across the music
+      // element's load gap. Unmute near the end — by fraction (98%) or, for short
+      // tracks where 98% lands after the swap, by a time floor that guarantees it's
+      // up before the gap — and re-mute once the next track passes 2%.
+      const anchor = anchorAudioRef.current;
+      if (SILENT_ANCHOR_ENABLED && anchor && !anchor.paused) {
+        if (anchor.muted &&
             (frac >= BRIDGE_START_FRACTION || remaining <= AUTO_ADVANCE_LOOKAHEAD_S + 1)) {
+          anchor.muted = false;            // enter bridge: become audible
           bridgeActiveRef.current = true;
-          startSilentAnchor();
-        } else if (bridgeActiveRef.current && frac >= BRIDGE_STOP_FRACTION && frac < BRIDGE_START_FRACTION) {
-          stopSilentAnchor(); // also clears bridgeActiveRef
+        } else if (!anchor.muted && bridgeActiveRef.current &&
+                   frac >= BRIDGE_STOP_FRACTION && frac < BRIDGE_START_FRACTION) {
+          anchor.muted = true;             // next track steady: back to inaudible
+          bridgeActiveRef.current = false;
         }
       }
 
@@ -4108,12 +4108,12 @@ const App: React.FC = () => {
     pausedAtRef.current = 0;
     // Re-arm the pre-end auto-advance for this new track.
     autoAdvanceTriggeredRef.current = false;
-    // Prime (unlock) the silent media-session anchor on this play. When playTrack
-    // is called from a user gesture (song click, manual next, lock-screen play)
-    // this first play→pause unlocks it so the bridge can start it gesture-lessly
-    // near each track's end. The anchor does NOT run continuously — see the
-    // bridge logic in setupAudioElement's timeupdate handler.
-    primeSilentAnchor();
+    // Start the silent media-session anchor (continuous, muted). On a user-gesture
+    // play this first start is permitted; on a gesture-less auto-advance fallback
+    // it's already running so this is a no-op. It stays muted during steady
+    // playback and is unmuted only for the bridge window (see the timeupdate
+    // handler in setupAudioElement).
+    startSilentAnchor();
     setIsAnalyzing(true);
 
     const song = tracks[index];
@@ -4404,36 +4404,32 @@ const App: React.FC = () => {
     }
     return anchorAudioRef.current;
   };
-  // Bridge window: the anchor runs from BRIDGE_START_FRACTION of the current
-  // track through BRIDGE_STOP_FRACTION of the next one — just long enough to
-  // cover the load gap on auto-advance — then stops so it doesn't duck the music
-  // during steady playback.
+  // Bridge window — the fractions of the track over which the anchor is UNMUTED
+  // (audible to Chrome, so it holds the media session across the auto-advance
+  // load gap). Outside this window the anchor stays muted so it doesn't duck the
+  // music.
   const BRIDGE_START_FRACTION = 0.98;
   const BRIDGE_STOP_FRACTION = 0.02;
 
-  // Prime (unlock) the anchor with a user-gesture play→pause so it can later be
-  // started gesture-lessly in the background at the 98% mark. Once an element has
-  // played, Chrome allows subsequent gesture-less play() on it (while the page
-  // has active media). Near-instant play→pause keeps it inaudible. Call only from
-  // a user gesture.
-  const primeSilentAnchor = () => {
-    const a = ensureSilentAnchor();
-    if (!a || anchorPrimedRef.current) return;
-    a.play().then(() => {
-      anchorPrimedRef.current = true;
-      if (!bridgeActiveRef.current) { try { a.pause(); a.currentTime = 0; } catch {} }
-    }).catch(() => {});
-  };
-  // Start/stop the (already-primed) anchor for a bridge. Starting works
-  // gesture-lessly once primed and while the page has active media playback.
+  // KEY DESIGN: the anchor plays CONTINUOUSLY for the whole session (started once
+  // from a user gesture — this is what reliably held the lock-screen card). What
+  // we toggle is its `.muted`, NOT play/pause:
+  //   - muted during steady playback  → Chrome doesn't duck the music (full vol)
+  //   - unmuted for the bridge window  → audible-to-Chrome, holds the session
+  //     across the music element's brief src-swap gap
+  // Toggling .muted needs no user gesture and never interrupts playback, which is
+  // why this works where pausing+restarting the anchor in the background did not
+  // (the background restart was autoplay-blocked → card dropped at the transition).
   const startSilentAnchor = () => {
     const a = ensureSilentAnchor();
-    if (a && a.paused) a.play().catch(() => {});
+    if (!a) return;
+    a.muted = true;          // steady-state: inaudible → no ducking
+    if (a.paused) a.play().catch(() => {});
   };
   const stopSilentAnchor = () => {
     bridgeActiveRef.current = false;
     const a = anchorAudioRef.current;
-    if (a && !a.paused) { try { a.pause(); } catch {} }
+    if (a) { try { a.pause(); a.muted = true; } catch {} }
   };
 
   // Safety net: whenever playback genuinely stops (user pause, playback error,
@@ -4491,10 +4487,10 @@ const App: React.FC = () => {
         } catch {}
       }
     } else {
-      // Prime/unlock the silent anchor within this play gesture (covers resume
-      // from a user pause and lock-screen / headphone play). The bridge logic
-      // starts it near each transition; it doesn't run continuously.
-      primeSilentAnchor();
+      // Start the silent anchor (continuous, muted) within this play gesture
+      // (covers resume from a user pause and lock-screen / headphone play). The
+      // bridge logic unmutes it around each transition.
+      startSilentAnchor();
       if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
         await audioCtxRef.current.resume();
       }
@@ -5270,7 +5266,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.0</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
