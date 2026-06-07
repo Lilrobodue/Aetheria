@@ -78,16 +78,46 @@ const MOBILE_MUSIC_DUCK_COMPENSATION = 1.6;
 const ANCHOR_TONE_HZ = 108;          // unused while amplitude is 0 (kept for reference)
 const ANCHOR_TONE_AMPLITUDE = 0;     // 0 = silent anchor. >0 would put a tone back on the element (don't — it cuts).
 
-// Continuous sub-bass "vibratory" drone, generated as a Web Audio OSCILLATOR so
-// it is perfectly gapless (no <audio>-loop seam) and — being Web Audio, not a
-// second media element — adds NO extra ducking. 54 Hz is A1, three octaves below
-// the 432 Hz base (432→216→108→54), so it sits under the music as a felt-not-heard
-// foundation that
-// harmonizes with the frequency-layer system; at sub-bass there's almost no
-// musical content to beat against, so it never "cuts in and out". Mostly inaudible
-// on phone speakers, felt on headphones/subs. Tunable; set LEVEL 0 to disable.
-const SUB_BASS_DRONE_HZ = 54;
-const SUB_BASS_DRONE_LEVEL = 0.10;   // peak gain at full volume (felt, subtle)
+// Continuous sub-bass "vibratory" drone, generated as Web Audio OSCILLATORS so it
+// is perfectly gapless (no <audio>-loop seam) and — being Web Audio, not a second
+// media element — adds NO extra ducking.
+//
+// HARMONICALLY LOCKED (v12.5): instead of a fixed pitch (the old 54 Hz, which beat
+// against drone-like songs), the drone is octave-derived from the ACTIVE frequency,
+// so it is always the same "note" as the solfeggio layer — no arbitrary pitch, no
+// beating. Two octave-locked layers:
+//   • CARRIER — active freq halved into the FELT sub-bass band (27–55 Hz). This is
+//     what the body actually feels through speakers/subs.
+//   • MODULATION — active freq halved into the THETA-ALPHA band (5–10 Hz). A raw
+//     ~8 Hz sine is inaudible/unreproducible on ANY driver, so we don't play it
+//     directly; we modulate the carrier's AMPLITUDE at this rate. The theta-alpha
+//     rhythm is then FELT as a slow throb riding the carrier (the isochronic /
+//     monaural-beat mechanism — the guide's 5–12 Hz target, made felt).
+// Both glide smoothly on track change. Set LEVEL 0 to disable; MOD_DEPTH 0 = steady
+// carrier only (no pulse). Mostly inaudible on phone speakers, felt on headphones/subs.
+const SUB_BASS_DRONE_LEVEL = 0.10;   // master peak gain at full volume (felt, subtle)
+const SUB_BASS_CARRIER_MIN_HZ = 27;  // A0 — lowest still-felt sub-bass
+const SUB_BASS_CARRIER_MAX_HZ = 55;  // ~A1 — top of the felt "foundation" band
+const SUB_BASS_MOD_DEPTH = 0.3;      // 0 = steady carrier, 1 = full gate. 0.3 = subtle felt pulse
+const SUB_BASS_MOD_MIN_HZ = 5;       // theta-alpha capture floor (guide range 5–12)
+const SUB_BASS_MOD_MAX_HZ = 10;      // theta-alpha crossover ceiling (ambient default)
+const SUB_BASS_GLIDE_S = 8;          // smooth pitch glide on track change (guide's transitionSubBass)
+
+// Octave-divide `freq` down into [min,max] by repeated halving — the guide's
+// sub-harmonic algorithm. Result is always the same note class as the source (pure
+// 2:1 octaves), so it stays harmonically locked. `clampUp` bumps one octave back up
+// if it undershoots the floor (required for the carrier, which MUST stay felt).
+const octaveInto = (freq: number, min: number, max: number, clampUp = false): number => {
+  if (!(freq > 0)) return min;
+  let f = freq;
+  while (f > max) f /= 2;
+  if (clampUp) while (f < min) f *= 2;
+  return f;
+};
+const feltCarrierHz = (freq: number): number =>
+  octaveInto(freq, SUB_BASS_CARRIER_MIN_HZ, SUB_BASS_CARRIER_MAX_HZ, true);
+const thetaAlphaModHz = (freq: number): number =>
+  octaveInto(freq, SUB_BASS_MOD_MIN_HZ, SUB_BASS_MOD_MAX_HZ, false);
 
 // CLOSED EXPERIMENT — a MediaStream-fed <audio> element (Web Audio →
 // MediaStreamDestination → element) was tested as a single-element media-session
@@ -1518,7 +1548,7 @@ const App: React.FC = () => {
   // purpose with zero churn.
   const silentKeepAliveRef = useRef<{ osc: OscillatorNode; gain: GainNode } | null>(null);
   // Continuous sub-bass vibratory drone (Web Audio oscillator → destination).
-  const subBassDroneRef = useRef<{ osc: OscillatorNode; gain: GainNode } | null>(null);
+  const subBassDroneRef = useRef<{ osc: OscillatorNode; gain: GainNode; amGain: GainNode; lfo: OscillatorNode; lfoGain: GainNode } | null>(null);
   const blobUrlsRef = useRef<{ [key: string]: string }>({});
 
   const solfeggioOscRef = useRef<OscillatorNode | null>(null);
@@ -1688,7 +1718,11 @@ const App: React.FC = () => {
       if (subBassDroneRef.current) {
         try {
           subBassDroneRef.current.osc.stop();
+          subBassDroneRef.current.lfo.stop();
           subBassDroneRef.current.osc.disconnect();
+          subBassDroneRef.current.amGain.disconnect();
+          subBassDroneRef.current.lfo.disconnect();
+          subBassDroneRef.current.lfoGain.disconnect();
           subBassDroneRef.current.gain.disconnect();
         } catch {
           // Already stopped/disconnected — safe to ignore.
@@ -2256,15 +2290,42 @@ const App: React.FC = () => {
       // is controlled by the gain, faded in/out with playback below.
       if (audioCtxRef.current && SUB_BASS_DRONE_LEVEL > 0 && !subBassDroneRef.current) {
         const ctx = audioCtxRef.current;
+        // Source of truth = the SAME frequency the solfeggio layer uses, so the
+        // drone is octave-locked to it (no beating). Updated on change below.
+        const baseFreq = applyLoShuPerfectMap(selectedSolfeggio);
+
+        // CARRIER — felt sub-bass, octave-locked to the active frequency.
         const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
         osc.type = 'sine';
-        osc.frequency.value = SUB_BASS_DRONE_HZ;
-        gain.gain.value = 0;                 // ramped up just below
-        osc.connect(gain);
+        osc.frequency.value = feltCarrierHz(baseFreq);
+
+        // AM stage — the carrier's amplitude swings around a midpoint at the
+        // theta-alpha rate. Midpoint = 1 - depth/2, swing = ±depth/2, so it ranges
+        // [1-depth, 1] — it SWELLS, never reaches zero. No gating, no "cutting".
+        const amGain = ctx.createGain();
+        amGain.gain.value = 1 - SUB_BASS_MOD_DEPTH / 2;
+
+        // LFO — the theta-alpha modulator. Octave-locked into 5–10 Hz; felt as a
+        // slow throb on the carrier, never heard as a pitch (the guide's target,
+        // delivered the only way a sub-perceptual rate can be: as an envelope).
+        const lfo = ctx.createOscillator();
+        lfo.type = 'sine';
+        lfo.frequency.value = thetaAlphaModHz(baseFreq);
+        const lfoGain = ctx.createGain();
+        lfoGain.gain.value = SUB_BASS_MOD_DEPTH / 2;   // ± swing depth
+        lfo.connect(lfoGain);
+        lfoGain.connect(amGain.gain);                  // a-rate amplitude modulation
+
+        // MASTER gain — faded with play/pause + volume (unchanged contract).
+        const gain = ctx.createGain();
+        gain.gain.value = 0;                           // ramped up just below
+
+        osc.connect(amGain);
+        amGain.connect(gain);
         gain.connect(ctx.destination);
         osc.start();
-        subBassDroneRef.current = { osc, gain };
+        lfo.start();
+        subBassDroneRef.current = { osc, gain, amGain, lfo, lfoGain };
       }
     } else {
       wakeLockManager.releaseWakeLock();
@@ -2280,6 +2341,25 @@ const App: React.FC = () => {
       subBassDroneRef.current.gain.gain.setTargetAtTime(target, audioCtxRef.current.currentTime, 0.25);
     }
   }, [isPlaying]);
+
+  // Re-lock the sub-bass carrier + theta-alpha modulation to the active frequency
+  // whenever it changes (track advance, frequency pick). Both GLIDE smoothly — a
+  // hard jump, even at sub-bass, is a perceptible lurch (the guide's transitionSubBass).
+  useEffect(() => {
+    const node = subBassDroneRef.current;
+    const ctx = audioCtxRef.current;
+    if (!node || !ctx) return;
+    const baseFreq = applyLoShuPerfectMap(selectedSolfeggio);
+    const carrier = feltCarrierHz(baseFreq);
+    const mod = thetaAlphaModHz(baseFreq);
+    const t = ctx.currentTime;
+    // Anchor at the current value, then exponential-ramp (perceptually smooth pitch
+    // glide; both targets are > 0 so exponential is safe).
+    node.osc.frequency.setValueAtTime(node.osc.frequency.value, t);
+    node.osc.frequency.exponentialRampToValueAtTime(carrier, t + SUB_BASS_GLIDE_S);
+    node.lfo.frequency.setValueAtTime(node.lfo.frequency.value, t);
+    node.lfo.frequency.exponentialRampToValueAtTime(mod, t + SUB_BASS_GLIDE_S);
+  }, [selectedSolfeggio]);
 
   // Background-playback watchdog.
   //
@@ -5329,7 +5409,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.4</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.5</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
