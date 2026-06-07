@@ -50,6 +50,47 @@ import {
 } from './utils/phiIntegration';
 
 // --- Helpers ---
+
+// True on phones/tablets, where the lock-screen media card needs the silent
+// audio anchor to survive background auto-advance. Desktop skips the anchor
+// entirely (no lock-screen problem, and the anchor would only duck the music).
+const IS_MOBILE_DEVICE = (() => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/Android|iPhone|iPad|iPod|Mobile|Silk|Kindle/i.test(ua)) return true;
+  if (/Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1) return true; // iPadOS
+  return false;
+})();
+
+// On mobile the continuously-playing silent anchor (required to hold the media
+// card across the auto-advance load gap) is a second active audio source, which
+// makes Chrome DUCK the music — audibly lowering it. We can't avoid the anchor
+// (the card needs it) so we compensate by boosting the music element's volume on
+// mobile to offset the duck. Approximate and tunable; raise if still too quiet,
+// lower if too loud. Desktop has no anchor and no duck, so it uses 1.0.
+const MOBILE_MUSIC_DUCK_COMPENSATION = 1.6;
+
+// The media-session anchor element plays a soft continuous DRONE instead of pure
+// silence — so the thing keeping the lock-screen card alive also contributes a
+// gentle harmonic pad under the music ("transform it to help us"). 108 Hz is A2,
+// exactly two octaves below the 432 Hz tuning base, so it sits consonantly under
+// the retuned music. Kept quiet via ANCHOR_TONE_AMPLITUDE. Set the amplitude to 0
+// to fall back to a truly silent anchor. (It still holds the card either way —
+// volume stays 1 on the element; softness comes from the sample amplitude.)
+const ANCHOR_TONE_HZ = 108;
+const ANCHOR_TONE_AMPLITUDE = 0.06; // 0..1 fraction of full scale (~ -24 dB)
+
+// === B PROTOTYPE (experimental, mobile) ===
+// Tests whether a MediaStream-fed <audio> element (Web Audio → MediaStream-
+// Destination → element) earns and HOLDS the Android-Chrome lock-screen card.
+// When true, the drone/silent anchor is turned OFF, and a continuous soft tone is
+// routed through a MediaStream into a dedicated element. If the card then SURVIVES
+// a background auto-transition with only that element holding it (the bare music
+// element is known to drop it at the load gap), the single-element rebuild
+// (music+layers through one stream element → card + zero ducking + gapless) is
+// viable. Flip to false to restore the v12.2 drone anchor.
+const B_PROTOTYPE_ENABLED = true;
+
 const formatDuration = (seconds: number) => {
   if (!seconds || isNaN(seconds)) return "00:00";
   const h = Math.floor(seconds / 3600);
@@ -1511,11 +1552,9 @@ const App: React.FC = () => {
   // direct-to-OS on mainAudioRef as before.
   const anchorAudioRef = useRef<HTMLAudioElement | null>(null);
   const silentWavUrlRef = useRef<string | null>(null);
-  // Bridge state: the anchor plays continuously but is only UNMUTED around a track
-  // transition (to cover the music element's brief load gap on auto-advance);
-  // muted the rest of the time so its second audio stream doesn't make Chrome duck
-  // the music. bridgeActiveRef = anchor currently unmuted/bridging.
-  const bridgeActiveRef = useRef(false);
+  // B prototype: MediaStream-fed element + its Web Audio source nodes.
+  const bStreamElRef = useRef<HTMLAudioElement | null>(null);
+  const bStreamNodesRef = useRef<{ osc: OscillatorNode; gain: GainNode; dest: MediaStreamAudioDestinationNode } | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   const stateRef = useRef({
@@ -1660,6 +1699,16 @@ const App: React.FC = () => {
         anchorAudioRef.current.pause();
         anchorAudioRef.current.src = '';
         anchorAudioRef.current = null;
+      }
+      // Clean up the B-prototype MediaStream element + nodes.
+      if (bStreamElRef.current) {
+        try { bStreamElRef.current.pause(); (bStreamElRef.current as any).srcObject = null; } catch {}
+        bStreamElRef.current = null;
+      }
+      if (bStreamNodesRef.current) {
+        try { bStreamNodesRef.current.osc.stop(); } catch {}
+        try { bStreamNodesRef.current.osc.disconnect(); bStreamNodesRef.current.gain.disconnect(); } catch {}
+        bStreamNodesRef.current = null;
       }
 
       // Clean up media source
@@ -2018,7 +2067,10 @@ const App: React.FC = () => {
     const vols = enablePhiMode
       ? calculatePhiVolumeRatios(volume)
       : { music: volume };
-    el.volume = Math.max(0, Math.min(1, vols.music * 0.18));
+    // On mobile, boost to offset Chrome's ducking caused by the silent anchor
+    // (see MOBILE_MUSIC_DUCK_COMPENSATION). Clamp keeps it safe at the top.
+    const duckComp = IS_MOBILE_DEVICE ? MOBILE_MUSIC_DUCK_COMPENSATION : 1;
+    el.volume = Math.max(0, Math.min(1, vols.music * 0.18 * duckComp));
   }, [enablePhiMode, volume]);
 
   useEffect(() => {
@@ -4013,35 +4065,13 @@ const App: React.FC = () => {
     // keeps firing on a locked screen because this element owns the media session.
     el.addEventListener('timeupdate', () => {
       if (el !== mainAudioRef.current) return;
-      if (el.paused) return;
+      if (el.paused || autoAdvanceTriggeredRef.current) return;
       const dur = el.duration;
       if (!Number.isFinite(dur) || dur <= 0) return;
-      const remaining = dur - el.currentTime;
-      const frac = el.currentTime / dur;
-
-      // SILENT-ANCHOR BRIDGE. The anchor plays continuously but stays MUTED during
-      // steady playback (no ducking). We UNMUTE it only AROUND the transition so
-      // it's audible-to-Chrome and holds the media session across the music
-      // element's load gap. Unmute near the end — by fraction (98%) or, for short
-      // tracks where 98% lands after the swap, by a time floor that guarantees it's
-      // up before the gap — and re-mute once the next track passes 2%.
-      const anchor = anchorAudioRef.current;
-      if (SILENT_ANCHOR_ENABLED && anchor && !anchor.paused) {
-        if (anchor.muted &&
-            (frac >= BRIDGE_START_FRACTION || remaining <= AUTO_ADVANCE_LOOKAHEAD_S + 1)) {
-          anchor.muted = false;            // enter bridge: become audible
-          bridgeActiveRef.current = true;
-        } else if (!anchor.muted && bridgeActiveRef.current &&
-                   frac >= BRIDGE_STOP_FRACTION && frac < BRIDGE_START_FRACTION) {
-          anchor.muted = true;             // next track steady: back to inaudible
-          bridgeActiveRef.current = false;
-        }
-      }
-
       // Auto-advance: clean single-element swap ~AUTO_ADVANCE_LOOKAHEAD_S before
-      // the end (anchor is already bridging by now).
-      if (autoAdvanceTriggeredRef.current) return;
-      if (remaining <= AUTO_ADVANCE_LOOKAHEAD_S) {
+      // the end. The continuously-playing silent anchor (mobile) bridges the load
+      // gap so the lock-screen card survives.
+      if (dur - el.currentTime <= AUTO_ADVANCE_LOOKAHEAD_S) {
         autoAdvanceTriggeredRef.current = true;
         handleAutoAdvanceRef.current();
       }
@@ -4114,6 +4144,7 @@ const App: React.FC = () => {
     // playback and is unmuted only for the bridge window (see the timeupdate
     // handler in setupAudioElement).
     startSilentAnchor();
+    startBPrototype(); // no-op unless B_PROTOTYPE_ENABLED
     setIsAnalyzing(true);
 
     const song = tracks[index];
@@ -4346,26 +4377,30 @@ const App: React.FC = () => {
   }, [playNext]);
 
   // The silent media-session anchor is only needed on MOBILE, where the screen
-  // locks and the OS drops the media card on gesture-less auto-advance. On
-  // DESKTOP it's pure downside: a second concurrently-playing audio source
-  // triggers Chrome's audio-focus ducking, which quietly lowers the music
-  // volume — and there's no lock-screen problem to solve there. So enable it
-  // only on phones/tablets (UA tokens, plus iPadOS 13+ which masquerades as a
-  // desktop Mac but is touch-primary). Flip the whole thing off by forcing false.
-  const SILENT_ANCHOR_ENABLED = (() => {
-    if (typeof navigator === 'undefined') return false;
-    const ua = navigator.userAgent || '';
-    if (/Android|iPhone|iPad|iPod|Mobile|Silk|Kindle/i.test(ua)) return true;
-    if (/Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1) return true; // iPadOS
-    return false;
-  })();
+  // locks and the OS drops the media card on gesture-less auto-advance. Desktop
+  // skips it (no lock-screen problem, and it would only duck the music). The
+  // anchor plays CONTINUOUSLY and UNMUTED — the only configuration that reliably
+  // holds the card across the load gap on Android Chrome (a muted or paused
+  // anchor gets deprioritised and the card drops at the transition). Its ducking
+  // of the music is offset on mobile by MOBILE_MUSIC_DUCK_COMPENSATION.
+  const SILENT_ANCHOR_ENABLED = IS_MOBILE_DEVICE && !B_PROTOTYPE_ENABLED;
 
   // Build a tiny all-zero (truly silent) WAV as a data URL — generated in-code so
   // it works offline and ships no asset. 1 s @ 8 kHz 16-bit mono ≈ 16 KB.
-  const buildSilentWavDataUrl = (): string => {
-    const sampleRate = 8000, seconds = 1, numChannels = 1, bitsPerSample = 16;
+  const buildAnchorWavDataUrl = (): string => {
+    // A seamless-looping soft sine drone (or pure silence when amplitude is 0).
+    // Sample rate is chosen as ANCHOR_TONE_HZ × an integer samples-per-cycle, and
+    // the length is an integer number of cycles, so the loop seam closes at phase
+    // zero with no click. ~6 s long to clear Chrome's "≥5 s = real media" focus
+    // threshold (media under 5 s may not get a lock-screen notification).
+    const samplesPerCycle = 80;
+    const sampleRate = Math.round(ANCHOR_TONE_HZ * samplesPerCycle);
+    const seconds = 6;
+    const cycles = Math.max(1, Math.round(ANCHOR_TONE_HZ * seconds));
+    const numChannels = 1, bitsPerSample = 16;
     const blockAlign = numChannels * (bitsPerSample / 8);
-    const dataSize = seconds * sampleRate * blockAlign;
+    const numSamples = cycles * samplesPerCycle;       // exact integer cycles
+    const dataSize = numSamples * blockAlign;
     const buffer = new ArrayBuffer(44 + dataSize);
     const view = new DataView(buffer);
     const writeStr = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
@@ -4382,20 +4417,26 @@ const App: React.FC = () => {
     view.setUint16(34, bitsPerSample, true);
     writeStr(36, 'data');
     view.setUint32(40, dataSize, true);
-    // PCM samples remain zero → perfect silence.
+    const amp = Math.max(0, Math.min(1, ANCHOR_TONE_AMPLITUDE)) * 32767;
+    for (let i = 0; i < numSamples; i++) {
+      // One cycle == samplesPerCycle samples → phase wraps exactly at the seam.
+      const sample = amp === 0 ? 0 : Math.round(amp * Math.sin((2 * Math.PI * i) / samplesPerCycle));
+      view.setInt16(44 + i * blockAlign, sample, true);
+    }
     let binary = '';
     const bytes = new Uint8Array(buffer);
     for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
     return 'data:audio/wav;base64,' + btoa(binary);
   };
 
-  // Create the anchor element lazily. Silent content at full volume is inaudible
-  // yet still counts as active media for the OS (a muted / zero-volume element
-  // can be ignored for media-session purposes, so we keep volume at 1).
+  // Create the anchor element lazily. It plays a soft harmonic drone (or silence)
+  // continuously to hold the media session; volume stays 1 on the element (a
+  // muted / zero-volume element can be ignored for media-session purposes) — the
+  // drone's softness comes from its low sample amplitude, not the element volume.
   const ensureSilentAnchor = (): HTMLAudioElement | null => {
     if (!SILENT_ANCHOR_ENABLED) return null;
     if (!anchorAudioRef.current) {
-      if (!silentWavUrlRef.current) silentWavUrlRef.current = buildSilentWavDataUrl();
+      if (!silentWavUrlRef.current) silentWavUrlRef.current = buildAnchorWavDataUrl();
       const a = new Audio(silentWavUrlRef.current);
       a.loop = true;
       a.preload = 'auto';
@@ -4404,32 +4445,57 @@ const App: React.FC = () => {
     }
     return anchorAudioRef.current;
   };
-  // Bridge window — the fractions of the track over which the anchor is UNMUTED
-  // (audible to Chrome, so it holds the media session across the auto-advance
-  // load gap). Outside this window the anchor stays muted so it doesn't duck the
-  // music.
-  const BRIDGE_START_FRACTION = 0.98;
-  const BRIDGE_STOP_FRACTION = 0.02;
-
-  // KEY DESIGN: the anchor plays CONTINUOUSLY for the whole session (started once
-  // from a user gesture — this is what reliably held the lock-screen card). What
-  // we toggle is its `.muted`, NOT play/pause:
-  //   - muted during steady playback  → Chrome doesn't duck the music (full vol)
-  //   - unmuted for the bridge window  → audible-to-Chrome, holds the session
-  //     across the music element's brief src-swap gap
-  // Toggling .muted needs no user gesture and never interrupts playback, which is
-  // why this works where pausing+restarting the anchor in the background did not
-  // (the background restart was autoplay-blocked → card dropped at the transition).
+  // Start the anchor: CONTINUOUS, UNMUTED playback for the whole session. This is
+  // the only configuration that reliably holds the lock-screen card across the
+  // auto-advance load gap on Android Chrome — muting or pausing it between
+  // transitions made the OS deprioritise it and the card dropped. The ducking
+  // this causes is offset by MOBILE_MUSIC_DUCK_COMPENSATION. Must be called from a
+  // user gesture the first time (autoplay); afterwards it just keeps running.
   const startSilentAnchor = () => {
     const a = ensureSilentAnchor();
     if (!a) return;
-    a.muted = true;          // steady-state: inaudible → no ducking
     if (a.paused) a.play().catch(() => {});
   };
   const stopSilentAnchor = () => {
-    bridgeActiveRef.current = false;
     const a = anchorAudioRef.current;
-    if (a) { try { a.pause(); a.muted = true; } catch {} }
+    if (a && !a.paused) { try { a.pause(); } catch {} }
+  };
+
+  // B PROTOTYPE — route a continuous soft tone through a MediaStreamDestination
+  // into a dedicated <audio> element, to test whether such an element holds the
+  // lock-screen card. Called from a user gesture (autoplay). Soft but audible so
+  // you can confirm the stream is live; it WILL duck the music here (two elements)
+  // — that's fine, this only tests card persistence, not the final no-duck layout.
+  const startBPrototype = () => {
+    if (!B_PROTOTYPE_ENABLED || !IS_MOBILE_DEVICE) return;
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    if (bStreamElRef.current) {
+      if (bStreamElRef.current.paused) bStreamElRef.current.play().catch(() => {});
+      return;
+    }
+    try {
+      const dest = ctx.createMediaStreamDestination();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = ANCHOR_TONE_HZ;
+      gain.gain.value = 0.04;              // soft confirmation tone
+      osc.connect(gain); gain.connect(dest);
+      osc.start();
+      const el = new Audio();
+      (el as any).srcObject = dest.stream;
+      el.autoplay = true;
+      el.play().catch((e: unknown) => console.warn('[Bproto] stream el play() failed', e));
+      bStreamElRef.current = el;
+      bStreamNodesRef.current = { osc, gain, dest };
+      console.log('[Bproto] MediaStream anchor element started');
+    } catch (e) {
+      console.warn('[Bproto] setup failed', e);
+    }
+  };
+  const stopBPrototype = () => {
+    const el = bStreamElRef.current;
+    if (el) { try { el.pause(); (el as any).srcObject = null; } catch {} }
   };
 
   // Safety net: whenever playback genuinely stops (user pause, playback error,
@@ -4439,7 +4505,7 @@ const App: React.FC = () => {
   // isPlaying stays true across a background auto-advance, so this never fires
   // mid-playlist.
   useEffect(() => {
-    if (!isPlaying) stopSilentAnchor();
+    if (!isPlaying) { stopSilentAnchor(); stopBPrototype(); }
   }, [isPlaying]);
 
   const handlePlayPause = async () => {
@@ -4460,6 +4526,7 @@ const App: React.FC = () => {
       // Stop the silent anchor too — a deliberate user pause should release the
       // media session, not keep it pinned alive by the anchor.
       stopSilentAnchor();
+      stopBPrototype();
       setIsPlaying(false);
       // Pressing the main pause button stops everything — including any
       // tone-only session started by clicking a frequency picker.
@@ -4491,6 +4558,7 @@ const App: React.FC = () => {
       // (covers resume from a user pause and lock-screen / headphone play). The
       // bridge logic unmutes it around each transition.
       startSilentAnchor();
+      startBPrototype(); // no-op unless B_PROTOTYPE_ENABLED
       if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
         await audioCtxRef.current.resume();
       }
@@ -5266,7 +5334,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.2-Bproto</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
