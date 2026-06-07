@@ -2141,34 +2141,55 @@ const App: React.FC = () => {
     }
   }, [volume, enablePhiMode, applyMusicElementVolume, isPlaying]);
 
+  // Adaptive binaural: move the brain-wave band with the music's actual energy.
+  //
+  // We CANNOT read the song from the live analyser — the music plays direct-to-OS
+  // through the <audio> element (deliberately not routed through Web Audio, so the
+  // lock-screen card survives), so the analyser only ever sees the near-silent
+  // synth layers and the old logic was pinned to Delta forever. Instead we read the
+  // PRE-SCANNED per-track band envelope (the same data the visualizer uses) at the
+  // live playback position — real per-song AND in-song energy, no audio-graph tap.
   useEffect(() => {
-    if (!isAdaptiveBinaural || !isPlaying || !analyserNode) return;
+    if (!isAdaptiveBinaural || !isPlaying) return;
+    const env = currentSongIndex >= 0 ? playlist[currentSongIndex]?.bandEnvelope : null;
+    if (!env) return;   // scan failed / no envelope → leave the manual band untouched
 
     const interval = setInterval(() => {
-        const bufferLength = analyserNode.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        analyserNode.getByteFrequencyData(dataArray);
-        
-        let sum = 0;
-        for(let i=0; i<bufferLength; i++) {
-            sum += dataArray[i] * dataArray[i];
-        }
-        const rms = Math.sqrt(sum / bufferLength) / 255;
-        
-        let targetPreset = BINAURAL_PRESETS[2]; 
-        if (rms < 0.1) targetPreset = BINAURAL_PRESETS[0];
-        else if (rms < 0.25) targetPreset = BINAURAL_PRESETS[1];
-        else if (rms > 0.6) targetPreset = BINAURAL_PRESETS[4]; 
-        else if (rms > 0.4) targetPreset = BINAURAL_PRESETS[3]; 
-        
-        if (targetPreset.name !== selectedBinaural.name) {
-            setSelectedBinaural(targetPreset);
-        }
+      const el = mainAudioRef.current;
+      if (!el) return;
+      const fps = env.fps || 20;
+      const frame = Math.floor((el.currentTime || 0) * fps);
+      // Average spectral activity over a ~1.5s window so the reading is smooth,
+      // not a single jittery frame. Each band is self-normalised, so this is a
+      // "how much is happening across the spectrum right now" intensity (0..1).
+      const win = Math.max(1, Math.round(fps * 1.5));
+      let sum = 0, count = 0;
+      for (let f = Math.max(0, frame - win); f <= frame; f++) {
+        const s = env.sub[f] ?? 0, b = env.bass[f] ?? 0, m = env.mid[f] ?? 0, h = env.high[f] ?? 0;
+        sum += (s + b + m + h) / 4;
+        count++;
+      }
+      const intensity = count ? (sum / count) / 255 : 0;
 
-    }, 3000); 
+      // Map intensity → target band (calm → Delta … intense → Gamma).
+      let target = 0;
+      if (intensity >= 0.75) target = 4;        // Gamma
+      else if (intensity >= 0.55) target = 3;   // Beta
+      else if (intensity >= 0.35) target = 2;   // Alpha
+      else if (intensity >= 0.15) target = 1;   // Theta
+      // else Delta (0)
+
+      // Drift at most ONE band per tick toward the target — organic movement, and
+      // it never retunes the binaural oscillators by more than a step at a time.
+      const cur = BINAURAL_PRESETS.findIndex((p) => p.name === selectedBinaural.name);
+      const curIdx = cur < 0 ? 2 : cur;
+      if (curIdx !== target) {
+        setSelectedBinaural(BINAURAL_PRESETS[curIdx + Math.sign(target - curIdx)]);
+      }
+    }, 3000);
 
     return () => clearInterval(interval);
-  }, [isAdaptiveBinaural, isPlaying, analyserNode, selectedBinaural]);
+  }, [isAdaptiveBinaural, isPlaying, selectedBinaural, currentSongIndex, playlist]);
 
   // Log phi integration on mount
   useEffect(() => {
@@ -5409,7 +5430,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.5</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.6</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
