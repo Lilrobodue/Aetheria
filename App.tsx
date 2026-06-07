@@ -1501,6 +1501,16 @@ const App: React.FC = () => {
   const recordMusicSrcRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const recordMusicDetachRef = useRef<(() => void) | null>(null);
   const mainAudioRef = useRef<HTMLAudioElement | null>(null);
+  // SILENT MEDIA-SESSION ANCHOR. A persistent, looping, silent <audio> element
+  // started on the user's first play gesture and never stopped during a playback
+  // session. Because it never stops or changes source, it keeps the page's OS
+  // media session continuously "playing" — so the brief load gap when the music
+  // element swaps .src on auto-advance no longer tears the lock-screen card down
+  // (a gesture-less rebuild of the card is not permitted, which is why the card
+  // was dropping on every background auto-transition). The music keeps playing
+  // direct-to-OS on mainAudioRef as before.
+  const anchorAudioRef = useRef<HTMLAudioElement | null>(null);
+  const silentWavUrlRef = useRef<string | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   const stateRef = useRef({
@@ -1640,7 +1650,13 @@ const App: React.FC = () => {
         mainAudioRef.current.src = '';
         mainAudioRef.current = null;
       }
-      
+      // Clean up the silent media-session anchor.
+      if (anchorAudioRef.current) {
+        anchorAudioRef.current.pause();
+        anchorAudioRef.current.src = '';
+        anchorAudioRef.current = null;
+      }
+
       // Clean up media source
       if (mediaSourceRef.current) {
         mediaSourceRef.current.disconnect();
@@ -4062,6 +4078,11 @@ const App: React.FC = () => {
     pausedAtRef.current = 0;
     // Re-arm the pre-end auto-advance for this new track.
     autoAdvanceTriggeredRef.current = false;
+    // Start the silent media-session anchor. When playTrack is called from a user
+    // gesture (song click, manual next, lock-screen play) this first start is
+    // permitted; on a gesture-less auto-advance fallback the anchor is already
+    // running so this is a no-op.
+    startSilentAnchor();
     setIsAnalyzing(true);
 
     const song = tracks[index];
@@ -4293,6 +4314,75 @@ const App: React.FC = () => {
       playNextRef.current = playNext;
   }, [playNext]);
 
+  // Master toggle for the silent media-session anchor (see anchorAudioRef). Flip
+  // to false to fully disable the technique and revert to bare single-element.
+  const SILENT_ANCHOR_ENABLED = true;
+
+  // Build a tiny all-zero (truly silent) WAV as a data URL — generated in-code so
+  // it works offline and ships no asset. 1 s @ 8 kHz 16-bit mono ≈ 16 KB.
+  const buildSilentWavDataUrl = (): string => {
+    const sampleRate = 8000, seconds = 1, numChannels = 1, bitsPerSample = 16;
+    const blockAlign = numChannels * (bitsPerSample / 8);
+    const dataSize = seconds * sampleRate * blockAlign;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+    const writeStr = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);                 // PCM
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeStr(36, 'data');
+    view.setUint32(40, dataSize, true);
+    // PCM samples remain zero → perfect silence.
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return 'data:audio/wav;base64,' + btoa(binary);
+  };
+
+  // Create the anchor element lazily. Silent content at full volume is inaudible
+  // yet still counts as active media for the OS (a muted / zero-volume element
+  // can be ignored for media-session purposes, so we keep volume at 1).
+  const ensureSilentAnchor = (): HTMLAudioElement | null => {
+    if (!SILENT_ANCHOR_ENABLED) return null;
+    if (!anchorAudioRef.current) {
+      if (!silentWavUrlRef.current) silentWavUrlRef.current = buildSilentWavDataUrl();
+      const a = new Audio(silentWavUrlRef.current);
+      a.loop = true;
+      a.preload = 'auto';
+      a.volume = 1;
+      anchorAudioRef.current = a;
+    }
+    return anchorAudioRef.current;
+  };
+  // Must be called synchronously inside a user gesture the FIRST time (autoplay
+  // policy). Subsequent calls while it's already running are no-ops.
+  const startSilentAnchor = () => {
+    const a = ensureSilentAnchor();
+    if (a && a.paused) a.play().catch(() => {});
+  };
+  const stopSilentAnchor = () => {
+    const a = anchorAudioRef.current;
+    if (a && !a.paused) { try { a.pause(); } catch {} }
+  };
+
+  // Safety net: whenever playback genuinely stops (user pause, playback error,
+  // or the terminal end of a non-looping playlist → isPlaying=false), release the
+  // anchor so it can't keep the media session pinned alive with no music. We only
+  // STOP here — starting stays inside a user gesture (autoplay policy). Note
+  // isPlaying stays true across a background auto-advance, so this never fires
+  // mid-playlist.
+  useEffect(() => {
+    if (!isPlaying) stopSilentAnchor();
+  }, [isPlaying]);
+
   const handlePlayPause = async () => {
     initAudio();
     if (isPlaying) {
@@ -4308,6 +4398,9 @@ const App: React.FC = () => {
       if (mainAudioRef.current) {
         mainAudioRef.current.pause();
       }
+      // Stop the silent anchor too — a deliberate user pause should release the
+      // media session, not keep it pinned alive by the anchor.
+      stopSilentAnchor();
       setIsPlaying(false);
       // Pressing the main pause button stops everything — including any
       // tone-only session started by clicking a frequency picker.
@@ -4317,6 +4410,9 @@ const App: React.FC = () => {
         navigator.mediaSession.playbackState = 'paused';
       }
     } else {
+      // Re-arm the silent anchor within this play gesture (covers resume from a
+      // user pause and lock-screen / headphone play).
+      startSilentAnchor();
       if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
         await audioCtxRef.current.resume();
       }
@@ -5092,7 +5188,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.7</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.8</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
