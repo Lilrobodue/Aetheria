@@ -1511,6 +1511,14 @@ const App: React.FC = () => {
   // direct-to-OS on mainAudioRef as before.
   const anchorAudioRef = useRef<HTMLAudioElement | null>(null);
   const silentWavUrlRef = useRef<string | null>(null);
+  // Bridge state: the anchor runs ONLY around a track transition (it covers the
+  // music element's brief load gap on auto-advance) instead of continuously —
+  // otherwise its second audio stream makes Chrome duck the music the whole time
+  // (audible volume drop). bridgeActiveRef = anchor currently bridging;
+  // anchorPrimedRef = anchor has been unlocked by a user-gesture play (required
+  // before we can start it gesture-lessly at the 98% mark in the background).
+  const bridgeActiveRef = useRef(false);
+  const anchorPrimedRef = useRef(false);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   const stateRef = useRef({
@@ -4008,10 +4016,32 @@ const App: React.FC = () => {
     // keeps firing on a locked screen because this element owns the media session.
     el.addEventListener('timeupdate', () => {
       if (el !== mainAudioRef.current) return;
-      if (el.paused || autoAdvanceTriggeredRef.current) return;
+      if (el.paused) return;
       const dur = el.duration;
       if (!Number.isFinite(dur) || dur <= 0) return;
-      if (dur - el.currentTime <= AUTO_ADVANCE_LOOKAHEAD_S) {
+      const remaining = dur - el.currentTime;
+      const frac = el.currentTime / dur;
+
+      // SILENT-ANCHOR BRIDGE. Run the anchor only AROUND the transition so it
+      // isn't ducking the music during steady playback (a continuously-playing
+      // second audio source makes Chrome quietly lower the music volume). Start
+      // it near the end — by fraction (98%) or, for short tracks where 98% would
+      // land after the swap, by a time floor that guarantees it's up before the
+      // auto-advance gap — and stop it once the next track passes 2%.
+      if (SILENT_ANCHOR_ENABLED && anchorPrimedRef.current) {
+        if (!bridgeActiveRef.current &&
+            (frac >= BRIDGE_START_FRACTION || remaining <= AUTO_ADVANCE_LOOKAHEAD_S + 1)) {
+          bridgeActiveRef.current = true;
+          startSilentAnchor();
+        } else if (bridgeActiveRef.current && frac >= BRIDGE_STOP_FRACTION && frac < BRIDGE_START_FRACTION) {
+          stopSilentAnchor(); // also clears bridgeActiveRef
+        }
+      }
+
+      // Auto-advance: clean single-element swap ~AUTO_ADVANCE_LOOKAHEAD_S before
+      // the end (anchor is already bridging by now).
+      if (autoAdvanceTriggeredRef.current) return;
+      if (remaining <= AUTO_ADVANCE_LOOKAHEAD_S) {
         autoAdvanceTriggeredRef.current = true;
         handleAutoAdvanceRef.current();
       }
@@ -4078,11 +4108,12 @@ const App: React.FC = () => {
     pausedAtRef.current = 0;
     // Re-arm the pre-end auto-advance for this new track.
     autoAdvanceTriggeredRef.current = false;
-    // Start the silent media-session anchor. When playTrack is called from a user
-    // gesture (song click, manual next, lock-screen play) this first start is
-    // permitted; on a gesture-less auto-advance fallback the anchor is already
-    // running so this is a no-op.
-    startSilentAnchor();
+    // Prime (unlock) the silent media-session anchor on this play. When playTrack
+    // is called from a user gesture (song click, manual next, lock-screen play)
+    // this first play→pause unlocks it so the bridge can start it gesture-lessly
+    // near each track's end. The anchor does NOT run continuously — see the
+    // bridge logic in setupAudioElement's timeupdate handler.
+    primeSilentAnchor();
     setIsAnalyzing(true);
 
     const song = tracks[index];
@@ -4314,9 +4345,20 @@ const App: React.FC = () => {
       playNextRef.current = playNext;
   }, [playNext]);
 
-  // Master toggle for the silent media-session anchor (see anchorAudioRef). Flip
-  // to false to fully disable the technique and revert to bare single-element.
-  const SILENT_ANCHOR_ENABLED = true;
+  // The silent media-session anchor is only needed on MOBILE, where the screen
+  // locks and the OS drops the media card on gesture-less auto-advance. On
+  // DESKTOP it's pure downside: a second concurrently-playing audio source
+  // triggers Chrome's audio-focus ducking, which quietly lowers the music
+  // volume — and there's no lock-screen problem to solve there. So enable it
+  // only on phones/tablets (UA tokens, plus iPadOS 13+ which masquerades as a
+  // desktop Mac but is touch-primary). Flip the whole thing off by forcing false.
+  const SILENT_ANCHOR_ENABLED = (() => {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    if (/Android|iPhone|iPad|iPod|Mobile|Silk|Kindle/i.test(ua)) return true;
+    if (/Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1) return true; // iPadOS
+    return false;
+  })();
 
   // Build a tiny all-zero (truly silent) WAV as a data URL — generated in-code so
   // it works offline and ships no asset. 1 s @ 8 kHz 16-bit mono ≈ 16 KB.
@@ -4362,13 +4404,34 @@ const App: React.FC = () => {
     }
     return anchorAudioRef.current;
   };
-  // Must be called synchronously inside a user gesture the FIRST time (autoplay
-  // policy). Subsequent calls while it's already running are no-ops.
+  // Bridge window: the anchor runs from BRIDGE_START_FRACTION of the current
+  // track through BRIDGE_STOP_FRACTION of the next one — just long enough to
+  // cover the load gap on auto-advance — then stops so it doesn't duck the music
+  // during steady playback.
+  const BRIDGE_START_FRACTION = 0.98;
+  const BRIDGE_STOP_FRACTION = 0.02;
+
+  // Prime (unlock) the anchor with a user-gesture play→pause so it can later be
+  // started gesture-lessly in the background at the 98% mark. Once an element has
+  // played, Chrome allows subsequent gesture-less play() on it (while the page
+  // has active media). Near-instant play→pause keeps it inaudible. Call only from
+  // a user gesture.
+  const primeSilentAnchor = () => {
+    const a = ensureSilentAnchor();
+    if (!a || anchorPrimedRef.current) return;
+    a.play().then(() => {
+      anchorPrimedRef.current = true;
+      if (!bridgeActiveRef.current) { try { a.pause(); a.currentTime = 0; } catch {} }
+    }).catch(() => {});
+  };
+  // Start/stop the (already-primed) anchor for a bridge. Starting works
+  // gesture-lessly once primed and while the page has active media playback.
   const startSilentAnchor = () => {
     const a = ensureSilentAnchor();
     if (a && a.paused) a.play().catch(() => {});
   };
   const stopSilentAnchor = () => {
+    bridgeActiveRef.current = false;
     const a = anchorAudioRef.current;
     if (a && !a.paused) { try { a.pause(); } catch {} }
   };
@@ -4428,9 +4491,10 @@ const App: React.FC = () => {
         } catch {}
       }
     } else {
-      // Re-arm the silent anchor within this play gesture (covers resume from a
-      // user pause and lock-screen / headphone play).
-      startSilentAnchor();
+      // Prime/unlock the silent anchor within this play gesture (covers resume
+      // from a user pause and lock-screen / headphone play). The bridge logic
+      // starts it near each transition; it doesn't run continuously.
+      primeSilentAnchor();
       if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
         await audioCtxRef.current.resume();
       }
@@ -5206,7 +5270,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.9</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.0</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
