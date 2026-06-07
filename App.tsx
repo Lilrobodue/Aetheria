@@ -4408,6 +4408,24 @@ const App: React.FC = () => {
       // Update media session state
       if ('mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'paused';
+        // Re-assert the scrubber to the MUSIC element's paused position. Without
+        // this the OS falls back to the silent anchor's intrinsic position (a
+        // 1 s loop), which snaps the lock-screen scrubber to ~0 on pause until
+        // the next track corrects it. This only updates the displayed position;
+        // it never touches actual audio playback. (Matches the duration/position
+        // formula in useMediaSession.)
+        try {
+          const el = mainAudioRef.current;
+          if (el && Number.isFinite(el.duration) && el.duration > 0 &&
+              typeof navigator.mediaSession.setPositionState === 'function') {
+            const dur = el.duration / PITCH_SHIFT_FACTOR;
+            navigator.mediaSession.setPositionState({
+              duration: dur,
+              position: Math.min(el.currentTime, dur),
+              playbackRate: 1,
+            });
+          }
+        } catch {}
       }
     } else {
       // Re-arm the silent anchor within this play gesture (covers resume from a
@@ -5188,7 +5206,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.8</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v11.9</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
