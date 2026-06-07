@@ -70,15 +70,24 @@ const IS_MOBILE_DEVICE = (() => {
 // lower if too loud. Desktop has no anchor and no duck, so it uses 1.0.
 const MOBILE_MUSIC_DUCK_COMPENSATION = 1.6;
 
-// The media-session anchor element plays a soft continuous DRONE instead of pure
-// silence — so the thing keeping the lock-screen card alive also contributes a
-// gentle harmonic pad under the music ("transform it to help us"). 108 Hz is A2,
-// exactly two octaves below the 432 Hz tuning base, so it sits consonantly under
-// the retuned music. Kept quiet via ANCHOR_TONE_AMPLITUDE. Set the amplitude to 0
-// to fall back to a truly silent anchor. (It still holds the card either way —
-// volume stays 1 on the element; softness comes from the sample amplitude.)
-const ANCHOR_TONE_HZ = 108;
-const ANCHOR_TONE_AMPLITUDE = 0.06; // 0..1 fraction of full scale (~ -24 dB). Set 0 for a silent anchor.
+// The media-session anchor element is SILENT — its only job is to hold the
+// lock-screen card. We do NOT put the audible drone on it: an <audio loop> isn't
+// gapless (it drops out every loop) and a fixed audible tone beats against
+// drone-like songs — both heard as the drone "cutting in and out". The audible
+// vibration now lives on a Web Audio oscillator instead (SUB_BASS_DRONE_*).
+const ANCHOR_TONE_HZ = 108;          // unused while amplitude is 0 (kept for reference)
+const ANCHOR_TONE_AMPLITUDE = 0;     // 0 = silent anchor. >0 would put a tone back on the element (don't — it cuts).
+
+// Continuous sub-bass "vibratory" drone, generated as a Web Audio OSCILLATOR so
+// it is perfectly gapless (no <audio>-loop seam) and — being Web Audio, not a
+// second media element — adds NO extra ducking. 54 Hz is A1, three octaves below
+// the 432 Hz base (432→216→108→54), so it sits under the music as a felt-not-heard
+// foundation that
+// harmonizes with the frequency-layer system; at sub-bass there's almost no
+// musical content to beat against, so it never "cuts in and out". Mostly inaudible
+// on phone speakers, felt on headphones/subs. Tunable; set LEVEL 0 to disable.
+const SUB_BASS_DRONE_HZ = 54;
+const SUB_BASS_DRONE_LEVEL = 0.10;   // peak gain at full volume (felt, subtle)
 
 // CLOSED EXPERIMENT — a MediaStream-fed <audio> element (Web Audio →
 // MediaStreamDestination → element) was tested as a single-element media-session
@@ -1508,6 +1517,8 @@ const App: React.FC = () => {
   // over a 19-hour session. A single long-running pair serves the same
   // purpose with zero churn.
   const silentKeepAliveRef = useRef<{ osc: OscillatorNode; gain: GainNode } | null>(null);
+  // Continuous sub-bass vibratory drone (Web Audio oscillator → destination).
+  const subBassDroneRef = useRef<{ osc: OscillatorNode; gain: GainNode } | null>(null);
   const blobUrlsRef = useRef<{ [key: string]: string }>({});
 
   const solfeggioOscRef = useRef<OscillatorNode | null>(null);
@@ -1673,7 +1684,18 @@ const App: React.FC = () => {
         }
         silentKeepAliveRef.current = null;
       }
-      
+      // Disconnect the sub-bass drone oscillator too.
+      if (subBassDroneRef.current) {
+        try {
+          subBassDroneRef.current.osc.stop();
+          subBassDroneRef.current.osc.disconnect();
+          subBassDroneRef.current.gain.disconnect();
+        } catch {
+          // Already stopped/disconnected — safe to ignore.
+        }
+        subBassDroneRef.current = null;
+      }
+
       // Clean up blob URLs
       Object.values(blobUrlsRef.current).forEach((url) => {
         if (typeof url === 'string') {
@@ -2077,7 +2099,13 @@ const App: React.FC = () => {
         const safeVolume = volumes.music * 0.18 * LAYER_BALANCE_ATTEN; // Match the initial gain setting
         gainNodeRef.current.gain.setTargetAtTime(safeVolume, audioCtxRef.current.currentTime, 0.1);
     }
-  }, [volume, enablePhiMode, applyMusicElementVolume]);
+
+    // Keep the sub-bass drone tracking the master volume while playing.
+    if (subBassDroneRef.current && audioCtxRef.current) {
+        const target = isPlaying ? volume * SUB_BASS_DRONE_LEVEL : 0;
+        subBassDroneRef.current.gain.gain.setTargetAtTime(target, audioCtxRef.current.currentTime, 0.2);
+    }
+  }, [volume, enablePhiMode, applyMusicElementVolume, isPlaying]);
 
   useEffect(() => {
     if (!isAdaptiveBinaural || !isPlaying || !analyserNode) return;
@@ -2222,11 +2250,34 @@ const App: React.FC = () => {
         osc.start();
         silentKeepAliveRef.current = { osc, gain };
       }
+
+      // Lazily create the continuous sub-bass drone (same once-and-keep pattern;
+      // an oscillator can only be .start()'d once). It runs forever; its loudness
+      // is controlled by the gain, faded in/out with playback below.
+      if (audioCtxRef.current && SUB_BASS_DRONE_LEVEL > 0 && !subBassDroneRef.current) {
+        const ctx = audioCtxRef.current;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = SUB_BASS_DRONE_HZ;
+        gain.gain.value = 0;                 // ramped up just below
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        subBassDroneRef.current = { osc, gain };
+      }
     } else {
       wakeLockManager.releaseWakeLock();
-      // Leave the silent oscillator running — it's a fixed, tiny cost and
-      // recreating it would re-introduce the very leak we're avoiding
-      // (an oscillator can only be .start()'d once per the Web Audio spec).
+      // Leave the silent oscillator (and the sub-bass drone) running — fixed,
+      // tiny cost; recreating would re-introduce the leak we're avoiding (an
+      // oscillator can only be .start()'d once per the Web Audio spec).
+    }
+
+    // Fade the sub-bass drone in while playing, out while paused. A smooth ramp
+    // (setTargetAtTime) is essential — an abrupt sub-bass start/stop is a thump.
+    if (subBassDroneRef.current && audioCtxRef.current) {
+      const target = isPlaying ? volume * SUB_BASS_DRONE_LEVEL : 0;
+      subBassDroneRef.current.gain.gain.setTargetAtTime(target, audioCtxRef.current.currentTime, 0.25);
     }
   }, [isPlaying]);
 
@@ -5278,7 +5329,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.4</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
