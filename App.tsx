@@ -14,6 +14,12 @@ import ExperienceTracker from './components/ExperienceTracker';
 import OfflineIndicator from './components/OfflineIndicator';
 import LoShuMatrix from './components/LoShuMatrix';
 import AccessibleGuidebook from './components/AccessibleGuidebook';
+import ClearPlaylistButton from './components/ClearPlaylistButton';
+import {
+  restorePlaylist,
+  clearPlaylistCache,
+  debouncedSave,
+} from './utils/playlistCache';
 import {
   analyzeFractalFrequencies,
   assessFrequencySafety,
@@ -1149,7 +1155,11 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
 const App: React.FC = () => {
   const [playlist, setPlaylist] = useState<Song[]>([]);
-  const [originalPlaylist, setOriginalPlaylist] = useState<Song[]>([]); 
+  const [originalPlaylist, setOriginalPlaylist] = useState<Song[]>([]);
+  // Playlist cache (IndexedDB) — persists the library across reloads.
+  // `isRestoring` gates the auto-save effect so the act of restoring doesn't
+  // immediately re-trigger a save of what we just read back.
+  const [isRestoring, setIsRestoring] = useState(false);
   const [currentSongIndex, setCurrentSongIndex] = useState<number>(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isShuffle, setIsShuffle] = useState(false);
@@ -1616,6 +1626,50 @@ const App: React.FC = () => {
       setFilteredPlaylist(filtered);
     }
   }, [searchTerm, playlist]);
+
+  // Restore the cached playlist on mount, before any user interaction. If
+  // IndexedDB holds a saved library, repopulate the in-memory state and flash a
+  // brief "Restored N tracks" toast. Restored tracks already carry their
+  // duration, analysis and bandEnvelope, so the background analyzers skip them.
+  // Corrupt/empty cache falls through silently to the normal empty state.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cached = await restorePlaylist();
+      if (cancelled || !cached) return;
+
+      setIsRestoring(true);
+      setPlaylist(cached.playlist);
+      setOriginalPlaylist(cached.originalPlaylist);
+      setCurrentSongIndex(cached.currentSongIndex);
+      if (cached.loShuWalkMode) setLoShuWalkMode(cached.loShuWalkMode);
+      setSelectedSolfeggio(cached.selectedSolfeggio);
+
+      console.log(
+        `[Aetheria] Playlist restored: ${cached.playlist.length} tracks ` +
+          `from ${new Date(cached.savedAt).toLocaleString()}`
+      );
+
+      // Keep the auto-save gate closed briefly so the restore doesn't bounce
+      // straight back into a redundant save, then drop the toast.
+      setTimeout(() => { if (!cancelled) setIsRestoring(false); }, 2000);
+    })();
+    return () => { cancelled = true; };
+  }, []); // mount-only
+
+  // Auto-save the playlist (debounced) whenever it or the session state changes.
+  // Skipped during the initial restore window and when the library is empty —
+  // an empty playlist is cleared via clearEntirePlaylist, not by auto-save.
+  useEffect(() => {
+    if (isRestoring || playlist.length === 0) return;
+    debouncedSave(
+      playlist,
+      originalPlaylist,
+      currentSongIndex,
+      loShuWalkMode,
+      selectedSolfeggio
+    );
+  }, [playlist, originalPlaylist, currentSongIndex, loShuWalkMode, selectedSolfeggio, isRestoring]);
 
   // Precompute song.id -> playlist index once per playlist change. The library
   // list render used to call playlist.findIndex() per row (O(n²) per render);
@@ -3266,6 +3320,44 @@ const App: React.FC = () => {
       setLoShuWalkSegments(null);
       setLoShuWalkPhases(null);
   };
+
+  // Single deliberate action behind the "Clear Playlist & Cache" button: stop
+  // playback, tear down the current audio source + object URLs, wipe all
+  // in-memory playlist state, and clear the IndexedDB cache so nothing is
+  // restored on the next load.
+  const clearEntirePlaylist = useCallback(async () => {
+    // Stop playback.
+    setIsPlaying(false);
+    if (sourceNodeRef.current) {
+      try {
+        sourceNodeRef.current.stop();
+        sourceNodeRef.current.disconnect();
+      } catch {}
+      sourceNodeRef.current = null;
+    }
+
+    // Detach and revoke every cached object URL so blobs can be GC'd.
+    if (mainAudioRef.current) {
+      try { mainAudioRef.current.pause(); } catch {}
+      mainAudioRef.current.src = '';
+    }
+    Object.values(blobUrlsRef.current).forEach((url: string) => {
+      try { URL.revokeObjectURL(url); } catch {}
+    });
+    blobUrlsRef.current = {};
+
+    // Wipe in-memory playlist state.
+    setPlaylist([]);
+    setOriginalPlaylist([]);
+    setFilteredPlaylist([]);
+    setCurrentSongIndex(-1);
+    clearLoShuWalkMode();
+
+    // Wipe the on-disk cache.
+    await clearPlaylistCache();
+
+    console.log('[Aetheria] Playlist and cache cleared');
+  }, []);
 
   // Generate full library alignment ordered by frequency
   const generateFullLibraryAlignment = () => {
@@ -5350,6 +5442,13 @@ registerProcessor('wav-capture', WavCapture);
           {/* Offline Indicator */}
           <OfflineIndicator showWhenOnline={true} />
 
+          {/* Restore toast — brief confirmation that the cached library is back. */}
+          {isRestoring && playlist.length > 0 && (
+            <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-900/90 border border-emerald-500/30 text-emerald-200 text-xs px-4 py-2 rounded-full backdrop-blur shadow-lg">
+              ✓ Restored {playlist.length} tracks from cache
+            </div>
+          )}
+
           {/* Analysis Notification */}
           {analysisNotification && (
             <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[100] max-w-lg">
@@ -5430,7 +5529,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.6</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.7</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -6665,6 +6764,14 @@ registerProcessor('wav-capture', WavCapture);
                 </span>
                 <span className="text-gold-500/80">{getTotalDuration()} Total</span>
             </div>
+            {/* Clear Playlist & Cache — deliberately below the footer (in the
+                reserved bottom margin) so it needs a scroll-down-and-tap and is
+                never hit by accident. Two-tap confirm handled in the component. */}
+            {playlist.length > 0 && (
+              <div className="px-6 pb-6 pt-2 bg-black/95 shrink-0 -mt-20 mb-0 z-10">
+                <ClearPlaylistButton onClear={clearEntirePlaylist} trackCount={playlist.length} />
+              </div>
+            )}
           </aside>
 
           {showSettings && (
