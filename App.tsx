@@ -18,7 +18,8 @@ import ClearPlaylistButton from './components/ClearPlaylistButton';
 import {
   restorePlaylist,
   clearPlaylistCache,
-  debouncedSave,
+  saveBlobsNow,
+  debouncedSaveMeta,
 } from './utils/playlistCache';
 import {
   analyzeFractalFrequencies,
@@ -1657,19 +1658,43 @@ const App: React.FC = () => {
     return () => { cancelled = true; };
   }, []); // mount-only
 
-  // Auto-save the playlist (debounced) whenever it or the session state changes.
-  // Skipped during the initial restore window and when the library is empty —
-  // an empty playlist is cleared via clearEntirePlaylist, not by auto-save.
+  // The set of cached track ids, as a stable string key. Audio blobs are heavy
+  // but only need (re)writing when this set changes — i.e. on import or delete,
+  // NOT when a scan streams metadata into existing tracks. Keying the blob-save
+  // effect on this (instead of the playlist array identity) means a deep scan,
+  // which mutates metadata ~once per track, triggers ZERO audio writes.
+  const songIdSetKey = useMemo(() => {
+    const ids = new Set<string>();
+    for (const s of playlist) if (s.file) ids.add(s.id);
+    for (const s of originalPlaylist) if (s.file) ids.add(s.id);
+    return Array.from(ids).sort().join(',');
+  }, [playlist, originalPlaylist]);
+
+  // Persist BLOBS incrementally when the id set changes (add new, drop removed;
+  // existing audio is never rewritten). Runs even during analysis so a reload
+  // mid-scan still restores the full library.
   useEffect(() => {
     if (isRestoring || playlist.length === 0) return;
-    debouncedSave(
+    saveBlobsNow(playlist, originalPlaylist);
+    // playlist/originalPlaylist are read but intentionally NOT deps — songIdSetKey
+    // captures the only change that should write audio.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [songIdSetKey, isRestoring]);
+
+  // Persist METADATA + session state (light — no audio). Debounced, and
+  // suppressed while a deep scan is active so its hundreds of per-track updates
+  // don't churn the cache and compete with the (CPU-bound) scan. When the scan
+  // finishes, isScanning flips false and this fires once — the settle-save.
+  useEffect(() => {
+    if (isRestoring || playlist.length === 0 || isScanning) return;
+    debouncedSaveMeta(
       playlist,
       originalPlaylist,
       currentSongIndex,
       loShuWalkMode,
       selectedSolfeggio
     );
-  }, [playlist, originalPlaylist, currentSongIndex, loShuWalkMode, selectedSolfeggio, isRestoring]);
+  }, [playlist, originalPlaylist, currentSongIndex, loShuWalkMode, selectedSolfeggio, isRestoring, isScanning]);
 
   // Precompute song.id -> playlist index once per playlist change. The library
   // list render used to call playlist.findIndex() per row (O(n²) per render);
@@ -5529,7 +5554,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.7</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.8</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
