@@ -4723,9 +4723,14 @@ const App: React.FC = () => {
     if (!isPlaying) stopSilentAnchor();
   }, [isPlaying]);
 
-  const handlePlayPause = async () => {
+  // Explicit, single-purpose transport actions. The car head-unit / lock-screen
+  // PLAY and PAUSE buttons are wired straight to these (see useMediaSession
+  // onPlay/onPause), so a momentarily stale `isPlaying` can't make PLAY run the
+  // pause path — the bug where pausing from the head unit then pressing play
+  // never resumed (NEXT still worked, because it was never a toggle). Neither
+  // function reads `isPlaying`; each does exactly its one job.
+  const pausePlayback = () => {
     initAudio();
-    if (isPlaying) {
       // Pause the audio element. We deliberately DO NOT suspend the
       // AudioContext here. On a locked mobile screen a suspended context
       // cannot be resumed (resume() only succeeds with the page visible or a
@@ -4767,7 +4772,10 @@ const App: React.FC = () => {
           }
         } catch {}
       }
-    } else {
+  };
+
+  const resumePlayback = async () => {
+    initAudio();
       // Start the silent anchor (continuous, muted) within this play gesture
       // (covers resume from a user pause and lock-screen / headphone play). The
       // bridge logic unmutes it around each transition.
@@ -4947,7 +4955,15 @@ const App: React.FC = () => {
           }
         }
       }
-    }
+  };
+
+  // In-app play/pause button — a toggle is fine here because the app is
+  // foregrounded, so React's `isPlaying` reliably matches reality. The OS /
+  // head-unit transport controls use the explicit pausePlayback / resumePlayback
+  // above instead.
+  const handlePlayPause = () => {
+    if (isPlaying) pausePlayback();
+    else resumePlayback();
   };
 
   // Select a Solfeggio frequency from any picker. Sets the tone, applies the
@@ -5344,8 +5360,11 @@ registerProcessor('wav-capture', WavCapture);
     isPlaying,
     currentTime: currTime,
     duration: currDuration,
-    onPlay: handlePlayPause,
-    onPause: handlePlayPause,
+    // Explicit, not the toggle — a head-unit/lock-screen PLAY must always resume
+    // and PAUSE must always pause, even if React's isPlaying briefly desyncs when
+    // the head unit pauses the element itself. (Was the car resume bug.)
+    onPlay: resumePlayback,
+    onPause: pausePlayback,
     onNext: handleNext,
     onPrevious: handlePrev,
     // ±skip (car / lock-screen seek buttons). Operates on the real audio
@@ -5554,7 +5573,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.8</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.9</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
