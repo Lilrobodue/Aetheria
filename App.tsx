@@ -5573,7 +5573,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v12.9</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.0</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -8114,16 +8114,16 @@ registerProcessor('wav-capture', WavCapture);
                     </div>
                     <ChevronRight size={14} className="text-slate-700 group-hover:text-pink-500 transition-colors shrink-0" />
                   </a>
-                  <a href="https://a.co/d/0c83ZGEu" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-blue-500/40 transition-all group">
+                  <div className="flex items-center gap-3 p-3 bg-slate-900/40 border border-slate-800/60 rounded-lg opacity-70 cursor-default">
                     <div className="w-9 h-9 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
                       <BookOpen size={16} className="text-blue-400" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-blue-400 transition-colors">The Golden Thread</h4>
-                      <p className="text-[10px] text-slate-500">One equation across all scales — E=hf as universal key</p>
+                      <h4 className="text-sm font-medium text-slate-200">Aetheria: The Science</h4>
+                      <p className="text-[10px] text-slate-500">A research-driven deep dive — currently in editing</p>
                     </div>
-                    <ChevronRight size={14} className="text-slate-700 group-hover:text-blue-500 transition-colors shrink-0" />
-                  </a>
+                    <span className="text-[9px] text-slate-500 tracking-[.15em] uppercase shrink-0">Coming soon</span>
+                  </div>
                   <a href="https://a.co/d/0ckEN0Qs" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-orange-500/40 transition-all group">
                     <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">
                       <Globe size={16} className="text-orange-400" />
@@ -8167,6 +8167,7 @@ registerProcessor('wav-capture', WavCapture);
                 <div className="text-[9px] text-slate-600 tracking-[.2em] uppercase text-center mb-3">Interactive Simulations</div>
                 <div className="grid grid-cols-2 gap-2">
                   {[
+                    { href: 'https://big-banana-studios.github.io/aetheria-voxel/', icon: '🧊', title: 'Resonance of the Spheres', sub: 'Voxel meditation PWA · Muse S, Athena & Polar H10' },
                     { href: 'https://lilrobodue.github.io/Lewis-Vortex-Model/', icon: '🌀', title: 'Lewis Vortex Model', sub: 'Formation Theory' },
                     { href: 'https://lilrobodue.github.io/Unified-Scale-Navigator/', icon: '🔬', title: 'Unified Scale Navigator', sub: 'Quantum to cosmic' },
                     { href: 'https://lilrobodue.github.io/HRV-Coherence-Visualizer/', icon: '💓', title: 'HRV Coherence Visualizer', sub: 'Heart rate variability' },
