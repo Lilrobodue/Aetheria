@@ -4274,9 +4274,9 @@ const App: React.FC = () => {
 
     // THE SWAP — same element, no pause, no load, no await.
     el.src = url;
-    // Must match the rate set in playTrack, or the gapless path would play at a
-    // different pitch than a normally-started track.
-    el.playbackRate = PITCH_SHIFT_FACTOR;
+    // Re-assert after the src swap so the gapless path can never drift from a
+    // normally-started track (rate AND pitch-preservation together).
+    applyPlaybackRate(el);
     const p = el.play();
     if (p) p.catch((err: unknown) => console.error('Gapless swap play() failed:', err));
     applyMusicElementVolume();
@@ -4335,12 +4335,40 @@ const App: React.FC = () => {
   const handleAutoAdvanceRef = useRef(handleAutoAdvance);
   useEffect(() => { handleAutoAdvanceRef.current = handleAutoAdvance; });
 
+  // 432 Hz retuning is VARISPEED — pitch and tempo move together, exactly like
+  // slowing a turntable. That is what a 440->432 retune physically IS, and it is
+  // artifact-free because it is plain resampling.
+  //
+  // `preservesPitch` MUST therefore be false. Left at its browser default of
+  // TRUE, setting playbackRate does not resample at all: it runs a WSOLA
+  // time-stretcher that cross-fades overlapping ~25 ms windows to hold the
+  // source pitch. That had two effects, both live in v13.1:
+  //   1. Audible warble on sustained harmonic material (lo-fi, slow tracks).
+  //      Dense transient material like ska masked it, which is what made the
+  //      bug look track-dependent rather than global.
+  //   2. NO RETUNING AT ALL — pitch preservation is the opposite of what we
+  //      want, so the app paid the full artifact cost and delivered none of the
+  //      432 shift. It also made toHeardHz() compensate for a shift that was
+  //      not happening, putting frequency assignment 31.8 cents out.
+  // Chrome only takes the artifact-free fast path at playbackRate === 1.0
+  // exactly, so 0.981818 always goes through the stretcher.
+  //
+  // Keep these two properties set TOGETHER — that is why this helper exists
+  // rather than a bare `el.playbackRate = ...` at each call site.
+  const applyPlaybackRate = (el: HTMLAudioElement) => {
+    el.preservesPitch = false;
+    (el as any).webkitPreservesPitch = false;  // Safari 15–16.3
+    (el as any).mozPreservesPitch = false;     // legacy Firefox
+    el.playbackRate = PITCH_SHIFT_FACTOR;
+  };
+
   // Attach the standard listeners to the audio element. The `el === mainAudioRef
   // .current` guards are belt-and-suspenders (there is a single element today)
   // so a stray event from a replaced element could never drive a second advance.
   const setupAudioElement = (el: HTMLAudioElement) => {
     el.crossOrigin = 'anonymous';
     el.preload = 'auto';
+    applyPlaybackRate(el);
 
     // PRE-END AUTO-ADVANCE — the primary path. Fires ~AUTO_ADVANCE_LOOKAHEAD_S
     // before the end, while still playing, so the swap happens before the element
@@ -4392,7 +4420,15 @@ const App: React.FC = () => {
 
     el.addEventListener('loadedmetadata', () => {
       if (el !== mainAudioRef.current) return;
-      setCurrDuration(el.duration / PITCH_SHIFT_FACTOR);
+      // ELEMENT TIME, not wall-clock. `currTime` is read straight off
+      // el.currentTime, which advances in MEDIA time (0 -> el.duration) no matter
+      // what the playback rate is. Dividing duration by PITCH_SHIFT_FACTOR here
+      // gave the true wall-clock length but put duration and position in
+      // DIFFERENT units, so the progress bar stopped at 98.2% and handleSeek
+      // aimed 1.85% past the end. Both units are defensible; the same one for
+      // both is the only requirement. The OS scrubber is told the real rate
+      // separately (see setPositionState), so it still extrapolates correctly.
+      setCurrDuration(el.duration);
     });
   };
 
@@ -4580,11 +4616,11 @@ const App: React.FC = () => {
       setIsAnalyzing(false);
 
       // Play the audio element (this will make Chrome show the speaker icon)
-      // 432 Hz retuning: 440->432 is a 0.981818 rate. Frequency detection runs on
-      // the UNSHIFTED source buffer, so it is compensated at the detection
-      // boundary (toHeardHz) — keep the two in step or the app will report
-      // frequencies 31.8 cents above what is actually heard.
-      mainAudioRef.current.playbackRate = PITCH_SHIFT_FACTOR;
+      // 432 Hz retuning: 440->432 is a 0.981818 varispeed rate. Frequency
+      // detection runs on the UNSHIFTED source buffer, so it is compensated at
+      // the detection boundary (toHeardHz) — keep the two in step or the app will
+      // report frequencies 31.8 cents away from what is actually heard.
+      applyPlaybackRate(mainAudioRef.current);
       // Set a conservative volume on the element itself as additional safety
       // Don't set volume on the element - we want pure Web Audio output only
       await mainAudioRef.current.play();
@@ -4796,11 +4832,16 @@ const App: React.FC = () => {
           const el = mainAudioRef.current;
           if (el && Number.isFinite(el.duration) && el.duration > 0 &&
               typeof navigator.mediaSession.setPositionState === 'function') {
-            const dur = el.duration / PITCH_SHIFT_FACTOR;
+            // Element time throughout, matching currTime / currDuration. The OS
+            // extrapolates the scrubber between updates using playbackRate, so
+            // handing it the REAL rate keeps the lock-screen position accurate —
+            // previously this declared 1 while playback ran at 0.981818, and
+            // divided the duration, which disagreed in both directions at once.
+            const dur = el.duration;
             navigator.mediaSession.setPositionState({
               duration: dur,
               position: Math.min(el.currentTime, dur),
-              playbackRate: 1,
+              playbackRate: PITCH_SHIFT_FACTOR,
             });
           }
         } catch {}
@@ -5383,6 +5424,10 @@ registerProcessor('wav-capture', WavCapture);
     isPlaying,
     currentTime: currTime,
     duration: currDuration,
+    // Both of the above are ELEMENT time. Hand the OS the real rate so it
+    // extrapolates the lock-screen scrubber correctly between updates —
+    // defaulting to 1 would drift it 1.85% fast across a track.
+    playbackRate: PITCH_SHIFT_FACTOR,
     // Explicit, not the toggle — a head-unit/lock-screen PLAY must always resume
     // and PAUSE must always pause, even if React's isPlaying briefly desyncs when
     // the head unit pauses the element itself. (Was the car resume bug.)

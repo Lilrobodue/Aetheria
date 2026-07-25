@@ -200,17 +200,29 @@ export function logPhiRelationships(musicVolume: number = 1.0, trackDuration: nu
  *   layer at the output            = trimmedValue * busGain
  *   bus gain                       = volume * 0.18 * LAYER_BALANCE_ATTEN = 0.072
  *
- *   binaural  = 0.8 * INV_PHI         * (0.03/0.03) * 0.287 = 0.1419
- *               -> 0.1419 * 0.072 = 0.0102 at output = -23 dB under the music
- *   solfeggio = 0.8 * INV_PHI_SQUARED * (0.01/0.01) * 0.328 = 0.1002
- *               -> 0.1002 * 0.072 = 0.0072 at output = -26 dB under the music
+ *   binaural  = 0.8 * INV_PHI         * (0.03/0.03) * 0.161 = 0.0796
+ *               -> 0.0796 * 0.072 = 0.0057 at output = -28 dB under the music
+ *   solfeggio = 0.8 * INV_PHI_SQUARED * (0.01/0.01) * 0.184 = 0.0562
+ *               -> 0.0562 * 0.072 = 0.0041 at output = -31 dB under the music
  *
- * These were 0.05 and 0.03 ("scale down to reasonable levels"), which put the
- * layers 38 dB and 47 dB under the music respectively — far below audibility, so
- * the entrainment layers were effectively not part of the experience at all.
+ * HISTORY — the values to reach for when reverting:
+ *   pre-v13.1  0.05  / 0.03   -> -38 / -47 dB. Far below audibility; the
+ *                               entrainment layers were not part of the
+ *                               experience at all.
+ *   v13.1      0.287 / 0.328  -> -23 / -26 dB. Clearly audible.
+ *   v13.2      0.161 / 0.184  -> -28 / -31 dB. Pulled back 5 dB while chasing a
+ *                               vinyl-warble report on lo-fi / slow tracks.
+ *
+ * NOTE on v13.2: the warble's diagnosed cause was elsewhere — preservesPitch was
+ * defaulting to true, so playbackRate ran a WSOLA time-stretcher (see
+ * applyPlaybackRate in App.tsx). This 5 dB reduction was precautionary, on the
+ * theory that the layers are more exposed on sparse material and that binaural's
+ * two close sine tones beat. If the slider A/B shows the layers were NOT a
+ * contributor, revert to the v13.1 values rather than leaving them quiet for no
+ * reason.
  */
-const BINAURAL_TRIM = 0.287;
-const SOLFEGGIO_TRIM = 0.328;
+const BINAURAL_TRIM = 0.161;
+const SOLFEGGIO_TRIM = 0.184;
 
 export function integratePhiVolumes(
   currentMusicVolume: number,
