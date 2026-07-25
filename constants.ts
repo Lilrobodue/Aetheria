@@ -269,7 +269,23 @@ export const BINAURAL_PRESETS: BinauralPreset[] = [
 ];
 
 // 432Hz Conversion Factor (432 / 440)
-export const PITCH_SHIFT_FACTOR = 0.981818; 
+export const PITCH_SHIFT_FACTOR = 0.981818;
+
+/**
+ * Convert a frequency measured in the SOURCE file to the frequency the listener
+ * actually HEARS.
+ *
+ * Playback runs the <audio> element at PITCH_SHIFT_FACTOR (432-referenced), but
+ * all frequency analysis decodes the raw file — decodeAudioData and
+ * OfflineAudioContext both see the unshifted source. Without this conversion the
+ * app would report, assign and display frequencies 1.85% (31.8 cents) above what
+ * is coming out of the speakers.
+ *
+ * Apply ONCE, at the detection boundary, so every downstream consumer
+ * (getHarmonicSolfeggio, deviation, closestSolfeggio, couldBeAetheria) agrees
+ * with playback. Do not apply it per-consumer.
+ */
+export const toHeardHz = (sourceHz: number): number => sourceHz * PITCH_SHIFT_FACTOR;
 
 export const UNIFIED_THEORY = {
   intro: `Aetheria operates on the principle of "Sympathetic Resonance"—the idea that external vibrations can influence internal biological and energetic states. We align the Mathematical (Sound), the Biological (Body), and the Archetypal (Spirit).`,

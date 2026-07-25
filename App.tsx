@@ -6,7 +6,7 @@ import {
   Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map as MapIcon, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe, Headphones, CheckCircle2
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings, BandEnvelope } from './types';
-import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, LO_SHU_WALK_COMBINED, LO_SHU_WALK_OUROBOROS, OUROBOROS_PHASES, SOURCE_FREQ, getLoShuPosition, type LoShuWalkMode } from './constants';
+import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, toHeardHz, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, LO_SHU_WALK_COMBINED, LO_SHU_WALK_OUROBOROS, OUROBOROS_PHASES, SOURCE_FREQ, getLoShuPosition, type LoShuWalkMode } from './constants';
 import Visualizer from './components/Visualizer';
 import FrequencySelector from './components/FrequencySelector';
 import SafetyProtocols from './components/SafetyProtocols';
@@ -41,13 +41,14 @@ import {
 import { useMediaSession, type Track } from './hooks/useMediaSession';
 import { stabilityManager, wakeLockManager } from './utils/stabilityManager';
 import { frequencyToSpectrumColor, type FrequencyColorMode } from './utils/spectrumColor';
+// NOTE: getBinauralPhaseOffset, getPhiTimingMarkers, getPhiEnvelopeVolume and
+// createPhiOscillator were imported here but never called — dropped. They remain
+// exported from phiIntegration.ts. Careful with createPhiOscillator if it is ever
+// adopted: it calls .start() internally, so a caller that also starts the
+// oscillator will throw InvalidStateError.
 import {
   calculatePhiVolumeRatios,
-  getBinauralPhaseOffset,
-  getPhiTimingMarkers,
-  getPhiEnvelopeVolume,
   getPhiIntensityMultiplier,
-  createPhiOscillator,
   logPhiRelationships,
   integratePhiVolumes,
   GOLDEN_ANGLE_RAD,
@@ -55,6 +56,7 @@ import {
   INV_PHI,
   INV_PHI_SQUARED
 } from './utils/phiIntegration';
+import { feltCarrierHz, thetaAlphaModHz, solfeggioHz } from './utils/frequencyMapping';
 
 // --- Helpers ---
 
@@ -76,6 +78,18 @@ const IS_MOBILE_DEVICE = (() => {
 // mobile to offset the duck. Approximate and tunable; raise if still too quiet,
 // lower if too loud. Desktop has no anchor and no duck, so it uses 1.0.
 const MOBILE_MUSIC_DUCK_COMPENSATION = 1.6;
+
+// TUNING KNOB — relative loudness of the binaural/solfeggio layers.
+// With direct playback, music left the Web Audio bus, so `gainNodeRef` now
+// carries ONLY the binaural + solfeggio layers. Previously those layers
+// shared the bus with the music and loud music peaks clipped/masked them
+// together; on their own clean path they sit forward in the mix. This factor
+// pushes them back behind the music the way they used to sit. 1.0 = exposed
+// (clean-path level), lower = more recessed. Music loudness is unaffected.
+// NOTE: the *audible* layer level is set by the trims in phiIntegration.ts
+// (BINAURAL_TRIM / SOLFEGGIO_TRIM) — tune there, not here. This factor also
+// scales the bus, so changing it moves both layers together.
+const LAYER_BALANCE_ATTEN = 0.5;
 
 // The media-session anchor element is SILENT — its only job is to hold the
 // lock-screen card. We do NOT put the audible drone on it: an <audio loop> isn't
@@ -103,28 +117,14 @@ const ANCHOR_TONE_AMPLITUDE = 0;     // 0 = silent anchor. >0 would put a tone b
 // Both glide smoothly on track change. Set LEVEL 0 to disable; MOD_DEPTH 0 = steady
 // carrier only (no pulse). Mostly inaudible on phone speakers, felt on headphones/subs.
 const SUB_BASS_DRONE_LEVEL = 0.10;   // master peak gain at full volume (felt, subtle)
-const SUB_BASS_CARRIER_MIN_HZ = 27;  // A0 — lowest still-felt sub-bass
-const SUB_BASS_CARRIER_MAX_HZ = 55;  // ~A1 — top of the felt "foundation" band
 const SUB_BASS_MOD_DEPTH = 0.3;      // 0 = steady carrier, 1 = full gate. 0.3 = subtle felt pulse
-const SUB_BASS_MOD_MIN_HZ = 5;       // theta-alpha capture floor (guide range 5–12)
-const SUB_BASS_MOD_MAX_HZ = 10;      // theta-alpha crossover ceiling (ambient default)
 const SUB_BASS_GLIDE_S = 8;          // smooth pitch glide on track change (guide's transitionSubBass)
 
-// Octave-divide `freq` down into [min,max] by repeated halving — the guide's
-// sub-harmonic algorithm. Result is always the same note class as the source (pure
-// 2:1 octaves), so it stays harmonically locked. `clampUp` bumps one octave back up
-// if it undershoots the floor (required for the carrier, which MUST stay felt).
-const octaveInto = (freq: number, min: number, max: number, clampUp = false): number => {
-  if (!(freq > 0)) return min;
-  let f = freq;
-  while (f > max) f /= 2;
-  if (clampUp) while (f < min) f *= 2;
-  return f;
-};
-const feltCarrierHz = (freq: number): number =>
-  octaveInto(freq, SUB_BASS_CARRIER_MIN_HZ, SUB_BASS_CARRIER_MAX_HZ, true);
-const thetaAlphaModHz = (freq: number): number =>
-  octaveInto(freq, SUB_BASS_MOD_MIN_HZ, SUB_BASS_MOD_MAX_HZ, false);
+// The band constants and the octave-mapping helpers (octaveInto, feltCarrierHz,
+// thetaAlphaModHz, toSubBass, solfeggioHz) now live in utils/frequencyMapping.ts
+// — the single source of truth shared with FrequencySelector. They used to be
+// duplicated there with a different threshold, so the preview tone and playback
+// emitted different frequencies. Import, never re-inline.
 
 // CLOSED EXPERIMENT — a MediaStream-fed <audio> element (Web Audio →
 // MediaStreamDestination → element) was tested as a single-element media-session
@@ -1510,13 +1510,18 @@ const App: React.FC = () => {
       
       // Perform advanced fractal analysis
       const result = await analyzeFractalFrequencies(buffer);
-      
+
       setFractalAnalysis(result);
       setIsAnalyzing(false);
-      
+
+      // DETECTION BOUNDARY — analysis read the unshifted source buffer; playback
+      // runs at PITCH_SHIFT_FACTOR. Convert here so the safety assessment and the
+      // returned frequency both describe what is actually heard.
+      const heardFreq = toHeardHz(result.dominantFrequency);
+
       // Update safety state based on analysis
-      const safetyAssessment = assessFrequencySafety(result.dominantFrequency);
-      if (result.dominantFrequency > 963) {
+      const safetyAssessment = assessFrequencySafety(heardFreq);
+      if (heardFreq > 963) {
         setSubtleResonanceMode(true);
         setShowSafetyProtocols(true);
         
@@ -1529,21 +1534,35 @@ const App: React.FC = () => {
       }
       
       console.log('Fractal Analysis Result:', result);
-      
-      return result.dominantFrequency;
+
+      return heardFreq;
     } catch (error) {
       console.error("Advanced analysis failed, falling back to basic detection", error);
       setIsAnalyzing(false);
       setFractalAnalysis(null);
-      
-      // Fallback to original detection method
-      return detectDominantFrequency(buffer);
+
+      // Fallback to original detection method — same boundary conversion applies.
+      return toHeardHz(await detectDominantFrequency(buffer));
     }
   }, [solfeggioVolume]);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  // Live mirror of `volume` for use inside callbacks with empty dep arrays
+  // (initAudio), which would otherwise close over the mount-time value.
+  const volumeRef = useRef(volume);
+  useEffect(() => { volumeRef.current = volume; }, [volume]);
   const gainNodeRef = useRef<GainNode | null>(null);
+  // MASTER BUS — the single point where EVERY audible Web Audio source sums
+  // before reaching the output. Unity gain, so it is level-transparent; its job
+  // is to exist, not to attenuate. The analyser and BOTH recorder taps hang off
+  // it, so anything connected here is automatically heard, visualised, AND
+  // recorded. Previously the taps hung off `gainNodeRef` (the binaural/solfeggio
+  // sub-mix) while the sub-bass drone connected straight to the destination —
+  // so the drone, ~97% of the synthesized output amplitude, was missing from
+  // every recording the app produced. Connect new sources HERE, not to
+  // ctx.destination, or they will be inaudible to the recorder.
+  const masterBusRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const compressorRef = useRef<DynamicsCompressorNode | null>(null);
   const visualizerGainRef = useRef<GainNode | null>(null);
@@ -1601,7 +1620,13 @@ const App: React.FC = () => {
   // direct-to-OS on mainAudioRef as before.
   const anchorAudioRef = useRef<HTMLAudioElement | null>(null);
   const silentWavUrlRef = useRef<string | null>(null);
-  const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  // NOTE: there is deliberately no MediaElementAudioSourceNode. The music plays
+  // DIRECT from the <audio> element to the OS so the lock-screen media session
+  // survives gesture-less auto-advance — routing it through Web Audio makes the
+  // element silent to the OS and the card drops. See the DIRECT PLAYBACK note in
+  // playTrack. Recording taps the element with captureStream() instead, which
+  // does not reroute it. (A dead `mediaSourceRef` lived here for a long time,
+  // never assigned, implying a music path through the graph that does not exist.)
 
   const stateRef = useRef({
     playlist,
@@ -1830,12 +1855,6 @@ const App: React.FC = () => {
         anchorAudioRef.current = null;
       }
 
-      // Clean up media source
-      if (mediaSourceRef.current) {
-        mediaSourceRef.current.disconnect();
-        mediaSourceRef.current = null;
-      }
-      
       // Stop all oscillators
       [solfeggioOscRef, binauralLeftOscRef, binauralRightOscRef].forEach(ref => {
         if (ref.current) {
@@ -1970,44 +1989,56 @@ const App: React.FC = () => {
         (audioCtxRef.current as any).deEsserFilter = deEsserFilter;
         (audioCtxRef.current as any).limiter = limiter;
         
+        // MASTER BUS — unity gain, level-transparent. Every audible source sums
+        // here, and the output / analyser / recorder taps all hang off it, so a
+        // source connected to the bus is heard, visualised and recorded by
+        // construction. See the masterBusRef declaration for why this exists.
+        masterBusRef.current = audioCtxRef.current.createGain();
+        masterBusRef.current.gain.value = 1.0;
+        masterBusRef.current.connect(audioCtxRef.current.destination);
+
+        // SAFETY LIMITER — deliberately NOT connected. With the clamp in
+        // integratePhiVolumes the worst-case bus total is ~0.28 of full scale, so
+        // a -0.5 dB limiter would never engage, and DynamicsCompressorNode adds
+        // ~6 ms of lookahead latency that would skew A/V sync in video captures.
+        // To enable it later, this is the only change needed:
+        //   masterBusRef.current.disconnect(audioCtxRef.current.destination);
+        //   masterBusRef.current.connect(limiter);
+        //   limiter.connect(audioCtxRef.current.destination);
+        // Reconnecting `compressorRef` / `highShelfFilter` is a TONAL change and
+        // a separate decision — both are also inert at these levels.
+
         gainNodeRef.current = audioCtxRef.current.createGain();
-        // Normal gain for dry signal
-        gainNodeRef.current.gain.value = 0.7; // 70% gain - standard level
-        
-        // COMPLETELY DRY SIGNAL PATH FOR TESTING
-        // Option 1: Direct connection (bypass everything)
-        // mediaSourceRef will connect directly to destination when created
-        
-        // Option 2: Only gain control (comment out Option 1 and uncomment below)
-        gainNodeRef.current.connect(audioCtxRef.current.destination);
-        
-        // Store nodes but don't connect them yet
-        // gainNodeRef.current.connect(limiter);
-        // limiter.connect(audioCtxRef.current.destination);
-        
-        // Keep compressor connected to nothing for now (we can re-enable later)
-        // compressorRef.current.connect(highShelfFilter);
-        // highShelfFilter.connect(limiter);
+        // Binaural / solfeggio sub-mix level. Initialised to the SAME steady-state
+        // formula the volume effect applies, so the layers don't overshoot on the
+        // first play. (This used to be a flat 0.7 — a ~9.7x overshoot for the half
+        // second before the effect ramped it down.) Read through volumeRef because
+        // initAudio has empty deps and would otherwise capture a stale `volume`.
+        gainNodeRef.current.gain.value = volumeRef.current * 0.18 * LAYER_BALANCE_ATTEN;
+
+        gainNodeRef.current.connect(masterBusRef.current);
 
         // Create separate gain for visualizer to boost signal without affecting audio
         visualizerGainRef.current = audioCtxRef.current.createGain();
         visualizerGainRef.current.gain.value = 2.0; // Moderate boost for smoother visuals
-        
+
         analyserRef.current = audioCtxRef.current.createAnalyser();
         analyserRef.current.fftSize = 512; // Smallest practical FFT for best performance
         analyserRef.current.smoothingTimeConstant = 0.92; // More smoothing to reduce jitter
-        
-        // Connect gain -> visualizer gain -> analyser (separate path for visuals)
-        gainNodeRef.current.connect(visualizerGainRef.current);
+
+        // Bus -> visualizer gain -> analyser (separate path for visuals)
+        masterBusRef.current.connect(visualizerGainRef.current);
         visualizerGainRef.current.connect(analyserRef.current);
-        
+
         setAnalyserNode(analyserRef.current);
-        
+
         destNodeRef.current = audioCtxRef.current.createMediaStreamDestination();
-        // Tap the live mix (gainNode) into the recording destination so MediaRecorder
-        // captures actual audio. The previous wiring fed `limiter` into the dest, but
-        // limiter had no input — producing silent recordings.
-        gainNodeRef.current.connect(destNodeRef.current);
+        // Tap the master bus into the recording destination so MediaRecorder
+        // captures the FULL synthesized mix — layers AND sub-bass drone. Tapping
+        // `gainNodeRef` here (the old wiring) silently dropped the drone from
+        // every recording; tapping `limiter` before that produced pure silence,
+        // since the limiter had no input.
+        masterBusRef.current.connect(destNodeRef.current);
       }
       if (audioCtxRef.current.state === 'suspended') {
         audioCtxRef.current.resume().catch(err => {
@@ -2019,21 +2050,6 @@ const App: React.FC = () => {
       alert('Audio initialization failed. Please reload the app.');
     }
   }, []);
-
-  // Octave-shift frequencies above 639Hz down to sub-bass range (20-60Hz).
-  // Threshold was 963 originally; lowered to 639 so the GUT band's upper
-  // three positions (741/852/963) also drop to sub-bass during playback.
-  // The UI still displays the canonical Hz (741/852/963) — only the
-  // oscillator's actual frequency is shifted, preserving the frequency's
-  // identity while keeping it out of the harsh upper range. Sub-bass
-  // mapping for these three: 741→46.3Hz, 852→53.25Hz, 963→30.1Hz.
-  const toSubBass = (freq: number): number => {
-    if (freq <= 639) return freq;
-    let f = freq;
-    while (f > 60) f /= 2;
-    if (f < 20) f *= 2;
-    return f;
-  };
 
   // Lo Shu Perfect GUT swap table. Only positions 1-6 differ; 7-9 are identical
   // in both sets, so they're absent here. Returns the input unchanged when the
@@ -2070,7 +2086,11 @@ const App: React.FC = () => {
     const gain = ctx.createGain();
 
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(toSubBass(applyLoShuPerfectMap(selectedSolfeggio)), now);
+    // solfeggioHz(), not toSubBass() — above the threshold the raw octave-drop
+    // lands exactly on the sub-bass drone's carrier (21 of 27 frequencies), which
+    // put two oscillators on one pitch with arbitrary per-session relative phase.
+    // The drone owns the felt band; this layer steps off it by φ.
+    osc.frequency.setValueAtTime(solfeggioHz(applyLoShuPerfectMap(selectedSolfeggio)), now);
     
     gain.gain.setValueAtTime(0, now);
     // CHANGE 1: Apply phi-based volume relationship for solfeggio layer
@@ -2166,15 +2186,6 @@ const App: React.FC = () => {
 
   useEffect(() => { updateSolfeggio(); }, [updateSolfeggio]);
   useEffect(() => { updateBinaural(); }, [updateBinaural]);
-
-  // TUNING KNOB — relative loudness of the binaural/solfeggio layers.
-  // With direct playback, music left the Web Audio bus, so `gainNodeRef` now
-  // carries ONLY the binaural + solfeggio layers. Previously those layers
-  // shared the bus with the music and loud music peaks clipped/masked them
-  // together; on their own clean path they sit forward in the mix. This factor
-  // pushes them back behind the music the way they used to sit. 1.0 = exposed
-  // (clean-path level), lower = more recessed. Music loudness is unaffected.
-  const LAYER_BALANCE_ATTEN = 0.5;
 
   // Apply the music volume directly on the <audio> element. With direct
   // playback the element is the music output (not the Web Audio gain node), so
@@ -2388,7 +2399,7 @@ const App: React.FC = () => {
       // Lazily create the continuous sub-bass drone (same once-and-keep pattern;
       // an oscillator can only be .start()'d once). It runs forever; its loudness
       // is controlled by the gain, faded in/out with playback below.
-      if (audioCtxRef.current && SUB_BASS_DRONE_LEVEL > 0 && !subBassDroneRef.current) {
+      if (audioCtxRef.current && SUB_BASS_DRONE_LEVEL > 0 && !subBassDroneRef.current && masterBusRef.current) {
         const ctx = audioCtxRef.current;
         // Source of truth = the SAME frequency the solfeggio layer uses, so the
         // drone is octave-locked to it (no beating). Updated on change below.
@@ -2422,10 +2433,19 @@ const App: React.FC = () => {
 
         osc.connect(amGain);
         amGain.connect(gain);
-        gain.connect(ctx.destination);
+        // Into the MASTER BUS, not ctx.destination. The bus is unity gain, so the
+        // drone's audible level is unchanged — but it is now also seen by the
+        // analyser and captured by BOTH recorders. Connecting straight to the
+        // destination (the old wiring) left the drone out of every export.
+        gain.connect(masterBusRef.current);
         osc.start();
         lfo.start();
         subBassDroneRef.current = { osc, gain, amGain, lfo, lfoGain };
+      } else if (audioCtxRef.current && SUB_BASS_DRONE_LEVEL > 0 && !subBassDroneRef.current) {
+        // Bus missing means initAudio() has not run yet. playTrack() calls it
+        // synchronously before setIsPlaying(true), so this should be unreachable;
+        // if it ever fires, the drone is silently absent — make that visible.
+        console.warn('Sub-bass drone skipped: master bus not initialised. Check initAudio() ordering.');
       }
     } else {
       wakeLockManager.releaseWakeLock();
@@ -2766,7 +2786,15 @@ const App: React.FC = () => {
             await new Promise(resolve => setTimeout(resolve, 50));
             freq = await detectDominantFrequency(audioBuffer);
           }
-          
+
+          // DETECTION BOUNDARY — everything above measured the unshifted source
+          // buffer; playback runs at PITCH_SHIFT_FACTOR. Convert once, here, so
+          // the solfeggio assignment, the deviation, the stored harmonicFreq and
+          // the Aetheria check all describe what the listener actually hears.
+          // (fractalData's own internal harmonic fields stay source-referenced —
+          // they are display detail and do not feed closestSolfeggio.)
+          freq = toHeardHz(freq);
+
           const solfeggio = getHarmonicSolfeggio(freq);
           const deviation = Math.abs(freq - solfeggio);
 
@@ -4246,7 +4274,9 @@ const App: React.FC = () => {
 
     // THE SWAP — same element, no pause, no load, no await.
     el.src = url;
-    el.playbackRate = 1.0;
+    // Must match the rate set in playTrack, or the gapless path would play at a
+    // different pitch than a normally-started track.
+    el.playbackRate = PITCH_SHIFT_FACTOR;
     const p = el.play();
     if (p) p.catch((err: unknown) => console.error('Gapless swap play() failed:', err));
     applyMusicElementVolume();
@@ -4550,8 +4580,11 @@ const App: React.FC = () => {
       setIsAnalyzing(false);
 
       // Play the audio element (this will make Chrome show the speaker icon)
-      // TEST: Temporarily disable pitch shifting to isolate distortion source
-      mainAudioRef.current.playbackRate = 1.0; // was PITCH_SHIFT_FACTOR (0.981818)
+      // 432 Hz retuning: 440->432 is a 0.981818 rate. Frequency detection runs on
+      // the UNSHIFTED source buffer, so it is compensated at the detection
+      // boundary (toHeardHz) — keep the two in step or the app will report
+      // frequencies 31.8 cents above what is actually heard.
+      mainAudioRef.current.playbackRate = PITCH_SHIFT_FACTOR;
       // Set a conservative volume on the element itself as additional safety
       // Don't set volume on the element - we want pure Web Audio output only
       await mainAudioRef.current.play();
@@ -4926,16 +4959,6 @@ const App: React.FC = () => {
                 mainAudioRef.current.load();
               }
               
-              // If media source exists, disconnect it
-              if (mediaSourceRef.current) {
-                try {
-                  mediaSourceRef.current.disconnect();
-                  mediaSourceRef.current = null;
-                } catch (e) {
-                  console.log('Error disconnecting media source:', e);
-                }
-              }
-              
               // Clear the audio element reference to force recreation
               mainAudioRef.current = null;
               
@@ -5122,7 +5145,7 @@ registerProcessor('wav-capture', WavCapture);
 
   const startWavRecording = async () => {
       const ctx = audioCtxRef.current;
-      if (!ctx || !gainNodeRef.current) return;
+      if (!ctx || !masterBusRef.current) return;
       await ensureWavWorklet(ctx);
       const channels = 2;
       const node = new AudioWorkletNode(ctx, 'wav-capture', {
@@ -5140,7 +5163,7 @@ registerProcessor('wav-capture', WavCapture);
               chunks[c].push(data[c] || new Float32Array(0));
           }
       };
-      gainNodeRef.current.connect(node); // binaural / solfeggio layers
+      masterBusRef.current.connect(node); // full synthesized mix: layers + sub-bass drone
       const detachMusic = attachMusicToRecording(node); // + music (direct-playback tap)
       // Worklet output is silent — connect to a muted sink so the graph stays alive.
       const sink = ctx.createGain();
@@ -5153,7 +5176,7 @@ registerProcessor('wav-capture', WavCapture);
           sampleRate: ctx.sampleRate,
           stop: () => {
               detachMusic();
-              try { gainNodeRef.current?.disconnect(node); } catch {}
+              try { masterBusRef.current?.disconnect(node); } catch {}
               try { node.disconnect(); } catch {}
               try { sink.disconnect(); } catch {}
               node.port.onmessage = null;
@@ -5573,7 +5596,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.0</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

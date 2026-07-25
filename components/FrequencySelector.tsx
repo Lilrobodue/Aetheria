@@ -38,6 +38,7 @@ import {
   assessFrequencySafety,
   type FractalAnalysisResult
 } from '../utils/fractalFrequencyAnalysis';
+import { solfeggioHz } from '../utils/frequencyMapping';
 
 interface FrequencySelectorProps {
   selectedFrequency: number;
@@ -274,15 +275,6 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
     }
   };
 
-  // Octave-shift frequencies above 963Hz down to sub-bass range (20-60Hz)
-  const toSubBass = (freq: number): number => {
-    if (freq <= 963) return freq;
-    let f = freq;
-    while (f > 60) f /= 2;
-    if (f < 20) f *= 2;
-    return f;
-  };
-
   // Generate tone for testing
   const generateTestTone = (frequency: number, duration: number = 3000) => {
     if (!audioContextRef.current) {
@@ -305,7 +297,13 @@ const FrequencySelector: React.FC<FrequencySelectorProps> = ({
     const gainNode = context.createGain();
 
     oscillator.type = 'sine';
-    oscillator.frequency.value = toSubBass(frequency);
+    // Shared with playback (utils/frequencyMapping.ts) so the preview emits the
+    // SAME frequency the app will actually play. This file used to carry its own
+    // copy with a 963 threshold while playback used 639, so previewing 741/852/963
+    // played them at full pitch while playback emitted 46/53/30 Hz.
+    // Level is deliberately NOT matched to playback — the solfeggio layer sits far
+    // below the music in the mix, so a level-accurate preview would be inaudible.
+    oscillator.frequency.value = solfeggioHz(frequency);
     
     const safetyAssessment = assessFrequencySafety(frequency);
     const testVolume = Math.min(0.1, safetyAssessment.volume * 0.3); // Very quiet for testing
