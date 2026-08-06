@@ -3032,9 +3032,12 @@ const App: React.FC = () => {
 
   // HEART Alignment Journey
   const generateHeartAlignmentJourney = () => {
-      // Get all HEART frequency ranges (1000-2999 Hz approximately)
+      // Get all HEART frequency ranges (1206-3150 Hz — Orders 4-6).
+      // Upper bound is 3150 inclusive: it is HEART position 9, not a HEAD
+      // frequency. A `< 3000` cutoff here previously dropped it into the
+      // HEAD journey and left HEART with only 8 of its 9 frequencies.
       const heartFrequencies = SOLFEGGIO_INFO
-          .filter(s => s.freq >= 1000 && s.freq < 3000)
+          .filter(s => s.freq >= 1000 && s.freq <= 3150)
           .map(s => s.freq)
           .sort((a, b) => a - b);
       
@@ -3089,9 +3092,11 @@ const App: React.FC = () => {
 
   // HEAD Alignment Journey  
   const generateHeadAlignmentJourney = () => {
-      // Get all HEAD frequency ranges (3000+ Hz)
+      // Get all HEAD frequency ranges (3504+ Hz — Orders 7-9).
+      // Starts at 3504, the first Seventh-order frequency. 3150 belongs to
+      // HEART (position 9) and is handled by the HEART journey.
       const headFrequencies = SOLFEGGIO_INFO
-          .filter(s => s.freq >= 3000)
+          .filter(s => s.freq >= 3504)
           .map(s => s.freq)
           .sort((a, b) => a - b);
       
@@ -3856,8 +3861,8 @@ const App: React.FC = () => {
       `• Unanalyzed tracks: ${unanalyzedTracks}\n\n` +
       `🎯 REGIME DISTRIBUTION:\n` +
       `• GUT (174-963 Hz): ${gutTracks} tracks\n` +
-      `• HEART (1000-2999 Hz): ${heartTracks} tracks\n` +
-      `• HEAD (3000+ Hz): ${headTracks} tracks\n\n` +
+      `• HEART (1206-3150 Hz): ${heartTracks} tracks\n` +
+      `• HEAD (3504+ Hz): ${headTracks} tracks\n\n` +
       `🎵 FREQUENCY BREAKDOWN:\n` +
       `${frequencyCounts.slice(0, 15).join('\n')}\n` +
       `${frequencyCounts.length > 15 ? `\n...and ${frequencyCounts.length - 15} more frequencies` : ''}\n\n` +
@@ -5641,7 +5646,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
