@@ -330,8 +330,12 @@ const detectGoldenRatioHarmonics = (frequencies: Float32Array): { dominantFreq: 
     }
   }
   
-  alignment /= harmonics.length;
-  
+  // A silent or empty spectrum leaves maxMagnitude and dominantFreq at 0, so
+  // no harmonic clears the 20Hz floor and this divides 0 by 0. NaN here
+  // propagates into fractalAnalysis and makes any sort comparing it
+  // non-deterministic, so collapse it to 0.
+  alignment = harmonics.length > 0 ? alignment / harmonics.length : 0;
+
   return { dominantFreq, harmonics, alignment };
 };
 
@@ -482,27 +486,53 @@ const calculateSacredGeometryAlignment = (frequencies: Float32Array): number => 
     Math.E,
     FRACTAL_CONSTANTS.GOLDEN_SPIRAL_RATIO
   ];
-  
+
+  // performOptimizedFFT returns raw magnitudes (sqrt(re²+im²) / length) which
+  // land around 5e-3 at the peak — roughly 20x below the 0.1 "significant
+  // frequency" cutoff this function used to apply directly. No bin ever
+  // cleared it, so the score was structurally 0 for every track ever
+  // analysed. Gate on each bin's share of the spectrum's own peak instead,
+  // the same normalisation detectGoldenRatioHarmonics already uses.
+  let maxMagnitude = 0;
+  for (let i = 0; i < frequencies.length; i++) {
+    if (frequencies[i] > maxMagnitude) maxMagnitude = frequencies[i];
+  }
+  if (maxMagnitude <= 0) return 0; // silence / empty spectrum
+
+  const SIGNIFICANT = 0.1;  // bin carries >10% of peak magnitude
+  const PARTNER = 0.05;     // its sacred-ratio partner carries >5%
+
   let alignment = 0;
+  let significantBins = 0;
   const binSize = 44100 / frequencies.length;
-  
+
   // Check how well frequency content aligns with sacred ratios
   for (let i = 1; i < frequencies.length; i++) {
-    if (frequencies[i] > 0.1) { // Significant frequency
+    const magnitude = frequencies[i] / maxMagnitude;
+    if (magnitude > SIGNIFICANT) { // Significant frequency
+      significantBins++;
       const currentFreq = i * binSize;
-      
+
       sacredRatios.forEach(ratio => {
         const expectedFreq = currentFreq * ratio;
         const expectedBin = Math.round(expectedFreq / binSize);
-        
-        if (expectedBin < frequencies.length && frequencies[expectedBin] > 0.05) {
-          alignment += frequencies[i] * frequencies[expectedBin];
+
+        if (expectedBin < frequencies.length) {
+          const partner = frequencies[expectedBin] / maxMagnitude;
+          if (partner > PARTNER) {
+            alignment += magnitude * partner;
+          }
         }
       });
     }
   }
-  
-  return Math.min(1, alignment / frequencies.length);
+
+  // Normalise against the strongest result achievable for this spectrum:
+  // every significant bin pairing with every sacred ratio at full strength.
+  // Dividing by frequencies.length (the old denominator) would re-shrink the
+  // score into the 1e-4 range and undo the fix.
+  const maxPossible = significantBins * sacredRatios.length;
+  return maxPossible > 0 ? Math.min(1, alignment / maxPossible) : 0;
 };
 
 /**

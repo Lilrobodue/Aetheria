@@ -1208,10 +1208,20 @@ const App: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [pendingDurationAnalysis, setPendingDurationAnalysis] = useState<string[]>([]);
-  // Song ids the duration analyzer has already attempted this session. The
-  // auto-rescan below uses this to retry each stuck track at most once, so a
-  // genuinely unreadable file can't get re-queued in an endless loop.
-  const triedDurationIdsRef = useRef<Set<string>>(new Set());
+  // How many times the duration analyzer has attempted each track this
+  // session. This was a one-shot Set, but getAudioDuration returns 0 for ANY
+  // failure — including transient ones, most notably a decode that lost the
+  // main thread to a deep scan running alongside it. Since the analyzer marks
+  // a track BEFORE awaiting the result, a single unlucky attempt blacklisted
+  // it for the whole session and left it stuck on "..." with no way back
+  // short of a reload. Counting attempts keeps the endless-loop protection
+  // (a genuinely unreadable file still converges, just after N tries) while
+  // letting a track that failed by accident recover.
+  const MAX_DURATION_ATTEMPTS = 3;
+  const durationAttemptsRef = useRef<Map<string, number>>(new Map());
+  // Bumped when every track earns a fresh retry budget, to re-trigger the
+  // auto-rescan effect below (clearing a ref can't do that on its own).
+  const [durationRetryEpoch, setDurationRetryEpoch] = useState(0);
   
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
@@ -2611,9 +2621,9 @@ const App: React.FC = () => {
        
        // Process batch
        await Promise.all(processing.map(async (id) => {
-          // Mark attempted up front so the auto-rescan won't re-queue this id
-          // even if it ends up resolving to 0 (unreadable file).
-          triedDurationIdsRef.current.add(id);
+          // Count the attempt up front so the auto-rescan can't re-queue this
+          // id in a tight loop even if it resolves to 0 (unreadable file).
+          durationAttemptsRef.current.set(id, (durationAttemptsRef.current.get(id) || 0) + 1);
           // Find song object in current playlist state (via ref or effect dependence) - using functional update below
           const song = originalPlaylist.find(s => s.id === id);
           if (song && song.file) {
@@ -2642,14 +2652,17 @@ const App: React.FC = () => {
 
   // AUTO RE-SCAN FOR MISSING DURATIONS
   // Whenever the library changes (import, restore, reorder), re-queue any track
-  // still missing a duration — but only ones that have a file and haven't been
-  // attempted yet this session. This heals tracks left on "..." by an
+  // still missing a duration — but only ones that have a file and haven't
+  // exhausted their retry budget. This heals tracks left on "..." by an
   // unreadable file or (before the timeout fix) a stalled queue, without a
-  // re-import. triedDurationIdsRef gates the retry to once per track, so a
-  // genuinely unreadable file converges instead of looping.
+  // re-import. MAX_DURATION_ATTEMPTS bounds the retries, so a genuinely
+  // unreadable file converges instead of looping. It runs over
+  // originalPlaylist — the whole library — so every generated playlist is
+  // covered, not just the one on screen.
   useEffect(() => {
     const stuck = originalPlaylist
-      .filter(s => (!s.duration || s.duration === 0) && s.file && !triedDurationIdsRef.current.has(s.id))
+      .filter(s => (!s.duration || s.duration === 0) && s.file &&
+                   (durationAttemptsRef.current.get(s.id) || 0) < MAX_DURATION_ATTEMPTS)
       .map(s => s.id);
     if (stuck.length === 0) return;
 
@@ -2658,7 +2671,22 @@ const App: React.FC = () => {
       stuck.forEach(id => merged.add(id));
       return merged.size === prev.length ? prev : Array.from(merged);
     });
-  }, [originalPlaylist]);
+  }, [originalPlaylist, durationRetryEpoch]);
+
+  // A deep scan saturates the main thread for minutes at a time, and the
+  // duration probes running alongside it are exactly what loses that race —
+  // so a scan can burn the entire retry budget on tracks that are perfectly
+  // readable. Hand every track a fresh budget once the scan finishes and
+  // re-trigger the rescan above, which is when the probes can actually
+  // succeed. This is the path that left whole playlists on "...".
+  const wasScanningRef = useRef(false);
+  useEffect(() => {
+    if (wasScanningRef.current && !isScanning) {
+      durationAttemptsRef.current.clear();
+      setDurationRetryEpoch(e => e + 1);
+    }
+    wasScanningRef.current = isScanning;
+  }, [isScanning]);
 
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -3653,58 +3681,90 @@ const App: React.FC = () => {
     }
   };
 
-  const generateDNAResonancePlaylist = () => {
-    // Strict 528Hz resonance filter - only the pure 528Hz frequency
-    console.log('=== STRICT 528Hz DNA RESONANCE FILTER ===');
+  // SOURCE Field Filter — 2178 Hz, HEART position 5 and the geometric centre
+  // of the Lo Shu cube. Every row, column, diagonal and the central vertical
+  // axis (528 → 2178 → 4920) intersects here, so tracks are ranked by
+  // sacredGeometryAlignment (φ, √2, √3, √5, π, e ratios) rather than by
+  // dnaResonanceScore — the DNA metric weights 528 Hz at 3× and would rank
+  // 2178 Hz tracks by their 528 Hz content.
+  //
+  // Ranking degrades gracefully: sacredGeometryAlignment only carries real
+  // values for tracks analysed AFTER the normalisation fix in
+  // calculateSacredGeometryAlignment, so goldenRatioAlignment (already
+  // peak-normalised, and φ is the first sacred ratio) breaks the ties on
+  // older cached analyses. Neither score gates membership.
+  const generateSourceFieldPlaylist = () => {
+    // Strict 2178Hz resonance filter - only the pure 2178Hz frequency
+    console.log('=== STRICT 2178Hz SOURCE FIELD FILTER ===');
     originalPlaylist.forEach(song => {
-      if (song.fractalAnalysis && song.closestSolfeggio === 528) {
-        const dnaScore = song.fractalAnalysis.dnaResonanceScore * 100;
-        console.log(`${song.name}: DNA=${dnaScore.toFixed(1)}% | 528Hz=true | Accuracy=${song.harmonicDeviation?.toFixed(1) || 'N/A'}Hz`);
+      if (song.fractalAnalysis && song.closestSolfeggio === 2178) {
+        const geometryScore = song.fractalAnalysis.sacredGeometryAlignment * 100;
+        const goldenScore = song.fractalAnalysis.goldenRatioAlignment * 100;
+        console.log(`${song.name}: Geometry=${geometryScore.toFixed(1)}% | Golden=${goldenScore.toFixed(1)}% | 2178Hz=true | Accuracy=${song.harmonicDeviation?.toFixed(1) || 'N/A'}Hz`);
       }
     });
 
-    // STRICT filtering: ONLY 528Hz tracks with any level of DNA resonance
-    const pure528Tracks = originalPlaylist
+    // STRICT filtering: ONLY 2178Hz tracks that carry fractal analysis.
+    // Deliberately NOT gated on a score being > 0: sacredGeometryAlignment is
+    // 0 for every track analysed before the normalisation fix in
+    // calculateSacredGeometryAlignment, so gating on it emptied the playlist
+    // even when 2178Hz matches existed. Frequency match + analysed is the real
+    // requirement; the scores below decide ORDER, not membership.
+    const pure2178Tracks = originalPlaylist
       .filter(song => {
-        // Must be exactly 528Hz frequency match
-        if (song.closestSolfeggio !== 528) return false;
-        
+        // Must be exactly 2178Hz frequency match
+        if (song.closestSolfeggio !== 2178) return false;
+
         // Must have fractal analysis data
-        if (!song.fractalAnalysis) return false;
-        
-        // Accept any level of DNA resonance (even minimal) for 528Hz tracks
-        return song.fractalAnalysis.dnaResonanceScore > 0;
+        return Boolean(song.fractalAnalysis);
       })
       .sort((a, b) => {
-        // Sort by DNA resonance score (highest first)
-        const aDNA = a.fractalAnalysis?.dnaResonanceScore || 0;
-        const bDNA = b.fractalAnalysis?.dnaResonanceScore || 0;
-        
-        if (Math.abs(aDNA - bDNA) > 0.01) {
-          return bDNA - aDNA;
+        // Sort by sacred geometry alignment (highest first)
+        const aGeometry = a.fractalAnalysis?.sacredGeometryAlignment || 0;
+        const bGeometry = b.fractalAnalysis?.sacredGeometryAlignment || 0;
+
+        if (Math.abs(aGeometry - bGeometry) > 0.01) {
+          return bGeometry - aGeometry;
         }
-        
-        // Then by harmonic accuracy (closest to pure 528Hz)
+
+        // Fall back to golden ratio alignment — φ is the first of the sacred
+        // ratios and this metric normalises against the spectrum's own peak,
+        // so it yields real values on tracks analysed before the fix. Keeps
+        // the ordering meaningful without forcing a full library re-scan.
+        const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
+        const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
+
+        if (Math.abs(aGolden - bGolden) > 0.01) {
+          return bGolden - aGolden;
+        }
+
+        // Then by harmonic accuracy (closest to pure 2178Hz)
         const aAccuracy = a.harmonicDeviation || 999;
         const bAccuracy = b.harmonicDeviation || 999;
-        
+
         return aAccuracy - bAccuracy;
       });
-    
-    console.log(`Found ${pure528Tracks.length} pure 528Hz tracks for DNA resonance playlist`);
-    
-    if (pure528Tracks.length > 0) {
-      setPlaylist(pure528Tracks);
+
+    console.log(`Found ${pure2178Tracks.length} pure 2178Hz tracks for SOURCE field playlist`);
+
+    if (pure2178Tracks.length > 0) {
+      setPlaylist(pure2178Tracks);
       setUseChakraOrder(false);
       setCurrentSongIndex(0);
       setSearchTerm('');
-      
-      // Auto-set to 528Hz for optimal DNA resonance
-      setSelectedSolfeggio(528);
-      
-      // Enable visualization features optimized for 528Hz DNA work
-      setVizSettings(prev => ({ 
-        ...prev, 
+
+      // Auto-set to 2178Hz for optimal SOURCE field resonance
+      setSelectedSolfeggio(2178);
+
+      // NOTE: missing track durations are no longer repaired here. That was a
+      // stopgap scoped to this one filter; the retry budget in
+      // MAX_DURATION_ATTEMPTS plus the post-scan reset now heals every
+      // playlist from the auto-rescan effect, so this generator does not need
+      // to special-case itself.
+
+      // Enable visualization features optimized for 2178Hz SOURCE field work
+      setVizSettings(prev => ({
+        ...prev,
         morphEnabled: true,
         showTreeOfLife: true,
         colorMode: 'chakra',
@@ -3712,41 +3772,57 @@ const App: React.FC = () => {
         showHexagons: true,
         hexOpacity: 0.7
       }));
-      
-      // Calculate quality metrics for user feedback
-      const avgDNAScore = pure528Tracks.reduce((sum, song) => 
-        sum + (song.fractalAnalysis?.dnaResonanceScore || 0), 0) / pure528Tracks.length;
-      
-      const highQualityTracks = pure528Tracks.filter(s => 
-        (s.fractalAnalysis?.dnaResonanceScore || 0) > 0.3).length;
-      
-      const avgAccuracy = pure528Tracks.reduce((sum, song) => 
-        sum + (song.harmonicDeviation || 0), 0) / pure528Tracks.length;
-      
+
+      // Calculate quality metrics for user feedback. Report whichever
+      // alignment score actually carries data: sacredGeometryAlignment reads 0
+      // across the board on pre-fix analyses, and quoting "0.0%" would look
+      // like a broken playlist rather than a stale metric.
+      const avgGeometryScore = pure2178Tracks.reduce((sum, song) =>
+        sum + (song.fractalAnalysis?.sacredGeometryAlignment || 0), 0) / pure2178Tracks.length;
+
+      const avgGoldenScore = pure2178Tracks.reduce((sum, song) =>
+        sum + (song.fractalAnalysis?.goldenRatioAlignment || 0), 0) / pure2178Tracks.length;
+
+      const usingGeometry = avgGeometryScore > 0;
+      const rankedBy = usingGeometry ? 'sacred geometry' : 'golden ratio';
+      const avgRankScore = usingGeometry ? avgGeometryScore : avgGoldenScore;
+
+      const highQualityTracks = pure2178Tracks.filter(s =>
+        ((usingGeometry ? s.fractalAnalysis?.sacredGeometryAlignment : s.fractalAnalysis?.goldenRatioAlignment) || 0) > 0.3).length;
+
+      const avgAccuracy = pure2178Tracks.reduce((sum, song) =>
+        sum + (song.harmonicDeviation || 0), 0) / pure2178Tracks.length;
+
+      // 2178Hz is a HEART frequency, so apply the same experience-level
+      // guard the HEART Alignment journey uses.
+      if (userExperienceLevel === 'beginner') {
+        setUserExperienceLevel('intermediate');
+      }
+
       setTimeout(() => {
         setAnalysisNotification(
-          `Pure 528Hz DNA Resonance Filter activated! ${pure528Tracks.length} tracks found. Average DNA resonance: ${(avgDNAScore * 100).toFixed(1)}%, ${highQualityTracks} high-quality tracks, avg accuracy: ±${avgAccuracy.toFixed(1)}Hz from pure 528Hz.`
+          `Pure 2178Hz SOURCE Field Filter activated! ${pure2178Tracks.length} tracks found. Average ${rankedBy} alignment: ${(avgRankScore * 100).toFixed(1)}%, ${highQualityTracks} high-alignment tracks, avg accuracy: ±${avgAccuracy.toFixed(1)}Hz from pure 2178Hz.${usingGeometry ? '' : ' (Re-scan to rank by sacred geometry.)'}`
         );
         setTimeout(() => setAnalysisNotification(null), 8000);
       }, 500);
-      
+
       if(window.innerWidth < 768) setShowSidebar(false);
     } else {
-      const tracksWith528 = originalPlaylist.filter(s => s.closestSolfeggio === 528).length;
+      const tracksWith2178 = originalPlaylist.filter(s => s.closestSolfeggio === 2178).length;
       const analyzedTracks = originalPlaylist.filter(s => s.fractalAnalysis).length;
       const unanalyzedTracks = originalPlaylist.length - analyzedTracks;
-      
-      alert(`No pure 528Hz tracks found for DNA resonance filter.\n\n` +
+
+      alert(`No pure 2178Hz tracks found for SOURCE field filter.\n\n` +
             `Current library status:\n` +
             `• Total tracks: ${originalPlaylist.length}\n` +
             `• Analyzed tracks: ${analyzedTracks}\n` +
             `• Unanalyzed tracks: ${unanalyzedTracks}\n` +
-            `• 528Hz frequency matches: ${tracksWith528}\n\n` +
+            `• 2178Hz frequency matches: ${tracksWith2178}\n\n` +
             `To use this filter:\n` +
-            `1. Import music containing 528Hz content\n` +
+            `1. Import music containing 2178Hz content\n` +
             `2. Run "Deep Scan" to analyze harmonic frequencies\n` +
-            `3. This filter requires exact 528Hz frequency matches\n\n` +
-            `Note: This filter only shows tracks that are harmonically centered on pure 528Hz.`);
+            `3. This filter requires exact 2178Hz frequency matches\n\n` +
+            `Note: This filter only shows tracks that are harmonically centered on pure 2178Hz — HEART position 5, the centre of the Lo Shu cube.`);
     }
   };
 
@@ -5646,7 +5722,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.4</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -6718,12 +6794,12 @@ registerProcessor('wav-capture', WavCapture);
                    </button>
 
                    <button 
-                    onClick={generateDNAResonancePlaylist}
+                    onClick={generateSourceFieldPlaylist}
                     className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-green-400 hover:border-green-500 transition-all active:scale-95"
                    >
                      <Hexagon size={16} className="mb-1 text-green-500" />
-                     <span>528Hz Filter</span>
-                     <span className="text-[8px] text-green-400">DNA Harmonic</span>
+                     <span>2178Hz Filter</span>
+                     <span className="text-[8px] text-green-400">SOURCE Centre</span>
                    </button>
 
                    <button 
