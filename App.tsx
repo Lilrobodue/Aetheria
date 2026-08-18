@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
@@ -144,6 +144,22 @@ const formatDuration = (seconds: number) => {
     return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   }
   return `${m}:${s.toString().padStart(2, '0')}`;
+};
+
+/** Extensions Chrome can actually decode. Used instead of trusting File.type,
+ *  which Windows leaves empty for plenty of perfectly good audio files. */
+const AUDIO_FILE_RE = /\.(mp3|wav|flac|m4a|mp4|aac|ogg|oga|opus|webm|aif|aiff)$/i;
+
+/** MIME types that START with "audio/" but are NOT a decodable track, so the
+ *  MIME backstop below can't quietly re-admit what the extension list rejects.
+ *  Chrome hands .m3u "audio/x-mpegurl" and .wma "audio/x-ms-wma" — the first is
+ *  a playlist, the second Chrome cannot decode. Both used to sail straight in. */
+const AUDIO_MIME_DENY_RE = /(mpegurl|scpls|ms-wma|ms-wax|ms-asf|realaudio)/i;
+
+/** The single source of truth for "is this an audio file we can play?". */
+const isImportableAudio = (f: File): boolean => {
+  if (AUDIO_FILE_RE.test(f.name)) return true;
+  return f.type.startsWith('audio/') && !AUDIO_MIME_DENY_RE.test(f.type);
 };
 
 const getAudioDuration = (file: File): Promise<number> => {
@@ -1161,14 +1177,17 @@ const App: React.FC = () => {
   // `isRestoring` gates the auto-save effect so the act of restoring doesn't
   // immediately re-trigger a save of what we just read back.
   const [isRestoring, setIsRestoring] = useState(false);
+  // Non-null only while a LARGE cached library is being read back off disk.
+  const [restoreProgress, setRestoreProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const RESTORE_PROGRESS_MIN_TRACKS = 300;
   const [currentSongIndex, setCurrentSongIndex] = useState<number>(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isShuffle, setIsShuffle] = useState(false);
   const [isLoop, setIsLoop] = useState(false);
   
-  // Search functionality
+  // Search functionality. NOTE: `filteredPlaylist` is DERIVED further down (a
+  // useMemo, not state) — see the comment there for why.
   const [searchTerm, setSearchTerm] = useState('');
-  const [filteredPlaylist, setFilteredPlaylist] = useState<Song[]>([]);
   
   // Advanced Shuffle State
   const [shuffledIndices, setShuffledIndices] = useState<number[]>([]);
@@ -1222,6 +1241,25 @@ const App: React.FC = () => {
   // Bumped when every track earns a fresh retry budget, to re-trigger the
   // auto-rescan effect below (clearing a ref can't do that on its own).
   const [durationRetryEpoch, setDurationRetryEpoch] = useState(0);
+  // Bumped once each time the queue drains, so the auto-rescan below gets one
+  // healing sweep per import without having to watch the playlist array itself.
+  const [durationDrainEpoch, setDurationDrainEpoch] = useState(0);
+  const durationQueueActiveRef = useRef(false);
+
+  // How many duration probes run at once. Each one spins up a real <audio>
+  // element, and mobile browsers cap concurrent media elements far lower than
+  // desktop, so this stays conservative rather than maximal — the old value of
+  // 5 (paired with a 100 ms inter-batch delay) capped the whole import at 50
+  // tracks/second, which is what made a few thousand files take minutes.
+  const DURATION_BATCH_SIZE = 12;
+  const DURATION_BATCH_SIZE_SCANNING = 4;
+  // Resolved durations are buffered here and written to state on a time budget
+  // instead of once per batch — see flushDurationUpdates.
+  const DURATION_FLUSH_MS = 500;
+  const durationUpdatesRef = useRef<Map<string, number>>(new Map());
+  const lastDurationFlushRef = useRef<number>(0);
+  // Total queued for the current import, for the progress readout. 0 = idle.
+  const durationQueueTotalRef = useRef<number>(0);
   
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
@@ -1651,17 +1689,36 @@ const App: React.FC = () => {
     stateRef.current = { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos };
   }, [playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos]);
 
-  // Search functionality effect
-  useEffect(() => {
-    if (searchTerm.trim() === '') {
-      setFilteredPlaylist(playlist);
-    } else {
-      const filtered = playlist.filter(song => 
-        song.name.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-      setFilteredPlaylist(filtered);
-    }
-  }, [searchTerm, playlist]);
+  // Search — DERIVED, not state. This used to be a useState + useEffect pair,
+  // which cost two full App renders per keystroke (one for searchTerm, one for
+  // setFilteredPlaylist) plus a third when the new array identity re-ran the
+  // virtualization effect below. It also called searchTerm.toLowerCase() INSIDE
+  // the predicate and song.name.toLowerCase() per track, so a single character
+  // allocated 2n throwaway strings. At a few thousand tracks that was plainly
+  // visible while typing.
+  //
+  // useDeferredValue keeps the input itself at high priority and lets React run
+  // the filter behind it, so a fast typist never waits on the list. During the
+  // brief lag the previous results stay on screen — which is also why the
+  // "no results" branch can't flash: an in-flight query still reads as the old,
+  // non-empty result.
+  const deferredSearchTerm = useDeferredValue(searchTerm);
+
+  // Lower-cased track names, computed once per playlist change rather than once
+  // per track per keystroke.
+  const nameLowerById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of playlist) m.set(s.id, s.name.toLowerCase());
+    return m;
+  }, [playlist]);
+
+  const filteredPlaylist = useMemo(() => {
+    const q = deferredSearchTerm.trim().toLowerCase();
+    if (q === '') return playlist;
+    return playlist.filter((song: Song) =>
+      (nameLowerById.get(song.id) ?? song.name.toLowerCase()).includes(q)
+    );
+  }, [deferredSearchTerm, playlist, nameLowerById]);
 
   // Restore the cached playlist on mount, before any user interaction. If
   // IndexedDB holds a saved library, repopulate the in-memory state and flash a
@@ -1671,8 +1728,18 @@ const App: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const cached = await restorePlaylist();
-      if (cancelled || !cached) return;
+      // Reading a few thousand cached tracks back off disk isn't instant, and
+      // until it lands the app looks like it lost the library. Only surface the
+      // progress toast once we know the cache is big enough to be worth it —
+      // a small library restores faster than the toast could be read.
+      const cached = await restorePlaylist((loaded, total) => {
+        if (!cancelled && total >= RESTORE_PROGRESS_MIN_TRACKS) {
+          setRestoreProgress({ loaded, total });
+        }
+      });
+      if (cancelled) return;
+      setRestoreProgress(null);
+      if (!cached) return;
 
       setIsRestoring(true);
       setPlaylist(cached.playlist);
@@ -1698,11 +1765,36 @@ const App: React.FC = () => {
   // NOT when a scan streams metadata into existing tracks. Keying the blob-save
   // effect on this (instead of the playlist array identity) means a deep scan,
   // which mutates metadata ~once per track, triggers ZERO audio writes.
+  //
+  // The key is an order-independent DIGEST, not the id list itself. It used to
+  // be Array.from(ids).sort().join(',') — O(n log n) plus a ~200 KB string, and
+  // the background duration analyzer changes the playlist identity once per
+  // batch, so an import re-paid that cost hundreds of times. Only equality ever
+  // matters here, so a scalar over the id set does the same job for free.
   const songIdSetKey = useMemo(() => {
-    const ids = new Set<string>();
-    for (const s of playlist) if (s.file) ids.add(s.id);
-    for (const s of originalPlaylist) if (s.file) ids.add(s.id);
-    return Array.from(ids).sort().join(',');
+    let xor = 0;
+    let sum = 0;
+    let count = 0;
+    const seen = new Set<string>();
+    const fold = (list: Song[]) => {
+      for (const s of list) {
+        if (!s.file || seen.has(s.id)) continue;
+        seen.add(s.id);
+        count++;
+        // FNV-1a over the id, combined both ways: XOR alone would cancel out
+        // under some add/remove pairs, the running sum won't.
+        let h = 0x811c9dc5;
+        for (let i = 0; i < s.id.length; i++) {
+          h ^= s.id.charCodeAt(i);
+          h = Math.imul(h, 0x01000193);
+        }
+        xor ^= h;
+        sum = (sum + h) | 0;
+      }
+    };
+    fold(playlist);
+    fold(originalPlaylist);
+    return `${count}:${(xor >>> 0).toString(36)}:${(sum >>> 0).toString(36)}`;
   }, [playlist, originalPlaylist]);
 
   // Persist BLOBS incrementally when the id set changes (add new, drop removed;
@@ -1710,7 +1802,20 @@ const App: React.FC = () => {
   // mid-scan still restores the full library.
   useEffect(() => {
     if (isRestoring || playlist.length === 0) return;
-    saveBlobsNow(playlist, originalPlaylist);
+    saveBlobsNow(playlist, originalPlaylist, (result) => {
+      // A library that only partly persisted used to fail COMPLETELY silently
+      // (console.warn and nothing else), so the user found out on the next
+      // reload when half their tracks were gone. Say it out loud instead.
+      if (!result.quotaExceeded && result.pending === 0) return;
+      const cached = result.total - result.pending;
+      setAnalysisNotification(
+        `Offline cache: ${cached.toLocaleString()} of ${result.total.toLocaleString()} tracks saved. ` +
+          (result.quotaExceeded
+            ? 'The browser is out of storage for this site — the rest will not survive a reload. ' +
+              'Free up disk space, or remove some tracks and re-import.'
+            : 'The remainder will be retried automatically.')
+      );
+    });
     // playlist/originalPlaylist are read but intentionally NOT deps — songIdSetKey
     // captures the only change that should write audio.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1741,6 +1846,21 @@ const App: React.FC = () => {
     playlist.forEach((s, i) => m.set(s.id, i));
     return m;
   }, [playlist]);
+
+  // Same idea for the whole library, but exposed through a ref. The background
+  // duration analyzer needs to look up songs by id, and it used to do that with
+  // originalPlaylist.find() while ALSO listing originalPlaylist as a dependency
+  // — so every batch both scanned the array and re-armed the effect that wrote
+  // it. Reading through a ref keeps the lookup O(1) and breaks that self-
+  // retriggering loop. Declared above the analyzer so React's in-order effect
+  // flush has it current before the analyzer's timer ever fires.
+  const originalSongById = useMemo(() => {
+    const m = new Map<string, Song>();
+    for (const s of originalPlaylist) m.set(s.id, s);
+    return m;
+  }, [originalPlaylist]);
+  const originalSongByIdRef = useRef(originalSongById);
+  useEffect(() => { originalSongByIdRef.current = originalSongById; }, [originalSongById]);
 
   // --- Library list virtualization ---
   // The library can hold hundreds of songs; rendering every row mounted a full
@@ -2568,13 +2688,28 @@ const App: React.FC = () => {
 
 
 
+  // Emitted-second gate for the clock below. See the note in updateTime.
+  const lastEmittedSecondRef = useRef(-1);
+
   useEffect(() => {
     const updateTime = () => {
       if (isPlaying && mainAudioRef.current) {
         // Use the audio element's currentTime directly
         const actualTime = mainAudioRef.current.currentTime;
-        setCurrTime(actualTime);
-        
+        // setCurrTime used to fire on EVERY animation frame, re-rendering the
+        // whole App ~60x/sec. Nothing downstream has sub-second resolution:
+        // the readout is formatDuration (whole seconds), the progress bar moves
+        // ~0.33%/sec on a five-minute track, the phi phase indicator uses coarse
+        // thresholds, and MediaSession would rather not be handed a position
+        // update every frame anyway. So only publish when the displayed second
+        // actually changes — ~60 renders/sec becomes ~1. The rAF loop itself
+        // still runs at frame rate, because the phi volume ramps below need it.
+        const second = Math.floor(actualTime);
+        if (second !== lastEmittedSecondRef.current) {
+          lastEmittedSecondRef.current = second;
+          setCurrTime(actualTime);
+        }
+
         // CHANGE 3: Apply phi-based temporal structure for dynamic volume
         if (enablePhiMode && phiTimingEnabled && currDuration > 0 && audioCtxRef.current) {
           const phiVolumes = integratePhiVolumes(volume, binauralVolume, solfeggioVolume, true);
@@ -2609,46 +2744,94 @@ const App: React.FC = () => {
 
 
   // BACKGROUND DURATION ANALYZER
+  //
+  // This was Θ(n²) over the library and was the single reason a large import
+  // wedged the tab. Per batch of 5 it did an O(n) originalPlaylist.find() for
+  // each track, then rebuilt BOTH full playlist arrays (n object spreads each,
+  // with an inner updates.find() per element), and because `originalPlaylist`
+  // sat in its own dependency array its own writes re-fired the effect — so an
+  // import paid all of that n/5 times. A 5,000-track library meant ~10M object
+  // spreads and 1,000 whole-App re-renders, on top of a hard 50-tracks/second
+  // ceiling from batchSize 5 every 100 ms.
+  //
+  // Three changes: O(1) Map lookups instead of scans, ONE array rebuild per
+  // time-boxed flush instead of one per batch, and the library is read through
+  // a ref so the effect no longer retriggers itself.
+  const flushDurationUpdates = useCallback(() => {
+    const updates = durationUpdatesRef.current;
+    if (updates.size === 0) return;
+    durationUpdatesRef.current = new Map();
+
+    // Returning `prev` unchanged when nothing matched keeps the array identity
+    // stable, so a flush that touches only originalPlaylist doesn't needlessly
+    // invalidate every memo keyed on playlist.
+    const apply = (prev: Song[]) => {
+      let changed = false;
+      const next = prev.map(s => {
+        const d = updates.get(s.id);
+        if (d === undefined) return s;
+        changed = true;
+        return { ...s, duration: d };
+      });
+      return changed ? next : prev;
+    };
+    setPlaylist(apply);
+    setOriginalPlaylist(apply);
+  }, []);
+
   useEffect(() => {
-    if (pendingDurationAnalysis.length === 0) return;
+    if (pendingDurationAnalysis.length === 0) {
+      flushDurationUpdates(); // queue drained — land the last partial batch
+      if (durationQueueActiveRef.current) {
+        durationQueueActiveRef.current = false;
+        // One healing sweep now that the queue is empty. Bounded: the rescan
+        // only re-queues tracks under MAX_DURATION_ATTEMPTS, and every pass
+        // increments the count, so a genuinely unreadable file converges.
+        setDurationDrainEpoch(e => e + 1);
+      }
+      return;
+    }
+    durationQueueActiveRef.current = true;
+
+    let cancelled = false;
 
     const processNextBatch = async () => {
-       const batchSize = 5;
+       // A deep scan owns the main thread; probing hard alongside it just loses
+       // the race and burns retry budget (hence the epoch reset further down).
+       const batchSize = isScanning ? DURATION_BATCH_SIZE_SCANNING : DURATION_BATCH_SIZE;
        const processing = pendingDurationAnalysis.slice(0, batchSize);
        const remaining = pendingDurationAnalysis.slice(batchSize);
-       
-       const updates: {id: string, duration: number}[] = [];
-       
-       // Process batch
+       const byId = originalSongByIdRef.current;
+
        await Promise.all(processing.map(async (id) => {
           // Count the attempt up front so the auto-rescan can't re-queue this
           // id in a tight loop even if it resolves to 0 (unreadable file).
           durationAttemptsRef.current.set(id, (durationAttemptsRef.current.get(id) || 0) + 1);
-          // Find song object in current playlist state (via ref or effect dependence) - using functional update below
-          const song = originalPlaylist.find(s => s.id === id);
+          const song = byId.get(id); // O(1) — was originalPlaylist.find()
           if (song && song.file) {
               const dur = await getAudioDuration(song.file);
-              updates.push({ id, duration: dur });
+              durationUpdatesRef.current.set(id, dur);
           }
        }));
-       
-       if (updates.length > 0) {
-           setPlaylist(prev => prev.map(s => {
-               const update = updates.find(u => u.id === s.id);
-               return update ? { ...s, duration: update.duration } : s;
-           }));
-           setOriginalPlaylist(prev => prev.map(s => {
-               const update = updates.find(u => u.id === s.id);
-               return update ? { ...s, duration: update.duration } : s;
-           }));
+
+       if (cancelled) return;
+
+       // Flush on a time budget, not per batch: one pair of array rebuilds
+       // every ~500 ms instead of one pair per 5 tracks.
+       const now = Date.now();
+       if (now - lastDurationFlushRef.current >= DURATION_FLUSH_MS || remaining.length === 0) {
+         lastDurationFlushRef.current = now;
+         flushDurationUpdates();
        }
-       
+
        setPendingDurationAnalysis(remaining);
     };
 
-    const timer = setTimeout(processNextBatch, 100);
-    return () => clearTimeout(timer);
-  }, [pendingDurationAnalysis, originalPlaylist]);
+    // No artificial gap when idle; keep one while scanning so the probes yield
+    // to the (CPU-bound) analysis.
+    const timer = setTimeout(processNextBatch, isScanning ? 100 : 0);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [pendingDurationAnalysis, isScanning, flushDurationUpdates]);
 
   // AUTO RE-SCAN FOR MISSING DURATIONS
   // Whenever the library changes (import, restore, reorder), re-queue any track
@@ -2659,11 +2842,21 @@ const App: React.FC = () => {
   // unreadable file converges instead of looping. It runs over
   // originalPlaylist — the whole library — so every generated playlist is
   // covered, not just the one on screen.
+  //
+  // Deliberately keyed on the library SIZE plus the two epochs, not on the
+  // originalPlaylist array identity. Keyed on identity it re-filtered the whole
+  // library once per duration batch — another O(n) term inside the import's
+  // quadratic loop, for a sweep that only has anything to do when tracks are
+  // added/removed (length), when a scan hands back a fresh retry budget
+  // (retry epoch), or when the queue has just drained (drain epoch).
   useEffect(() => {
-    const stuck = originalPlaylist
-      .filter(s => (!s.duration || s.duration === 0) && s.file &&
-                   (durationAttemptsRef.current.get(s.id) || 0) < MAX_DURATION_ATTEMPTS)
-      .map(s => s.id);
+    const stuck: string[] = [];
+    for (const s of originalSongByIdRef.current.values()) {
+      if ((!s.duration || s.duration === 0) && s.file &&
+          (durationAttemptsRef.current.get(s.id) || 0) < MAX_DURATION_ATTEMPTS) {
+        stuck.push(s.id);
+      }
+    }
     if (stuck.length === 0) return;
 
     setPendingDurationAnalysis(prev => {
@@ -2671,7 +2864,7 @@ const App: React.FC = () => {
       stuck.forEach(id => merged.add(id));
       return merged.size === prev.length ? prev : Array.from(merged);
     });
-  }, [originalPlaylist, durationRetryEpoch]);
+  }, [originalPlaylist.length, durationRetryEpoch, durationDrainEpoch]);
 
   // A deep scan saturates the main thread for minutes at a time, and the
   // duration probes running alongside it are exactly what loses that race —
@@ -2688,6 +2881,35 @@ const App: React.FC = () => {
     wasScanningRef.current = isScanning;
   }, [isScanning]);
 
+  // IMPORT PROGRESS
+  // An import's wall-clock is spent in the duration queue, so that queue is
+  // what the progress bar should track. Before this, isUploading flipped true
+  // and false inside one synchronous tick and uploadProgress never left 0 —
+  // a folder of a few thousand files gave the user a dead button and a list of
+  // rows reading "..." with no indication anything was happening.
+  useEffect(() => {
+    let total = durationQueueTotalRef.current;
+    const remaining = pendingDurationAnalysis.length;
+
+    if (remaining === 0) {
+      if (total !== 0) {
+        durationQueueTotalRef.current = 0;
+        setUploadProgress(100);
+      }
+      setIsUploading(false);
+      return;
+    }
+
+    // The auto-rescan can add to a queue that's already being drained; widen
+    // the denominator rather than letting progress run backwards.
+    if (remaining > total) {
+      total = remaining;
+      durationQueueTotalRef.current = remaining;
+    }
+    // Held below 100 so the number only reads "done" when the queue is empty.
+    setUploadProgress(Math.min(99, Math.round(((total - remaining) / total) * 100)));
+  }, [pendingDurationAnalysis]);
+
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -2696,8 +2918,17 @@ const App: React.FC = () => {
     setIsUploading(true);
     setUploadProgress(0);
 
-    const fileList = (Array.from(files) as File[]).filter(f => f.type.includes('audio') || f.name.endsWith('.wav') || f.name.endsWith('.mp3'));
-    
+    // Windows reports File.type from the shell registry rather than the file
+    // itself, so .flac/.m4a/.ogg routinely arrive with an EMPTY type. The old
+    // filter was `type.includes('audio')` with a filename fallback for .wav and
+    // .mp3 ONLY — which meant whole formats vanished on import with no message.
+    // See isImportableAudio: extension first, MIME as a narrowed backstop. WMA,
+    // ALAC and .m3u/.pls playlists are excluded on purpose — Chrome can't decode
+    // the first two, and the last aren't tracks at all.
+    const fileArray = Array.from(files) as File[];
+    const fileList = fileArray.filter(isImportableAudio);
+    const skippedCount = fileArray.length - fileList.length;
+
     // 1. Create Song objects immediately with 0 duration to unblock UI
     const newSongs: Song[] = fileList.map(file => {
         let displayName = file.name.replace(/\.[^/.]+$/, "");
@@ -2721,15 +2952,31 @@ const App: React.FC = () => {
 
     setPlaylist(prev => {
         const updated = [...prev, ...newSongs];
-        setOriginalPlaylist(updated); 
+        setOriginalPlaylist(updated);
         return updated;
     });
 
-    // 2. Queue for background analysis
-    setPendingDurationAnalysis(prev => [...prev, ...newSongs.map(s => s.id)]);
-    
-    setIsUploading(false);
-    event.target.value = ''; 
+    // 2. Queue for background analysis. The queue length is also what drives
+    //    the import progress readout, so record the total here.
+    setPendingDurationAnalysis(prev => {
+        const next = [...prev, ...newSongs.map(s => s.id)];
+        durationQueueTotalRef.current = next.length;
+        return next;
+    });
+
+    // isUploading is NOT cleared here. It used to be — set true and false in
+    // the same synchronous tick — so the percentage never moved and importing a
+    // large folder looked like a frozen tab for minutes while durations filled
+    // in behind it. The queue-watcher effect clears it when the work is done.
+    if (skippedCount > 0) {
+        setAnalysisNotification(
+            `Importing ${fileList.length.toLocaleString()} tracks. ` +
+            `Skipped ${skippedCount.toLocaleString()} file${skippedCount === 1 ? '' : 's'} ` +
+            `that ${skippedCount === 1 ? 'is' : 'are'} not a supported audio format ` +
+            `(Chrome can't decode WMA or Apple Lossless).`
+        );
+    }
+    event.target.value = '';
   };
 
   const scanLibrary = async () => {
@@ -3435,7 +3682,7 @@ const App: React.FC = () => {
     // Wipe in-memory playlist state.
     setPlaylist([]);
     setOriginalPlaylist([]);
-    setFilteredPlaylist([]);
+    // filteredPlaylist derives from playlist, so emptying that empties it too.
     setCurrentSongIndex(-1);
     clearLoShuWalkMode();
 
@@ -5478,10 +5725,14 @@ registerProcessor('wav-capture', WavCapture);
     }
   };
 
-  const getTotalDuration = () => {
-    const totalSeconds = playlist.reduce((acc, song) => acc + (song.duration || 0), 0);
-    return formatDuration(totalSeconds);
-  };
+  // Memoized: this was a plain function called during render, and the render it
+  // was called in runs on every animation frame during playback. At a few
+  // thousand tracks that was ~300,000 reduce iterations per second to produce
+  // one footer string that only changes when a duration does.
+  const totalDurationLabel = useMemo(
+    () => formatDuration(playlist.reduce((acc, song) => acc + (song.duration || 0), 0)),
+    [playlist]
+  );
 
   // Media Session Integration for Vehicle Controls.
   // Memoized so the object identity only changes when the track or frequency
@@ -5635,6 +5886,15 @@ registerProcessor('wav-capture', WavCapture);
           {/* Offline Indicator */}
           <OfflineIndicator showWhenOnline={true} />
 
+          {/* Restore-in-progress toast — only for libraries large enough that
+              reading them back off disk takes long enough to notice. */}
+          {restoreProgress && (
+            <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 border border-slate-700 text-slate-300 text-xs px-4 py-2 rounded-full backdrop-blur shadow-lg flex items-center gap-2">
+              <Loader2 size={12} className="animate-spin text-gold-500" />
+              Loading library — {restoreProgress.loaded.toLocaleString()} / {restoreProgress.total.toLocaleString()} tracks
+            </div>
+          )}
+
           {/* Restore toast — brief confirmation that the cached library is back. */}
           {isRestoring && playlist.length > 0 && (
             <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-900/90 border border-emerald-500/30 text-emerald-200 text-xs px-4 py-2 rounded-full backdrop-blur shadow-lg">
@@ -5722,7 +5982,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.4</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.5</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -6534,29 +6794,51 @@ registerProcessor('wav-capture', WavCapture);
                */}
 
                <div className="grid grid-cols-2 gap-2 mb-3">
-                   <label className="flex items-center justify-center gap-2 p-3 border border-slate-700 rounded-lg cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all active:scale-95 group text-xs">
-                      <Upload size={16} className="group-hover:animate-bounce" />
-                      <span className="font-semibold">Import Folder</span>
+                   <label className={`flex items-center justify-center gap-2 p-3 border border-slate-700 rounded-lg cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all active:scale-95 group text-xs ${isUploading ? 'opacity-60 pointer-events-none' : ''}`}>
+                      {isUploading
+                        ? <Loader2 size={16} className="animate-spin text-gold-500" />
+                        : <Upload size={16} className="group-hover:animate-bounce" />}
+                      <span className="font-semibold">{isUploading ? `${uploadProgress}%` : 'Import Folder'}</span>
                       <input
                         type="file"
                         {...({ webkitdirectory: "", directory: "" } as any)}
                         multiple
+                        disabled={isUploading}
                         className="hidden"
                         onChange={handleFileUpload}
                       />
                    </label>
-                   
-                   <label className="flex items-center justify-center gap-2 p-3 border border-slate-700 rounded-lg cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all active:scale-95 text-xs">
-                      <FilePlus size={16} />
-                      <span className="font-semibold">Add Files</span>
+
+                   <label className={`flex items-center justify-center gap-2 p-3 border border-slate-700 rounded-lg cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all active:scale-95 text-xs ${isUploading ? 'opacity-60 pointer-events-none' : ''}`}>
+                      {isUploading
+                        ? <Loader2 size={16} className="animate-spin text-gold-500" />
+                        : <FilePlus size={16} />}
+                      <span className="font-semibold">{isUploading ? `${uploadProgress}%` : 'Add Files'}</span>
                       <input
                         type="file"
                         multiple
+                        disabled={isUploading}
                         className="hidden"
                         onChange={handleFileUpload}
                       />
                    </label>
                </div>
+
+               {/* Import progress. A few thousand files take a while to read
+                   track lengths from; without this the tab just looks stuck. */}
+               {isUploading && (
+                 <div className="mb-3">
+                   <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+                     <div
+                       className="h-full bg-gold-500 transition-all duration-200"
+                       style={{ width: `${uploadProgress}%` }}
+                     />
+                   </div>
+                   <div className="mt-1 text-[10px] text-slate-500 text-center">
+                     Reading track lengths — {pendingDurationAnalysis.length.toLocaleString()} to go
+                   </div>
+                 </div>
+               )}
                
                {/* Search Section */}
                <div className="relative mb-3">
@@ -6955,7 +7237,7 @@ registerProcessor('wav-capture', WavCapture);
                     : `${playlist.length} Tracks`
                   }
                 </span>
-                <span className="text-gold-500/80">{getTotalDuration()} Total</span>
+                <span className="text-gold-500/80">{totalDurationLabel} Total</span>
             </div>
             {/* Clear Playlist & Cache — deliberately below the footer (in the
                 reserved bottom margin) so it needs a scroll-down-and-tap and is
