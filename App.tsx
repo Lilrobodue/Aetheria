@@ -146,6 +146,25 @@ const formatDuration = (seconds: number) => {
   return `${m}:${s.toString().padStart(2, '0')}`;
 };
 
+/** Extensions Chrome can actually decode. Checked FIRST, so an audio file still
+ *  imports on the rare occasion the browser hands us a blank File.type (a file
+ *  off a network share, an odd content provider). In practice Chromium fills
+ *  the type in from its own extension table, so this is a safety net rather
+ *  than the main path — the MIME check below does most of the work. */
+const AUDIO_FILE_RE = /\.(mp3|wav|flac|m4a|mp4|aac|ogg|oga|opus|webm|aif|aiff)$/i;
+
+/** MIME types that START with "audio/" but are NOT a decodable track, so the
+ *  MIME backstop below can't quietly re-admit what the extension list rejects.
+ *  Chrome hands .m3u "audio/x-mpegurl" and .wma "audio/x-ms-wma" — the first is
+ *  a playlist, the second Chrome cannot decode. */
+const AUDIO_MIME_DENY_RE = /(mpegurl|scpls|ms-wma|ms-wax|ms-asf|realaudio)/i;
+
+/** The single source of truth for "is this an audio file we can play?". */
+const isImportableAudio = (f: File): boolean => {
+  if (AUDIO_FILE_RE.test(f.name)) return true;
+  return f.type.startsWith('audio/') && !AUDIO_MIME_DENY_RE.test(f.type);
+};
+
 const getAudioDuration = (file: File): Promise<number> => {
   return new Promise((resolve) => {
     const objectUrl = URL.createObjectURL(file);
@@ -2696,8 +2715,17 @@ const App: React.FC = () => {
     setIsUploading(true);
     setUploadProgress(0);
 
-    const fileList = (Array.from(files) as File[]).filter(f => f.type.includes('audio') || f.name.endsWith('.wav') || f.name.endsWith('.mp3'));
-    
+    // The filter used to be `type.includes('audio')` with a filename fallback
+    // for .wav and .mp3 only. The substring test was too loose: Chrome reports
+    // .m3u as "audio/x-mpegurl" and .wma as "audio/x-ms-wma", so playlists and
+    // files Chrome cannot decode were both imported as if they were tracks —
+    // they sat in the library showing "..." and failed on play. See
+    // isImportableAudio. Anything skipped is now reported rather than
+    // disappearing without a word.
+    const fileArray = Array.from(files) as File[];
+    const fileList = fileArray.filter(isImportableAudio);
+    const skippedCount = fileArray.length - fileList.length;
+
     // 1. Create Song objects immediately with 0 duration to unblock UI
     const newSongs: Song[] = fileList.map(file => {
         let displayName = file.name.replace(/\.[^/.]+$/, "");
@@ -2727,9 +2755,17 @@ const App: React.FC = () => {
 
     // 2. Queue for background analysis
     setPendingDurationAnalysis(prev => [...prev, ...newSongs.map(s => s.id)]);
-    
+
     setIsUploading(false);
-    event.target.value = ''; 
+    if (skippedCount > 0) {
+        setAnalysisNotification(
+            `Added ${fileList.length.toLocaleString()} tracks. ` +
+            `Skipped ${skippedCount.toLocaleString()} file${skippedCount === 1 ? '' : 's'} ` +
+            `that ${skippedCount === 1 ? 'is' : 'are'} not a playable audio format ` +
+            `(Chrome can't decode WMA or Apple Lossless).`
+        );
+    }
+    event.target.value = '';
   };
 
   const scanLibrary = async () => {
@@ -5722,7 +5758,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.8</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.9</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
