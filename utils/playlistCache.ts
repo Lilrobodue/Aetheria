@@ -73,8 +73,13 @@ const BLOB_CHUNK_BYTES = 200 * 1024 * 1024; // 200 MB
 const RESTORE_CHUNK = 200;
 
 // Headroom left free beyond the payload we are about to write, so a save never
-// fills the origin quota to the brim.
-const CAPACITY_HEADROOM_MB = 100;
+// fills the origin quota to the brim. Applied PER CHUNK, so it must stay small:
+// at 100 MB a 2 MB chunk demanded 102 MB of free space, which on a device
+// anywhere near its quota blocked every write while looking like a disk-space
+// problem. The real limit is enforced by the QuotaExceededError branch below;
+// this is only a "don't run it right to the edge" margin.
+const CAPACITY_HEADROOM_MB = 10;
+
 
 // ----------------------------------------------------------------------------
 // Cached shapes
@@ -133,6 +138,11 @@ export interface BlobSaveResult {
   pending: number;
   total: number;
   quotaExceeded: boolean;
+  /** Real numbers from the Storage API, filled in when the cache runs short.
+   *  Surfaced in the UI so a storage problem reports itself rather than needing
+   *  a console on a phone to diagnose. */
+  availableMB?: number;
+  quotaMB?: number;
 }
 
 // ----------------------------------------------------------------------------
@@ -245,7 +255,12 @@ function metaSignature(song: Song): string {
     song.fractalAnalysis ? '1' : '0',
     song.intervalAnalysis ? '1' : '0',
     song.isAetheriaCandidate ? '1' : '0',
-    song.bandEnvelope ? song.bandEnvelope.sub.length : '0',
+    // Optional-chained all the way down on purpose. This runs inside
+    // saveMetaAndState's try block, and a throw here would abort BEFORE the
+    // playlist-state record is written — and without that record restore
+    // returns null, i.e. the whole library silently disappears. A malformed
+    // envelope must never be able to cost the user their cache.
+    song.bandEnvelope?.sub?.length ?? '0',
   ].join('|');
 }
 
@@ -370,22 +385,36 @@ async function saveBlobs(
     }
 
     if (toAdd.length > 0) {
-      // Size the capacity check by what we are ACTUALLY about to write. The old
-      // flat 100 MB floor happily waved through a 40 GB import.
       const addBytes = toAdd.reduce((acc, s) => acc + (s.file?.size || 0), 0);
-      const requiredMB = addBytes / (1024 * 1024) + CAPACITY_HEADROOM_MB;
-      if (!(await hasStorageCapacity(requiredMB))) {
-        db.close();
-        result.pending = toAdd.length;
-        result.quotaExceeded = true;
-        return result;
-      }
+      console.log(
+        `[PlaylistCache] Caching ${toAdd.length} new tracks ` +
+          `(${(addBytes / 1048576).toFixed(0)} MB) in chunks`
+      );
 
       // Worth asking before committing gigabytes to a cache the browser is
       // otherwise free to evict.
       await requestPersistentStorage();
 
+      // Capacity is checked PER CHUNK, against that chunk's size only.
+      //
+      // It was briefly checked against the whole import up front, refusing to
+      // write anything unless the entire library fit — which defeated the point
+      // of chunking and was a straight regression against the old flat 100 MB
+      // floor. On phones, where estimate() reports a far smaller quota than on
+      // desktop, a few-hundred-track library tripped it and cached NOTHING, so
+      // every launch re-imported and re-scanned from scratch. Write as much as
+      // actually fits; the remainder resumes on the next save.
       for (const chunk of chunkSongs(toAdd)) {
+        const chunkMB = chunk.reduce((a, s) => a + (s.file?.size || 0), 0) / 1048576;
+        if (!(await hasStorageCapacity(chunkMB + CAPACITY_HEADROOM_MB))) {
+          result.quotaExceeded = true;
+          Object.assign(result, await storageSnapshot());
+          console.warn(
+            `[PlaylistCache] Stopping after ${result.written} of ${toAdd.length} new tracks — ` +
+              `not enough room for the next ${chunkMB.toFixed(0)} MB. Everything written so far is kept.`
+          );
+          break;
+        }
         try {
           const tx = db.transaction(BLOBS_STORE, 'readwrite');
           const store = tx.objectStore(BLOBS_STORE);
@@ -395,6 +424,7 @@ async function saveBlobs(
         } catch (err) {
           if (isQuotaError(err)) {
             result.quotaExceeded = true;
+            Object.assign(result, await storageSnapshot());
             console.warn(
               `[PlaylistCache] Out of storage after ${result.written} of ${toAdd.length} ` +
                 `new tracks. Everything written so far is kept; the rest retries next save.`
@@ -655,6 +685,18 @@ async function clearPlaylistCache(): Promise<void> {
  *  diagnostic to block caching on a perfectly capable device.
  *  Callers pass the size of the payload they are about to write; the default is
  *  only a floor, for callers with nothing heavy to save. */
+/** Current quota/usage in MB, or null if the Storage API isn't available. */
+async function storageSnapshot(): Promise<{ availableMB: number; quotaMB: number } | null> {
+  try {
+    if (!navigator.storage?.estimate) return null;
+    const est = await navigator.storage.estimate();
+    const quotaMB = (est.quota || 0) / 1048576;
+    return { availableMB: quotaMB - (est.usage || 0) / 1048576, quotaMB };
+  } catch {
+    return null;
+  }
+}
+
 async function hasStorageCapacity(requiredMB: number = 100): Promise<boolean> {
   try {
     if (!navigator.storage?.estimate) return true;
@@ -711,16 +753,22 @@ function debouncedSaveMeta(
 ): void {
   if (metaTimer) clearTimeout(metaTimer);
   metaTimer = setTimeout(async () => {
-    // Metadata is light; the default floor check is enough here.
-    if (await hasStorageCapacity()) {
-      await saveMetaAndState(
-        playlist,
-        originalPlaylist,
-        currentSongIndex,
-        loShuWalkMode,
-        selectedSolfeggio
-      );
-    }
+    // NO capacity pre-check here, deliberately.
+    //
+    // Metadata and the playlist-state record are kilobytes, and state is the
+    // INDEX — restore reads playlistOrder first and bails out entirely without
+    // it. Gating it behind a megabyte-scale free-space check (it used to share
+    // the audio's flat 100 MB floor) meant a device near its quota could hold a
+    // perfectly good set of audio blobs and still restore nothing, because the
+    // few-KB index was the one write that got skipped. Always attempt it; the
+    // try/catch inside saveMetaAndState is the correct place for a real failure.
+    await saveMetaAndState(
+      playlist,
+      originalPlaylist,
+      currentSongIndex,
+      loShuWalkMode,
+      selectedSolfeggio
+    );
   }, delayMs);
 }
 

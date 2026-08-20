@@ -146,6 +146,14 @@ const formatDuration = (seconds: number) => {
   return `${m}:${s.toString().padStart(2, '0')}`;
 };
 
+/** Concurrent <audio> duration probes, sized to the device. Phones report 4-8
+ *  cores and throttle hard under sustained decode; laptops report 8-16 and
+ *  don't. Computed once at module load — hardwareConcurrency never changes. */
+const DEVICE_DURATION_BATCH = Math.max(
+  4,
+  Math.min(12, Math.floor((navigator.hardwareConcurrency || 4) * 0.75))
+);
+
 /** Extensions Chrome can actually decode. Used instead of trusting File.type,
  *  which Windows leaves empty for plenty of perfectly good audio files. */
 const AUDIO_FILE_RE = /\.(mp3|wav|flac|m4a|mp4|aac|ogg|oga|opus|webm|aif|aiff)$/i;
@@ -1247,12 +1255,21 @@ const App: React.FC = () => {
   const durationQueueActiveRef = useRef(false);
 
   // How many duration probes run at once. Each one spins up a real <audio>
-  // element, and mobile browsers cap concurrent media elements far lower than
-  // desktop, so this stays conservative rather than maximal — the old value of
-  // 5 (paired with a 100 ms inter-batch delay) capped the whole import at 50
+  // element, so this is genuine decode work, not bookkeeping. The old value of
+  // 5 paired with a 100 ms inter-batch delay capped the whole import at 50
   // tracks/second, which is what made a few thousand files take minutes.
-  const DURATION_BATCH_SIZE = 12;
+  //
+  // Scaled to the device rather than fixed: a flat 12-wide batch with no gap is
+  // fine on a laptop but cooks a phone, which has fewer cores, caps concurrent
+  // media elements lower, and thermally throttles long before a desktop would.
+  // hardwareConcurrency is the only proxy the platform gives us. Even at the
+  // low end this is several times the old throughput, because the 100 ms gap
+  // between batches is gone.
+  const DURATION_BATCH_SIZE = DEVICE_DURATION_BATCH;
   const DURATION_BATCH_SIZE_SCANNING = 4;
+  // A one-frame yield between batches so the main thread stays interactive and
+  // the device gets a moment to breathe. Zero gap measurably ran phones hot.
+  const DURATION_IDLE_GAP_MS = 16;
   // Resolved durations are buffered here and written to state on a time budget
   // instead of once per batch — see flushDurationUpdates.
   const DURATION_FLUSH_MS = 500;
@@ -1808,12 +1825,18 @@ const App: React.FC = () => {
       // reload when half their tracks were gone. Say it out loud instead.
       if (!result.quotaExceeded && result.pending === 0) return;
       const cached = result.total - result.pending;
+      // Include the real Storage API numbers: on a phone there's no console to
+      // check, so the message has to carry enough to diagnose itself.
+      const room = result.quotaMB
+        ? ` Browser storage for this site: ${Math.round(result.availableMB ?? 0).toLocaleString()} MB free ` +
+          `of ${Math.round(result.quotaMB).toLocaleString()} MB.`
+        : '';
       setAnalysisNotification(
-        `Offline cache: ${cached.toLocaleString()} of ${result.total.toLocaleString()} tracks saved. ` +
+        `Offline cache: ${cached.toLocaleString()} of ${result.total.toLocaleString()} tracks saved.` +
           (result.quotaExceeded
-            ? 'The browser is out of storage for this site — the rest will not survive a reload. ' +
-              'Free up disk space, or remove some tracks and re-import.'
-            : 'The remainder will be retried automatically.')
+            ? ` Ran out of room, so the rest won't survive a reload.${room} ` +
+              'Free up space on the device, or remove some tracks.'
+            : ' The remainder will be retried automatically.')
       );
     });
     // playlist/originalPlaylist are read but intentionally NOT deps — songIdSetKey
@@ -2827,9 +2850,9 @@ const App: React.FC = () => {
        setPendingDurationAnalysis(remaining);
     };
 
-    // No artificial gap when idle; keep one while scanning so the probes yield
-    // to the (CPU-bound) analysis.
-    const timer = setTimeout(processNextBatch, isScanning ? 100 : 0);
+    // A one-frame gap when idle, a longer one while scanning so the probes
+    // yield to the (CPU-bound) analysis.
+    const timer = setTimeout(processNextBatch, isScanning ? 100 : DURATION_IDLE_GAP_MS);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [pendingDurationAnalysis, isScanning, flushDurationUpdates]);
 
@@ -5982,7 +6005,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.5</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.6</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
