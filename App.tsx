@@ -2713,10 +2713,41 @@ const App: React.FC = () => {
 
   // Emitted-second gate for the clock below. See the note in updateTime.
   const lastEmittedSecondRef = useRef(-1);
+  // The clock loop rides on rAF but does its work at CLOCK_HZ, not frame rate.
+  //
+  // Running the body 60x/sec was always wasteful, and it turned into a real
+  // thermal problem the moment the per-frame re-render was removed. Before
+  // that, the 60fps setCurrTime saturated the main thread and the browser
+  // silently DROPPED animation frames — measured at ~57 rAF/sec on a loaded
+  // library. With the render cost gone there was nothing in the way, so the
+  // loop started landing every frame (~92 rAF/sec including the visualiser):
+  // less jank, but materially more sustained CPU, which a phone reports as
+  // heat during playback. Freeing the main thread only helps if the freed
+  // capacity isn't immediately spent.
+  //
+  // 10 Hz is comfortably enough for everything downstream: the readout is
+  // whole seconds, and the phi ramps below use setTargetAtTime with a 0.3 s
+  // time constant, so scheduling them faster than the smoothing itself was
+  // never doing anything.
+  // Scheduled as setTimeout -> rAF rather than a rAF chain gated by a timer
+  // check, so the main thread is only WOKEN ~10x/sec instead of 60x/sec to
+  // immediately return. Keeping rAF as the second half preserves the previous
+  // behaviour exactly where it matters: while the tab is hidden rAF never
+  // fires, so the loop parks itself and resumes on the next visible frame.
+  const CLOCK_HZ = 10;
+  const clockTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const scheduleTick = () => {
+      clockTimerRef.current = window.setTimeout(() => {
+        rafRef.current = requestAnimationFrame(updateTime);
+      }, 1000 / CLOCK_HZ);
+    };
+
     const updateTime = () => {
       if (isPlaying && mainAudioRef.current) {
+        scheduleTick();
+
         // Use the audio element's currentTime directly
         const actualTime = mainAudioRef.current.currentTime;
         // setCurrTime used to fire on EVERY animation frame, re-rendering the
@@ -2725,8 +2756,8 @@ const App: React.FC = () => {
         // ~0.33%/sec on a five-minute track, the phi phase indicator uses coarse
         // thresholds, and MediaSession would rather not be handed a position
         // update every frame anyway. So only publish when the displayed second
-        // actually changes — ~60 renders/sec becomes ~1. The rAF loop itself
-        // still runs at frame rate, because the phi volume ramps below need it.
+        // actually changes, so the App re-renders about once a second instead
+        // of sixty times.
         const second = Math.floor(actualTime);
         if (second !== lastEmittedSecondRef.current) {
           lastEmittedSecondRef.current = second;
@@ -2757,12 +2788,16 @@ const App: React.FC = () => {
             );
           }
         }
-        
-        rafRef.current = requestAnimationFrame(updateTime);
+        // NOTE: the next tick is scheduled at the TOP of this callback.
+        // Scheduling here as well would queue two chains and the loop would
+        // double on every tick.
       }
     };
-    if (isPlaying) rafRef.current = requestAnimationFrame(updateTime);
-    return () => cancelAnimationFrame(rafRef.current);
+    if (isPlaying) scheduleTick();
+    return () => {
+      if (clockTimerRef.current !== null) clearTimeout(clockTimerRef.current);
+      cancelAnimationFrame(rafRef.current);
+    };
   }, [isPlaying, enablePhiMode, phiTimingEnabled, currDuration, volume, binauralVolume, solfeggioVolume]);
 
 
@@ -6005,7 +6040,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.6</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v13.7</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
