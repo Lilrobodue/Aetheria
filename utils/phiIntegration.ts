@@ -200,10 +200,10 @@ export function logPhiRelationships(musicVolume: number = 1.0, trackDuration: nu
  *   layer at the output            = trimmedValue * busGain
  *   bus gain                       = volume * MUSIC_OUTPUT_LEVEL * LAYER_BALANCE_ATTEN = 0.4
  *
- *   binaural  = 0.8 * INV_PHI         * (0.03/0.03) * 0.161 = 0.0796
- *               -> 0.0796 * 0.4 = 0.0318 at output = -28 dB under the music
- *   solfeggio = 0.8 * INV_PHI_SQUARED * (0.01/0.01) * 0.184 = 0.0562
- *               -> 0.0562 * 0.4 = 0.0225 at output = -31 dB under the music
+ *   binaural  = 0.8 * INV_PHI         * (0.03/0.03) * 0.287 = 0.1419
+ *               -> 0.1419 * 0.4 = 0.0568 at output = -23 dB under the music
+ *   solfeggio = 0.8 * INV_PHI_SQUARED * (0.01/0.01) * 0.328 = 0.1002
+ *               -> 0.1002 * 0.4 = 0.0401 at output = -26 dB under the music
  *
  * NOTE: MUSIC_OUTPUT_LEVEL (App.tsx) replaced a hard-coded 0.18 headroom factor.
  * It scales the music AND this bus by the same amount, so the dB figures below
@@ -216,17 +216,21 @@ export function logPhiRelationships(musicVolume: number = 1.0, trackDuration: nu
  *   v13.1      0.287 / 0.328  -> -23 / -26 dB. Clearly audible.
  *   v13.2      0.161 / 0.184  -> -28 / -31 dB. Pulled back 5 dB while chasing a
  *                               vinyl-warble report on lo-fi / slow tracks.
+ *   v14.4      0.287 / 0.328  -> -23 / -26 dB. CURRENT. v13.2's pullback reverted.
  *
- * NOTE on v13.2: the warble's diagnosed cause was elsewhere — preservesPitch was
- * defaulting to true, so playbackRate ran a WSOLA time-stretcher (see
- * applyPlaybackRate in App.tsx). This 5 dB reduction was precautionary, on the
- * theory that the layers are more exposed on sparse material and that binaural's
- * two close sine tones beat. If the slider A/B shows the layers were NOT a
- * contributor, revert to the v13.1 values rather than leaving them quiet for no
- * reason.
+ * WHY v14.4 reverted v13.2: the warble's diagnosed cause was elsewhere entirely —
+ * preservesPitch was defaulting to true, so playbackRate ran a WSOLA time-stretcher
+ * (see applyPlaybackRate in App.tsx). The 5 dB cut was precautionary, on the theory
+ * that the layers are more exposed on sparse material and that binaural's two close
+ * sine tones beat. That theory was never confirmed, and the layers spent two minor
+ * versions quiet for no reason. Restored alongside the v14.1 output-level fix, which
+ * removed a second unjustified precautionary attenuation (MUSIC_OUTPUT_LEVEL).
+ *
+ * If the warble ever returns on lo-fi / slow material, check preservesPitch FIRST —
+ * these trims are the wrong place to look.
  */
-const BINAURAL_TRIM = 0.161;
-const SOLFEGGIO_TRIM = 0.184;
+const BINAURAL_TRIM = 0.287;
+const SOLFEGGIO_TRIM = 0.328;
 
 export function integratePhiVolumes(
   currentMusicVolume: number,
