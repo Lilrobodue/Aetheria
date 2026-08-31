@@ -196,14 +196,18 @@ export function logPhiRelationships(musicVolume: number = 1.0, trackDuration: nu
  *
  * Derivation (defaults: volume 0.8, binauralVolume 0.03, solfeggioVolume 0.01):
  *
- *   music reference at the output  = volume * 0.18 * duckComp   = 0.144  (desktop)
+ *   music reference at the output  = volume * MUSIC_OUTPUT_LEVEL * duckComp = 0.8 (desktop)
  *   layer at the output            = trimmedValue * busGain
- *   bus gain                       = volume * 0.18 * LAYER_BALANCE_ATTEN = 0.072
+ *   bus gain                       = volume * MUSIC_OUTPUT_LEVEL * LAYER_BALANCE_ATTEN = 0.4
  *
  *   binaural  = 0.8 * INV_PHI         * (0.03/0.03) * 0.161 = 0.0796
- *               -> 0.0796 * 0.072 = 0.0057 at output = -28 dB under the music
+ *               -> 0.0796 * 0.4 = 0.0318 at output = -28 dB under the music
  *   solfeggio = 0.8 * INV_PHI_SQUARED * (0.01/0.01) * 0.184 = 0.0562
- *               -> 0.0562 * 0.072 = 0.0041 at output = -31 dB under the music
+ *               -> 0.0562 * 0.4 = 0.0225 at output = -31 dB under the music
+ *
+ * NOTE: MUSIC_OUTPUT_LEVEL (App.tsx) replaced a hard-coded 0.18 headroom factor.
+ * It scales the music AND this bus by the same amount, so the dB figures below
+ * are unchanged — they are ratios under the music, not absolute levels.
  *
  * HISTORY — the values to reach for when reverting:
  *   pre-v13.1  0.05  / 0.03   -> -38 / -47 dB. Far below audibility; the

@@ -91,6 +91,22 @@ const MOBILE_MUSIC_DUCK_COMPENSATION = 1.6;
 // scales the bus, so changing it moves both layers together.
 const LAYER_BALANCE_ATTEN = 0.5;
 
+// MASTER OUTPUT LEVEL — how loud the music element and the layer bus run.
+//
+// This was a hard-coded 0.18 (~-15 dB) in every gain formula, described as
+// "ultra-conservative volume scaling to prevent any distortion". It predates
+// direct playback, when the music still ran through the Web Audio bus and could
+// sum with the layers into clipping. With the music now on the <audio> element
+// (its own path straight to the OS mixer) that headroom bought nothing — it just
+// made every track ~15 dB quieter than the same file on YouTube, so listeners
+// had to push the system volume up and lost body and richness on the way.
+//
+// 1.0 = play the file at its native level, which is what every other player
+// does. The layer bus is scaled by this SAME constant at all three call sites,
+// so the music : binaural : solfeggio balance is exactly what it was — only the
+// overall level moved. To restore the old headroom, set this back to 0.18.
+const MUSIC_OUTPUT_LEVEL = 1.0;
+
 // The media-session anchor element is SILENT — its only job is to hold the
 // lock-screen card. We do NOT put the audible drone on it: an <audio loop> isn't
 // gapless (it drops out every loop) and a fixed audible tone beats against
@@ -2026,10 +2042,15 @@ const App: React.FC = () => {
         masterBusRef.current.gain.value = 1.0;
         masterBusRef.current.connect(audioCtxRef.current.destination);
 
-        // SAFETY LIMITER — deliberately NOT connected. With the clamp in
-        // integratePhiVolumes the worst-case bus total is ~0.28 of full scale, so
-        // a -0.5 dB limiter would never engage, and DynamicsCompressorNode adds
-        // ~6 ms of lookahead latency that would skew A/V sync in video captures.
+        // SAFETY LIMITER — still NOT connected, but the headroom margin is now
+        // much thinner than it was. The old worst-case bus total was ~0.28 of
+        // full scale (2.0 clamped layer input * volume * 0.18 * 0.5, plus the
+        // 0.10 drone). With MUSIC_OUTPUT_LEVEL at 1.0 that becomes volume * 1.1,
+        // i.e. ~0.88 at the default volume of 0.8 but ~1.1 — clipping — with the
+        // volume AND the solfeggio/binaural sliders all pushed to maximum. The
+        // music itself is unaffected either way: it plays on the <audio> element
+        // and never touches this bus. DynamicsCompressorNode adds ~6 ms of
+        // lookahead latency, which is why this is not simply switched on.
         // To enable it later, this is the only change needed:
         //   masterBusRef.current.disconnect(audioCtxRef.current.destination);
         //   masterBusRef.current.connect(limiter);
@@ -2043,7 +2064,7 @@ const App: React.FC = () => {
         // first play. (This used to be a flat 0.7 — a ~9.7x overshoot for the half
         // second before the effect ramped it down.) Read through volumeRef because
         // initAudio has empty deps and would otherwise capture a stale `volume`.
-        gainNodeRef.current.gain.value = volumeRef.current * 0.18 * LAYER_BALANCE_ATTEN;
+        gainNodeRef.current.gain.value = volumeRef.current * MUSIC_OUTPUT_LEVEL * LAYER_BALANCE_ATTEN;
 
         gainNodeRef.current.connect(masterBusRef.current);
 
@@ -2218,8 +2239,8 @@ const App: React.FC = () => {
 
   // Apply the music volume directly on the <audio> element. With direct
   // playback the element is the music output (not the Web Audio gain node), so
-  // its volume IS the music level. We keep the same * 0.18 scaling the old
-  // Web Audio master used, so perceived music loudness is unchanged.
+  // its volume IS the music level. Scaled by MUSIC_OUTPUT_LEVEL — the single
+  // knob for overall playback loudness (was a hard-coded 0.18).
   const applyMusicElementVolume = useCallback(() => {
     const el = mainAudioRef.current;
     if (!el) return;
@@ -2228,8 +2249,12 @@ const App: React.FC = () => {
       : { music: volume };
     // On mobile, boost to offset Chrome's ducking caused by the silent anchor
     // (see MOBILE_MUSIC_DUCK_COMPENSATION). Clamp keeps it safe at the top.
+    // NOTE since MUSIC_OUTPUT_LEVEL went to 1.0: HTMLMediaElement.volume cannot
+    // exceed 1.0, so on mobile this compensation now runs out of room — the
+    // slider reaches full output at ~0.63 and the top of its travel is flat.
+    // That is a ceiling, not a loss: mobile is still far louder than it was.
     const duckComp = IS_MOBILE_DEVICE ? MOBILE_MUSIC_DUCK_COMPENSATION : 1;
-    el.volume = Math.max(0, Math.min(1, vols.music * 0.18 * duckComp));
+    el.volume = Math.max(0, Math.min(1, vols.music * MUSIC_OUTPUT_LEVEL * duckComp));
   }, [enablePhiMode, volume]);
 
   useEffect(() => {
@@ -2238,7 +2263,7 @@ const App: React.FC = () => {
 
     // The gain node no longer carries the music — only the binaural / solfeggio
     // layers route through it — but it stays the master for THOSE layers, and
-    // they were always scaled by this same music*0.18 master, so their balance
+    // they were always scaled by this same MUSIC_OUTPUT_LEVEL master, so their balance
     // is unchanged.
     if(gainNodeRef.current && audioCtxRef.current) {
         // Apply phi relationships if enabled
@@ -2249,7 +2274,7 @@ const App: React.FC = () => {
         // Ultra-conservative volume scaling to prevent any distortion. The
         // extra LAYER_BALANCE_ATTEN factor recesses the binaural/solfeggio
         // layers (the only signals on this bus now) back behind the music.
-        const safeVolume = volumes.music * 0.18 * LAYER_BALANCE_ATTEN; // Match the initial gain setting
+        const safeVolume = volumes.music * MUSIC_OUTPUT_LEVEL * LAYER_BALANCE_ATTEN; // Match the initial gain setting
         gainNodeRef.current.gain.setTargetAtTime(safeVolume, audioCtxRef.current.currentTime, 0.1);
     }
 
@@ -5758,7 +5783,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v14.0</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v14.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
