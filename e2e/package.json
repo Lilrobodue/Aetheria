@@ -4,7 +4,8 @@
   "type": "module",
   "description": "Dev-only browser tests for Aetheria. Kept out of the root package so the Node 18 deploy (npm ci + vite build) never installs it.",
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:device": "node run-device.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1"

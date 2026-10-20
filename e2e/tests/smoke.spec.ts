@@ -1,8 +1,10 @@
-import { test, expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { test, expect } from './fixtures';
 import {
   openApp,
   acceptDisclaimer,
   importTones,
+  addFiles,
   elapsedSeconds,
   cacheCounts,
   expectCache,
@@ -15,6 +17,7 @@ import {
 
 // Tests tagged @mobile also run under an Android user agent (see the config),
 // which switches on the silent media-session anchor and the mobile volume path.
+// With `npm run test:device` every test runs on the phone's Chrome instead.
 
 /** A song row in the list (it holds the row's Delete button). */
 const rowOf = (page: Page, name: string) =>
@@ -189,11 +192,7 @@ test('Remove copies keeps the only stored copy when its re-import could not be s
 
   // Re-import the same file (same name and size, a new id). Its save fails,
   // and the banner now calls the stored orphan a copy.
-  await page.getByLabel('Add files').setInputFiles({
-    name: 'tone-03.wav',
-    mimeType: 'audio/wav',
-    buffer: toneWav(30, 220 + 2 * 37),
-  });
+  await addFiles(page, [{ name: 'tone-03.wav', mimeType: 'audio/wav', buffer: toneWav(30, 220 + 2 * 37) }]);
   await expect(page.getByText(/^1 track could not be saved for offline use/)).toBeVisible();
   await expect(page.getByText('Found 1 stored copy of tracks already in your library.')).toBeVisible();
 

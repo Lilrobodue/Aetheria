@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { ON_DEVICE } from './fixtures';
 
 /** A short mono 16-bit PCM sine WAV (8 kHz), small enough to import dozens. */
 export function toneWav(seconds: number, freq: number): Buffer {
@@ -76,7 +77,37 @@ export async function importTones(page: Page, count: number, seconds: number, pr
     mimeType: 'audio/wav',
     buffer: toneWav(seconds, 220 + i * 37),
   }));
-  await page.getByLabel('Add files').setInputFiles(files);
+  await addFiles(page, files);
+}
+
+type TestFile = { name: string; mimeType: string; buffer: Buffer };
+
+/**
+ * Put files on the "Add files" input, as picking them would. A phone's Chrome
+ * can't read this computer's disk (Playwright's setInputFiles hands it local
+ * paths), so on a device the files are built in the page and handed to the
+ * input with the change event a pick fires.
+ */
+export async function addFiles(page: Page, files: TestFile[]): Promise<void> {
+  if (!ON_DEVICE) {
+    await page.getByLabel('Add files').setInputFiles(files);
+    return;
+  }
+  await page.evaluate(
+    ({ files }) => {
+      const input = document.querySelector('input[aria-label="Add files"]') as HTMLInputElement;
+      const picked = new DataTransfer();
+      for (const f of files) {
+        const binary = atob(f.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        picked.items.add(new File([bytes], f.name, { type: f.mimeType }));
+      }
+      input.files = picked.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+    { files: files.map((f) => ({ name: f.name, mimeType: f.mimeType, base64: f.buffer.toString('base64') })) }
+  );
 }
 
 /**
