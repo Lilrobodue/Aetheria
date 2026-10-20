@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import { DEVICE } from './tests/adb';
+import { DEVICE, TEST_PORT, TEST_ORIGIN } from './tests/adb';
 
 // Aetheria's browser smoke tests (v14.5+).
 //
@@ -9,16 +9,19 @@ import { DEVICE } from './tests/adb';
 //                               phone's Chrome, plus the lock-screen test)
 //
 // Drives the INSTALLED Google Chrome (channel 'chrome'), so no browser download
-// is needed, and starts the Vite dev server from the repo root on its own port.
+// is needed, and starts the Vite dev server from the repo root on the tests'
+// own port, 3199 — never 3100, the dev server you run yourself (on a phone a
+// library loaded there lives in the same Chrome profile the tests use).
 // Service workers are blocked so the app's offline cache can't serve a stale
 // shell between runs. These tests are not part of the deploy.
 //
 // On a device (E2E_DEVICE set; see tests/adb.ts) the phone's Chrome loads the
-// dev server through `adb reverse`, so tests run on http://localhost:3100 there
-// too — a separate origin from the live app, whose stored library they never
-// touch. device-setup.ts wires up adb and turns the media volume down meanwhile.
+// test server through `adb reverse`. The tests wipe http://localhost:3199's
+// storage before each test and touch no other origin: not the live app's, and
+// not localhost:3100. device-setup.ts wires up adb and turns the media volume
+// down meanwhile.
 //
-// E2E_REUSE_SERVER=1 tests whatever already serves port 3100 instead of
+// E2E_REUSE_SERVER=1 tests whatever already serves port 3199 instead of
 // starting this checkout — only for deliberate runs against another build
 // (e.g. the previous release, to prove a test fails on the old code).
 
@@ -35,7 +38,7 @@ export default defineConfig({
   reporter: [['list']],
   globalSetup: './device-setup.ts',
   use: {
-    baseURL: 'http://localhost:3100',
+    baseURL: TEST_ORIGIN,
     channel: 'chrome',
     serviceWorkers: 'block',
     launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },
@@ -52,9 +55,9 @@ export default defineConfig({
         { name: 'mobile-ua', grep: /@mobile/, grepInvert: /@device/, use: { userAgent: ANDROID_UA } },
       ],
   webServer: {
-    command: 'npx vite --port 3100 --strictPort',
+    command: `npx vite --port ${TEST_PORT} --strictPort`,
     cwd: '..',
-    url: 'http://localhost:3100',
+    url: TEST_ORIGIN,
     reuseExistingServer: !!process.env.E2E_REUSE_SERVER,
     timeout: 120_000,
   },

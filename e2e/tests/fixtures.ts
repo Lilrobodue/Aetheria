@@ -1,12 +1,12 @@
 import { test as base, expect, chromium, type Browser } from '@playwright/test';
-import { DEVICE } from './adb';
+import { DEVICE, TEST_ORIGIN } from './adb';
 
 // The suite's `test`. Locally it is Playwright's own (a fresh browser context
 // per test). With E2E_DEVICE set it drives the phone's Chrome instead, over the
 // DevTools socket that device-setup forwards to localhost:9222: the phone has
-// one Chrome profile, so each test gets a new tab with everything the test
-// origin stored cleared first. The app's real origin is never touched — the
-// tests load http://localhost:3100, which adb reverses to this computer.
+// one Chrome profile — the user's own — so each test gets a new tab with
+// everything the TEST origin stored cleared first. Only that origin: the live
+// app's and the user's own dev server's (localhost:3100) are never touched.
 export const ON_DEVICE = !!DEVICE;
 
 const deviceTest = base.extend<{}, { phoneChrome: Browser }>({
@@ -27,8 +27,10 @@ const deviceTest = base.extend<{}, { phoneChrome: Browser }>({
     // to contexts it creates), so resolve the tests' relative URLs here.
     const goto = page.goto.bind(page);
     page.goto = (url, options) => goto(new URL(url, baseURL).toString(), options);
+    const origin = new URL(baseURL!).origin;
+    if (origin !== TEST_ORIGIN) throw new Error(`Refusing to clear ${origin}: only ${TEST_ORIGIN} is the tests' own.`);
     const cdp = await context.newCDPSession(page);
-    await cdp.send('Storage.clearDataForOrigin', { origin: new URL(baseURL!).origin, storageTypes: 'all' });
+    await cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'all' });
     await cdp.detach();
     // The desktop runs' layout, so every selector holds; the engine, the audio
     // stack, the media session and the (mobile) user agent are the phone's.
