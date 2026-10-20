@@ -2,6 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { VizSettings, BandEnvelope } from '../types';
 import { frequencyToSpectrumColor, type FrequencyColorMode } from '../utils/spectrumColor';
 import { LO_SHU_WALKS, type LoShuWalkMode } from '../constants';
+import { countDraw } from '../utils/perfHud';
 
 interface VisualizerProps {
   analyser: AnalyserNode | null;
@@ -1006,6 +1007,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
         const stepScale = Math.min(1.6, deltaTime / targetFrameTime);
         timeRef.current += (0.025 * tempoSpeed) * stepScale; // 1.0 = old 2.5
       }
+
+      countDraw(); // perf HUD: a frame is being rendered (no-op unless ?perf=1)
 
       // 1. Resize Handling
       if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {

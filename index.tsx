@@ -3,6 +3,10 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './src/index.css';
 import { register as registerSW, NetworkStatus } from './src/serviceWorker';
+import { startPerfHud } from './utils/perfHud';
+
+// Dev-only perf readout (?perf=1); a no-op unless switched on.
+startPerfHud();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -24,10 +28,13 @@ registerSW({
   },
   onUpdate: (registration) => {
     console.log('🔄 New app version available!');
-    // Optional: Show user notification that they can refresh for updates
-    if (confirm('New version available! Reload to update?')) {
-      window.location.reload();
-    }
+    // Never a blocking confirm(): this fires whenever a deploy is detected,
+    // which can be mid-playback on a locked phone or in the car, and a modal
+    // dialog freezes JavaScript — auto-advance and the media session with it.
+    // App shows a non-blocking "Update ready · Reload" toast instead; the flag
+    // covers an App that mounts after the event.
+    (window as any).__aetheriaUpdateReady = true;
+    window.dispatchEvent(new Event('aetheria:update-ready'));
   },
   onOfflineReady: () => {
     console.log('📱 App is ready to work offline');

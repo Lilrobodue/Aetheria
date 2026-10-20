@@ -1,5 +1,16 @@
 # CLAUDE.md — CABI Playlist Persistence & Cache Management
 
+> **Historical design brief (the first, v1 cache). Superseded — read
+> `utils/playlistCache.ts` for how the cache works now.** Audio and metadata
+> have lived in separate stores since the v2 schema, and since v14.5 a save
+> only ever ADDS stored audio: nothing is deleted because it is missing from a
+> list, only by explicit deletes — the row Delete and the Recover banner's
+> Discard / Remove copies (`deleteTracksFromCache`), and Clear
+> (`clearPlaylistCache`). Do not bring back the "clear the store, then write the
+> current playlist" save shown below: when a bug shrank the in-memory library
+> (v14.4 did this from a mix or a walk), that pattern deleted the rest of the
+> library's audio from the device.
+
 ## Context
 
 The Aetheria 432Hz Player stores uploaded songs in browser memory only. A page

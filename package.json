@@ -1,14 +1,16 @@
 {
-  "name": "v14.4-aetheria:-harmonic-resonance-player",
+  "name": "v14.5-aetheria:-harmonic-resonance-player",
   "private": true,
-  "version": "14.4.0",
+  "version": "14.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "build:analyze": "vite build --mode analyze",
     "preview": "vite preview",
-    "deploy": "npm run build"
+    "deploy": "npm run build",
+    "check:playlists": "node utils/library/listOps.check.ts",
+    "check:critical": "node scripts/check-critical.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.554.0",

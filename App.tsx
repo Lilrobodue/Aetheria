@@ -18,9 +18,25 @@ import ClearPlaylistButton from './components/ClearPlaylistButton';
 import {
   restorePlaylist,
   clearPlaylistCache,
+  deleteTracksFromCache,
   saveBlobsNow,
   debouncedSaveMeta,
+  saveBlobs,
+  saveMetaAndState,
+  cancelPendingSaves,
+  waitForBlobSaves,
+  storedTrackIds,
+  cacheGeneration,
 } from './utils/playlistCache';
+import {
+  dedupeById,
+  sameIdOrder,
+  patchById,
+  removeIdsWithCursor,
+  appendToLibrary,
+  splitOrphans,
+} from './utils/library/listOps';
+import { countCommit } from './utils/perfHud';
 import {
   analyzeFractalFrequencies,
   assessFrequencySafety,
@@ -1196,6 +1212,8 @@ const App: React.FC = () => {
   // `isRestoring` gates the auto-save effect so the act of restoring doesn't
   // immediately re-trigger a save of what we just read back.
   const [isRestoring, setIsRestoring] = useState(false);
+  // How many library tracks the restore brought back, for its toast.
+  const [restoredCount, setRestoredCount] = useState(0);
   const [currentSongIndex, setCurrentSongIndex] = useState<number>(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isShuffle, setIsShuffle] = useState(false);
@@ -1492,6 +1510,178 @@ const App: React.FC = () => {
   // Offline-ready confirmation. Separate from analysisNotification so it can
   // persist until the user taps it away (analysis toasts auto-fade).
   const [offlineReadyNotice, setOfflineReadyNotice] = useState<string | null>(null);
+
+  // Non-blocking notices. They replace alert()/confirm() on every path a
+  // locked phone or the car can reach (media-session handlers, element events,
+  // timers) — a modal dialog freezes JavaScript, so auto-advance and the
+  // lock-screen card stall until someone dismisses it.
+  //   statusToast   messages. A sticky one (an error the user must see) is kept
+  //                 in stickyToastRef, so a timed toast that covers it reveals
+  //                 it again when it ends instead of wiping it. Its `kind`
+  //                 lets the code that raised it withdraw it once it stops
+  //                 being true (withdrawStickyToast).
+  //   updateReady   a new deploy is ready — its own banner, never evicted.
+  //   orphanOffer   stored tracks the library no longer lists — its own banner.
+  type StatusToast = {
+    message: string;
+    actionLabel?: string;
+    onAction?: () => void;
+    sticky: boolean;
+    kind?: 'cache-tracks' | 'cache-state';
+  };
+  const [statusToast, setStatusToast] = useState<StatusToast | null>(null);
+  const statusToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stickyToastRef = useRef<StatusToast | null>(null);
+  const showStatusToast = useCallback((
+    message: string,
+    opts?: {
+      actionLabel?: string;
+      onAction?: () => void;
+      sticky?: boolean;
+      durationMs?: number;
+      kind?: StatusToast['kind'];
+    }
+  ) => {
+    if (statusToastTimerRef.current) clearTimeout(statusToastTimerRef.current);
+    statusToastTimerRef.current = null;
+    const toast: StatusToast = {
+      message,
+      actionLabel: opts?.actionLabel,
+      onAction: opts?.onAction,
+      sticky: !!opts?.sticky,
+      kind: opts?.kind,
+    };
+    if (toast.sticky) stickyToastRef.current = toast;
+    setStatusToast(toast);
+    if (!toast.sticky) {
+      statusToastTimerRef.current = setTimeout(() => {
+        statusToastTimerRef.current = null;
+        setStatusToast(stickyToastRef.current); // reveal a sticky one it covered
+      }, opts?.durationMs ?? 6000);
+    }
+  }, []);
+  // The metadata-save warning's failure spell (see the cache listeners below):
+  // active from a failed save until one that started after it succeeds.
+  const stateSpellRef = useRef({ active: false, shown: false, dismissed: false, full: false });
+  const dismissStatusToast = useCallback(() => {
+    if (statusToastTimerRef.current) clearTimeout(statusToastTimerRef.current);
+    statusToastTimerRef.current = null;
+    setStatusToast((prev: StatusToast | null) => {
+      if (!prev || prev.sticky) {
+        // The user has seen the metadata warning: not again this spell.
+        if (prev?.kind === 'cache-state') stateSpellRef.current.dismissed = true;
+        stickyToastRef.current = null;
+        return null;
+      }
+      return stickyToastRef.current; // dismissing a timed toast reveals the sticky one
+    });
+  }, []);
+  /** Take down the sticky toast of this kind, whether showing or covered. */
+  const withdrawStickyToast = useCallback((kind: NonNullable<StatusToast['kind']>) => {
+    if (stickyToastRef.current?.kind !== kind) return;
+    stickyToastRef.current = null;
+    setStatusToast((prev: StatusToast | null) => (prev?.kind === kind ? null : prev));
+  }, []);
+
+  // A new deploy was detected (index.tsx). Offer the reload; never force it.
+  const [updateReady, setUpdateReady] = useState<boolean>(() => !!(window as any).__aetheriaUpdateReady);
+  useEffect(() => {
+    const onUpdateReady = () => setUpdateReady(true);
+    window.addEventListener('aetheria:update-ready', onUpdateReady);
+    return () => window.removeEventListener('aetheria:update-ready', onUpdateReady);
+  }, []);
+
+  // What the cache could not store (utils/playlistCache): say so, rather than
+  // letting it vanish silently on the next reload. Sticky, until dismissed or
+  // until a save that STARTED after the latest failure of that kind stores
+  // everything ('aetheria:cache-ok' with a higher seq) — the warning is no
+  // longer true then, and is withdrawn.
+  // The metadata (state) kind fails on every track change while storage stays
+  // full, so it is one warning per failure spell, which a confirmed success
+  // (or Clear) ends. It never covers the tracks warning, which says more; when
+  // that one is withdrawn while a spell is still on, the state warning takes
+  // its place — unless the user already dismissed it this spell.
+  const cacheErrorSeqRef = useRef({ tracks: -1, state: -1 });
+  useEffect(() => {
+    const showStateWarning = () => {
+      const spell = stateSpellRef.current;
+      spell.shown = true;
+      showStatusToast(
+        `Your latest library changes could not be saved${spell.full ? ": this device's storage is full" : ''}. ` +
+          `Recent analysis and list changes may be missing after a reload.`,
+        { sticky: true, kind: 'cache-state' }
+      );
+    };
+    const onCacheError = (e: Event) => {
+      const { count = 0, reason = 'write-failed', what = 'tracks', seq = 0 } = (e as CustomEvent).detail || {};
+      const kind: 'tracks' | 'state' = what === 'state' ? 'state' : 'tracks';
+      // Every failure counts, shown or not: only a save that started after the
+      // LATEST one may withdraw the warning.
+      cacheErrorSeqRef.current[kind] = Math.max(cacheErrorSeqRef.current[kind], seq);
+      const full = reason === 'storage-full';
+      if (kind === 'state') {
+        const spell = stateSpellRef.current;
+        if (!spell.active) Object.assign(spell, { active: true, shown: false, dismissed: false });
+        spell.full = full;
+        if (spell.shown || spell.dismissed || stickyToastRef.current?.kind === 'cache-tracks') return;
+        showStateWarning();
+        return;
+      }
+      const tracks = `${count} track${count === 1 ? '' : 's'}`;
+      showStatusToast(
+        `${tracks} could not be saved for offline use${full ? ": this device's storage is full" : ''}. ` +
+          `${count === 1 ? 'It plays' : 'They play'} now but won't be here after a reload.`,
+        { sticky: true, kind: 'cache-tracks' }
+      );
+    };
+    const onCacheOk = (e: Event) => {
+      const { what = 'tracks', seq = 0 } = (e as CustomEvent).detail || {};
+      if (what === 'state') {
+        if (seq > cacheErrorSeqRef.current.state) {
+          // The spell is over: the next failure warns again.
+          Object.assign(stateSpellRef.current, { active: false, shown: false, dismissed: false });
+          withdrawStickyToast('cache-state');
+        }
+      } else if (seq > cacheErrorSeqRef.current.tracks && stickyToastRef.current?.kind === 'cache-tracks') {
+        withdrawStickyToast('cache-tracks');
+        // A metadata failure it kept off the screen may still stand.
+        const spell = stateSpellRef.current;
+        if (spell.active && !spell.dismissed) showStateWarning();
+      }
+    };
+    window.addEventListener('aetheria:cache-error', onCacheError);
+    window.addEventListener('aetheria:cache-ok', onCacheOk);
+    return () => {
+      window.removeEventListener('aetheria:cache-error', onCacheError);
+      window.removeEventListener('aetheria:cache-ok', onCacheOk);
+    };
+  }, [showStatusToast, withdrawStickyToast]);
+
+  // Stored tracks found at restore that the saved library doesn't list. The
+  // banner words them (splitOrphans) against the library as it is NOW; Recover
+  // and Discard decide against what is actually stored. 'Not now' only hides
+  // the banner: the tracks stay counted for Clear, which deletes them too.
+  const [orphanOffer, setOrphanOffer] = useState<Song[] | null>(null);
+  const orphanOfferRef: { current: Song[] | null } = useRef<Song[] | null>(null);
+  useEffect(() => {
+    orphanOfferRef.current = orphanOffer;
+  }, [orphanOffer]);
+  const [orphanBannerHidden, setOrphanBannerHidden] = useState(false);
+  const [orphanBusy, setOrphanBusy] = useState(false);
+  const [discardArmed, setDiscardArmed] = useState(false);
+  const orphanSplit = useMemo(
+    () => (orphanOffer ? splitOrphans<Song>(orphanOffer, originalPlaylist) : null),
+    [orphanOffer, originalPlaylist]
+  );
+  // What Clear deletes, for its confirmation: the library's tracks plus stored
+  // tracks still waiting on the Recover banner.
+  const storedTrackCount = useMemo(
+    () => new Set([...originalPlaylist, ...(orphanOffer ?? [])].map((s: Song) => s.id)).size,
+    [originalPlaylist, orphanOffer]
+  );
+
+  // Perf HUD commit counter (a no-op unless ?perf=1). No deps: once per commit.
+  useEffect(() => { countCommit(); });
   const [showExperienceHistory, setShowExperienceHistory] = useState(false);
   
   // Phi integration state
@@ -1686,6 +1876,214 @@ const App: React.FC = () => {
     stateRef.current = { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos };
   }, [playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos]);
 
+  // The latest library, for async loops (Deep Scan) and handlers that must not
+  // read a stale render's originalPlaylist. (Annotated: this project has no
+  // @types/react, so useRef itself returns any.)
+  const libraryRef: { current: Song[] } = useRef<Song[]>(originalPlaylist);
+  useEffect(() => {
+    libraryRef.current = originalPlaylist;
+  }, [originalPlaylist]);
+
+  // Session values for handlers created once (the update banner's Reload).
+  const sessionRef = useRef({ loShuWalkMode, selectedSolfeggio, isScanning });
+  useEffect(() => {
+    sessionRef.current = { loShuWalkMode, selectedSolfeggio, isScanning };
+  }, [loShuWalkMode, selectedSolfeggio, isScanning]);
+
+  // Reload for a new version without losing in-memory work. Saves are
+  // debounced (metadata is held back while Deep Scan runs), and a reload
+  // aborts an IndexedDB write mid-way — an import still being stored would not
+  // come back. So: stop any scan, let a blob write in progress finish, store
+  // what isn't stored yet, write the current lists, and only then reload. If
+  // anything could not be stored (or the saving outlasts a minute), hold the
+  // reload and say so: reloading would lose it, and its warning with the page.
+  const reloadingRef = useRef(false);
+  const flushAndReload = useCallback(async () => {
+    if (reloadingRef.current) return;
+    reloadingRef.current = true;
+    showStatusToast('Saving your library before reloading…', { sticky: true });
+    // (Fields, not `let`s: TypeScript doesn't see the listeners assign them.)
+    const outcome: { failed: boolean; failedWhat: 'tracks' | 'state' | null; timedOut: boolean; stoppedScan: boolean } =
+      { failed: false, failedWhat: null, timedOut: false, stoppedScan: false };
+    // What the saves report while flushing, by kind: a failure counts only if
+    // no save that STARTED after it succeeded (the rule the warnings use) — a
+    // save already running when Reload was tapped may fail, and the flush's
+    // own later save store everything after all.
+    const latest = { tracks: { error: -1, ok: -1 }, state: { error: -1, ok: -1 } };
+    const onSaveReport = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      const kind: 'tracks' | 'state' = detail.what === 'state' ? 'state' : 'tracks';
+      const field: 'error' | 'ok' = e.type === 'aetheria:cache-ok' ? 'ok' : 'error';
+      latest[kind][field] = Math.max(latest[kind][field], detail.seq ?? 0);
+    };
+    window.addEventListener('aetheria:cache-error', onSaveReport);
+    window.addEventListener('aetheria:cache-ok', onSaveReport);
+    const flush = async () => {
+      if (sessionRef.current.isScanning) {
+        outcome.stoppedScan = true;
+        (window as any).cancelAetheriaAnalysis?.({ quiet: true });
+      }
+      cancelPendingSaves();
+      await waitForBlobSaves();
+      const playOrder = stateRef.current.playlist;
+      const library = libraryRef.current;
+      if (playOrder.length || library.length) await saveBlobs(playOrder, library);
+      // The lists as they are NOW, not as they were before the audio was
+      // stored: if this outlasts the minute below, the page stays open, and
+      // changes made meanwhile (or a Clear) must not be rolled back by an old
+      // snapshot.
+      const { playlist: nowOrder, currentSongIndex: cursor } = stateRef.current;
+      const nowLibrary = libraryRef.current;
+      if (nowOrder.length || nowLibrary.length) {
+        await saveMetaAndState(
+          nowOrder,
+          nowLibrary,
+          cursor,
+          sessionRef.current.loShuWalkMode,
+          sessionRef.current.selectedSolfeggio
+        );
+      }
+    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // A big import can take a while to store; a write that never settles
+      // must not leave Reload waiting for ever.
+      await Promise.race([
+        flush(),
+        new Promise<void>(resolve => {
+          timer = setTimeout(() => { outcome.timedOut = true; resolve(); }, 60_000);
+        }),
+      ]);
+    } catch (err) {
+      outcome.failed = true;
+      console.warn('[Aetheria] Could not save before reloading:', err);
+    } finally {
+      clearTimeout(timer);
+      window.removeEventListener('aetheria:cache-error', onSaveReport);
+      window.removeEventListener('aetheria:cache-ok', onSaveReport);
+    }
+    const tracksFailed = latest.tracks.error > latest.tracks.ok;
+    const stateFailed = latest.state.error > latest.state.ok;
+    if (tracksFailed || stateFailed) {
+      outcome.failed = true;
+      outcome.failedWhat = tracksFailed ? 'tracks' : 'state'; // tracks outranks state
+    }
+    if (outcome.failed || outcome.timedOut) {
+      reloadingRef.current = false;
+      const scanNote = outcome.stoppedScan
+        ? ' Deep Scan was stopped; start it again to finish (tracks already scanned are kept).'
+        : '';
+      showStatusToast(
+        outcome.timedOut
+          ? `Your library is still being saved, so the update is waiting. Tap Reload again in a moment.${scanNote}`
+          : `Some of your library couldn't be saved, so the update is waiting: reloading now would lose it.${scanNote}`,
+        {
+          sticky: true,
+          actionLabel: 'Reload anyway',
+          onAction: () => window.location.reload(),
+          // Tagged like the warning it stands in for, so the save that later
+          // stores everything withdraws it too.
+          kind: outcome.timedOut
+            ? undefined
+            : outcome.failedWhat === 'tracks' ? 'cache-tracks' : outcome.failedWhat === 'state' ? 'cache-state' : undefined,
+        }
+      );
+      return;
+    }
+    window.location.reload();
+  }, [showStatusToast]);
+
+  // Recover: add the stored tracks the library lost, and remove stored copies
+  // of tracks it already has. The play order takes the recovered tracks too
+  // when it IS the library, or shows the library again when it is empty.
+  // Discard (two taps): delete them from the device.
+  // Both decide against what is STORED, not only what the library lists: a
+  // copy is removed only when its library twin's audio is on disk. A re-import
+  // whose save failed (a full device) or hasn't run yet leaves the orphan as
+  // the only stored copy, so that one is kept and offered again next launch.
+  const orphanActionRef = useRef(false);
+  const settleOrphans = async (mode: 'recover' | 'discard') => {
+    const offer = orphanOfferRef.current;
+    if (!offer || orphanActionRef.current) return;
+    orphanActionRef.current = true;
+    setOrphanBusy(true);
+    const generation = cacheGeneration();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // What is stored, once the saves in progress have finished. A slow or
+      // stuck save must not leave the banner busy for ever: after 30 s, do
+      // nothing and say so — the banner stays, to try again.
+      const stored: Set<string> | null = await Promise.race([
+        waitForBlobSaves().then(() => storedTrackIds()),
+        new Promise<null>(resolve => {
+          timer = setTimeout(() => resolve(null), 30_000);
+        }),
+      ]);
+      // A Clear while waiting took these orphans with everything else. (The
+      // generation changes the moment Clear starts, re-rendered or not.)
+      if (orphanOfferRef.current !== offer || cacheGeneration() !== generation) return;
+      if (!stored) {
+        setDiscardArmed(false);
+        showStatusToast(
+          "A save is still running, so Aetheria can't check your stored tracks yet. Try again in a moment.",
+          { durationMs: 8000 }
+        );
+        return;
+      }
+      const library = libraryRef.current;
+      const { fresh, duplicates, unconfirmed } = splitOrphans<Song>(offer, library, stored);
+      if (mode === 'recover' && fresh.length) {
+        const playOrder = stateRef.current.playlist;
+        const playIsLibrary = sameIdOrder(playOrder, library);
+        setOriginalPlaylist(prev => appendToLibrary(prev, fresh));
+        if (playIsLibrary) setPlaylist(prev => appendToLibrary(prev, fresh));
+        else if (playOrder.length === 0) setPlaylist(appendToLibrary(library, fresh));
+      }
+      const toDelete = mode === 'discard' ? [...fresh, ...duplicates] : duplicates;
+      if (toDelete.length) {
+        // The space freed may now fit what didn't fit before: try the audio
+        // AND the lists again (no list changes here, so nothing else would
+        // re-save the state) — unless a Clear came meanwhile, as these lists
+        // would be from before it.
+        deleteTracksFromCache(toDelete.map(s => s.id)).then(() => {
+          if (cacheGeneration() !== generation) return;
+          const { playlist: order, currentSongIndex: cursor } = stateRef.current;
+          const lib = libraryRef.current;
+          if (!order.length && !lib.length) return;
+          saveBlobsNow(order, lib, 0);
+          debouncedSaveMeta(order, lib, cursor, sessionRef.current.loShuWalkMode, sessionRef.current.selectedSolfeggio, 0);
+        });
+      }
+      setOrphanOffer(unconfirmed.length ? unconfirmed : null);
+      setOrphanBannerHidden(unconfirmed.length > 0);
+      setDiscardArmed(false);
+      if (unconfirmed.length) {
+        const one = unconfirmed.length === 1;
+        showStatusToast(
+          `Kept ${unconfirmed.length} stored track${one ? '' : 's'}: ` +
+            `${one ? 'it matches a track' : 'they match tracks'} you just imported, ` +
+            `which ${one ? "isn't" : "aren't"} saved yet. ` +
+            `${one ? "It'll" : "They'll"} be offered again next time Aetheria opens.`,
+          { durationMs: 10000 }
+        );
+      }
+    } finally {
+      clearTimeout(timer);
+      orphanActionRef.current = false;
+      setOrphanBusy(false);
+    }
+  };
+  const recoverOrphans = () => settleOrphans('recover');
+  const discardOrphans = () => {
+    if (!orphanOfferRef.current || orphanActionRef.current) return;
+    if (!discardArmed) {
+      setDiscardArmed(true);
+      setTimeout(() => setDiscardArmed(false), 4000);
+      return;
+    }
+    settleOrphans('discard');
+  };
+
   // Search functionality effect
   useEffect(() => {
     if (searchTerm.trim() === '') {
@@ -1709,21 +2107,48 @@ const App: React.FC = () => {
       const cached = await restorePlaylist();
       if (cancelled || !cached) return;
 
-      setIsRestoring(true);
-      setPlaylist(cached.playlist);
-      setOriginalPlaylist(cached.originalPlaylist);
-      setCurrentSongIndex(cached.currentSongIndex);
-      if (cached.loShuWalkMode) setLoShuWalkMode(cached.loShuWalkMode);
-      setSelectedSolfeggio(cached.selectedSolfeggio);
+      const hasLists = cached.playlist.length > 0 || cached.originalPlaylist.length > 0;
+      if (hasLists) {
+        setIsRestoring(true);
+        setRestoredCount(cached.originalPlaylist.length);
+        // A metadata save scheduled before the restore landed holds only what
+        // was imported meanwhile; it would write that over the saved lists.
+        // The gate reopening below saves the merged lists instead.
+        cancelPendingSaves('meta');
+        const importedMeanwhile = libraryRef.current.length > 0;
+        if (importedMeanwhile) {
+          // A large library restores slowly, and an import can land first.
+          // Keep it, and what the user is doing: the restored library goes
+          // AFTER it, so the play order's indices and the cursor still hold.
+          const playIsLibrary = sameIdOrder(stateRef.current.playlist, libraryRef.current);
+          setOriginalPlaylist(prev => appendToLibrary(prev, cached.originalPlaylist));
+          if (playIsLibrary) setPlaylist(prev => appendToLibrary(prev, cached.originalPlaylist));
+        } else {
+          setPlaylist(cached.playlist);
+          setOriginalPlaylist(cached.originalPlaylist);
+          setCurrentSongIndex(cached.currentSongIndex);
+          if (cached.loShuWalkMode) setLoShuWalkMode(cached.loShuWalkMode);
+          if (cached.selectedSolfeggio != null) setSelectedSolfeggio(cached.selectedSolfeggio);
+        }
 
-      console.log(
-        `[Aetheria] Playlist restored: ${cached.playlist.length} tracks ` +
-          `from ${new Date(cached.savedAt).toLocaleString()}`
-      );
+        console.log(
+          `[Aetheria] Playlist restored: ${cached.originalPlaylist.length} library tracks, ` +
+            `${cached.playlist.length} in the play order, from ${new Date(cached.savedAt).toLocaleString()}` +
+            (importedMeanwhile ? ' (merged after tracks imported while it loaded)' : '')
+        );
+      }
+
+      // Stored audio the saved library no longer lists — what a v14.4
+      // library-shrink left behind. Offer it back; never add it silently.
+      // (The banner tells copies of library tracks apart: splitOrphans.)
+      if (cached.orphans.length > 0) {
+        setOrphanOffer(cached.orphans);
+        setOrphanBannerHidden(false);
+      }
 
       // Keep the auto-save gate closed briefly so the restore doesn't bounce
       // straight back into a redundant save, then drop the toast.
-      setTimeout(() => { if (!cancelled) setIsRestoring(false); }, 2000);
+      if (hasLists) setTimeout(() => { if (!cancelled) setIsRestoring(false); }, 2000);
     })();
     return () => { cancelled = true; };
   }, []); // mount-only
@@ -1740,11 +2165,14 @@ const App: React.FC = () => {
     return Array.from(ids).sort().join(',');
   }, [playlist, originalPlaylist]);
 
-  // Persist BLOBS incrementally when the id set changes (add new, drop removed;
-  // existing audio is never rewritten). Runs even during analysis so a reload
-  // mid-scan still restores the full library.
+  // Persist new BLOBS when the id set changes (add-only since v14.5: existing
+  // audio is never rewritten, and nothing is deleted here — only the explicit
+  // Delete and Clear remove audio). Runs even during analysis so a reload
+  // mid-scan still restores the full library. Gated on BOTH lists being empty,
+  // not on the play order alone: an emptied mix with a full library must still
+  // save (e.g. an import after deleting every track of a mix).
   useEffect(() => {
-    if (isRestoring || playlist.length === 0) return;
+    if (isRestoring || (playlist.length === 0 && originalPlaylist.length === 0)) return;
     saveBlobsNow(playlist, originalPlaylist);
     // playlist/originalPlaylist are read but intentionally NOT deps — songIdSetKey
     // captures the only change that should write audio.
@@ -1755,8 +2183,9 @@ const App: React.FC = () => {
   // suppressed while a deep scan is active so its hundreds of per-track updates
   // don't churn the cache and compete with the (CPU-bound) scan. When the scan
   // finishes, isScanning flips false and this fires once — the settle-save.
+  // (Gated on both lists being empty, like the blob save above.)
   useEffect(() => {
-    if (isRestoring || playlist.length === 0 || isScanning) return;
+    if (isRestoring || (playlist.length === 0 && originalPlaylist.length === 0) || isScanning) return;
     debouncedSaveMeta(
       playlist,
       originalPlaylist,
@@ -1824,28 +2253,38 @@ const App: React.FC = () => {
   // Delete song function
   const deleteSong = useCallback((songId: string) => {
     const updatePlaylist = (prev: Song[]) => prev.filter(song => song.id !== songId);
-    
+
+    // Where the play order's cursor lands. Every entry of the track before the
+    // cursor counts (a walk can hold a track more than once), and a track that
+    // is not in the play order — deleted from the library while a mix plays —
+    // leaves the cursor alone. (findIndex returned -1 for that case, and
+    // -1 < cursor decremented it, so the wrong song was shown and Next was off
+    // by one.)
+    const { cursor: nextCursor, removedCurrent } =
+      removeIdsWithCursor(playlist, new Set([songId]), currentSongIndex);
+
     // Update both playlists
     setPlaylist(updatePlaylist);
     setOriginalPlaylist(updatePlaylist);
-    
-    // Handle currently playing song
-    const deletingIndex = playlist.findIndex(song => song.id === songId);
-    if (deletingIndex === currentSongIndex) {
+
+    if (removedCurrent) {
       // If currently playing song is deleted, stop playback
       setIsPlaying(false);
       if (sourceNodeRef.current) {
-        try { 
-          sourceNodeRef.current.stop(); 
+        try {
+          sourceNodeRef.current.stop();
           sourceNodeRef.current.disconnect();
         } catch(e) {}
         sourceNodeRef.current = null;
       }
       setCurrentSongIndex(-1);
-    } else if (deletingIndex < currentSongIndex) {
-      // If deleted song was before current song, adjust index
-      setCurrentSongIndex(prev => prev - 1);
+    } else if (nextCursor !== currentSongIndex) {
+      setCurrentSongIndex(nextCursor);
     }
+
+    // The explicit delete is the only path that removes stored audio; the
+    // blob sync no longer infers deletions from the lists.
+    deleteTracksFromCache([songId]);
   }, [playlist, currentSongIndex]);
 
   // Cleanup on unmount
@@ -2097,7 +2536,8 @@ const App: React.FC = () => {
       }
     } catch (error) {
       console.error('Audio initialization failed:', error);
-      alert('Audio initialization failed. Please reload the app.');
+      // Non-blocking: initAudio runs on play paths the lock screen can reach.
+      showStatusToast('Audio could not start. Please reload the app.', { sticky: true });
     }
   }, []);
 
@@ -2653,28 +3093,37 @@ const App: React.FC = () => {
 
 
   // BACKGROUND DURATION ANALYZER
+  // One batch at a time: a running batch must not be started again when the
+  // library changes under it (Deep Scan now patches the library once per
+  // track). The library is read through libraryRef for the same reason, and
+  // the queue update is functional so ids queued during a batch survive.
+  const durationBatchInFlightRef = useRef(false);
   useEffect(() => {
-    if (pendingDurationAnalysis.length === 0) return;
+    if (pendingDurationAnalysis.length === 0 || durationBatchInFlightRef.current) return;
 
     const processNextBatch = async () => {
+       durationBatchInFlightRef.current = true;
        const batchSize = 5;
        const processing = pendingDurationAnalysis.slice(0, batchSize);
-       const remaining = pendingDurationAnalysis.slice(batchSize);
+       const batchIds = new Set(processing);
        
        const updates: {id: string, duration: number}[] = [];
        
        // Process batch
-       await Promise.all(processing.map(async (id) => {
-          // Count the attempt up front so the auto-rescan can't re-queue this
-          // id in a tight loop even if it resolves to 0 (unreadable file).
-          durationAttemptsRef.current.set(id, (durationAttemptsRef.current.get(id) || 0) + 1);
-          // Find song object in current playlist state (via ref or effect dependence) - using functional update below
-          const song = originalPlaylist.find(s => s.id === id);
-          if (song && song.file) {
-              const dur = await getAudioDuration(song.file);
-              updates.push({ id, duration: dur });
-          }
-       }));
+       try {
+         await Promise.all(processing.map(async (id) => {
+            // Count the attempt up front so the auto-rescan can't re-queue this
+            // id in a tight loop even if it resolves to 0 (unreadable file).
+            durationAttemptsRef.current.set(id, (durationAttemptsRef.current.get(id) || 0) + 1);
+            const song = libraryRef.current.find(s => s.id === id);
+            if (song && song.file) {
+                const dur = await getAudioDuration(song.file);
+                updates.push({ id, duration: dur });
+            }
+         }));
+       } finally {
+         durationBatchInFlightRef.current = false;
+       }
        
        if (updates.length > 0) {
            setPlaylist(prev => prev.map(s => {
@@ -2687,12 +3136,12 @@ const App: React.FC = () => {
            }));
        }
        
-       setPendingDurationAnalysis(remaining);
+       setPendingDurationAnalysis(prev => prev.filter(id => !batchIds.has(id)));
     };
 
     const timer = setTimeout(processNextBatch, 100);
     return () => clearTimeout(timer);
-  }, [pendingDurationAnalysis, originalPlaylist]);
+  }, [pendingDurationAnalysis]);
 
   // AUTO RE-SCAN FOR MISSING DURATIONS
   // Whenever the library changes (import, restore, reorder), re-queue any track
@@ -2772,16 +3221,28 @@ const App: React.FC = () => {
         };
     });
 
-    setPlaylist(prev => {
-        const updated = [...prev, ...newSongs];
-        setOriginalPlaylist(updated); 
-        return updated;
-    });
+    // The LIBRARY grows by the import. The play order grows with it only when
+    // it IS the library; while a mix or walk is playing it stays as it is. (This
+    // used to copy the play order plus the new files into the library, so an
+    // import during a mix shrank the library to that mix — and the blob sync
+    // then deleted every other track's stored audio.) An emptied list (every
+    // track of a mix deleted) shows the library again, with the import.
+    const playOrderIsLibrary = sameIdOrder(playlist, originalPlaylist);
+    const playOrderIsEmpty = playlist.length === 0;
+    setOriginalPlaylist(prev => appendToLibrary(prev, newSongs));
+    if (playOrderIsLibrary) setPlaylist(prev => appendToLibrary(prev, newSongs));
+    else if (playOrderIsEmpty) setPlaylist(appendToLibrary(originalPlaylist, newSongs));
 
     // 2. Queue for background analysis
     setPendingDurationAnalysis(prev => [...prev, ...newSongs.map(s => s.id)]);
 
     setIsUploading(false);
+    if (!playOrderIsLibrary && !playOrderIsEmpty && newSongs.length > 0) {
+        showStatusToast(
+            `Added ${newSongs.length.toLocaleString()} track${newSongs.length === 1 ? '' : 's'} to your library. ` +
+            `The list that's playing is unchanged.`
+        );
+    }
     if (skippedCount > 0) {
         setAnalysisNotification(
             `Added ${fileList.length.toLocaleString()} tracks. ` +
@@ -2793,35 +3254,73 @@ const App: React.FC = () => {
     event.target.value = '';
   };
 
+  // True from the start of a Deep Scan run until its finally block. Cancel
+  // flips isScanning off at once (so the button resets) while the run is still
+  // inside its current track; a second run must wait for this one to exit.
+  const scanLoopActiveRef = useRef(false);
+
   const scanLibrary = async () => {
+    if (scanLoopActiveRef.current) {
+      showStatusToast('The previous scan is still finishing. Try again in a moment.');
+      return;
+    }
     initAudio();
-    if (!playlist.length || !audioCtxRef.current) return;
-    
+    // Deep Scan analyses the LIBRARY, whatever the play order shows. It used to
+    // scan the play order and write that list back over the library when it
+    // finished — so a scan started from a mix or walk shrank the library to the
+    // mix, and the blob sync then deleted every other track's stored audio. Each
+    // track is now read fresh from the library and its results are patched in
+    // BY ID, so imports and deletes made during a long scan survive as well.
+    const libraryAtStart = dedupeById(libraryRef.current);
+    if (!libraryAtStart.length || !audioCtxRef.current) return;
+    const queueIds = libraryAtStart.filter(s => !s.harmonicFreq).map(s => s.id);
+    const total = queueIds.length;
+    if (total === 0) {
+      setAnalysisNotification(
+        `Every track in your library is already scanned (${libraryAtStart.length.toLocaleString()} tracks).`
+      );
+      setTimeout(() => setAnalysisNotification(null), 6000);
+      return;
+    }
+
     // Calculate time estimate (1-3 minutes per song for thorough analysis)
-    const estimatedMinutes = Math.round(playlist.length * 2.5);
-    const timeEstimate = estimatedMinutes > 60 
+    const estimatedMinutes = Math.round(total * 2.5);
+    const timeEstimate = estimatedMinutes > 60
       ? `${Math.round(estimatedMinutes / 60)}h ${estimatedMinutes % 60}m`
       : `${estimatedMinutes}m`;
-    
-    const notificationMsg = `Starting deep fractal analysis of ${playlist.length} songs. Estimated time: ${timeEstimate}. This will be thorough but slow - you can cancel anytime.`;
-    
+
+    const notificationMsg = `Starting deep fractal analysis of ${total} unscanned songs. Estimated time: ${timeEstimate}. This will be thorough but slow - you can cancel anytime.`;
+
     setAnalysisNotification(notificationMsg);
     setTimeout(() => setAnalysisNotification(null), 8000);
-    
+
     setIsScanning(true);
     setScanProgress(0);
+    scanLoopActiveRef.current = true;
 
-    const newPlaylist = [...playlist];
+    const results = new Map<string, Partial<Song>>();
     let processedCount = 0;
     let shouldCancel = false;
     const startTime = Date.now();
 
-    // Cancel function
-    const cancelScan = () => {
+    // One track's results, applied by id to the library and the play order
+    // (every repeat of the track in a walk included).
+    const applyResult = (id: string, patch: Partial<Song>) => {
+      results.set(id, patch);
+      const patches = new Map([[id, patch]]);
+      setOriginalPlaylist(prev => patchById(prev, patches));
+      setPlaylist(prev => patchById(prev, patches));
+    };
+
+    // Cancel function. `quiet`: the library is going away (Clear, reload), so
+    // skip the end-of-scan summary.
+    let quietCancel = false;
+    const cancelScan = (opts?: { quiet?: boolean }) => {
       shouldCancel = true;
+      if (opts?.quiet) quietCancel = true;
       setIsScanning(false);
       setScanProgress(0);
-      console.log(`Analysis cancelled after processing ${processedCount}/${newPlaylist.length} files`);
+      console.log(`Analysis cancelled after processing ${processedCount}/${total} files`);
     };
 
     // Store cancel function for emergency use
@@ -2829,26 +3328,30 @@ const App: React.FC = () => {
 
     try {
       // Process ONE file at a time for maximum control and stability
-      for (let i = 0; i < newPlaylist.length; i++) {
+      for (let qi = 0; qi < queueIds.length; qi++) {
         if (shouldCancel) {
           console.log('Analysis cancelled by user');
           break;
         }
 
-        // Skip already analyzed files
-        if (newPlaylist[i].harmonicFreq) {
+        // Re-read the track: it may have been deleted since the scan began.
+        // (Only deletion skips it. A crystal assigned meanwhile — e.g. by
+        // Auto-Distribute, which writes a placeholder harmonicFreq — must not
+        // stop the real analysis; the scan's results replace it.)
+        const song = libraryRef.current.find(s => s.id === queueIds[qi]);
+        if (!song) {
           processedCount++;
-          setScanProgress(Math.round((processedCount / newPlaylist.length) * 100));
+          setScanProgress(Math.round((processedCount / total) * 100));
           continue;
         }
 
-        console.log(`Analyzing ${i + 1}/${newPlaylist.length}: ${newPlaylist[i].name}`);
+        console.log(`Analyzing ${qi + 1}/${total}: ${song.name}`);
 
         try {
-          const file = newPlaylist[i].file;
-          
+          const file = song.file;
+
           // Show which file we're processing
-          setAnalysisNotification(`Analyzing: ${newPlaylist[i].name} (${i + 1}/${newPlaylist.length})`);
+          setAnalysisNotification(`Analyzing: ${song.name} (${qi + 1}/${total})`);
           
           // Decode audio with yielding
           const arrayBuffer = await file.arrayBuffer();
@@ -2868,9 +3371,12 @@ const App: React.FC = () => {
             // Use the interruptible fractal analysis
             fractalData = await analyzeFractalFrequenciesInterruptible(audioBuffer, () => shouldCancel);
             freq = fractalData.dominantFrequency;
-            console.log(`Fractal analysis complete for ${newPlaylist[i].name}: ${freq.toFixed(1)}Hz`);
+            console.log(`Fractal analysis complete for ${song.name}: ${freq.toFixed(1)}Hz`);
           } catch (e) {
-            console.warn('Fractal analysis failed for', newPlaylist[i].name, 'using basic detection');
+            // A cancel surfaces here as a thrown 'Analysis cancelled': stop,
+            // without running the fallback or recording placeholder values.
+            if (shouldCancel) break;
+            console.warn('Fractal analysis failed for', song.name, 'using basic detection');
             // Yield before fallback
             await new Promise(resolve => setTimeout(resolve, 50));
             freq = await detectDominantFrequency(audioBuffer);
@@ -2904,7 +3410,7 @@ const App: React.FC = () => {
               intervalData = { ...full, intervals: [] };
             }
           } catch (intervalErr) {
-            console.warn('Interval analysis failed for', newPlaylist[i].name, intervalErr);
+            console.warn('Interval analysis failed for', song.name, intervalErr);
           }
 
           // Additive: pre-compute the per-band energy envelope so the
@@ -2914,13 +3420,13 @@ const App: React.FC = () => {
           try {
             bandEnvelope = await analyzeBandEnvelopes(audioBuffer);
           } catch (envErr) {
-            console.warn('Band envelope analysis failed for', newPlaylist[i].name, envErr);
+            console.warn('Band envelope analysis failed for', song.name, envErr);
           }
           // Yield so the heavy offline renders don't lock the scan UI.
           await new Promise(resolve => setTimeout(resolve, 10));
+          if (shouldCancel) break;
 
-          newPlaylist[i] = {
-            ...newPlaylist[i],
+          applyResult(song.id, {
             harmonicFreq: freq,
             closestSolfeggio: solfeggio,
             harmonicDeviation: deviation,
@@ -2928,67 +3434,76 @@ const App: React.FC = () => {
             intervalAnalysis: intervalData,
             isAetheriaCandidate: couldBeAetheria(freq),
             bandEnvelope,
-          };
-          
+          });
+
         } catch (e) {
-          console.warn("Could not analyze", newPlaylist[i].name, e);
+          console.warn("Could not analyze", song.name, e);
           // Set basic fallback values
-          newPlaylist[i] = {
-            ...newPlaylist[i],
+          applyResult(song.id, {
             harmonicFreq: 440,
             closestSolfeggio: 528,
             harmonicDeviation: 999
-          };
+          });
         }
 
         processedCount++;
-        
+
         // Update progress
-        const progress = Math.round((processedCount / newPlaylist.length) * 100);
+        const progress = Math.round((processedCount / total) * 100);
         setScanProgress(progress);
-        
+
         // Calculate time remaining
         const elapsed = Date.now() - startTime;
         const avgTimePerFile = elapsed / processedCount;
-        const remaining = (newPlaylist.length - processedCount) * avgTimePerFile;
+        const remaining = (total - processedCount) * avgTimePerFile;
         const remainingMinutes = Math.round(remaining / 60000);
-        
-        console.log(`Progress: ${progress}% (${processedCount}/${newPlaylist.length}), Est. remaining: ${remainingMinutes}m`);
-        
-        // Update playlist progressively so user sees results
-        setPlaylist([...newPlaylist]);
-        
+
+        console.log(`Progress: ${progress}% (${processedCount}/${total}), Est. remaining: ${remainingMinutes}m`);
+
         // Longer yield between files to prevent browser stress
         // Scale the delay based on library size (bigger libraries = longer breaks)
-        const breakTime = Math.min(1000, Math.max(200, newPlaylist.length * 5));
+        const breakTime = Math.min(1000, Math.max(200, libraryAtStart.length * 5));
         await new Promise(resolve => setTimeout(resolve, breakTime));
       }
 
     } catch (error) {
       console.error('Scan library error:', error);
       const elapsed = Math.round((Date.now() - startTime) / 60000);
-      alert(`Analysis encountered an error after ${elapsed} minutes. Processed ${processedCount}/${newPlaylist.length} files. Partial results have been saved.`);
+      // A toast, not alert(): the scan runs for hours, often with the phone
+      // locked, and a modal dialog would freeze playback until dismissed.
+      showStatusToast(
+        `Analysis stopped with an error after ${elapsed} min. ${processedCount} of ${total} tracks ` +
+        `were processed, and their results are kept.`,
+        { durationMs: 12000 }
+      );
     } finally {
       // Clean up
-      delete (window as any).cancelAetheriaAnalysis;
+      scanLoopActiveRef.current = false;
+      if ((window as any).cancelAetheriaAnalysis === cancelScan) delete (window as any).cancelAetheriaAnalysis;
       setAnalysisNotification(null);
-      
-      setPlaylist(newPlaylist);
-      setOriginalPlaylist(newPlaylist);
+
+      // No wholesale list writes here: each track's results were patched in by
+      // id as it finished (applyResult).
       setIsScanning(false);
       setScanProgress(0);
-      
+
       const totalTime = Math.round((Date.now() - startTime) / 60000);
-      console.log(`Analysis complete: ${processedCount}/${newPlaylist.length} files processed in ${totalTime} minutes`);
-      
-      if (processedCount > 0) {
-        // Generate detailed analysis summary
-        const analyzedSongs = newPlaylist.filter(s => s.harmonicFreq);
+      console.log(`Analysis complete: ${processedCount}/${total} files processed in ${totalTime} minutes`);
+
+      if (processedCount > 0 && !quietCancel) {
+        // Generate detailed analysis summary from the library as it was when
+        // the scan began, with this run's results applied.
+        const analyzedSongs = libraryAtStart
+          .map(s => {
+            const r = results.get(s.id);
+            return r ? { ...s, ...r } : s;
+          })
+          .filter(s => s.harmonicFreq);
         const octaveRangeStats = getOctaveRangeStatistics(analyzedSongs);
         const regimeStats = getRegimeStatistics(analyzedSongs);
-        
+
         const successMsg = `📊 Extended Octave Range Analysis Complete!\n\n` +
-          `⏱️ Processed: ${processedCount}/${newPlaylist.length} files in ${totalTime} minutes\n` +
+          `⏱️ Processed: ${processedCount}/${total} files in ${totalTime} minutes\n` +
           `🎵 Frequency Distribution:\n${octaveRangeStats}\n\n` +
           `🧘 Regime Distribution:\n${regimeStats}\n\n` +
           `✨ Ready for harmonic alignment journeys!`;
@@ -3473,6 +3988,10 @@ const App: React.FC = () => {
   // in-memory playlist state, and clear the IndexedDB cache so nothing is
   // restored on the next load.
   const clearEntirePlaylist = useCallback(async () => {
+    // Stop a running Deep Scan: it would go on analysing the cleared tracks
+    // (quietly: no end-of-scan summary for a library that is gone).
+    (window as any).cancelAetheriaAnalysis?.({ quiet: true });
+
     // Stop playback.
     setIsPlaying(false);
     if (sourceNodeRef.current) {
@@ -3499,6 +4018,17 @@ const App: React.FC = () => {
     setFilteredPlaylist([]);
     setCurrentSongIndex(-1);
     clearLoShuWalkMode();
+
+    // Notices about the old library go too: a Recover tapped after Clear would
+    // write the cleared tracks straight back.
+    setOrphanOffer(null);
+    setOrphanBannerHidden(false);
+    setDiscardArmed(false);
+    Object.assign(stateSpellRef.current, { active: false, shown: false, dismissed: false });
+    stickyToastRef.current = null;
+    if (statusToastTimerRef.current) clearTimeout(statusToastTimerRef.current);
+    statusToastTimerRef.current = null;
+    setStatusToast(null);
 
     // Wipe the on-disk cache.
     await clearPlaylistCache();
@@ -5120,9 +5650,11 @@ const App: React.FC = () => {
           // Different recovery strategies based on error type
           if (error instanceof DOMException) {
             if (error.name === 'NotAllowedError') {
-              // User interaction required
+              // User interaction required. A toast, not alert(): this path is
+              // reachable from the lock screen and the car (media-session play),
+              // where a modal dialog would freeze the page until dismissed.
               console.log('User interaction required for playback');
-              alert('Please click play again to resume playback.');
+              showStatusToast('The browser blocked playback. Tap play to resume.', { durationMs: 8000 });
             } else if (error.name === 'NotSupportedError' || error.name === 'AbortError') {
               // Source is likely corrupted or expired - reload
               console.log('Source error detected, reloading track...');
@@ -5157,7 +5689,7 @@ const App: React.FC = () => {
           } else {
             // Non-DOM error - log and try to recover
             console.error('Unexpected error type:', error);
-            alert('Audio playback error. Please try selecting the track again.');
+            showStatusToast('Playback error. Try selecting the track again.', { durationMs: 8000 });
           }
         }
       }
@@ -5697,11 +6229,105 @@ registerProcessor('wav-capture', WavCapture);
           <OfflineIndicator showWhenOnline={true} />
 
           {/* Restore toast — brief confirmation that the cached library is back. */}
-          {isRestoring && playlist.length > 0 && (
+          {isRestoring && restoredCount > 0 && (
             <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-900/90 border border-emerald-500/30 text-emerald-200 text-xs px-4 py-2 rounded-full backdrop-blur shadow-lg">
-              ✓ Restored {playlist.length} tracks from cache
+              ✓ Restored {restoredCount} tracks from cache
             </div>
           )}
+
+          {/* Non-blocking notices — the replacement for alert()/confirm() on
+              paths the lock screen or the car can reach. Three independent
+              slots so none evicts another: the update banner, the recovery
+              offer, and the status toast. Sits above the restore toast.
+              The container is the live region and is ALWAYS mounted (empty, it
+              takes no space): screen readers often skip a live region that is
+              inserted together with its text, but announce what is added to
+              one that is already there. Not atomic (role=status alone would
+              make it so, re-reading every notice on each change); each card
+              is atomic, so a change reads just that card. */}
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="false"
+            className="fixed bottom-40 left-1/2 -translate-x-1/2 z-[70] w-[calc(100%-2rem)] max-w-md flex flex-col gap-2"
+          >
+              {updateReady && (
+                <div aria-atomic="true" className="flex items-center gap-3 bg-slate-900/95 border border-gold-500/40 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-lg">
+                  <span className="flex-1 leading-snug">A new version of Aetheria is ready.</span>
+                  <button
+                    onClick={flushAndReload}
+                    className="shrink-0 min-h-[44px] px-3 rounded-lg bg-gold-500 hover:bg-gold-400 text-black text-xs font-bold transition-colors"
+                  >
+                    Reload
+                  </button>
+                  <button
+                    onClick={() => setUpdateReady(false)}
+                    aria-label="Dismiss update notice"
+                    className="shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-white"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
+              {!orphanBannerHidden && orphanSplit && orphanSplit.fresh.length + orphanSplit.duplicates.length > 0 && (
+                <div aria-atomic="true" className="flex flex-col gap-2 bg-slate-900/95 border border-emerald-500/40 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-lg">
+                  <span className="leading-snug">
+                    {orphanSplit.fresh.length > 0
+                      ? `Found ${orphanSplit.fresh.length} stored track${orphanSplit.fresh.length === 1 ? '' : 's'} that ${orphanSplit.fresh.length === 1 ? 'is' : 'are'} not in your library.`
+                      : `Found ${orphanSplit.duplicates.length} stored cop${orphanSplit.duplicates.length === 1 ? 'y' : 'ies'} of tracks already in your library.`}
+                    {orphanSplit.fresh.length > 0 && orphanSplit.duplicates.length > 0 &&
+                      ` ${orphanSplit.duplicates.length} more ${orphanSplit.duplicates.length === 1 ? 'is a copy' : 'are copies'} of tracks you have and will be removed.`}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={recoverOrphans}
+                      aria-disabled={orphanBusy}
+                      className={`min-h-[44px] px-3 rounded-lg bg-emerald-500 text-black text-xs font-bold transition-colors ${orphanBusy ? 'opacity-60' : 'hover:bg-emerald-400'}`}
+                    >
+                      {orphanBusy
+                        ? 'One moment…'
+                        : orphanSplit.fresh.length > 0 ? `Recover ${orphanSplit.fresh.length}` : 'Remove copies'}
+                    </button>
+                    {orphanSplit.fresh.length > 0 && (
+                      <button
+                        onClick={discardOrphans}
+                        aria-disabled={orphanBusy}
+                        className={`min-h-[44px] px-3 rounded-lg border text-xs font-bold transition-colors ${discardArmed ? 'border-red-500/60 text-red-300 bg-red-900/30' : 'border-slate-600 text-slate-300 hover:border-slate-400'} ${orphanBusy ? 'opacity-60' : ''}`}
+                      >
+                        {discardArmed ? 'Tap again to delete them' : 'Discard'}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setOrphanBannerHidden(true); setDiscardArmed(false); }}
+                      aria-label="Not now"
+                      className="ml-auto min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-white"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {statusToast && (
+                <div aria-atomic="true" className="flex items-center gap-3 bg-slate-900/95 border border-slate-600 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-lg">
+                  <span className="flex-1 leading-snug">{statusToast.message}</span>
+                  {statusToast.actionLabel && statusToast.onAction && (
+                    <button
+                      onClick={statusToast.onAction}
+                      className="shrink-0 min-h-[44px] px-3 rounded-lg bg-gold-500 hover:bg-gold-400 text-black text-xs font-bold transition-colors"
+                    >
+                      {statusToast.actionLabel}
+                    </button>
+                  )}
+                  <button
+                    onClick={dismissStatusToast}
+                    aria-label="Dismiss"
+                    className="shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-white"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
+          </div>
 
           {/* Analysis Notification */}
           {analysisNotification && (
@@ -5783,7 +6409,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v14.4</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v14.5</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -6600,6 +7226,7 @@ registerProcessor('wav-capture', WavCapture);
                       <span className="font-semibold">Import Folder</span>
                       <input
                         type="file"
+                        aria-label="Import folder"
                         {...({ webkitdirectory: "", directory: "" } as any)}
                         multiple
                         className="hidden"
@@ -6612,6 +7239,7 @@ registerProcessor('wav-capture', WavCapture);
                       <span className="font-semibold">Add Files</span>
                       <input
                         type="file"
+                        aria-label="Add files"
                         multiple
                         className="hidden"
                         onChange={handleFileUpload}
@@ -6661,19 +7289,43 @@ registerProcessor('wav-capture', WavCapture);
                </div>
 
                {/* Smart Harmonic Distribution - Single Reliable Method */}
-               <button 
+               <button
+                aria-disabled={isScanning}
+                title={isScanning ? 'Unavailable while Deep Scan runs' : undefined}
                 onClick={() => {
-                  if (playlist.length >= 27) {
+                  // Not during a Deep Scan: the scan is writing real analysis
+                  // into these tracks, and Auto-Distribute would overwrite it
+                  // with placeholder crystals. (aria-disabled rather than
+                  // disabled, so a tap explains why instead of doing nothing —
+                  // a phone never shows the title tooltip.)
+                  if (isScanning) {
+                    showStatusToast('Auto-Distribute is unavailable while Deep Scan runs.');
+                    return;
+                  }
+                  // Distribute the whole LIBRARY and apply the assignments by id;
+                  // the play order and cursor stay as they are. This used to
+                  // distribute the play order and write it over the library, so
+                  // running it while a mix or walk showed shrank the library to
+                  // that mix — and the blob sync deleted every other track's audio.
+                  const library = dedupeById<Song>(originalPlaylist);
+                  if (library.length >= 27) {
                     // Use the proven smart harmonic distribution for all libraries 27+ songs
                     const gutFreqs = [174, 285, 396, 417, 528, 639, 741, 852, 963];
                     const heartFreqs = [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150];
                     const headFreqs = [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336];
                     const allFreqs = [...gutFreqs, ...heartFreqs, ...headFreqs];
-                    
-                    const redistributed = distributeUsingHarmonicOctavesMaster(playlist, allFreqs);
-                    
-                    setPlaylist(redistributed);
-                    setOriginalPlaylist(redistributed);
+
+                    const redistributed = distributeUsingHarmonicOctavesMaster(library, allFreqs);
+                    const assignments = new Map<string, Partial<Song>>();
+                    for (const s of redistributed) {
+                      assignments.set(s.id, {
+                        harmonicFreq: s.harmonicFreq,
+                        closestSolfeggio: s.closestSolfeggio,
+                        harmonicDeviation: s.harmonicDeviation,
+                      });
+                    }
+                    setOriginalPlaylist(prev => patchById(prev, assignments));
+                    setPlaylist(prev => patchById(prev, assignments));
                     
                     const gutCount = redistributed.filter(s => gutFreqs.includes((s.closestSolfeggio as number) || 0)).length;
                     const heartCount = redistributed.filter(s => heartFreqs.includes((s.closestSolfeggio as number) || 0)).length;
@@ -6721,10 +7373,13 @@ registerProcessor('wav-capture', WavCapture);
                     setAnalysisNotification(`Harmonic Distribution Complete: ${redistributed.length} songs distributed across all 27 frequencies. ${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD. ${missingFreqs.length > 0 ? `Missing: ${missingFreqs.join(', ')}Hz. ` : ''}${cabStatus}${cabiStatus}`);
                     setTimeout(() => setAnalysisNotification(null), 8000);
                   } else {
-                    alert(`Harmonic Distribution requires at least 27 tracks for optimal frequency coverage. Current library has ${playlist.length} tracks. (A full CAB ride needs 81 tracks for 3 unique songs per frequency.)`);
+                    showStatusToast(
+                      `Harmonic Distribution needs at least 27 tracks for full frequency coverage; your library has ${library.length}. (A full CAB ride needs 81: 3 unique songs per frequency.)`,
+                      { durationMs: 10000 }
+                    );
                   }
                 }}
-                className={`mb-3 w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg font-medium tracking-wide transition-all active:scale-95 bg-gold-900/20 hover:bg-gold-800/30 border border-gold-500/30 hover:border-gold-500/50`}
+                className={`mb-3 w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg font-medium tracking-wide transition-all bg-gold-900/20 border border-gold-500/30 ${isScanning ? 'opacity-40 cursor-not-allowed' : 'active:scale-95 hover:bg-gold-800/30 hover:border-gold-500/50'}`}
                >
                  <Target size={14} className="text-gold-400" />
                  <span className="text-gold-400 font-bold">Auto-Distribute Frequencies</span>
@@ -6894,10 +7549,24 @@ registerProcessor('wav-capture', WavCapture);
             </div>
             
             <div ref={songListRef} className="p-2 pb-32">
-              {playlist.length === 0 && (
+              {playlist.length === 0 && originalPlaylist.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-48 text-center text-slate-600 p-6">
                   <p>Library Empty</p>
                   <p className="text-xs mt-2">Upload a folder or add files to begin.</p>
+                </div>
+              )}
+              {playlist.length === 0 && originalPlaylist.length > 0 && (
+                <div className="flex flex-col items-center justify-center h-48 text-center text-slate-500 p-6">
+                  <p>This list is empty</p>
+                  <p className="text-xs mt-2">
+                    Your library still has {new Set(originalPlaylist.map(s => s.id)).size} tracks.
+                  </p>
+                  <button
+                    onClick={restoreLibrary}
+                    className="mt-3 min-h-[44px] px-4 rounded-lg border border-gold-500/40 text-gold-400 hover:bg-gold-500/10 text-xs font-bold"
+                  >
+                    Show library
+                  </button>
                 </div>
               )}
               {searchTerm && filteredPlaylist.length === 0 && playlist.length > 0 && (
@@ -7021,9 +7690,12 @@ registerProcessor('wav-capture', WavCapture);
             {/* Clear Playlist & Cache — deliberately below the footer (in the
                 reserved bottom margin) so it needs a scroll-down-and-tap and is
                 never hit by accident. Two-tap confirm handled in the component. */}
-            {playlist.length > 0 && (
+            {storedTrackCount > 0 && (
               <div className="px-6 pb-6 pt-2 bg-black/95 shrink-0 -mt-20 mb-0 z-10">
-                <ClearPlaylistButton onClear={clearEntirePlaylist} trackCount={playlist.length} />
+                <ClearPlaylistButton
+                  onClear={clearEntirePlaylist}
+                  libraryCount={storedTrackCount}
+                />
               </div>
             )}
           </aside>
@@ -8514,7 +9186,7 @@ registerProcessor('wav-capture', WavCapture);
                     
                     {/* Top Row: Info */}
                     <div className="flex flex-wrap justify-center items-center gap-x-3 gap-y-1 text-[10px] font-medium text-slate-400">
-                        <span className="text-slate-200 truncate max-w-[150px] sm:max-w-[300px] font-bold">
+                        <span data-testid="now-playing-title" className="text-slate-200 truncate max-w-[150px] sm:max-w-[300px] font-bold">
                             {playlist[currentSongIndex]?.name || "Aetheria Harmonic Player"}
                         </span>
                         
@@ -8661,7 +9333,7 @@ registerProcessor('wav-capture', WavCapture);
                            </span>
                          )}
                          
-                         <span className="font-mono text-slate-600 ml-1">
+                         <span data-testid="transport-time" className="font-mono text-slate-600 ml-1">
                             {formatDuration(currTime)} / {formatDuration(currDuration)}
                          </span>
                          
@@ -8685,18 +9357,19 @@ registerProcessor('wav-capture', WavCapture);
                         
                         {/* Playback Controls */}
                         <div className="flex items-center gap-3 relative">
-                            <button onClick={() => setIsShuffle(!isShuffle)} className={`${isShuffle ? 'text-gold-500' : 'text-slate-600'} hover:text-white transition-colors`}><Shuffle size={14}/></button>
-                            <button onClick={handlePrev} className="text-slate-300 hover:text-white transition-colors"><SkipBack size={16}/></button>
+                            <button onClick={() => setIsShuffle(!isShuffle)} aria-label="Shuffle" aria-pressed={isShuffle} className={`${isShuffle ? 'text-gold-500' : 'text-slate-600'} hover:text-white transition-colors`}><Shuffle size={14}/></button>
+                            <button onClick={handlePrev} aria-label="Previous track" className="text-slate-300 hover:text-white transition-colors"><SkipBack size={16}/></button>
 
                             <button
                                 onClick={handlePlayPause}
+                                aria-label={isPlaying ? 'Pause' : 'Play'}
                                 className="w-8 h-8 rounded-full bg-gold-500 hover:bg-gold-400 flex items-center justify-center text-black shadow-lg shadow-gold-500/20 transition-all hover:scale-105 active:scale-95"
                             >
                                 {isPlaying ? <Pause size={16} fill="black" /> : <Play size={16} fill="black" className="ml-0.5" />}
                             </button>
 
-                            <button onClick={handleNext} className="text-slate-300 hover:text-white transition-colors"><SkipForward size={16}/></button>
-                            <button onClick={() => setIsLoop(!isLoop)} className={`${isLoop ? 'text-gold-500' : 'text-slate-600'} hover:text-white transition-colors`}><Repeat size={14}/></button>
+                            <button onClick={handleNext} aria-label="Next track" className="text-slate-300 hover:text-white transition-colors"><SkipForward size={16}/></button>
+                            <button onClick={() => setIsLoop(!isLoop)} aria-label="Repeat" aria-pressed={isLoop} className={`${isLoop ? 'text-gold-500' : 'text-slate-600'} hover:text-white transition-colors`}><Repeat size={14}/></button>
 
                             {/* Lo Shu Walk shortcut — opens a popover with the three walks. */}
                             <button

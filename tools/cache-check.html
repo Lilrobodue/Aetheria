@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cache Check</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; padding: 16px; background: #0b0f17; color: #e2e8f0; font: 14px/1.5 system-ui, sans-serif; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p { color: #94a3b8; margin: 0 0 16px; }
+      li { margin: 4px 0; }
+      .pass { color: #4ade80; }
+      .fail { color: #f87171; }
+      #result { font-weight: 700; margin-top: 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>Playlist cache check</h1>
+    <p>Dev-only (v14.5). Runs the cache's round trips on a throwaway IndexedDB database and deletes it afterwards; your library is never touched.</p>
+    <ol id="tests"></ol>
+    <div id="result" data-testid="cache-check-result">Running…</div>
+    <script type="module" src="./cache-check.ts"></script>
+  </body>
+</html>
