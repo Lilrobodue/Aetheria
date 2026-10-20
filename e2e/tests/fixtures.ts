@@ -39,8 +39,34 @@ const deviceTest = base.extend<{}, { phoneChrome: Browser }>({
     // cache dev modules between runs.
     await page.addInitScript(() => {
       if (navigator.serviceWorker) (navigator.serviceWorker as any).register = () => new Promise(() => {});
+      // Every media element the app plays (it keeps them out of the DOM), so
+      // the teardown below can stop them all.
+      const media = ((window as any).__e2eMedia = new Set<HTMLMediaElement>());
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+        media.add(this);
+        return play.call(this);
+      };
     });
     await use(page);
+    // Stop the app's media and release its media session, then unload it.
+    // A tab torn down a moment after its lock-screen card appeared (a failed
+    // play leaves the silent anchor looping) can strand Chrome's Android card
+    // on PLAYING until Chrome restarts, and a stranded card takes the media
+    // keys the next test sends.
+    await page
+      .evaluate(() => {
+        for (const el of (window as any).__e2eMedia ?? []) {
+          try { el.pause(); } catch {}
+        }
+        try {
+          navigator.mediaSession.playbackState = 'none';
+          navigator.mediaSession.metadata = null;
+        } catch {}
+      })
+      .catch(() => {});
+    await page.waitForTimeout(1000).catch(() => {});
+    await page.goto('about:blank').catch(() => {});
     await page.close();
   },
 });

@@ -32,16 +32,36 @@ export function adb(...args: string[]): string {
   return execFileSync(adbPath(), [...target(), ...args], { encoding: 'utf8' }).replace(/\r/g, '');
 }
 
+/** Fail fast on a locked phone: taps and playback need it unlocked, and only
+ *  its owner can unlock a secure lock. */
+export function assertUnlocked(): void {
+  if (/isKeyguardShowing=true/.test(adb('shell', 'dumpsys', 'window'))) {
+    throw new Error('The phone is locked. Unlock it (and keep it unlocked) to run the device tests.');
+  }
+}
+
 /**
- * The phone's Chrome media session as Android reports it — what the lock
- * screen, the notification and the car show. null when Chrome has none.
+ * Every media session Chrome holds, as Android reports them (highest priority
+ * first) — what the lock screen, the notification and the car show.
  */
-export function mediaSession(): { state: string; title: string } | null {
+export function chromeSessions(): { state: string; title: string }[] {
   const out = adb('shell', 'dumpsys', 'media_session');
-  const at = out.indexOf('package=com.android.chrome');
-  if (at < 0) return null;
-  const block = out.slice(at, at + 3000);
-  const state = /state=PlaybackState \{state=([A-Z_]+)\(\d+\)/.exec(block)?.[1] ?? '';
-  const title = /metadata: size=\d+, description=([^,\n]*)/.exec(block)?.[1]?.trim() ?? '';
-  return { state: state.toLowerCase(), title };
+  const marker = 'package=com.android.chrome';
+  const sessions: { state: string; title: string }[] = [];
+  for (let at = out.indexOf(marker); at >= 0; at = out.indexOf(marker, at + marker.length)) {
+    const next = out.indexOf('package=', at + marker.length);
+    const block = out.slice(at, next < 0 ? at + 3000 : Math.min(next, at + 3000));
+    const state = /state=PlaybackState \{state=([A-Z_]+)\(\d+\)/.exec(block)?.[1] ?? '';
+    // "description=<title>, <artist>, <album>": the app's artist is fixed, so a
+    // song title holding commas is still read whole.
+    const description = /metadata: size=\d+, description=([^\n]*)/.exec(block)?.[1] ?? '';
+    const title = (/^(.*?), Aetheria Harmonic Player/.exec(description)?.[1] ?? description.split(',')[0]).trim();
+    sessions.push({ state: state.toLowerCase(), title });
+  }
+  return sessions;
+}
+
+/** Chrome's top media session (the card the phone shows); null when it has none. */
+export function mediaSession(): { state: string; title: string } | null {
+  return chromeSessions()[0] ?? null;
 }

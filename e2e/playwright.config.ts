@@ -43,16 +43,20 @@ export default defineConfig({
     serviceWorkers: 'block',
     launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },
   },
+  // real-library.spec.ts runs only when asked for (E2E_REAL_LIBRARY=1 on a
+  // device run, --project=android-real): it drives YOUR library in YOUR tab.
+  testIgnore: process.env.E2E_REAL_LIBRARY ? undefined : /real-library\.spec\.ts/,
   projects: DEVICE
     ? [
-        { name: 'android', grepInvert: /@device/ },
+        { name: 'android', grepInvert: /@device|@real/ },
         // Turns the screen off (and leaves a phone with a secure lock locked),
         // so it runs after everything else.
         { name: 'android-lock-screen', grep: /@device/, dependencies: ['android'] },
+        ...(process.env.E2E_REAL_LIBRARY ? [{ name: 'android-real', grep: /@real/ }] : []),
       ]
     : [
-        { name: 'desktop', grepInvert: /@device/ },
-        { name: 'mobile-ua', grep: /@mobile/, grepInvert: /@device/, use: { userAgent: ANDROID_UA } },
+        { name: 'desktop', grepInvert: /@device|@real/ },
+        { name: 'mobile-ua', grep: /@mobile/, grepInvert: /@device|@real/, use: { userAgent: ANDROID_UA } },
       ],
   webServer: {
     command: `npx vite --port ${TEST_PORT} --strictPort`,

@@ -256,7 +256,7 @@ export function integratePhiVolumes(
   const solfeggioScale = currentSolfeggioVolume / 0.01; // Current default is 1%
 
   // CLAMP — required, not defensive. `solfeggioVolume`'s slider runs to 1.0
-  // (App.tsx, min 0 / max 1), and a preset path sets it to 0.3. At the trims
+  // (App.tsx, min 0 / max 1). (v14.6 removed the first-tap jump to 0.3.) At the trims
   // above, a slider at 1.0 with volume at 1.0 yields ~12.5 here and ~1.13 at the
   // output — hard clipping. Clamped, the worst case across every slider position
   // is ~0.28 of full scale, which is why the master-bus limiter can stay

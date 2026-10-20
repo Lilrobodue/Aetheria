@@ -1,4 +1,4 @@
-import { adb, DEVICE, TEST_PORT } from './tests/adb';
+import { adb, assertUnlocked, DEVICE, TEST_PORT } from './tests/adb';
 
 // Global setup for runs on the Android device (E2E_DEVICE set; see
 // tests/adb.ts): wake it, make sure Chrome runs, reverse the test server's
@@ -8,6 +8,7 @@ import { adb, DEVICE, TEST_PORT } from './tests/adb';
 export default async function deviceSetup() {
   if (!DEVICE) return;
   adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  assertUnlocked();
   adb('shell', 'am', 'start', '-n', 'com.android.chrome/com.google.android.apps.chrome.Main');
   for (let i = 0; i < 20 && !adb('shell', 'cat', '/proc/net/unix').includes('@chrome_devtools_remote'); i++) {
     await new Promise((r) => setTimeout(r, 500));
@@ -17,9 +18,14 @@ export default async function deviceSetup() {
 
   const volume = /volume is (\d+)/.exec(adb('shell', 'cmd', 'media_session', 'volume', '--stream', '3', '--get'))?.[1];
   adb('shell', 'cmd', 'media_session', 'volume', '--stream', '3', '--set', '2');
+  // Keep the screen on while plugged in, so a screen timeout can't lock the
+  // phone in the middle of the run.
+  const stayOn = adb('shell', 'settings', 'get', 'global', 'stay_on_while_plugged_in').trim();
+  adb('shell', 'settings', 'put', 'global', 'stay_on_while_plugged_in', '3');
 
   return async () => {
     if (volume) adb('shell', 'cmd', 'media_session', 'volume', '--stream', '3', '--set', volume);
+    adb('shell', 'settings', 'put', 'global', 'stay_on_while_plugged_in', stayOn);
     adb('reverse', '--remove', `tcp:${TEST_PORT}`);
     adb('forward', '--remove', 'tcp:9222');
   };

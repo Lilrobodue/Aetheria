@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2,
-  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map as MapIcon, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe, Headphones, CheckCircle2, Library
+  Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map as MapIcon, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe, Headphones, CheckCircle2, Library, VolumeX
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings, BandEnvelope } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, toHeardHz, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, LO_SHU_WALK_COMBINED, LO_SHU_WALK_OUROBOROS, OUROBOROS_PHASES, SOURCE_FREQ, getLoShuPosition, type LoShuWalkMode } from './constants';
@@ -151,6 +151,9 @@ const ANCHOR_TONE_AMPLITUDE = 0;     // 0 = silent anchor. >0 would put a tone b
 const SUB_BASS_DRONE_LEVEL = 0.10;   // master peak gain at full volume (felt, subtle)
 const SUB_BASS_MOD_DEPTH = 0.3;      // 0 = steady carrier, 1 = full gate. 0.3 = subtle felt pulse
 const SUB_BASS_GLIDE_S = 8;          // smooth pitch glide on track change (guide's transitionSubBass)
+// "Music only" (v14.6): when it flips, the layer bus and the drone glide to 0
+// or back with this time constant: about 1 s to -35 dB, so no click.
+const MUSIC_ONLY_FADE_TAU_S = 0.25;
 
 // The band constants and the octave-mapping helpers (octaveInto, feltCarrierHz,
 // thetaAlphaModHz, toSubBass, solfeggioHz) now live in utils/frequencyMapping.ts
@@ -1205,6 +1208,20 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     );
 };
 
+// --- Launch disclaimer ---
+// Acceptance is saved per wording version (v14.6): the disclaimer shows on
+// first launch, and once more whenever DISCLAIMER_VERSION changes. Change it
+// with ANY change to the disclaimer's wording (App's "Disclaimer Modal" JSX),
+// and only then: restyling or moving the text must not re-show it. v15.0's new
+// driving line changes it. The value is the date the current wording shipped
+// (update 7.7, 632f266); never derive it from the app version. (The e2e suite
+// pins the wording: disclaimer.spec.ts fails when it changes.)
+const DISCLAIMER_VERSION = '2026-04-16';
+// Holds the accepted DISCLAIMER_VERSION. '.v1' is the storage format, like the
+// other aetheria.*.v1 keys. The Nov 2025 key 'aetheria_v3_disclaimer' accepted
+// an older text and is ignored.
+const DISCLAIMER_STORAGE_KEY = 'aetheria.disclaimer.v1';
+
 const App: React.FC = () => {
   const [playlist, setPlaylist] = useState<Song[]>([]);
   const [originalPlaylist, setOriginalPlaylist] = useState<Song[]>([]);
@@ -1283,14 +1300,39 @@ const App: React.FC = () => {
 
   // Disclaimer & Tutorial State
   
-  const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+  // Shown until this device accepts the current wording (DISCLAIMER_VERSION).
+  // Read once, lazily, so an accepted disclaimer never flashes; unreadable
+  // storage means it shows.
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState<boolean>(() => {
+    try {
+      return typeof localStorage !== 'undefined'
+        && localStorage.getItem(DISCLAIMER_STORAGE_KEY) === DISCLAIMER_VERSION;
+    } catch {
+      return false;
+    }
+  });
   const [showTutorial, setShowTutorial] = useState(false);
+  // Set by Safety Protocols' "Read the disclaimer", so accepting it again
+  // doesn't start the first-run tutorial in the middle of a session.
+  const rereadingDisclaimerRef = useRef(false);
 
-  // Disclaimer pop-up on every visit logic is handled by initial state being false
   const acceptDisclaimer = () => {
       setDisclaimerAccepted(true);
-      // Show tutorial after first acceptance if not seen
-      const tutorialSeen = localStorage.getItem('aetheria_v3_tutorial_seen');
+      try {
+        localStorage.setItem(DISCLAIMER_STORAGE_KEY, DISCLAIMER_VERSION);
+      } catch {
+        // Full or blocked storage: accepted for this session only.
+      }
+      // Show tutorial after first acceptance if not seen — not when the
+      // disclaimer was reopened to read it (Safety Protocols).
+      if (rereadingDisclaimerRef.current) {
+        rereadingDisclaimerRef.current = false;
+        return;
+      }
+      let tutorialSeen: string | null = 'true'; // storage unreadable: don't nag
+      try {
+        tutorialSeen = localStorage.getItem('aetheria_v3_tutorial_seen');
+      } catch {}
       if (!tutorialSeen) {
           setShowTutorial(true);
       }
@@ -1298,7 +1340,9 @@ const App: React.FC = () => {
 
   const closeTutorial = () => {
       setShowTutorial(false);
-      localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
+      try {
+        localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
+      } catch {}
   };
 
   // Visual settings — persisted to localStorage so the user's tuning survives
@@ -1363,13 +1407,10 @@ const App: React.FC = () => {
   const [solfeggioVolume, setSolfeggioVolume] = useState(0.01);
   // Independent gate for the solfeggio oscillator so the user can hear a
   // selected tone without the music track also resuming. Set true by
-  // selectFrequency, cleared when the user explicitly pauses via the main
-  // play/pause button.
+  // selectFrequency; cleared by every stop (v14.6): pausePlayback (Pause, the
+  // OS pause/stop, Emergency Stop, deleting the playing track, Next on the
+  // last track), Clear, playback errors and the end of the list.
   const [isSolfeggioActive, setIsSolfeggioActive] = useState(false);
-  // One-shot guard so we bump a near-zero solfeggio volume up to an audible
-  // level the first time the user activates a tone — without overriding
-  // intentional later adjustments.
-  const hasBoostedSolfeggioVolumeRef = useRef(false);
   const [binauralVolume, setBinauralVolume] = useState(0.03); // Initialized to 3%
   const [selectedSolfeggio, setSelectedSolfeggio] = useState<number>(396);
   // Lo Shu Perfect GUT mode — when ON, the GUT-band Solfeggio frequencies
@@ -1398,6 +1439,41 @@ const App: React.FC = () => {
       // localStorage may be full or blocked — persistence is best-effort.
     }
   }, [loShuPerfectGUT]);
+
+  // "Music only" (v14.6): the tone, the binaural beat and the sub-bass drone
+  // are off and the music plays on untouched. Saved. It is one multiplier,
+  // classicLayerGain, on the layer bus (gainNodeRef) and on the drone's gain;
+  // the oscillators keep running behind it, so turning it off restores the
+  // exact levels. The Safety panel's Mute turns it on.
+  const MUSIC_ONLY_STORAGE_KEY = 'aetheria.musicOnly.v1';
+  const [musicOnly, setMusicOnly] = useState<boolean>(() => {
+    try {
+      const raw = typeof localStorage !== 'undefined'
+        ? localStorage.getItem(MUSIC_ONLY_STORAGE_KEY)
+        : null;
+      return raw === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(MUSIC_ONLY_STORAGE_KEY, String(musicOnly));
+      }
+    } catch {
+      // localStorage may be full or blocked — persistence is best-effort.
+    }
+  }, [musicOnly]);
+
+  const classicLayerGain = musicOnly ? 0 : 1;
+  // The tone level actually heard, for the effects documentation's records.
+  const heardToneVolume = musicOnly ? 0 : solfeggioVolume;
+  // initAudio has empty deps, so it reads the multiplier through this ref
+  // (the volumeRef pattern).
+  const classicLayerGainRef = useRef(classicLayerGain);
+  useEffect(() => { classicLayerGainRef.current = classicLayerGain; }, [classicLayerGain]);
 
   // Frequency colour mode — 'chakra' (the chakra/order palette stored in
   // SOLFEGGIO_INFO) or 'spectrum' (the colour the frequency would actually
@@ -1719,12 +1795,12 @@ const App: React.FC = () => {
     if (isDocumentingEffects && isPlaying && !currentEffectsSession) {
       const sessionId = experienceTracker.startSession(
         selectedSolfeggio,
-        solfeggioVolume,
+        heardToneVolume,
         'sine'
       );
       setCurrentEffectsSession(sessionId);
     }
-    
+
     if (!isDocumentingEffects && currentEffectsSession) {
       const report = experienceTracker.completeSession(currentEffectsSession);
       if (report) {
@@ -1736,7 +1812,7 @@ const App: React.FC = () => {
       }
       setCurrentEffectsSession(null);
     }
-  }, [isDocumentingEffects, isPlaying, selectedSolfeggio, solfeggioVolume, currentEffectsSession]);
+  }, [isDocumentingEffects, isPlaying, selectedSolfeggio, heardToneVolume, currentEffectsSession]);
 
   // Enhanced frequency detection function
   const detectDominantFrequencyAdvanced = useCallback(async (buffer: AudioBuffer): Promise<number> => {
@@ -1844,6 +1920,9 @@ const App: React.FC = () => {
   // the live tap node and its teardown so a recording mixes music + layers.
   const recordMusicSrcRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const recordMusicDetachRef = useRef<(() => void) | null>(null);
+  // Whether the last attachMusicToRecording could tap the music. Without it a
+  // recording holds only the layers — silence under Music only.
+  const recordMusicAttachedRef = useRef(false);
   const mainAudioRef = useRef<HTMLAudioElement | null>(null);
   // SILENT MEDIA-SESSION ANCHOR. A persistent, looping, silent <audio> element
   // started on the user's first play gesture and never stopped during a playback
@@ -2268,8 +2347,25 @@ const App: React.FC = () => {
     setOriginalPlaylist(updatePlaylist);
 
     if (removedCurrent) {
-      // If currently playing song is deleted, stop playback
-      setIsPlaying(false);
+      // The highlighted track was deleted. If it is sounding, stop the way
+      // Pause does (music, anchor, tone, media session); if it isn't, leave a
+      // tone-only session alone, as before. Either way unload the element and
+      // revoke its URL so Play can't resume the deleted file. removeAttribute +
+      // load() empties the element without the 'error' that `src = ''` raises.
+      // (pausePlayback is declared further down: call it here, never list it
+      // in this callback's deps.)
+      const el = mainAudioRef.current;
+      if (el && !el.paused) pausePlayback();
+      else setIsPlaying(false);
+      if (el) {
+        el.removeAttribute('src');
+        try { el.load(); } catch {}
+      }
+      const url = blobUrlsRef.current[songId];
+      if (url) {
+        try { URL.revokeObjectURL(url); } catch {}
+        delete blobUrlsRef.current[songId];
+      }
       if (sourceNodeRef.current) {
         try {
           sourceNodeRef.current.stop();
@@ -2503,7 +2599,9 @@ const App: React.FC = () => {
         // first play. (This used to be a flat 0.7 — a ~9.7x overshoot for the half
         // second before the effect ramped it down.) Read through volumeRef because
         // initAudio has empty deps and would otherwise capture a stale `volume`.
-        gainNodeRef.current.gain.value = volumeRef.current * MUSIC_OUTPUT_LEVEL * LAYER_BALANCE_ATTEN;
+        // × classicLayerGainRef (0 under Music only), through a ref for the same
+        // reason, so a saved Music only holds from the very first tap.
+        gainNodeRef.current.gain.value = volumeRef.current * MUSIC_OUTPUT_LEVEL * LAYER_BALANCE_ATTEN * classicLayerGainRef.current;
 
         gainNodeRef.current.connect(masterBusRef.current);
 
@@ -2697,9 +2795,15 @@ const App: React.FC = () => {
     el.volume = Math.max(0, Math.min(1, vols.music * MUSIC_OUTPUT_LEVEL * duckComp));
   }, [enablePhiMode, volume]);
 
+  // The Music-only multiplier this effect last applied. A change is a flip,
+  // which fades the bus and the drone over MUSIC_ONLY_FADE_TAU_S; volume and
+  // play/pause changes keep their 0.1 s / 0.2 s.
+  const appliedClassicLayerGainRef = useRef(classicLayerGain);
   useEffect(() => {
     // Music level now lives on the audio element (direct playback).
     applyMusicElementVolume();
+    const musicOnlyFlip = appliedClassicLayerGainRef.current !== classicLayerGain;
+    appliedClassicLayerGainRef.current = classicLayerGain;
 
     // The gain node no longer carries the music — only the binaural / solfeggio
     // layers route through it — but it stays the master for THOSE layers, and
@@ -2714,16 +2818,16 @@ const App: React.FC = () => {
         // Ultra-conservative volume scaling to prevent any distortion. The
         // extra LAYER_BALANCE_ATTEN factor recesses the binaural/solfeggio
         // layers (the only signals on this bus now) back behind the music.
-        const safeVolume = volumes.music * MUSIC_OUTPUT_LEVEL * LAYER_BALANCE_ATTEN; // Match the initial gain setting
-        gainNodeRef.current.gain.setTargetAtTime(safeVolume, audioCtxRef.current.currentTime, 0.1);
+        const safeVolume = volumes.music * MUSIC_OUTPUT_LEVEL * LAYER_BALANCE_ATTEN * classicLayerGain; // Match the initial gain setting
+        gainNodeRef.current.gain.setTargetAtTime(safeVolume, audioCtxRef.current.currentTime, musicOnlyFlip ? MUSIC_ONLY_FADE_TAU_S : 0.1);
     }
 
     // Keep the sub-bass drone tracking the master volume while playing.
     if (subBassDroneRef.current && audioCtxRef.current) {
-        const target = isPlaying ? volume * SUB_BASS_DRONE_LEVEL : 0;
-        subBassDroneRef.current.gain.gain.setTargetAtTime(target, audioCtxRef.current.currentTime, 0.2);
+        const target = isPlaying ? volume * SUB_BASS_DRONE_LEVEL * classicLayerGain : 0;
+        subBassDroneRef.current.gain.gain.setTargetAtTime(target, audioCtxRef.current.currentTime, musicOnlyFlip ? MUSIC_ONLY_FADE_TAU_S : 0.2);
     }
-  }, [volume, enablePhiMode, applyMusicElementVolume, isPlaying]);
+  }, [volume, enablePhiMode, applyMusicElementVolume, isPlaying, classicLayerGain]);
 
   // Adaptive binaural: move the brain-wave band with the music's actual energy.
   //
@@ -2951,7 +3055,7 @@ const App: React.FC = () => {
     // Fade the sub-bass drone in while playing, out while paused. A smooth ramp
     // (setTargetAtTime) is essential — an abrupt sub-bass start/stop is a thump.
     if (subBassDroneRef.current && audioCtxRef.current) {
-      const target = isPlaying ? volume * SUB_BASS_DRONE_LEVEL : 0;
+      const target = isPlaying ? volume * SUB_BASS_DRONE_LEVEL * classicLayerGain : 0; // 0 under Music only
       subBassDroneRef.current.gain.gain.setTargetAtTime(target, audioCtxRef.current.currentTime, 0.25);
     }
   }, [isPlaying]);
@@ -3992,8 +4096,9 @@ const App: React.FC = () => {
     // (quietly: no end-of-scan summary for a library that is gone).
     (window as any).cancelAetheriaAnalysis?.({ quiet: true });
 
-    // Stop playback.
+    // Stop playback, a tone-only session included.
     setIsPlaying(false);
+    setIsSolfeggioActive(false);
     if (sourceNodeRef.current) {
       try {
         sourceNodeRef.current.stop();
@@ -5083,8 +5188,11 @@ const App: React.FC = () => {
       });
       if (el !== mainAudioRef.current) return; // ignore events from a replaced element
       setIsPlaying(false);
+      setIsSolfeggioActive(false); // a failed track stops every layer, the tone included
       // Auto-recovery for common blob errors — clear src so the next play reloads.
-      if (audio.error?.code === 2 || audio.error?.code === 4) {
+      // Not for the empty src this sets: Chrome answers `src = ''` with a code-4
+      // error of its own, and answering that again looped forever (v14.6).
+      if ((audio.error?.code === 2 || audio.error?.code === 4) && el.getAttribute('src')) {
         (el as any).needsReload = true;
         el.src = '';
       }
@@ -5341,6 +5449,9 @@ const App: React.FC = () => {
       console.error('Playback error:', error);
       setIsAnalyzing(false);
       setIsPlaying(false);
+      // A failed play stops every layer. Deliberately not pausePlayback(): when
+      // a second pick aborts this play(), the new track is already starting.
+      setIsSolfeggioActive(false);
     }
   };
 
@@ -5357,7 +5468,17 @@ const App: React.FC = () => {
     const next = resolveNext(true); // commits shuffle bookkeeping, like before
     if (next === null) {
       // Empty playlist, or the terminal end of a non-looping playlist.
+      // A Next with more than 1 s left (in-app, lock screen, car) is a stop:
+      // pause the music too. Auto-advance arrives with <= 0.35 s left
+      // (AUTO_ADVANCE_LOOKAHEAD_S) or at 'ended', and lets that tail play out.
+      // An unknown length (NaN, or Infinity for a recorder WebM) is not a tail.
+      const el = mainAudioRef.current;
+      if (el && !el.ended && !(el.duration - el.currentTime <= 1)) {
+        pausePlayback();
+        return;
+      }
       setIsPlaying(false);
+      setIsSolfeggioActive(false);
       return;
     }
     // Auto-advance preserves the existing shuffle order (resolveNext already
@@ -5720,17 +5841,17 @@ const App: React.FC = () => {
       );
     }
 
-    // First-time courtesy boost: the default solfeggio "Layer Intensity" is
-    // 1%, which is inaudible alongside music. Bump once to ~30% on the very
-    // first tone activation so the user hears something. We won't override
-    // any later manual adjustment.
-    if (!hasBoostedSolfeggioVolumeRef.current && solfeggioVolume < 0.1) {
-      setSolfeggioVolume(0.3);
-      hasBoostedSolfeggioVolumeRef.current = true;
-    }
-
+    // No first-tap boost (removed in v14.6: it jumped Layer Intensity to 30%,
+    // +20 dB, until reload, and undid Mute). The tone plays at the slider's
+    // level: at the default 1%, volume 0.8 and phi mode on, its gain ramps to
+    // 0.100228 on a 0.4 bus = 0.0401 peak, -26 dB under the music (the tone
+    // alone). While music plays, phi timing scales it by
+    // getPhiIntensityMultiplier: 0 at each track start, full at 38.2% / 61.8%.
     setSelectedSolfeggio(applyLoShuPerfectMap(rawFreq));
     setIsSolfeggioActive(true);
+    if (musicOnly) {
+      showStatusToast('Music only is on, so the tone is silent. Turn it off in Harmonic Control.');
+    }
   };
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -5839,6 +5960,7 @@ registerProcessor('wav-capture', WavCapture);
   // bus. Returns a teardown that disconnects the tap. Degrades gracefully to
   // layers-only if the browser can't capture the element.
   const attachMusicToRecording = (target: AudioNode): (() => void) => {
+      recordMusicAttachedRef.current = false;
       const ctx = audioCtxRef.current;
       const el = mainAudioRef.current as (HTMLAudioElement & { captureStream?: () => MediaStream }) | null;
       if (!ctx || !el || typeof el.captureStream !== 'function') return () => {};
@@ -5848,6 +5970,7 @@ registerProcessor('wav-capture', WavCapture);
           const src = ctx.createMediaStreamSource(stream);
           src.connect(target);
           recordMusicSrcRef.current = src;
+          recordMusicAttachedRef.current = true;
           return () => {
               try { src.disconnect(); } catch {}
               if (recordMusicSrcRef.current === src) recordMusicSrcRef.current = null;
@@ -5899,6 +6022,15 @@ registerProcessor('wav-capture', WavCapture);
       };
   };
 
+  // Under Music only the layers are silent, so a recording that couldn't tap
+  // the music (a browser without captureStream, or no track loaded yet) would
+  // be silence. Say so; don't block it.
+  const warnIfRecordingSilent = () => {
+      if (musicOnly && !recordMusicAttachedRef.current) {
+          showStatusToast("Music only is on and the music can't be recorded here, so this recording will be silent.", { durationMs: 8000 });
+      }
+  };
+
   const startRecording = (type: 'audio' | 'video' | 'both') => {
       if (!audioCtxRef.current) return;
 
@@ -5908,6 +6040,7 @@ registerProcessor('wav-capture', WavCapture);
               .then(() => {
                   setIsRecording(true);
                   setShowRecordOptions(false);
+                  warnIfRecordingSilent();
               })
               .catch((e) => {
                   alert("WAV recording failed to start.");
@@ -5926,6 +6059,7 @@ registerProcessor('wav-capture', WavCapture);
           // remember the teardown for stopRecording.
           recordMusicDetachRef.current = attachMusicToRecording(destNodeRef.current);
           tracks.push(...destNodeRef.current.stream.getAudioTracks());
+          warnIfRecordingSilent();
       }
 
       const canvas = document.getElementById('viz-canvas') as HTMLCanvasElement;
@@ -6133,9 +6267,10 @@ registerProcessor('wav-capture', WavCapture);
   return (
     <div className={`relative min-h-screen bg-black text-slate-200 font-sans overflow-hidden ${isFullScreen ? 'h-screen' : ''}`}>
       
-      {/* Disclaimer Modal */}
+      {/* Disclaimer Modal. Its wording is versioned: change DISCLAIMER_VERSION
+          (above App) with any wording change, or it won't show again. */}
       {!disclaimerAccepted && (
-        <div className="fixed inset-0 z-[150] bg-black/95 flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-500">
+        <div data-testid="disclaimer" className="fixed inset-0 z-[150] bg-black/95 flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-500">
           <div className="max-w-lg w-full max-h-[90vh] bg-slate-900 border border-gold-500/30 p-8 rounded-2xl shadow-2xl text-center relative overflow-hidden overflow-y-auto my-auto">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent"></div>
             <AlertTriangle className="w-12 h-12 text-gold-500 mx-auto mb-4 animate-pulse" />
@@ -6409,7 +6544,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v14.5</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v14.6</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -6439,6 +6574,8 @@ registerProcessor('wav-capture', WavCapture);
                         if (window.innerWidth < 768) setShowSidebar(false);
                     }
                 }} 
+                title="Harmonic Control"
+                aria-label="Harmonic Control"
                 className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"
             >
                 <Settings size={20} />
@@ -7708,7 +7845,27 @@ registerProcessor('wav-capture', WavCapture);
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar pb-32">
-                   
+
+                   {/* Music only (v14.6): tone, beat and drone off; the music plays on. Saved. */}
+                   <div className="flex items-center justify-between gap-3 p-4 rounded-xl border border-slate-700 bg-slate-900/50">
+                      <div className="flex items-center gap-2 min-w-0">
+                          <VolumeX className={`w-5 h-5 shrink-0 ${musicOnly ? 'text-orange-400' : 'text-slate-500'}`} />
+                          <div className="min-w-0">
+                              <div className="text-xs font-bold uppercase tracking-widest text-slate-300">Music only</div>
+                              <div className="text-[10px] text-slate-500">Tone, beat and drone off. The music plays on. Saved.</div>
+                          </div>
+                      </div>
+                      <button
+                          role="switch"
+                          aria-checked={musicOnly}
+                          aria-label="Music only"
+                          onClick={() => setMusicOnly((v: boolean) => !v)}
+                          className={`w-10 h-5 rounded-full relative transition-colors shrink-0 ${musicOnly ? 'bg-orange-500' : 'bg-slate-700'}`}
+                      >
+                          <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-transform ${musicOnly ? 'left-6' : 'left-1'}`}></div>
+                      </button>
+                   </div>
+
                    {/* Phi Integration Panel */}
                    <div className="border border-purple-500/30 rounded-xl overflow-hidden bg-slate-900/50 shadow-[0_0_15px_rgba(147,51,234,0.1)]">
                       <div className="p-4 bg-purple-900/20">
@@ -8361,7 +8518,7 @@ registerProcessor('wav-capture', WavCapture);
                         isDocumenting={isDocumentingEffects}
                         onToggleDocumentation={() => setIsDocumentingEffects(!isDocumentingEffects)}
                         currentFrequency={selectedSolfeggio}
-                        currentVolume={solfeggioVolume}
+                        currentVolume={heardToneVolume}
                         sessionDuration={sessionDuration}
                         isPlaying={isPlaying}
                         onSessionStart={(data) => {
@@ -8370,7 +8527,7 @@ registerProcessor('wav-capture', WavCapture);
                           if (!currentEffectsSession) {
                             const sessionId = experienceTracker.startSession(
                               selectedSolfeggio,
-                              solfeggioVolume,
+                              heardToneVolume,
                               'sine'
                             );
                             setCurrentEffectsSession(sessionId);
@@ -8384,7 +8541,7 @@ registerProcessor('wav-capture', WavCapture);
                             const userReport = {
                               userId: 'user_' + Date.now(), // In real app, use proper user ID
                               frequency: selectedSolfeggio,
-                              volume: solfeggioVolume,
+                              volume: heardToneVolume,
                               duration: sessionDuration,
                               waveform: 'sine',
                               environment: data.environment || 'unknown',
@@ -8808,7 +8965,7 @@ registerProcessor('wav-capture', WavCapture);
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-400">Volume</span>
-                          <span className="text-white">{Math.round(solfeggioVolume * 100)}%</span>
+                          <span className="text-white">{musicOnly ? 'Layers off' : `${Math.round(solfeggioVolume * 100)}%`}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-400">Mode</span>
@@ -8847,7 +9004,9 @@ registerProcessor('wav-capture', WavCapture);
                       <div className="flex gap-2">
                         <button
                           onClick={() => {
-                            setIsPlaying(false);
+                            // The same stop as Pause and the lock-screen pause:
+                            // the music, the anchor and every layer (v14.6).
+                            pausePlayback();
                             setShowSafetyProtocols(false);
                           }}
                           className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded"
@@ -8855,13 +9014,36 @@ registerProcessor('wav-capture', WavCapture);
                           Emergency Stop
                         </button>
                         <button
-                          onClick={() => setSolfeggioVolume(0)}
+                          onClick={() => {
+                            setMusicOnly(true);
+                            // Saved, unlike v14.5's one-session Mute: say so where touch users see it.
+                            showStatusToast('Layers muted. They stay off until you turn off Music only in Harmonic Control.', {
+                              actionLabel: 'Undo',
+                              onAction: () => { setMusicOnly(false); dismissStatusToast(); },
+                              durationMs: 8000,
+                            });
+                          }}
+                          title="Turns on Music only: the tone, beat and drone fade out and stay off. Turn it off in Harmonic Control."
                           className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold rounded"
                         >
-                          Mute
+                          {musicOnly ? 'Layers muted' : 'Mute layers'}
                         </button>
                       </div>
                       
+                      {/* The launch disclaimer, readable any time: since v14.6 it
+                          shows by itself only on first launch and when its wording
+                          changes. More › Safety replaces this in v14.22. */}
+                      <button
+                        onClick={() => {
+                          rereadingDisclaimerRef.current = true;
+                          setShowSafetyProtocols(false);
+                          setDisclaimerAccepted(false);
+                        }}
+                        className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded border border-slate-600"
+                      >
+                        Read the disclaimer
+                      </button>
+
                       {/* Close Button */}
                       <button
                         onClick={() => setShowSafetyProtocols(false)}
@@ -9303,7 +9485,16 @@ registerProcessor('wav-capture', WavCapture);
                          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
                             <Waves size={8} /> {selectedBinaural.name}
                          </span>
-                         
+                         {musicOnly && (
+                           <span
+                             data-testid="music-only-chip"
+                             className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-300 border border-orange-500/30"
+                             title="Music only is on: the tone, beat and drone are off. Turn it off in Harmonic Control."
+                           >
+                             <VolumeX size={8} /> Music only
+                           </span>
+                         )}
+
                          {/* Sacred Geometry Status */}
                          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20"
                            title={`${getCurrentSacredGeometry().shape} manifesting`}>

@@ -60,8 +60,13 @@ export async function openApp(page: Page, opts: { acceptDialogs?: boolean; query
   return dialogs;
 }
 
-/** The launch disclaimer (shown until accepted; from v14.6 once per text version). */
+/**
+ * The launch disclaimer: accept it if it shows. From v14.6 it shows only until
+ * the current wording is accepted, so "not there" is a normal answer — wait
+ * for the app itself (rendered under the disclaimer) before deciding.
+ */
 export async function acceptDisclaimer(page: Page): Promise<void> {
+  await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
   const accept = page.getByRole('button', { name: /I understand, let me begin/ });
   if (await accept.isVisible().catch(() => false)) await accept.click();
 }
@@ -178,6 +183,180 @@ export async function controlStateSaves(page: Page): Promise<void> {
     } as typeof put;
   });
 }
+
+/**
+ * Watch the app's Web Audio graph and media elements (call before openApp; it
+ * survives reloads). The app exposes nothing for tests, so this wraps the
+ * standard APIs: every connect(), the tone's gain ramp (the app's only
+ * linearRampToValueAtTime), the last setTargetAtTime and first .value write
+ * per AudioParam, stopped sources, oscillators and channel mergers created,
+ * and which element plays music (a blob: src) and which the silent anchor
+ * (data:). In-page and in-memory only.
+ */
+export async function instrumentAudio(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const A: any = ((window as any).__audio = {
+      edges: [], last: new Map(), firstSet: new Map(), rampParams: [], ramps: [], envMax: 0,
+      toneOscs: [], stopped: new WeakSet(), oscCount: 0, mergerCount: 0,
+      music: null, anchor: null, musicPauses: 0,
+    });
+    const P = AudioParam.prototype as any;
+    const ramp = P.linearRampToValueAtTime;
+    P.linearRampToValueAtTime = function (v: number, t: number) {
+      A.rampParams.push(this);
+      A.ramps.push(v);
+      return ramp.call(this, v, t);
+    };
+    const toward = P.setTargetAtTime;
+    P.setTargetAtTime = function (v: number, t: number, tau: number) {
+      A.last.set(this, { target: v, tau });
+      if (A.rampParams.includes(this)) A.envMax = Math.max(A.envMax, v);
+      return toward.call(this, v, t, tau);
+    };
+    const value = Object.getOwnPropertyDescriptor(AudioParam.prototype, 'value')!;
+    Object.defineProperty(AudioParam.prototype, 'value', {
+      ...value,
+      set(v: number) {
+        if (!A.firstSet.has(this)) A.firstSet.set(this, v);
+        value.set!.call(this, v);
+      },
+    });
+    const connect = AudioNode.prototype.connect as any;
+    (AudioNode.prototype as any).connect = function (dest: any, ...rest: unknown[]) {
+      A.edges.push([this, dest]);
+      if (this instanceof OscillatorNode && dest instanceof GainNode && A.rampParams.includes(dest.gain)) A.toneOscs.push(this);
+      return connect.call(this, dest, ...rest);
+    };
+    const stop = AudioScheduledSourceNode.prototype.stop;
+    AudioScheduledSourceNode.prototype.stop = function (this: AudioScheduledSourceNode, when?: number) {
+      A.stopped.add(this);
+      return stop.call(this, when);
+    };
+    const B = BaseAudioContext.prototype as any;
+    const osc = B.createOscillator;
+    const merger = B.createChannelMerger;
+    B.createOscillator = function () {
+      if (this instanceof AudioContext) A.oscCount++;
+      return osc.call(this);
+    };
+    B.createChannelMerger = function (...args: unknown[]) {
+      if (this instanceof AudioContext) A.mergerCount++;
+      return merger.apply(this, args);
+    };
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+      const src = this.getAttribute('src') || '';
+      if (src.startsWith('blob:')) A.music = this;
+      else if (src.startsWith('data:')) A.anchor = this;
+      return play.call(this);
+    };
+    const pause = HTMLMediaElement.prototype.pause;
+    HTMLMediaElement.prototype.pause = function (this: HTMLMediaElement) {
+      if (this === A.music) A.musicPauses++;
+      return pause.call(this);
+    };
+  });
+}
+
+export interface LayerState {
+  ctxRunning: boolean;
+  /** The layer bus (tone + binaural): its value now, first write, last target. */
+  bus: number | null;
+  busFirst: number | null;
+  busLast: { target: number; tau: number } | null;
+  /** The sub-bass drone's gain. */
+  drone: number | null;
+  droneLast: { target: number; tau: number } | null;
+  /** Every tone-gain ramp target so far, and the highest envelope target on one. */
+  toneTargets: number[];
+  envMax: number;
+  /** The newest tone oscillator exists and hasn't been stopped. */
+  toneSounding: boolean;
+  oscCount: number;
+  mergerCount: number;
+  music: { paused: boolean; ended: boolean; time: number; volume: number; src: string | null; currentSrc: string } | null;
+  musicPauses: number;
+  anchorPaused: boolean | null;
+}
+
+/** Read what instrumentAudio recorded. The master bus is the one node feeding
+ *  the recording destination; the layer bus and the drone feed the master bus,
+ *  in that order. */
+export async function layerState(page: Page): Promise<LayerState> {
+  return page.evaluate(() => {
+    const A = (window as any).__audio;
+    const master = A.edges.find(([, d]: any[]) => d instanceof MediaStreamAudioDestinationNode)?.[0];
+    const [bus, drone] = A.edges
+      .filter(([s, d]: any[]) => d === master && s instanceof GainNode)
+      .map(([s]: any[]) => s as GainNode);
+    const tone = A.toneOscs[A.toneOscs.length - 1];
+    const m: HTMLMediaElement | null = A.music;
+    return {
+      ctxRunning: bus ? bus.context.state === 'running' : false,
+      bus: bus ? bus.gain.value : null,
+      busFirst: bus ? (A.firstSet.get(bus.gain) ?? null) : null,
+      busLast: bus ? (A.last.get(bus.gain) ?? null) : null,
+      drone: drone ? drone.gain.value : null,
+      droneLast: drone ? (A.last.get(drone.gain) ?? null) : null,
+      toneTargets: A.ramps.slice(),
+      envMax: A.envMax,
+      toneSounding: !!tone && !A.stopped.has(tone),
+      oscCount: A.oscCount,
+      mergerCount: A.mergerCount,
+      music: m
+        ? { paused: m.paused, ended: m.ended, time: m.currentTime, volume: m.volume, src: m.getAttribute('src'), currentSrc: m.currentSrc }
+        : null,
+      musicPauses: A.musicPauses,
+      anchorPaused: A.anchor ? A.anchor.paused : null,
+    };
+  });
+}
+
+/** Pick a frequency in the "Advanced Frequency Selection" modal (it closes itself). */
+export async function pickFrequency(page: Page, hz = 528): Promise<void> {
+  await page.getByTitle('Advanced Frequency Selection').click();
+  await page.getByRole('button', { name: `${hz}Hz`, exact: true }).click();
+}
+
+/** Open Harmonic Control (the header's gear). */
+export async function openHarmonicControl(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Harmonic Control', exact: true }).click();
+  await page.getByRole('heading', { name: 'Harmonic Control', exact: true }).waitFor();
+}
+
+/** Tap a frequency in Harmonic Control's "Traditional Scale (Safe)" grid. */
+export async function tapTraditional(page: Page, hz: number): Promise<void> {
+  await page
+    .getByText('Traditional Scale (Safe)', { exact: true })
+    .locator('xpath=..')
+    .getByRole('button', { name: String(hz), exact: true })
+    .click();
+}
+
+/** Harmonic Control's "Layer Intensity" readout, e.g. "1%". */
+export const layerIntensity = (page: Page) =>
+  page.getByText('Layer Intensity', { exact: true }).locator('xpath=following-sibling::span[1]');
+
+/** Open the Safety Protocols panel unless it is already open (the app opens it
+ *  by itself for an unanalysed track). */
+export async function openSafety(page: Page): Promise<void> {
+  if (await page.getByRole('button', { name: 'Emergency Stop' }).isVisible().catch(() => false)) return;
+  await page.getByTitle('Safety Protocols', { exact: true }).click();
+  await page.getByRole('button', { name: 'Emergency Stop' }).waitFor();
+}
+
+/** Count console messages starting with `prefix` from now on. */
+export function countConsole(page: Page, prefix: string): () => number {
+  let n = 0;
+  page.on('console', (m) => {
+    if (m.text().startsWith(prefix)) n++;
+  });
+  return () => n;
+}
+
+/** A song row in the list (it holds the row's Delete button). */
+export const rowOf = (page: Page, name: string) =>
+  page.locator('div.group').filter({ has: page.getByText(name, { exact: true }) });
 
 /** Seconds elapsed in the current track, from the transport readout "m:ss / m:ss". */
 export async function elapsedSeconds(page: Page): Promise<number> {
