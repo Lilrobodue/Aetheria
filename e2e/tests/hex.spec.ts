@@ -386,7 +386,7 @@ function segmentDistance(px: number, py: number, a: { x: number; y: number }, b:
   return Math.hypot(a.x + vx * t - px, a.y + vy * t - py);
 }
 
-type DrawnHex = { lw: number; cx: number; cy: number };
+type DrawnHex = { lw: number; cx: number; cy: number; a: number };
 
 /** Record the stroked hexagons of the last ~600 frames in window.__frames (call before openApp). */
 async function recordHexDraws(page: Page): Promise<void> {
@@ -428,7 +428,10 @@ async function recordHexDraws(page: Page): Promise<void> {
       if (frame && path.length === 12) {
         const size = (path[0] - path[6]) / 2;
         if (size > 40 && size < 120 && Math.abs(path[1] - path[7]) < 1e-6) {
-          frame.push({ lw: this.lineWidth, cx: (path[0] + path[6]) / 2, cy: (path[1] + path[7]) / 2 });
+          // Its alpha as the canvas stores it (8 bits: a near-invisible fade reads 0).
+          const rgba = /rgba?\(([^)]+)\)/.exec(String(this.strokeStyle));
+          const a = (rgba ? Number(rgba[1].split(',')[3] ?? 1) : 1) * this.globalAlpha;
+          frame.push({ lw: this.lineWidth, cx: (path[0] + path[6]) / 2, cy: (path[1] + path[7]) / 2, a });
         }
       }
       return stroke.apply(this, args);
@@ -460,9 +463,10 @@ test('what the hex layer draws: tokens on cells or mid-glide and never closer th
     for (const t of tokens) {
       const near = nearestCell(t.cx, t.cy);
       if (near.distance < 0.5) {
-        // Resting (exactly on its cell): its own cell must not be drawn under it.
-        // A token a hair into its glide is drawn over a near-invisible fading cell.
-        if (near.distance < 1e-6 && cells.some((c) => Math.hypot(c.cx - t.cx, c.cy - t.cy) < 1e-6)) underRestingToken++;
+        // Resting (exactly on its cell): its own cell must not be visibly drawn
+        // under it. On a glide's last frame the token can sit within 1e-7 px of
+        // its cell while the fading cell is still stroked at an invisible alpha.
+        if (near.distance < 1e-6 && cells.some((c) => c.a > 0.002 && Math.hypot(c.cx - t.cx, c.cy - t.cy) < 1e-6)) underRestingToken++;
       } else {
         // Gliding: on the edge from its nearest cell to a neighbour.
         const a = LATTICE[near.at];

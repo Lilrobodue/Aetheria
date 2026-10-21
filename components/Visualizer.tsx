@@ -1437,8 +1437,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
         // "Cooler" (settings.frameRate) caps this loop at ~20 fps: 49.99 ms sits
         // just under three 60 Hz vsyncs, as 33.33 sits under two, so frames stay
         // evenly paced (a ~24 fps cap alternates 2 and 3 vsyncs and judders).
-        // Standard stays the validated 30. App still re-renders every frame
-        // while music plays, so Cooler trims only the visualizer's share.
+        // Standard stays the validated 30. Cooler trims the visualizer's own
+        // work (App renders only a few times a second since v14.8).
         const targetFrameTime = settings.frameRate === 'cooler' ? 49.99 : 33.33;
 
         // Skip frame if we're running too fast
