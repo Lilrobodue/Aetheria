@@ -2491,6 +2491,40 @@ const App: React.FC = () => {
     };
   }, [isZenMode]);
 
+  // What the header and the player bar cover of the visualizer (px from the top
+  // and the bottom edge): the Spectrum lens fits between them instead of sliding
+  // behind the player bar. Measured, so a rotation, a resize or a wrapping info
+  // row is followed; Zen Mode's hidden UI covers nothing. Set only on a change.
+  const headerRef = useRef<HTMLElement | null>(null);
+  const playerBarRef = useRef<HTMLDivElement | null>(null);
+  const [uiInsets, setUiInsets] = useState({ top: 0, bottom: 0 });
+  const uiHidden = isZenMode && !zenUiVisible;
+  useEffect(() => {
+    const apply = (top: number, bottom: number) =>
+      setUiInsets((prev: { top: number; bottom: number }) => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }));
+    if (uiHidden) {
+      apply(0, 0);
+      return;
+    }
+    const measure = () => {
+      const header = headerRef.current;
+      const bar = playerBarRef.current;
+      apply(
+        header ? Math.max(0, Math.ceil(header.getBoundingClientRect().bottom)) : 0,
+        bar ? Math.max(0, Math.ceil(window.innerHeight - bar.getBoundingClientRect().top)) : 0
+      );
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    if (observer && headerRef.current) observer.observe(headerRef.current);
+    if (observer && playerBarRef.current) observer.observe(playerBarRef.current);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [uiHidden]);
+
   // Handle Shuffle State Logic
   useEffect(() => {
     if (isShuffle && playlist.length > 0) {
@@ -3164,13 +3198,45 @@ const App: React.FC = () => {
 
 
 
+  // A pause sets the element's exact time in the same render as isPlaying, so
+  // the commit that hands useMediaSession the paused state hands the lock
+  // screen the paused position too. Set only from the time effect's cleanup
+  // below, it came a render later: useMediaSession had often sent the older
+  // quarter-second time by then, and its 1 Hz throttle kept that one.
+  const [clockPlaying, setClockPlaying] = useState(isPlaying);
+  if (clockPlaying !== isPlaying) {
+    setClockPlaying(isPlaying);
+    if (!isPlaying && mainAudioRef.current) setCurrTime(mainAudioRef.current.currentTime);
+  }
+
+  // False once App unmounts. Declared before the time effect below, so on
+  // unmount its cleanup runs first and the time effect's cleanup sets no state.
+  const appMountedRef = useRef(false);
   useEffect(() => {
+    appMountedRef.current = true;
+    return () => { appMountedRef.current = false; };
+  }, []);
+
+  useEffect(() => {
+    // currTime feeds the clock text, the seek bar, the φ phase badge and the
+    // lock screen's position (itself throttled to 1 Hz in useMediaSession), so
+    // it is set only as the element crosses a quarter second, moves back (a
+    // seek, a new track) or on this run's first frame. Setting it every frame
+    // re-rendered the whole App ~60 times a second while playing: most of the
+    // renderer's CPU, the phone's main heat. The φ gains below still follow
+    // every frame. On the quarter-second grid the clock turns with the music,
+    // and when the run stops (a pause) the time is set once more, to the
+    // element's own, so a paused clock and seek bar show where it stopped.
+    let lastSetTime = -1;
     const updateTime = () => {
       if (isPlaying && mainAudioRef.current) {
         // Use the audio element's currentTime directly
         const actualTime = mainAudioRef.current.currentTime;
-        setCurrTime(actualTime);
-        
+        if (lastSetTime < 0 || actualTime < lastSetTime || Math.floor(actualTime * 4) !== Math.floor(lastSetTime * 4)) {
+          lastSetTime = actualTime;
+          setCurrTime(actualTime);
+        }
+
         // CHANGE 3: Apply phi-based temporal structure for dynamic volume
         if (enablePhiMode && phiTimingEnabled && currDuration > 0 && audioCtxRef.current) {
           const phiVolumes = integratePhiVolumes(volume, binauralVolume, solfeggioVolume, true);
@@ -3200,7 +3266,10 @@ const App: React.FC = () => {
       }
     };
     if (isPlaying) rafRef.current = requestAnimationFrame(updateTime);
-    return () => cancelAnimationFrame(rafRef.current);
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      if (isPlaying && appMountedRef.current && mainAudioRef.current) setCurrTime(mainAudioRef.current.currentTime);
+    };
   }, [isPlaying, enablePhiMode, phiTimingEnabled, currDuration, volume, binauralVolume, solfeggioVolume]);
 
 
@@ -6537,6 +6606,7 @@ registerProcessor('wav-capture', WavCapture);
             loShuWalkStep={loShuWalkMode ? currentSongIndex : -1}
             bandEnvelope={currentSongIndex >= 0 ? (playlist[currentSongIndex]?.bandEnvelope ?? null) : null}
             audioElementRef={mainAudioRef}
+            uiInsets={uiInsets}
         />
       </div>
 
@@ -6544,7 +6614,7 @@ registerProcessor('wav-capture', WavCapture);
         className={`relative z-10 flex flex-col h-screen transition-opacity duration-1000 ${(!isZenMode || zenUiVisible) ? 'opacity-100' : 'opacity-0'} ${isZenMode ? '' : 'bg-black/20'}`}
       >
         
-        <header className="flex justify-between items-center p-3 md:p-4 border-b border-slate-800/50 bg-black/80 backdrop-blur-md z-30 shadow-lg safe-area-top shrink-0">
+        <header ref={headerRef} className="flex justify-between items-center p-3 md:p-4 border-b border-slate-800/50 bg-black/80 backdrop-blur-md z-30 shadow-lg safe-area-top shrink-0">
           <div className="flex items-center gap-2">
              <button onClick={() => setShowSidebar(!showSidebar)} className="text-gold-500 mr-2 p-1 hover:bg-slate-800 rounded">
                <Menu />
@@ -6552,7 +6622,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v14.7</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v14.8</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -8032,7 +8102,7 @@ registerProcessor('wav-capture', WavCapture);
                                         className="w-full bg-slate-900 text-xs border border-slate-700 rounded px-2 py-1 text-slate-300"
                                     >
                                         <option value="pulse">Radial Pulse (Gentle)</option>
-                                        <option value="spectrum">Spectrum Analyzer (Aggressive)</option>
+                                        <option value="spectrum">Spectrum Lens (Epic)</option>
                                         <option value="wave">Energy Wave (Flowing)</option>
                                     </select>
                                 </div>
@@ -8046,9 +8116,7 @@ registerProcessor('wav-capture', WavCapture);
                                         ? 'Held still: this device asks for reduced motion.'
                                         : !on
                                             ? 'Off-colour hexes stay in their original places.'
-                                            : vizSettings.hexVisualMode === 'spectrum' && !vizSettings.showWaterRipples
-                                                ? 'Barely visible in Spectrum mode: try Radial Pulse, Energy Wave or Hydro-Acoustics.'
-                                                : 'Off-colour hexes glide to a neighbouring cell every few seconds, faster when the music is busy.';
+                                            : 'Off-colour hexes glide to a neighbouring cell every few seconds, faster when the music is busy.';
                                     return (
                                         <div className={`p-3 bg-slate-900 rounded-lg border border-slate-800 transition-opacity ${vizSettings.showHexagons ? '' : 'opacity-50'}`}>
                                             <button
@@ -9400,14 +9468,14 @@ registerProcessor('wav-capture', WavCapture);
 
           {/* NEW FOOTER - SNAPPED TO BOTTOM */}
           <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none flex justify-center">
-             <div className="pointer-events-auto w-full bg-black/90 backdrop-blur-xl border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] transition-all duration-300 group">
+             <div ref={playerBarRef} data-testid="player-bar" className="pointer-events-auto w-full bg-black/90 backdrop-blur-xl border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] transition-all duration-300 group">
                 
                 {/* Seek Bar with Phi Timing Markers */}
                 <div 
                     className="w-full h-1 hover:h-2 bg-slate-800/50 cursor-pointer relative transition-all group-hover:h-2"
                     onClick={handleSeek}
                 >
-                    <div className="absolute inset-y-0 left-0 bg-gold-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]" style={{width: `${(currTime / (currDuration || 1)) * 100}%`}}></div>
+                    <div data-testid="seek-progress" className="absolute inset-y-0 left-0 bg-gold-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]" style={{width: `${(currTime / (currDuration || 1)) * 100}%`}}></div>
                     
                     {/* Phi timing markers */}
                     {enablePhiMode && phiTimingEnabled && currDuration > 0 && (

@@ -115,8 +115,10 @@ test('wandering hexes are on by default, come up on from an older save, and stay
   const dialogs = await openApp(page, { query: '?perf=1' });
   await openVisualization(page);
   await expect(wanderSwitch(page)).toHaveAttribute('aria-checked', 'true');
-  // The default mode is Spectrum with Hydro-Acoustics off, where tokens barely show.
-  await expect(wanderSwitch(page)).toHaveAccessibleDescription(/^Barely visible in Spectrum mode/);
+  // The default mode is Spectrum, where (from v14.8) the tokens ride the lens: the usual line.
+  await expect(wanderSwitch(page)).toHaveAccessibleDescription(
+    'Off-colour hexes glide to a neighbouring cell every few seconds, faster when the music is busy.'
+  );
   // The visualizer runs it too (held, as nothing plays): the HUD has its part.
   await expect.poll(async () => (await latestHud(page))?.hex ?? null).not.toBeNull();
   // Untapped, neither setting is saved, so their defaults can still change later.
@@ -267,7 +269,7 @@ test('Cooler draws ~20 frames a second, Standard 30, and the choice is saved', a
   expect(dialogs).toEqual([]);
 });
 
-test('no errors, and the visualizer keeps drawing, across play, track change, density, the switch and a resize', async ({ page }) => {
+test('no errors, and the visualizer keeps drawing, across play, track change, density, the switch, Spectrum and a resize', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => {
@@ -275,6 +277,8 @@ test('no errors, and the visualizer keeps drawing, across play, track change, de
     if (m.type() === 'error' && !m.text().startsWith('[SW]')) errors.push(m.text());
     // The wander's safety net caught an exception and went static.
     if (m.text().startsWith('[hexWander]')) errors.push(m.text());
+    // Spectrum's safety net caught one: it draws no hexes for the rest of the session.
+    if (m.text().startsWith('[spectrum]')) errors.push(m.text());
   });
   // Errors are checked as each step ends, so a failure names the error and not
   // only its symptom: an exception in the effect's first render() call
@@ -317,6 +321,12 @@ test('no errors, and the visualizer keeps drawing, across play, track change, de
     await page.waitForTimeout(2000);
     await wanderSwitch(page).click();
     await expect(wanderSwitch(page)).toHaveAttribute('aria-checked', 'true');
+  });
+  await step('switch to Spectrum and back', async () => {
+    await hexModeSelect(page).selectOption('spectrum');
+    await page.waitForTimeout(3000);
+    await hexModeSelect(page).selectOption('pulse');
+    await page.waitForTimeout(2000);
   });
   await step('resize to a phone and back', async () => {
     const size = page.viewportSize()!;

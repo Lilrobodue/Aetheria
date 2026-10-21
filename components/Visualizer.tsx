@@ -2,13 +2,15 @@ import React, { useRef, useEffect } from 'react';
 import { VizSettings, BandEnvelope } from '../types';
 import { frequencyToSpectrumColor, type FrequencyColorMode } from '../utils/spectrumColor';
 import { LO_SHU_WALKS, type LoShuWalkMode } from '../constants';
-import { countDraw, countHexMoves, perfHudEnabled, reportHexFrame } from '../utils/perfHud';
+import { countDraw, countHexMoves, perfHudEnabled, reportHexFrame, reportSpectrumFrame } from '../utils/perfHud';
 import {
   HEX_SIZE, HEX_COLS, HEX_ROWS, HEX_CELLS, HEX_UNIT_COS, HEX_UNIT_SIN,
   hexX, hexY, goldenShade, buildNeighbourTable,
   createHexWander, resetHexWander, stepHexWander, smoothWanderEnergy, easeGlide, hexWanderCover,
 } from '../utils/hexWander';
 import type { HexWander } from '../utils/hexWander';
+import { createHexSpectrum, stepHexSpectrum, hexSpectrumCellLevel, hexSpectrumEcho, seedHexSpectrumFloors, envelopeMean, hexSpectrumAlphaScale } from '../utils/hexSpectrum';
+import type { HexSpectrum } from '../utils/hexSpectrum';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 
 interface VisualizerProps {
@@ -41,7 +43,13 @@ interface VisualizerProps {
    *  position used to index bandEnvelope. A ref (stable identity) rather than a
    *  prop value so frame-accurate time reads don't churn React state. */
   audioElementRef?: React.RefObject<HTMLAudioElement | null>;
+  /** CSS px the App's own panels cover at the top (its header) and the bottom
+   *  (the player bar). The Spectrum lens fits between them (it slid behind the
+   *  player bar on a phone); absent or 0 = nothing covers the canvas (Zen Mode).
+   *  No other layer reads it. */
+  uiInsets?: { top: number; bottom: number };
 }
+const NO_INSETS = { top: 0, bottom: 0 };
 
 // 27 Aetheria frequencies arranged into [GUT, HEART, HEAD] layers, ordered
 // by Lo Shu position 1..9 (so index 0 == position 1).
@@ -129,6 +137,54 @@ const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5)); // ~2.399 rad
 // so fewer concurrent ripples = lighter kick frames = no dropped frames on the
 // beat, while 40 is still well above what's visible at once.
 const MAX_ACTIVE_RIPPLES = 40;
+
+// --- Spectrum mode drawing (utils/hexSpectrum) ---
+// Every lit hexagon of a Spectrum frame goes into a (style, alpha) bucket; each
+// bucket sets its colour, width and alpha once, then draws its hexagons, each
+// its own small convex path: one path holding many hexagons measured several
+// times slower to rasterise in the GPU process, which is most of the phone's
+// heat. No colour string is built per hexagon. Styles, in draw order:
+// 0 cells, 1 tokens shade1, 2 tokens shade2, 3 cap cores (fill only), 4 caps.
+const SPEC_STYLES = 5;
+// Bucket alphas, geometric (brightness reads logarithmically, ~1.5x apart), and
+// the edges between them (geometric means). Below the first edge nothing is
+// drawn: a hexagon fainter than ~0.1 costs a draw and barely shows.
+const SPEC_LEVELS = [0.13, 0.2, 0.31, 0.47, 0.71, 1];
+const SPEC_EDGES = [0.1, 0.161, 0.249, 0.382, 0.578, 0.843];
+const SPEC_Q = SPEC_LEVELS.length;
+const SPEC_MAX_DRAWS = 2048; // 1200 cells + 342 tokens + 2 per cap, with headroom
+const SPEC_CELL_GAIN = 1.45; // a bar tip at hex opacity 0.6 strokes at ~0.9
+const SPEC_CAP_SIZE = 0.55;  // caps are smaller than a cell: sparks riding the bars
+const SPEC_CORE_SIZE = 0.24; // a cap's bright core, relative to the cap, drawn at
+const SPEC_CORE_ALPHA = 0.6; // 60 % of the cap
+// The line, per row: every stroke is 1 px. A 1 px stroke takes the GPU's
+// cheap hairline path; any wider stroke of the curve is tessellated, and
+// measured +200 to +400 us of GPU-process time per frame each. The glow is
+// two faint 1 px copies just above and below the core (the "bloom").
+const SPEC_LINE_BLOOM_DY = 1.5;   // px: the bloom copies' offset from the core
+const SPEC_LINE_BLOOM_ALPHA = 0.25;
+const SPEC_LINE_CORE_ALPHA = 0.7;
+// Heat levers (cheapest look-loss first; re-run the photosensitivity gate after
+// any change): SPEC_LINE_ECHOES and SPEC_LINE_BLOOM false drop 4 strokes a frame
+// each; SPEC_CORE_ALPHA 0 drops the cap cores; SPEC_DRAW_TOKENS false leaves the
+// tokens wandering but undrawn in Spectrum. Together these four pass the gate
+// and take back about half the lens's GPU-process time (phone viewport).
+// Raising SPEC_EDGES[0] (the faintest bucket off) failed it: red cells popping
+// in at 0.2 flashed at max settings with Astral Trails.
+const SPEC_LINE_ECHOES = true;
+const SPEC_LINE_BLOOM = true;
+const SPEC_DRAW_TOKENS = true;
+const SPEC_CELL_FADE = 0.1; // s: a lit cell's afterglow
+interface SpecDrawList {
+  x: Float64Array; y: Float64Array; r: Float64Array; b: Uint8Array; n: number; count: Uint16Array;
+  /** On-screen cells (same cull as the Pulse/Wave loop), rebuilt on a resize or a new grid. */
+  vis: Int16Array; nVis: number; vw: number; vh: number; grid: unknown;
+}
+const createSpecDrawList = (): SpecDrawList => ({
+  x: new Float64Array(SPEC_MAX_DRAWS), y: new Float64Array(SPEC_MAX_DRAWS), r: new Float64Array(SPEC_MAX_DRAWS),
+  b: new Uint8Array(SPEC_MAX_DRAWS), n: 0, count: new Uint16Array(SPEC_STYLES * SPEC_Q),
+  vis: new Int16Array(HEX_CELLS), nVis: 0, vw: -1, vh: -1, grid: null,
+});
 
 // Convert Hex to HSL for color math
 const hexToHSL = (hex: string): { h: number; s: number; l: number } => {
@@ -744,6 +800,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
   loShuWalkStep = -1,
   bandEnvelope = null,
   audioElementRef,
+  uiInsets = NO_INSETS,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -795,6 +852,25 @@ const Visualizer: React.FC<VisualizerProps> = ({
   const prefersReducedMotion = usePrefersReducedMotion();
   const reducedMotionRef = useRef(prefersReducedMotion);
   useEffect(() => { reducedMotionRef.current = prefersReducedMotion; }, [prefersReducedMotion]);
+
+  // Spectrum mode (utils/hexSpectrum): bar levels, caps and the per-cell
+  // tables, kept in a ref so pause/play and settings changes (which restart
+  // the RAF loop) never reset the bars. Built on the first Spectrum frame.
+  const hexSpectrumRef = useRef<HexSpectrum | null>(null);
+  // Spectrum's draw list: every lit hexagon of a frame (cells, tokens, caps),
+  // bucketed by style and alpha so each colour is set once; each hexagon is
+  // still its own path. Created on first use (a useRef initialiser would
+  // allocate on every React render).
+  const specDrawRef = useRef<SpecDrawList | null>(null);
+  // Once Spectrum throws, it draws nothing for the session (the v14.7 look)
+  // instead of freezing every layer. specEnvRef: the envelope its floors were
+  // seeded from (undefined = none yet, null = the fallback pulse).
+  const specFailedRef = useRef(false);
+  const specEnvRef = useRef<BandEnvelope | null | undefined>(undefined);
+  // The panels the lens fits between, mirrored into a ref (as the envelope is)
+  // so a new measurement never restarts the RAF loop.
+  const uiInsetsRef = useRef(uiInsets);
+  useEffect(() => { uiInsetsRef.current = uiInsets; }, [uiInsets]);
 
   // Initialize Particles - Reduced counts for better performance
   useEffect(() => {
@@ -1004,6 +1080,313 @@ const Visualizer: React.FC<VisualizerProps> = ({
       if (!wanderFailedRef.current) console.warn('[hexWander] stopped after an error; the hexes stay static from now on.', err);
       wanderFailedRef.current = true;
       hw.live = false;
+    };
+
+    // --- Spectrum mode (utils/hexSpectrum) ---
+    // Leaving Spectrum, or hiding the Hex Grid (the lens stops stepping, so it
+    // would freeze): the next Spectrum frame clears the grid's levels first and
+    // fades the lens in, instead of showing a stale one.
+    if ((settings.hexVisualMode !== 'spectrum' || !settings.showHexagons) && hexSpectrumRef.current) hexSpectrumRef.current.active = false;
+    // Style colours, opaque: each bucket's alpha goes in globalAlpha, so these
+    // are the only colour strings Spectrum builds (once per effect run).
+    const specStroke = [primaryStr + '1)', shade1Str + '1)', shade2Str + '1)', '', shade2Str + '1)'];
+    const specFill = [primaryStr + '0.16)', shade1Str + '0.2)', shade2Str + '0.2)', shade2Str + '1)', primaryStr + '0.12)'];
+    // Cells 1 px and tokens 2 px, as drawHex; caps 1 px. 0 = no stroke.
+    const specWidth = [1, 2, 2, 0, 1];
+    const specLineGlow = primaryStr + '1)';
+    const specLineCore = shade2Str + '1)';
+    const specMeans = new Float32Array(4); // a new track's band means (floor seed)
+    // Every Spectrum alpha x this: 0.7 for a saturated red base colour, x 0.5 with Astral Trails.
+    const specGuard = hexSpectrumAlphaScale(primaryColor, !!settings.enableTrails);
+    const specPush = (d: SpecDrawList, x: number, y: number, r: number, style: number, alpha: number) => {
+      alpha *= specGuard;
+      let q = -1;
+      for (let k = 0; k < SPEC_Q; k++) if (alpha >= SPEC_EDGES[k]) q = k;
+      if (q < 0 || d.n >= SPEC_MAX_DRAWS) return;
+      const i = d.n++;
+      const bucket = style * SPEC_Q + q;
+      d.x[i] = x; d.y[i] = y; d.r[i] = r; d.b[i] = bucket;
+      d.count[bucket]++;
+    };
+    // Draw the queued hexagons of styles [fromStyle, toStyle): style and alpha
+    // set once per bucket, each hexagon its own convex path (stroke, then fill,
+    // as drawHex). Returns the number drawn (perf HUD).
+    const specFlush = (d: SpecDrawList, fromStyle: number, toStyle: number) => {
+      let style = -1;
+      let drawn = 0;
+      for (let bucket = fromStyle * SPEC_Q; bucket < toStyle * SPEC_Q; bucket++) {
+        if (d.count[bucket] === 0) continue;
+        const st = (bucket / SPEC_Q) | 0;
+        if (st !== style) {
+          style = st;
+          if (specWidth[st]) { ctx.strokeStyle = specStroke[st]; ctx.lineWidth = specWidth[st]; }
+          ctx.fillStyle = specFill[st];
+        }
+        ctx.globalAlpha = SPEC_LEVELS[bucket - st * SPEC_Q];
+        for (let i = 0; i < d.n; i++) {
+          if (d.b[i] !== bucket) continue;
+          const x = d.x[i], y = d.y[i], r = d.r[i];
+          ctx.beginPath();
+          ctx.moveTo(x + r, y);
+          for (let c = 1; c < 6; c++) ctx.lineTo(x + r * HEX_UNIT_COS[c], y + r * HEX_UNIT_SIN[c]);
+          ctx.closePath();
+          if (specWidth[st]) ctx.stroke();
+          ctx.fill();
+          drawn++;
+        }
+        d.count[bucket] = 0;
+      }
+      ctx.globalAlpha = 1;
+      return drawn;
+    };
+    // One row of the line (0 upper, 1 lower): a Catmull-Rom spline (as cubic
+    // Beziers) through that row's caps, now (off < 0) or in an echo slot. One
+    // contour per path: stroking both rows as one path rasterised ~2x slower.
+    const specLinePath = (s: HexSpectrum, row: number, off: number, reach: number, dy: number) => {
+      const X = s.lineX, Y = s.lineY;
+      const peaks = off < 0 ? s.peak : s.echo;
+      const o = off < 0 ? 0 : off;
+      let m = 0;
+      for (let b = row === 0 ? 0 : s.lineSplit, to = row === 0 ? s.lineSplit : s.nBars; b < to; b++) {
+        if (s.barX[b] > reach || s.barX[b] < -reach) continue; // far off screen
+        X[m] = s.barX[b];
+        Y[m] = s.barDY[b] * peaks[o + s.barPillar[b]] + dy;
+        m++;
+      }
+      ctx.beginPath();
+      if (m < 2) return false;
+      ctx.moveTo(X[0], Y[0]);
+      for (let k = 0; k < m - 1; k++) {
+        const k0 = k > 0 ? k - 1 : 0, k3 = k + 2 < m ? k + 2 : m - 1;
+        ctx.bezierCurveTo(
+          X[k] + (X[k + 1] - X[k0]) / 6, Y[k] + (Y[k + 1] - Y[k0]) / 6,
+          X[k + 1] - (X[k3] - X[k]) / 6, Y[k + 1] - (Y[k3] - Y[k]) / 6,
+          X[k + 1], Y[k + 1]);
+      }
+      return true;
+    };
+    // The line, per row, all 1 px: two faint echoes (where it was 4 and 8
+    // frames ago; off under reduced motion), the bloom (two copies 1.5 px above
+    // and below, in the base colour, swelling with the bass: `glow` 0..1), then
+    // the pale core.
+    const specLine = (s: HexSpectrum, alpha: number, glow: number, reach: number, echoes: boolean) => {
+      if (alpha < 0.03) return;
+      const g = 0.6 + 0.8 * glow;
+      ctx.lineWidth = 1;
+      for (let row = 0; row < 2; row++) {
+        ctx.strokeStyle = specLineGlow;
+        if (echoes) {
+          for (let k = 8; k >= 4; k -= 4) {
+            if (!specLinePath(s, row, hexSpectrumEcho(s, k), reach, 0)) continue;
+            ctx.globalAlpha = alpha * (k === 4 ? 0.3 : 0.15);
+            ctx.stroke();
+          }
+        }
+        if (SPEC_LINE_BLOOM) {
+          ctx.globalAlpha = alpha * SPEC_LINE_BLOOM_ALPHA * g;
+          if (specLinePath(s, row, -1, reach, -SPEC_LINE_BLOOM_DY)) ctx.stroke();
+          if (specLinePath(s, row, -1, reach, SPEC_LINE_BLOOM_DY)) ctx.stroke();
+        }
+        if (!specLinePath(s, row, -1, reach, 0)) continue;
+        ctx.strokeStyle = specLineCore;
+        ctx.globalAlpha = alpha * SPEC_LINE_CORE_ALPHA;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    };
+    // Ripple lift at a cell: the same sum the static path computes per cell.
+    const specWaveLift = (hx: number, hy: number, cx: number, cy: number) => {
+      let waveLift = 0;
+      const ripples = ripplesRef.current;
+      for (let ri = 0; ri < ripples.length; ri++) {
+        const r = ripples[ri];
+        const dx = hx - (r.x - cx);
+        const dy = hy - (r.y - cy);
+        const waveWidth = r.type === 'bass' ? 50 : 30;
+        const maxReach = r.radius + waveWidth;
+        if (dx > maxReach || dx < -maxReach || dy > maxReach || dy < -maxReach) continue;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > maxReach * maxReach) continue;
+        const innerEdge = r.radius - waveWidth;
+        if (innerEdge > 0 && d2 < innerEdge * innerEdge) continue;
+        const distToWaveFront = Math.abs(Math.sqrt(d2) - r.radius);
+        if (distToWaveFront < waveWidth) waveLift += (1 - (distToWaveFront / waveWidth)) * r.alpha;
+      }
+      return waveLift;
+    };
+    // One Spectrum frame: step the bars; queue the tip cells, the wander tokens
+    // and the caps; draw cells and tokens, then the line, then the caps on top.
+    // sub..high: each band's level at the playback position x Audio Reactivity.
+    const spectrumLayer = (
+      wander: HexWander | null, w: number, h: number, cx: number, cy: number,
+      sub: number, bass: number, mid: number, high: number, dt: number, wanderMs: number,
+    ) => {
+      const specT0 = perfHudEnabled ? performance.now() : 0; // perf HUD only
+      const reduced = reducedMotionRef.current;
+      let s = hexSpectrumRef.current;
+      if (!s) s = hexSpectrumRef.current = createHexSpectrum();
+      // Tokens 2 px, as drawHex. With the wander off, the static off-colour cells
+      // draw 1 px: 2 px outlines sweeping with the bars flashed at max settings.
+      specWidth[1] = specWidth[2] = wander ? 2 : 1;
+      let d = specDrawRef.current;
+      if (!d) d = specDrawRef.current = createSpecDrawList();
+      const cells = hexGridRef.current;
+      if (!s.active) {
+        // (Re)entering Spectrum: nothing another mode left lit lingers.
+        // The lens fades in (presence from 0) instead of popping in on a mode switch.
+        for (let i = 0; i < cells.length; i++) { cells[i].activeLevel = 0; cells[i].liftLevel = 0; }
+        s.presence = 0;
+        s.active = true;
+      }
+      if (d.grid !== cells || d.vw !== w || d.vh !== h) {
+        // The on-screen cells, culled exactly as the Pulse / Wave loop culls them.
+        let n = 0;
+        for (let i = 0; i < cells.length; i++) {
+          const hex = cells[i];
+          const screenX = cx + hex.x;
+          const screenY = cy + hex.y;
+          if (screenX < -hex.size || screenX > w + hex.size || screenY < -hex.size || screenY > h + hex.size) continue;
+          d.vis[n++] = i;
+        }
+        d.nVis = n; d.grid = cells; d.vw = w; d.vh = h;
+      }
+      if (isPlaying) {
+        // A new track (or none, the fallback pulse): seed the floors from its mean.
+        const env = bandEnvelopeRef.current;
+        const envNow = env && env.bass.length > 0 ? env : null;
+        if (specEnvRef.current !== envNow) {
+          const sens = settings.sensitivity || 1;
+          if (envNow) {
+            specMeans[0] = envelopeMean(envNow.sub) * sens; specMeans[1] = envelopeMean(envNow.bass) * sens;
+            specMeans[2] = envelopeMean(envNow.mid) * sens; specMeans[3] = envelopeMean(envNow.high) * sens;
+            seedHexSpectrumFloors(s, specMeans, sens);
+          } else seedHexSpectrumFloors(s, null, sens);
+          specEnvRef.current = envNow;
+        }
+      }
+      const insets = uiInsetsRef.current;
+      stepHexSpectrum(s, sub, bass, mid, high, isPlaying, reduced, dt, timeRef.current, w, h, insets.top, insets.bottom);
+      const presence = s.presence;
+      const gain = settings.hexOpacity * SPEC_CELL_GAIN;
+      // Caps and line follow Hex Opacity below the default 0.6 (their look at 0.6 and above is fixed).
+      const accent = presence * Math.min(1, settings.hexOpacity / 0.6);
+      const hydro = settings.showWaterRipples && isPlaying;
+      // The tokens: with Hydro-Acoustics on they wander undrawn (as SPEC_DRAW_TOKENS
+      // false): their 2 px outlines swelling and brightening with each passing
+      // ripple flickered 16 px blocks past the photosensitivity limit on some
+      // seeds. Their cells then draw as plain cells, not as dark holes.
+      const drawTokens = SPEC_DRAW_TOKENS && !settings.showWaterRipples;
+      const kCellFade = 1 - Math.exp(-dt / SPEC_CELL_FADE);
+      const vis = d.vis;
+      for (let v = 0; v < d.nVis; v++) {
+        const i = vis[v];
+        const hex = cells[i];
+        // The tokens read this level (before the ripple lift), as in Pulse and Wave.
+        let active = hexSpectrumCellLevel(s, i) * presence;
+        if (wander) { wander.cellRawActive[i] = active; wander.cellStamp[i] = wander.frame; }
+        const waveLift = hydro ? specWaveLift(hex.x, hex.y, cx, cy) : 0;
+        if (wander) wander.cellRawLift[i] = waveLift;
+        active = Math.min(1.5, active + waveLift * 0.8);
+        // A cell lights at once and fades over ~0.1 s, so a tip racing back to
+        // the centre (fast beats, max settings) leaves a short afterglow instead
+        // of switching cells off at the beat rate.
+        const lv = hex.activeLevel;
+        hex.activeLevel = active > lv ? active : lv + (active - lv) * kCellFade;
+        hex.liftLevel = hex.liftLevel * 0.86 + waveLift * 0.14;
+        let alpha = Math.min(1, hex.activeLevel * gain);
+        // Wander off: the static layout's off-colour cells keep their shade and boost.
+        const shade = wander || hex.colorType === 'primary' ? 0 : hex.colorType === 'shade1' ? 1 : 2;
+        if (shade) alpha *= shade === 1 ? 1.5 : 1.2;
+        if (hex.liftLevel > 0.2) alpha += 0.3;
+        if (alpha > 1) alpha = 1;
+        const own = wander && drawTokens ? wander.owner[i] : 0;
+        if (wander && own) alpha *= 1 - hexWanderCover(wander, own - 1, i);
+        // Fixed size: the ripple lift lights a cell but doesn't swell it (a 1 px
+        // outline sliding ~13 px at every ripple flickered along its path).
+        specPush(d, hex.x, hex.y, HEX_SIZE * 0.95, shade, alpha);
+      }
+      // The tokens: exactly the static path's token levels (jitter, lift,
+      // smoothing, shade boosts), queued into the buckets instead of drawHex
+      // (undrawn with Hydro-Acoustics on, see drawTokens).
+      if (wander) {
+        const t0 = perfHudEnabled ? performance.now() : 0;
+        try {
+          const frame = wander.frame;
+          const stamp = wander.cellStamp;
+          const rawActive = wander.cellRawActive;
+          const rawLift = wander.cellRawLift;
+          let onScreen = 0;
+          let gliding = 0;
+          for (let k = 0; k < wander.n; k++) {
+            const from = wander.cell[k];
+            const to = wander.target[k];
+            const a = cells[from];
+            let x = a.x;
+            let y = a.y;
+            let e = 0;
+            if (to >= 0) {
+              gliding++;
+              e = easeGlide(wander.progress[k]);
+              const b = cells[to];
+              x += (b.x - x) * e;
+              y += (b.y - y) * e;
+            }
+            const screenX = cx + x;
+            const screenY = cy + y;
+            if (screenX < -HEX_SIZE || screenX > w + HEX_SIZE || screenY < -HEX_SIZE || screenY > h + HEX_SIZE) {
+              wander.active[k] *= 0.9;
+              wander.lift[k] *= 0.86;
+              continue;
+            }
+            onScreen++;
+            let active = stamp[from] === frame ? rawActive[from] : 0;
+            let waveLift = stamp[from] === frame ? rawLift[from] : 0;
+            if (to >= 0) {
+              active += ((stamp[to] === frame ? rawActive[to] : 0) - active) * e;
+              waveLift += ((stamp[to] === frame ? rawLift[to] : 0) - waveLift) * e;
+            }
+            if (isPlaying) active = Math.max(0, Math.min(1, active + (Math.random() - 0.5) * 0.3 * settings.sensitivity));
+            active = Math.min(1.5, active + waveLift * 0.8);
+            wander.active[k] = wander.active[k] * 0.9 + active * 0.1;
+            wander.lift[k] = wander.lift[k] * 0.86 + waveLift * 0.14;
+            let opacity = Math.min(1, wander.active[k] * settings.hexOpacity);
+            if (!(opacity > 0.05)) continue; // drawHex's test
+            const shade = wander.shade[k];
+            opacity *= shade === 1 ? 1.5 : 1.2;
+            if (wander.lift[k] > 0.2) opacity += 0.3;
+            if (drawTokens) specPush(d, x, y, HEX_SIZE * 0.95 * (1 + wander.lift[k] * 0.28), shade, Math.min(1, opacity));
+          }
+          if (perfHudEnabled) reportHexFrame(onScreen, gliding, wander.energy, (wanderMs + performance.now() - t0) * 1000);
+        } catch (err) {
+          wanderFailed(wander, err);
+        }
+      }
+      // The caps: small hexes riding beyond the bar tips, each with a bright core,
+      // except with Hydro-Acoustics on: a core bobbing through a 16 px block at
+      // each kick, over cells the ripples lift and drop, flashed it ~2.5 times a
+      // second, with or without the wander.
+      const drawCores = !settings.showWaterRipples;
+      for (let b = 0; b < s.nBars; b++) {
+        const p = s.barPillar[b];
+        if (p >= s.live) continue; // far off screen
+        const glow = s.glow[p];
+        const a = accent * (0.3 + 0.7 * glow);
+        if (a < 0.06) continue;
+        const x = s.barX[b];
+        const y = s.barDY[b] * s.peak[p];
+        if (cx + x < -HEX_SIZE || cx + x > w + HEX_SIZE || cy + y < -HEX_SIZE || cy + y > h + HEX_SIZE) continue;
+        const r = HEX_SIZE * SPEC_CAP_SIZE * (0.92 + 0.08 * glow);
+        if (drawCores) specPush(d, x, y, r * SPEC_CORE_SIZE, 3, a * SPEC_CORE_ALPHA);
+        specPush(d, x, y, r, 4, a);
+      }
+      let drawn = specFlush(d, 0, 3);
+      // The line's strength follows the overall level; its glow, the low end.
+      const all = s.bands[0] + s.bands[1] + s.bands[2] + s.bands[3];
+      const low = s.bands[0] > s.bands[1] ? s.bands[0] : s.bands[1];
+      specLine(s, specGuard * accent * (0.35 + 0.65 * Math.min(1, all / 2)), low, w / 2 + 2 * HEX_SIZE * Math.sqrt(3), SPEC_LINE_ECHOES && !reduced);
+      drawn += specFlush(d, 3, SPEC_STYLES);
+      d.n = 0;
+      if (perfHudEnabled) reportSpectrumFrame(drawn, (performance.now() - specT0) * 1000);
     };
 
     // Reusable audio buffer — allocated once, resized only when bufferLength changes.
@@ -1223,6 +1606,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
       let envDriven = false;
       let rawBass = 0;
       let rawMid = 0;
+      let rawSub = 0;  // Spectrum reads all four raw samples
+      let rawHigh = 0;
       const env = bandEnvelopeRef.current;
       const el = audioElementRef?.current;
       if (isPlaying && env && el && env.bass.length > 0) {
@@ -1240,6 +1625,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
         peakValue = 255 * bassEnergy;                     // for colour code that reads peaks
         rawBass = sample(env.bass);
         rawMid  = sample(env.mid);
+        rawSub  = sample(env.sub);
+        rawHigh = sample(env.high);
         envDriven = true;
       } else if (isPlaying) {
         // FALLBACK — track not scanned (no envelope). Keep the calm deterministic
@@ -1569,11 +1956,32 @@ const Visualizer: React.FC<VisualizerProps> = ({
           }
           const wander = hw; // the loops' view: null = static path, even after a failure just now
 
+          // Spectrum draws its own layer (bars, tokens, caps, the line); Pulse and
+          // Wave run the per-cell loop below, unchanged. If Spectrum ever throws it
+          // draws nothing for the session (the v14.7 look) instead of freezing every layer.
+          const spectrum = settings.hexVisualMode === 'spectrum';
+          if (spectrum && !specFailedRef.current) {
+              try {
+                  // Each band's level x Audio Reactivity: the raw envelope sample, or the
+                  // fallback pulse with the other modes' band gains taken back out.
+                  const sens = settings.sensitivity || 1;
+                  spectrumLayer(wander, w, h, cx, cy,
+                      envDriven ? rawSub * sens : subBassEnergy / 1.5,
+                      envDriven ? rawBass * sens : bassEnergy / 1.2,
+                      envDriven ? rawMid * sens : midEnergy,
+                      envDriven ? rawHigh * sens : highEnergy / 0.8,
+                      Math.min(frameDtSec, 0.08), wanderMs);
+              } catch (err) {
+                  if (!specFailedRef.current) console.warn('[spectrum] stopped after an error; Spectrum draws no hexes from now on.', err);
+                  specFailedRef.current = true;
+              }
+          }
+
           // Cull off-screen hexagons in-place. The previous .filter() built
           // a fresh ~600-entry array every frame (~36k objects/sec at 60fps)
           // — major GC pressure during music playback. We now skip hidden
           // cells inside the forEach with no allocation.
-          hexGridRef.current.forEach((hex: HexCell, i: number) => {
+          if (!spectrum) hexGridRef.current.forEach((hex: HexCell, i: number) => {
               const screenX = cx + hex.x;
               const screenY = cy + hex.y;
               if (
@@ -1584,15 +1992,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
               }
               let active = 0;
               if (isPlaying && bufferLength > 0) {
-                  if (settings.hexVisualMode === 'spectrum') {
-                      // Enhanced spectrum mode with frequency mapping
-                      const freqBin = Math.min(hex.freqIndex % bufferLength, bufferLength - 1);
-                      const rawValue = dataArray[freqBin] / 255;
-                      // Apply spectral weighting based on position
-                      const distanceFactor = 1 - (hex.dist / 1000);
-                      active = rawValue * 1.5 * distanceFactor;
-                  }
-                  else if (settings.hexVisualMode === 'pulse') {
+                  if (settings.hexVisualMode === 'pulse') {
                       // Enhanced pulse mode responding to multiple frequency bands
                       const radialWave = Math.sin(timeRef.current * 2 - hex.dist * 0.01);
                       if (radialWave > 0.7) {
@@ -1670,8 +2070,9 @@ const Visualizer: React.FC<VisualizerProps> = ({
           // The tokens, over the cells. Each reuses the mode level and wave lift
           // its cells computed this frame (blended along the glide), then gets
           // exactly a shade cell's jitter, lift boost and smoothing, so a
-          // resting token looks like today's shade cell.
-          if (wander) {
+          // resting token looks like today's shade cell. (Spectrum draws its
+          // tokens inside spectrumLayer.)
+          if (wander && !spectrum) {
               const t0 = perfHudEnabled ? performance.now() : 0;
               try {
                   const cells = hexGridRef.current;

@@ -12,6 +12,10 @@
 //             mean of tokens gliding, both over the WHOLE grid; the mean of
 //             tokens on screen; pace energy; the wander's own time (µs). Absent
 //             in windows where the wander didn't run.
+//   spec      (own line) while the Spectrum hex mode runs: hexagons drawn per
+//             frame (cells, tokens, caps and cores; 0.0 once a pause has faded
+//             it out) and the layer's own time per frame (µs). Absent in
+//             windows where the Spectrum layer didn't run.
 //
 // OFF by default and free when off: the counters are a single boolean test.
 // Turn it on with ?perf=1 in the URL and off with ?perf=0. The choice is kept
@@ -68,6 +72,18 @@ export function reportHexFrame(onScreen: number, gliding: number, energy: number
   hexUs += wanderUs;
 }
 
+let specFrames = 0;
+let specDrawn = 0;
+let specUs = 0;
+
+/** Visualizer: once per rendered frame in which the Spectrum layer ran. */
+export function reportSpectrumFrame(drawn: number, us: number): void {
+  if (!perfHudEnabled) return;
+  specFrames++;
+  specDrawn += drawn;
+  specUs += us;
+}
+
 let started = false;
 
 export function startPerfHud(): void {
@@ -118,8 +134,11 @@ export function startPerfHud(): void {
         ` glide ${(hexGliding / hexFrames).toFixed(1)} e${(hexEnergy / hexFrames).toFixed(2)}` +
         ` ${Math.round(hexUs / hexFrames)}µs`;
     }
-    // The hex part gets its own line on screen: one line overflows a phone.
-    el.textContent = line.replace(' · hex', '\nhex');
+    if (specFrames > 0) {
+      line += ` · spec ${(specDrawn / specFrames).toFixed(1)}/f ${Math.round(specUs / specFrames)}µs`;
+    }
+    // The hex and spec parts get their own lines on screen: one line overflows a phone.
+    el.textContent = line.replace(' · hex', '\nhex').replace(' · spec', '\nspec');
     console.log('[perf] ' + line);
     draws = 0;
     rafs = 0;
@@ -132,5 +151,8 @@ export function startPerfHud(): void {
     hexGliding = 0;
     hexEnergy = 0;
     hexUs = 0;
+    specFrames = 0;
+    specDrawn = 0;
+    specUs = 0;
   }, 1000);
 }

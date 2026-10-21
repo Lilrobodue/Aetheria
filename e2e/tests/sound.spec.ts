@@ -86,7 +86,10 @@ test('a tap under music keeps the tone at its level and leaves the beat alone', 
   await expect(layerIntensity(page)).toHaveText('1%');
   // Past the envelope's peaks: it topped out at the tone's level, not 10x it.
   await expect.poll(() => elapsedSeconds(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(8);
-  expect((await layerState(page)).envMax).toBeCloseTo(TONE_TARGET, 3);
+  const { envMax } = await layerState(page);
+  // Sampled once a frame, so a dropped frame at the peak reads it a little low, never high.
+  expect(envMax).toBeLessThanOrEqual(TONE_TARGET * 1.005);
+  expect(envMax).toBeGreaterThanOrEqual(TONE_TARGET * 0.95);
 });
 
 test('Emergency Stop pauses the music and silences every layer @mobile', async ({ page }) => {

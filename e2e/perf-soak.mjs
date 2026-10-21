@@ -4,7 +4,8 @@
 //
 // Plays the library in YOUR open tab of --origin from its first track with the
 // perf HUD on (?perf=1), and every second reads the HUD's line (visualizer
-// draws, animation frames, React commits, long tasks); every 30 s the phone's
+// draws, animation frames, React commits, long tasks, and the Spectrum layer's
+// hexagons and µs per frame while it runs); every 30 s the phone's
 // temperatures (AP / SKIN / battery), the page's JS heap and the playback
 // state. Same conditions every run so releases compare: screen kept on, fixed
 // brightness, media volume 2. Everything it changes is put back at the end
@@ -62,8 +63,13 @@ const errors = [];
 tab.on('console', (m) => {
   const t = m.text();
   const x = /^\[perf\] draws ([\d.]+)\/s · rAF ([\d.]+)\/s · commits ([\d.]+)\/s · long (\d+) \((\d+) ms\)/.exec(t);
-  if (x) perf.push({ at: Date.now(), draws: +x[1], raf: +x[2], commits: +x[3], longTasks: +x[4], longMs: +x[5] });
-  else if (m.type() === 'error') errors.push(t);
+  if (x) {
+    const entry = { at: Date.now(), draws: +x[1], raf: +x[2], commits: +x[3], longTasks: +x[4], longMs: +x[5] };
+    // v14.8: the Spectrum layer's part, present only in windows where it ran.
+    const sp = / · spec ([\d.]+)\/f (\d+)µs/.exec(t);
+    if (sp) { entry.specDrawn = +sp[1]; entry.specUs = +sp[2]; }
+    perf.push(entry);
+  } else if (m.type() === 'error') errors.push(t);
 });
 tab.on('pageerror', (e) => errors.push(e.message));
 
@@ -118,7 +124,7 @@ try {
 
 const steady = perf.filter((p) => p.at > perf[0]?.at + 60_000); // skip the first minute
 const stat = (key) => {
-  const v = steady.map((p) => p[key]).sort((a, b) => a - b);
+  const v = steady.map((p) => p[key]).filter((x) => x !== undefined).sort((a, b) => a - b);
   const q = (f) => v[Math.min(v.length - 1, Math.floor(f * v.length))];
   return { median: q(0.5), p95: q(0.95) };
 };
@@ -130,6 +136,8 @@ const summary = {
   draws: stat('draws'),
   raf: stat('raf'),
   commits: stat('commits'),
+  // Spectrum hexagons drawn per frame and the layer's µs per frame (null when it never ran).
+  spec: steady.some((p) => p.specDrawn !== undefined) ? { drawnPerFrame: stat('specDrawn'), us: stat('specUs') } : null,
   longTasksPerMin: +((steady.reduce((s, p) => s + p.longTasks, 0) / Math.max(1, steady.length)) * 60).toFixed(1),
   longMsPerMin: Math.round((steady.reduce((s, p) => s + p.longMs, 0) / Math.max(1, steady.length)) * 60),
   temps: {
