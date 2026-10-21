@@ -8,6 +8,10 @@
 //   rAF       animation frames the browser delivered
 //   commits   React commits of App
 //   long      long tasks (> 50 ms) and their total time (Chromium only)
+//   hex       (own line) while the hex wander runs: accepted moves/s and the
+//             mean of tokens gliding, both over the WHOLE grid; the mean of
+//             tokens on screen; pace energy; the wander's own time (µs). Absent
+//             in windows where the wander didn't run.
 //
 // OFF by default and free when off: the counters are a single boolean test.
 // Turn it on with ?perf=1 in the URL and off with ?perf=0. The choice is kept
@@ -42,6 +46,28 @@ export function countCommit(): void {
   if (perfHudEnabled) commits++;
 }
 
+let hexMoves = 0;
+let hexFrames = 0;
+let hexOnScreen = 0;
+let hexGliding = 0;
+let hexEnergy = 0;
+let hexUs = 0;
+
+/** Visualizer: hex-wander moves accepted this frame. */
+export function countHexMoves(n: number): void {
+  if (perfHudEnabled) hexMoves += n;
+}
+
+/** Visualizer: once per rendered frame in which the hex wander ran. */
+export function reportHexFrame(onScreen: number, gliding: number, energy: number, wanderUs: number): void {
+  if (!perfHudEnabled) return;
+  hexFrames++;
+  hexOnScreen += onScreen;
+  hexGliding += gliding;
+  hexEnergy += energy;
+  hexUs += wanderUs;
+}
+
 let started = false;
 
 export function startPerfHud(): void {
@@ -71,6 +97,7 @@ export function startPerfHud(): void {
 
   const el = document.createElement('div');
   el.setAttribute('aria-hidden', 'true');
+  el.setAttribute('data-testid', 'perf-hud');
   el.style.cssText =
     'position:fixed;top:4px;left:4px;z-index:300;pointer-events:none;' +
     'font:11px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5e1;' +
@@ -82,15 +109,28 @@ export function startPerfHud(): void {
     const now = performance.now();
     const s = Math.max(0.001, (now - last) / 1000);
     last = now;
-    const line =
+    let line =
       `draws ${(draws / s).toFixed(1)}/s · rAF ${(rafs / s).toFixed(1)}/s · ` +
       `commits ${(commits / s).toFixed(1)}/s · long ${longTasks} (${Math.round(longMs)} ms)`;
-    el.textContent = line;
+    if (hexFrames > 0) {
+      line +=
+        ` · hex ${(hexMoves / s).toFixed(1)}/s on ${(hexOnScreen / hexFrames).toFixed(1)}` +
+        ` glide ${(hexGliding / hexFrames).toFixed(1)} e${(hexEnergy / hexFrames).toFixed(2)}` +
+        ` ${Math.round(hexUs / hexFrames)}µs`;
+    }
+    // The hex part gets its own line on screen: one line overflows a phone.
+    el.textContent = line.replace(' · hex', '\nhex');
     console.log('[perf] ' + line);
     draws = 0;
     rafs = 0;
     commits = 0;
     longTasks = 0;
     longMs = 0;
+    hexMoves = 0;
+    hexFrames = 0;
+    hexOnScreen = 0;
+    hexGliding = 0;
+    hexEnergy = 0;
+    hexUs = 0;
   }, 1000);
 }

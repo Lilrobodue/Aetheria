@@ -59,7 +59,7 @@ export default defineConfig({
         { name: 'mobile-ua', grep: /@mobile/, grepInvert: /@device|@real/, use: { userAgent: ANDROID_UA } },
       ],
   webServer: {
-    command: `npx vite --port ${TEST_PORT} --strictPort`,
+    command: `npx vite --config e2e/vite.e2e.config.ts --port ${TEST_PORT} --strictPort`,
     cwd: '..',
     url: TEST_ORIGIN,
     reuseExistingServer: !!process.env.E2E_REUSE_SERVER,

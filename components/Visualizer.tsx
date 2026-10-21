@@ -2,7 +2,14 @@ import React, { useRef, useEffect } from 'react';
 import { VizSettings, BandEnvelope } from '../types';
 import { frequencyToSpectrumColor, type FrequencyColorMode } from '../utils/spectrumColor';
 import { LO_SHU_WALKS, type LoShuWalkMode } from '../constants';
-import { countDraw } from '../utils/perfHud';
+import { countDraw, countHexMoves, perfHudEnabled, reportHexFrame } from '../utils/perfHud';
+import {
+  HEX_SIZE, HEX_COLS, HEX_ROWS, HEX_CELLS, HEX_UNIT_COS, HEX_UNIT_SIN,
+  hexX, hexY, goldenShade, buildNeighbourTable,
+  createHexWander, resetHexWander, stepHexWander, smoothWanderEnergy, easeGlide, hexWanderCover,
+} from '../utils/hexWander';
+import type { HexWander } from '../utils/hexWander';
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 
 interface VisualizerProps {
   analyser: AnalyserNode | null;
@@ -778,6 +785,17 @@ const Visualizer: React.FC<VisualizerProps> = ({
   const frameCountRef = useRef(0);
   const targetFPSRef = useRef(60);
   
+  // Wandering hexes (utils/hexWander): rebuilt with the grid, kept in refs so a
+  // settings change (which restarts the RAF loop) never resets it. Once the
+  // wander throws, wanderFailedRef keeps today's static hexes for the session.
+  const hexWanderRef = useRef<HexWander | null>(null);
+  const wanderFailedRef = useRef(false);
+  // Reduced motion holds the wander still. Mirrored into a ref, not a RAF dep,
+  // so an OS change never restarts the loop.
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const reducedMotionRef = useRef(prefersReducedMotion);
+  useEffect(() => { reducedMotionRef.current = prefersReducedMotion; }, [prefersReducedMotion]);
+
   // Initialize Particles - Reduced counts for better performance
   useEffect(() => {
     const pCount = settings.particleDensity === 'low' ? 200 : settings.particleDensity === 'medium' ? 400 : 800;
@@ -803,33 +821,40 @@ const Visualizer: React.FC<VisualizerProps> = ({
     }
     particlesRef.current = newParticles;
 
-    // Initialize Hex Grid - Reduced for better performance
+    // Initialize Hex Grid - Reduced for better performance. The lattice
+    // constants and formulas live in utils/hexWander (moved verbatim), so the
+    // grid and the wander can never disagree about where a cell is.
     const hexCells: HexCell[] = [];
-    const size = 50; // Larger cells = fewer to render
-    const cols = 20; // Reduced from 30
-    const rows = 15; // Reduced from 20
+    const size = HEX_SIZE; // Larger cells = fewer to render
+    const cols = HEX_COLS; // Reduced from 30
+    const rows = HEX_ROWS; // Reduced from 20
     const hexWidth = Math.sqrt(3) * size;
     const hexHeight = 2 * size;
     const xOffset = hexWidth;
     const yOffset = hexHeight * 0.75;
+    const cellShade = new Uint8Array(HEX_CELLS); // goldenShade per cell, in build order
 
     let index = 0;
     for (let r = -rows; r < rows; r++) {
         for (let c = -cols; c < cols; c++) {
-             const x = (c * xOffset) + ((r % 2) * xOffset / 2);
-             const y = r * yOffset;
+             const x = hexX(c, r, xOffset);
+             const y = hexY(r, yOffset);
              const dist = Math.sqrt(x*x + y*y);
              const normalizedDist = Math.min(1, dist / 800);
              const freqIndex = Math.floor(normalizedDist * 64);
              // Golden Ratio distribution
-             const mathType = (Math.abs((c * r * PHI) + index) * PHI) % 1;
-             let colorType: 'primary' | 'shade1' | 'shade2' = 'primary';
-             if (mathType > 0.69) { colorType = mathType > 0.85 ? 'shade2' : 'shade1'; }
+             const shade = goldenShade(c, r, index);
+             const colorType: 'primary' | 'shade1' | 'shade2' = shade === 0 ? 'primary' : shade === 1 ? 'shade1' : 'shade2';
+             cellShade[index] = shade;
              hexCells.push({ col: c, row: r, x, y, size, dist, activeLevel: 0, liftLevel: 0, pulseSpeed: 0.02 + Math.random() * 0.05, freqIndex, colorType, phaseOffset: Math.random() * Math.PI * 2 });
              index++;
         }
     }
     hexGridRef.current = hexCells;
+    // A fresh wander for the fresh grid, every token on its golden-ratio home
+    // cell; the RAF loop resets it (live = false) before its first step.
+    const { nb, offGrid } = buildNeighbourTable();
+    hexWanderRef.current = createHexWander(cellShade, nb, offGrid);
 
   }, [settings.particleDensity]);
 
@@ -940,9 +965,53 @@ const Visualizer: React.FC<VisualizerProps> = ({
     const shade1Str = `hsla(${baseHSL.h}, ${Math.min(100, baseHSL.s + 15)}%, ${Math.max(10, baseHSL.l - 25)}%,`;
     const shade2Str = `hsla(${baseHSL.h}, ${Math.max(0, baseHSL.s - 15)}%, ${Math.min(95, baseHSL.l + 30)}%,`;
 
+    // One grid hexagon, drawn exactly as the hex layer always has: the corner
+    // tables hold the same doubles the inline cos/sin calls returned.
+    // shade: 0 primary, 1 shade1, 2 shade2. vis (0..1) scales the FINAL alpha,
+    // after the shade and lift boosts; the static path and the tokens pass 1.
+    // Built once per effect run, so nothing is allocated per frame.
+    const drawHex = (x: number, y: number, liftLevel: number, opacity: number, shade: number, vis: number) => {
+      // Today's test on the base opacity. A part-covered cell is then drawn
+      // however faint (vis > 0), so it fades with the glide instead of popping
+      // in and out at a threshold, which the +0.3 lift boost made visible.
+      if (!(opacity > 0.05) || !(vis > 0)) return;
+      ctx.beginPath();
+      const liftScale = 1 + (liftLevel * 0.28);
+      const drawSize = HEX_SIZE * 0.95 * liftScale;
+      for (let i = 0; i < 6; i++) {
+          ctx[i===0?'moveTo':'lineTo'](x + drawSize * HEX_UNIT_COS[i], y + drawSize * HEX_UNIT_SIN[i]);
+      }
+      ctx.closePath();
+
+      let strokeStr = primaryStr;
+      let fillStr = primaryStr;
+      if (shade === 1) { strokeStr = fillStr = shade1Str; opacity *= 1.5; }
+      else if (shade === 2) { strokeStr = fillStr = shade2Str; opacity *= 1.2; }
+      if (liftLevel > 0.2) opacity = Math.min(1, opacity + 0.3);
+      if (vis < 1) opacity *= vis;
+
+      ctx.strokeStyle = strokeStr + opacity + ')';
+      ctx.lineWidth = shade === 0 ? 1 : 2;
+      ctx.stroke();
+      ctx.fillStyle = fillStr + (opacity * 0.2) + ')';
+      ctx.fill();
+    };
+
+    // The wander's safety net: render() reschedules itself only at its very
+    // end, so an exception there would freeze every layer. Warn once, then
+    // draw today's static hexes for the rest of the session.
+    const wanderFailed = (hw: HexWander, err: unknown) => {
+      if (!wanderFailedRef.current) console.warn('[hexWander] stopped after an error; the hexes stay static from now on.', err);
+      wanderFailedRef.current = true;
+      hw.live = false;
+    };
+
     // Reusable audio buffer — allocated once, resized only when bufferLength changes.
     // Allocating per-frame caused GC churn that visibly stuttered the loop.
     let dataArray = new Uint8Array(analyser ? analyser.frequencyBinCount : 0);
+
+    // When the last frame was actually rendered (this effect run), for the hex wander's clock.
+    let lastRenderTs = 0;
 
     const render = (timestamp?: number) => {
       // Initialize dynamic speed variable
@@ -959,6 +1028,10 @@ const Visualizer: React.FC<VisualizerProps> = ({
       // it touches dynamicSpeed. Raise toward 1 to bring tempo reactivity back;
       // mirrors the GEOMETRY_AUDIO_REACTIVITY knob used for the bass coupling.
       const TEMPO_SPEED_COUPLING = 0;
+
+      // Seconds this frame stands for, for the hex wander. Stays 0 on the first
+      // direct render(), which has no timestamp.
+      let frameDtSec = 0;
 
       // Performance optimization: Stable frame rate limiting
       if (timestamp) {
@@ -978,7 +1051,12 @@ const Visualizer: React.FC<VisualizerProps> = ({
         // that 60 FPS produces GC hitches. Tradeoff: on a 60 Hz display each
         // rendered frame holds for two vsyncs, so motion looks slightly less
         // continuous than at 60 FPS, but there are no GC stutters to break it.
-        const targetFrameTime = 33.33;
+        // "Cooler" (settings.frameRate) caps this loop at ~20 fps: 49.99 ms sits
+        // just under three 60 Hz vsyncs, as 33.33 sits under two, so frames stay
+        // evenly paced (a ~24 fps cap alternates 2 and 3 vsyncs and judders).
+        // Standard stays the validated 30. App still re-renders every frame
+        // while music plays, so Cooler trims only the visualizer's share.
+        const targetFrameTime = settings.frameRate === 'cooler' ? 49.99 : 33.33;
 
         // Skip frame if we're running too fast
         if (deltaTime < targetFrameTime) {
@@ -1003,9 +1081,17 @@ const Visualizer: React.FC<VisualizerProps> = ({
         // step. Frames currently arrive unevenly (~38–44ms), so a fixed step made
         // motion judder (equal visual deltas over unequal real time). Scaling by
         // deltaTime keeps motion real-time-smooth across that jitter; the 1.6 cap
-        // bounds any rare slow frame so it eases instead of lurching.
-        const stepScale = Math.min(1.6, deltaTime / targetFrameTime);
+        // bounds any rare slow frame so it eases instead of lurching. Measured
+        // against the STANDARD frame, so a Cooler frame advances ~1.25 steps and
+        // motion roughly keeps Standard's pace (the remainder carry above
+        // over-counts both); for Standard this is exactly min(1.6, dt / 33.33).
+        const stepScale = Math.min(1.6 * (targetFrameTime / 33.33), deltaTime / 33.33);
         timeRef.current += (0.025 * tempoSpeed) * stepScale; // 1.0 = old 2.5
+        // The wander's clock is REAL time since the last rendered frame: deltaTime
+        // re-counts the carried remainder (~1.25× wall clock at 60 Hz), which
+        // would run its rests and glides fast. Capped where it is used.
+        frameDtSec = lastRenderTs ? (timestamp - lastRenderTs) / 1000 : 0;
+        lastRenderTs = timestamp;
       }
 
       countDraw(); // perf HUD: a frame is being rendered (no-op unless ?perf=1)
@@ -1131,6 +1217,12 @@ const Visualizer: React.FC<VisualizerProps> = ({
       // drop is known in advance and fires on time. We linearly interpolate
       // between envelope samples so the stepped 20 fps data reads smoothly at
       // the render's frame rate.
+      // The hex wander's pace reads the RAW samples (before Audio Reactivity and
+      // the clamp), so it never depends on sensitivity. envDriven = a real
+      // envelope is playing; the fallback pulse and pause count as calm.
+      let envDriven = false;
+      let rawBass = 0;
+      let rawMid = 0;
       const env = bandEnvelopeRef.current;
       const el = audioElementRef?.current;
       if (isPlaying && env && el && env.bass.length > 0) {
@@ -1146,6 +1238,9 @@ const Visualizer: React.FC<VisualizerProps> = ({
         highEnergy    = Math.min(1, sample(env.high) * sens * 0.8);
         spectralCentroid = 0.3 + 0.5 * highEnergy;        // brightness follows real high content
         peakValue = 255 * bassEnergy;                     // for colour code that reads peaks
+        rawBass = sample(env.bass);
+        rawMid  = sample(env.mid);
+        envDriven = true;
       } else if (isPlaying) {
         // FALLBACK — track not scanned (no envelope). Keep the calm deterministic
         // pulse so the visual still breathes instead of going dead.
@@ -1432,11 +1527,53 @@ const Visualizer: React.FC<VisualizerProps> = ({
           ctx.save();
           ctx.translate(cx, cy);
 
+          // Wandering hexes: the off-colour cells are tokens that glide between
+          // cells (utils/hexWander), so every cell draws as primary and the
+          // tokens draw on top. hw null (switched OFF, or the wander failed) is
+          // exactly the v14.6 static path, which is also the rollback and the
+          // perf baseline.
+          let hw: HexWander | null = settings.hexWander !== false && !wanderFailedRef.current ? hexWanderRef.current : null;
+          let wanderMs = 0; // perf HUD only
+          if (hw) {
+              const t0 = perfHudEnabled ? performance.now() : 0;
+              try {
+                  if (!hw.live) {
+                      // OFF→ON or a fresh grid: start from the original layout,
+                      // carrying the home cells' levels in so nothing pops.
+                      resetHexWander(hw, Math.random);
+                      const cells = hexGridRef.current;
+                      for (let k = 0; k < hw.n; k++) {
+                          const home = cells[hw.home[k]];
+                          hw.active[k] = home.activeLevel;
+                          hw.lift[k] = home.liftLevel;
+                      }
+                      hw.live = true;
+                  }
+                  const dt = Math.min(frameDtSec, 0.08); // a slow Cooler frame, but no burst after a hidden tab
+                  const energy = smoothWanderEnergy(hw, rawBass, rawMid, envDriven, dt);
+                  const movesBefore = hw.moves;
+                  // Held (rests frozen, no new moves) under reduced motion or while paused.
+                  stepHexWander(hw, dt, energy, reducedMotionRef.current || !isPlaying, Math.random);
+                  hw.frame++;
+                  if (perfHudEnabled) {
+                      countHexMoves(hw.moves - movesBefore);
+                      wanderMs = performance.now() - t0;
+                  }
+              } catch (err) {
+                  wanderFailed(hw, err);
+                  hw = null;
+              }
+          } else if (hexWanderRef.current) {
+              // Static path; switching back on restarts from the original layout.
+              hexWanderRef.current.live = false;
+          }
+          const wander = hw; // the loops' view: null = static path, even after a failure just now
+
           // Cull off-screen hexagons in-place. The previous .filter() built
           // a fresh ~600-entry array every frame (~36k objects/sec at 60fps)
           // — major GC pressure during music playback. We now skip hidden
           // cells inside the forEach with no allocation.
-          hexGridRef.current.forEach((hex: HexCell) => {
+          hexGridRef.current.forEach((hex: HexCell, i: number) => {
               const screenX = cx + hex.x;
               const screenY = cy + hex.y;
               if (
@@ -1474,7 +1611,11 @@ const Visualizer: React.FC<VisualizerProps> = ({
                       active = Math.max(0, waveX * waveY * (bassEnergy * 0.5 + midEnergy * 0.3 + highEnergy * 0.2));
                   }
               }
-              if (hex.colorType !== 'primary' && isPlaying) active = Math.max(0, Math.min(1, active + (Math.random() - 0.5) * 0.3 * settings.sensitivity));
+              // With the wander on every cell is primary (no jitter), and the
+              // tokens read this frame's levels of the cells under them.
+              const shadeHere = wander ? false : hex.colorType !== 'primary';
+              if (wander) { wander.cellRawActive[i] = active; wander.cellStamp[i] = wander.frame; }
+              if (shadeHere && isPlaying) active = Math.max(0, Math.min(1, active + (Math.random() - 0.5) * 0.3 * settings.sensitivity));
               
               let waveLift = 0;
               if (settings.showWaterRipples && isPlaying) {
@@ -1510,6 +1651,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
                       }
                   }
               }
+              if (wander) wander.cellRawLift[i] = waveLift;
               active = Math.min(1.5, active + waveLift * 0.8);
               hex.activeLevel = hex.activeLevel * 0.9 + active * 0.1;
               // Smooth the ripple lift so the hex SWELLS with the passing wave
@@ -1518,31 +1660,72 @@ const Visualizer: React.FC<VisualizerProps> = ({
               // jerk locked to every bass hit. The ripple ring itself (Layer 2)
               // still draws crisply; only the grid's response is eased.
               hex.liftLevel = hex.liftLevel * 0.86 + waveLift * 0.14;
-              let opacity = Math.min(1, hex.activeLevel * settings.hexOpacity);
-
-              if (opacity > 0.05) {
-                ctx.beginPath();
-                const liftScale = 1 + (hex.liftLevel * 0.28);
-                const drawSize = hex.size * 0.95 * liftScale;
-                for (let i = 0; i < 6; i++) {
-                    const angle = (Math.PI / 3) * i;
-                    ctx[i===0?'moveTo':'lineTo'](hex.x + drawSize * Math.cos(angle), hex.y + drawSize * Math.sin(angle));
-                }
-                ctx.closePath();
-                
-                let strokeStr = primaryStr;
-                let fillStr = primaryStr;
-                if (hex.colorType === 'shade1') { strokeStr = fillStr = shade1Str; opacity *= 1.5; } 
-                else if (hex.colorType === 'shade2') { strokeStr = fillStr = shade2Str; opacity *= 1.2; }
-                if (hex.liftLevel > 0.2) opacity = Math.min(1, opacity + 0.3);
-
-                ctx.strokeStyle = strokeStr + opacity + ')';
-                ctx.lineWidth = hex.colorType === 'primary' ? 1 : 2;
-                ctx.stroke();
-                ctx.fillStyle = fillStr + (opacity * 0.2) + ')';
-                ctx.fill();
-              }
+              const opacity = Math.min(1, hex.activeLevel * settings.hexOpacity);
+              // A token fades its cell out as it arrives and back in as it leaves.
+              const own = wander ? wander.owner[i] : 0;
+              const vis = wander && own ? 1 - hexWanderCover(wander, own - 1, i) : 1;
+              drawHex(hex.x, hex.y, hex.liftLevel, opacity, shadeHere ? (hex.colorType === 'shade1' ? 1 : 2) : 0, vis);
           });
+
+          // The tokens, over the cells. Each reuses the mode level and wave lift
+          // its cells computed this frame (blended along the glide), then gets
+          // exactly a shade cell's jitter, lift boost and smoothing, so a
+          // resting token looks like today's shade cell.
+          if (wander) {
+              const t0 = perfHudEnabled ? performance.now() : 0;
+              try {
+                  const cells = hexGridRef.current;
+                  const frame = wander.frame;
+                  const stamp = wander.cellStamp;
+                  const rawActive = wander.cellRawActive;
+                  const rawLift = wander.cellRawLift;
+                  let onScreen = 0;
+                  let gliding = 0;
+                  for (let k = 0; k < wander.n; k++) {
+                      const from = wander.cell[k];
+                      const to = wander.target[k];
+                      const a = cells[from];
+                      let x = a.x;
+                      let y = a.y;
+                      let e = 0;
+                      if (to >= 0) {
+                          gliding++;
+                          e = easeGlide(wander.progress[k]);
+                          const b = cells[to];
+                          x += (b.x - x) * e;
+                          y += (b.y - y) * e;
+                      }
+                      // Culled exactly like a cell. Off screen its levels decay, so a
+                      // token that left lit comes back dark instead of flashing.
+                      const screenX = cx + x;
+                      const screenY = cy + y;
+                      if (
+                          screenX < -HEX_SIZE || screenX > w + HEX_SIZE ||
+                          screenY < -HEX_SIZE || screenY > h + HEX_SIZE
+                      ) {
+                          wander.active[k] *= 0.9;
+                          wander.lift[k] *= 0.86;
+                          continue;
+                      }
+                      onScreen++;
+                      // A cell not stamped this frame (culled) contributes 0.
+                      let active = stamp[from] === frame ? rawActive[from] : 0;
+                      let waveLift = stamp[from] === frame ? rawLift[from] : 0;
+                      if (to >= 0) {
+                          active += ((stamp[to] === frame ? rawActive[to] : 0) - active) * e;
+                          waveLift += ((stamp[to] === frame ? rawLift[to] : 0) - waveLift) * e;
+                      }
+                      if (isPlaying) active = Math.max(0, Math.min(1, active + (Math.random() - 0.5) * 0.3 * settings.sensitivity));
+                      active = Math.min(1.5, active + waveLift * 0.8);
+                      wander.active[k] = wander.active[k] * 0.9 + active * 0.1;
+                      wander.lift[k] = wander.lift[k] * 0.86 + waveLift * 0.14;
+                      drawHex(x, y, wander.lift[k], Math.min(1, wander.active[k] * settings.hexOpacity), wander.shade[k], 1);
+                  }
+                  if (perfHudEnabled) reportHexFrame(onScreen, gliding, wander.energy, (wanderMs + performance.now() - t0) * 1000);
+              } catch (err) {
+                  wanderFailed(wander, err);
+              }
+          }
         ctx.restore();
       }
 

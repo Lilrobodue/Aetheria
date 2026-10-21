@@ -55,6 +55,7 @@ import {
   type FrequencyEffect 
 } from './utils/effectsDocumentation';
 import { useMediaSession, type Track } from './hooks/useMediaSession';
+import { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion';
 import { stabilityManager, wakeLockManager } from './utils/stabilityManager';
 import { frequencyToSpectrumColor, type FrequencyColorMode } from './utils/spectrumColor';
 // NOTE: getBinauralPhaseOffset, getPhiTimingMarkers, getPhiEnvelopeVolume and
@@ -1346,8 +1347,8 @@ const App: React.FC = () => {
   };
 
   // Visual settings — persisted to localStorage so the user's tuning survives
-  // reloads and new sessions. Bump VIZ_SETTINGS_VERSION if VizSettings shape
-  // changes incompatibly; saved values from older versions will be discarded.
+  // reloads and new sessions. If VizSettings changes incompatibly, bump the
+  // key's version suffix; values saved under the old key are then ignored.
   const VIZ_SETTINGS_STORAGE_KEY = 'aetheria.vizSettings.v1';
   const VIZ_SETTINGS_DEFAULTS: VizSettings = {
     speed: 1.0,
@@ -1358,6 +1359,9 @@ const App: React.FC = () => {
     showHexagons: true,
     hexOpacity: 0.6,
     hexVisualMode: 'spectrum',
+    // hexWander and frameRate stay unset until the user taps them (every reader
+    // treats unset as ON / Standard), so their defaults can still change after
+    // the soak. The wander is ON meanwhile: OFF is the exact v14.6 path and the rollback.
     showWaterRipples: false,
     hydroIntensity: 50,
     showTreeOfLife: false,
@@ -1402,6 +1406,10 @@ const App: React.FC = () => {
       // persistence is best-effort, never fatal.
     }
   }, [vizSettings]);
+
+  // Reduced motion holds the wandering hexes still (the Visualizer reads the
+  // same hook); here it picks the "Wandering hexes" row's status line.
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   const [volume, setVolume] = useState(0.8);
   const [solfeggioVolume, setSolfeggioVolume] = useState(0.01);
@@ -6544,7 +6552,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v14.6</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v14.7</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -8027,6 +8035,65 @@ registerProcessor('wav-capture', WavCapture);
                                         <option value="spectrum">Spectrum Analyzer (Aggressive)</option>
                                         <option value="wave">Energy Wave (Flowing)</option>
                                     </select>
+                                </div>
+
+                                {/* Wandering hexes (v14.7): the off-colour hexes glide between cells. Saved.
+                                  * The whole row is the switch (a 44 px tap target); dimmed, not
+                                  * disabled, while the Hex Grid is off. */}
+                                {(() => {
+                                    const on = vizSettings.hexWander !== false;
+                                    const status = prefersReducedMotion
+                                        ? 'Held still: this device asks for reduced motion.'
+                                        : !on
+                                            ? 'Off-colour hexes stay in their original places.'
+                                            : vizSettings.hexVisualMode === 'spectrum' && !vizSettings.showWaterRipples
+                                                ? 'Barely visible in Spectrum mode: try Radial Pulse, Energy Wave or Hydro-Acoustics.'
+                                                : 'Off-colour hexes glide to a neighbouring cell every few seconds, faster when the music is busy.';
+                                    return (
+                                        <div className={`p-3 bg-slate-900 rounded-lg border border-slate-800 transition-opacity ${vizSettings.showHexagons ? '' : 'opacity-50'}`}>
+                                            <button
+                                                type="button"
+                                                role="switch"
+                                                aria-checked={on}
+                                                aria-labelledby="hex-wander-label"
+                                                aria-describedby="hex-wander-status"
+                                                onClick={() => setVizSettings({...vizSettings, hexWander: !on})}
+                                                className="w-full min-h-11 flex items-center justify-between gap-3 text-left"
+                                            >
+                                                <span id="hex-wander-label" className="text-[10px] text-gold-400 font-bold uppercase tracking-wider flex items-center gap-2"><Hexagon size={12}/> Wandering hexes</span>
+                                                <span aria-hidden="true" className={`w-8 h-4 shrink-0 rounded-full relative transition-colors ${on ? 'bg-gold-500' : 'bg-slate-700'}`}>
+                                                    <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${on ? 'left-[18px]' : 'left-0.5'}`}></span>
+                                                </span>
+                                            </button>
+                                            <p id="hex-wander-status" className="text-[11px] text-slate-400 mt-1">{status}</p>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Frame rate (v14.7): Cooler caps the visualizer at ~20 fps. Saved. */}
+                                <div>
+                                    <div id="frame-rate-label" className="text-[10px] text-slate-400 mb-1 uppercase tracking-widest">Frame rate</div>
+                                    <div role="group" aria-labelledby="frame-rate-label" className="grid grid-cols-2 gap-2">
+                                        {([
+                                            { rate: 'standard' as const, label: 'Standard · 30 fps' },
+                                            { rate: 'cooler' as const, label: 'Cooler · ~20 fps' },
+                                        ]).map(({ rate, label }) => {
+                                            const on = (vizSettings.frameRate === 'cooler' ? 'cooler' : 'standard') === rate;
+                                            return (
+                                                <button
+                                                    key={rate}
+                                                    type="button"
+                                                    aria-pressed={on}
+                                                    aria-describedby="frame-rate-hint"
+                                                    onClick={() => setVizSettings({...vizSettings, frameRate: rate})}
+                                                    className={`text-xs py-2 min-h-11 rounded border transition-all ${on ? 'bg-gold-500/20 border-gold-500 text-gold-400' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
+                                                >
+                                                    {label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <p id="frame-rate-hint" className="text-[11px] text-slate-400 mt-1">Cooler draws the visualizer at ~20 fps instead of 30: a little less smooth.</p>
                                 </div>
                                 
                                 <div className="flex items-center justify-between p-3 bg-slate-900 rounded-lg border border-slate-800 flex-wrap">

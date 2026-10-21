@@ -75,6 +75,7 @@ export interface VizSettings {
   showHexagons: boolean;
   hexOpacity: number;   // 0 to 1
   hexVisualMode: 'pulse' | 'spectrum' | 'wave'; 
+  hexWander?: boolean;  // Off-colour hexes glide between cells; false = the static layout. Unset = ON
   
   // Water Effect
   showWaterRipples: boolean; 
@@ -108,4 +109,7 @@ export interface VizSettings {
   enableFlow: boolean;
   enableFloat: boolean;
   enablePulse: boolean;
+
+  // Performance
+  frameRate?: 'standard' | 'cooler'; // Visualizer cap: 30 fps (validated) or ~20 fps. Unset = Standard
 }
