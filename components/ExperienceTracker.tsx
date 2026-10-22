@@ -26,6 +26,8 @@ interface ExperienceTrackerProps {
   onToggleDocumentation: () => void;
   currentFrequency: number;
   currentVolume: number;
+  /** Shown instead of the rounded percent when given (v15.0: v2's tone level in dB; its default would read "0%"). */
+  currentVolumeText?: string;
   sessionDuration: number;
   isPlaying: boolean;
   onSessionStart?: (sessionData: SessionStartData) => void;
@@ -71,6 +73,7 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
   onToggleDocumentation,
   currentFrequency,
   currentVolume,
+  currentVolumeText,
   sessionDuration,
   isPlaying,
   onSessionStart,
@@ -240,7 +243,7 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
           
           <div className="text-xs text-purple-200 mb-3 space-y-1">
             <div>📊 <strong>Frequency:</strong> {currentFrequency}Hz</div>
-            <div>🔊 <strong>Volume:</strong> {Math.round(currentVolume * 100)}%</div>
+            <div>🔊 <strong>Volume:</strong> {currentVolumeText ?? `${Math.round(currentVolume * 100)}%`}</div>
             <div>⏱️ <strong>Duration:</strong> {Math.floor(sessionDuration)}:{((sessionDuration % 1) * 60).toFixed(0).padStart(2, '0')}</div>
             <div>📝 <strong>Notes:</strong> {sessionNotes.length}</div>
           </div>

@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { ON_DEVICE } from './fixtures';
 
 /** A short mono 16-bit PCM sine WAV (8 kHz), small enough to import dozens. */
@@ -34,8 +34,18 @@ export function toneWav(seconds: number, freq: number): Buffer {
  * `acceptDialogs` (the row Delete confirm) dialogs are accepted, not recorded.
  * Also counts HTMLMediaElement.pause() calls in window.__pauseCount: the
  * gapless advance never pauses, the playTrack fallback does.
+ *
+ * The layer engine (v15.0): v2 is the release default, so a new profile plays
+ * v2 and asks for its output on the first play. The suites written for classic
+ * keep testing it: `engine` (default 'classic') is saved before the app's first
+ * load, as a tap on Classic would, unless the profile already holds a choice;
+ * later taps and seedLayers change it as usual. 'default' leaves the profile
+ * unset, as a new user's.
  */
-export async function openApp(page: Page, opts: { acceptDialogs?: boolean; query?: string } = {}): Promise<string[]> {
+export async function openApp(
+  page: Page,
+  opts: { acceptDialogs?: boolean; query?: string; engine?: 'classic' | 'v2' | 'default' } = {}
+): Promise<string[]> {
   const dialogs: string[] = [];
   page.on('dialog', async (d) => {
     if (opts.acceptDialogs) {
@@ -45,6 +55,21 @@ export async function openApp(page: Page, opts: { acceptDialogs?: boolean; query
       await d.dismiss();
     }
   });
+  const engine = opts.engine === 'default' ? null : (opts.engine ?? 'classic');
+  await page.addInitScript(
+    ({ engine, key }) => {
+      // Once per tab (its first load), so a test that later clears the choice keeps it cleared.
+      try {
+        if (engine && sessionStorage.getItem('__e2eEngineSeeded') === null) {
+          sessionStorage.setItem('__e2eEngineSeeded', '1');
+          if (localStorage.getItem(key) === null) localStorage.setItem(key, engine);
+        }
+      } catch {
+        // No storage here (e.g. about:blank): nothing to seed.
+      }
+    },
+    { engine, key: LAYER_ENGINE_KEY }
+  );
   await page.addInitScript(() => {
     localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
     const w = window as any;
@@ -423,4 +448,154 @@ export async function cacheCounts(page: Page): Promise<CacheCounts> {
 /** Wait until the persisted cache matches (debounced saves take a few seconds). */
 export async function expectCache(page: Page, expected: Partial<CacheCounts>, timeout = 15_000): Promise<void> {
   await expect.poll(() => cacheCounts(page), { timeout, intervals: [500, 1000] }).toMatchObject(expected);
+}
+
+// Layers v2 (v14.9; the default since v15.0): the "Layer sound: v2 / classic"
+// A/B. The keys are the app's own (utils/soundV2/layerHost.ts, soundLog.ts); a
+// new profile has none of them until the user taps a choice (openApp saves
+// 'classic' for the classic suites unless told otherwise).
+export const LAYER_ENGINE_KEY = 'aetheria.layerEngine.v1';
+export const LAYER_OUTPUT_KEY = 'aetheria.layerOutput.v1';
+// '1' while an "Ask me again" waits for its answer (the saved output stays beside it, in effect).
+export const LAYER_OUTPUT_ASK_AGAIN_KEY = 'aetheria.layerOutputAskAgain.v1';
+export const DRONE_KEY = 'aetheria.droneEnabled.v1';
+export const SOUND_LOG_KEY = 'aetheria.soundSessions.v1';
+// The tone level, one per engine (v15.0), saved only when that engine's slider is moved.
+export const TONE_LEVEL_V2_KEY = 'aetheria.toneLevelV2.v1';
+export const TONE_LEVEL_CLASSIC_KEY = 'aetheria.toneLevelClassic.v1';
+
+/** Move a range slider as a drag does: the new value, then an input event (React's onChange). The native value
+ *  setter is used because React's own setter on the element would swallow the change. */
+export async function setSlider(slider: Locator, value: number): Promise<void> {
+  await slider.evaluate((el, v) => {
+    const input = el as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, String(v));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, value);
+}
+
+/** Store A/B choices the way a tap would, then reload into the app (openApp first). */
+export async function seedLayers(
+  page: Page,
+  s: { engine?: 'classic' | 'v2'; output?: 'headphones' | 'speakers' | 'phone' | 'car'; drone?: boolean }
+): Promise<void> {
+  await page.evaluate(
+    ({ s, keys }) => {
+      if (s.engine) localStorage.setItem(keys.engine, s.engine);
+      if (s.output) localStorage.setItem(keys.output, s.output);
+      if (s.drone !== undefined) localStorage.setItem(keys.drone, String(s.drone));
+    },
+    { s, keys: { engine: LAYER_ENGINE_KEY, output: LAYER_OUTPUT_KEY, drone: DRONE_KEY } }
+  );
+  await page.reload();
+  await acceptDisclaimer(page);
+}
+
+/**
+ * The app's v2 dev hook, window.__aetheriaLayers (App.tsx; dev builds only, so
+ * the test server has it and production does not). Its effect runs just after
+ * the first render, hence the short wait; a page without it fails here rather
+ * than letting a test pass on "no player".
+ */
+async function layersHook(page: Page): Promise<void> {
+  await page
+    .waitForFunction(() => !!(window as any).__aetheriaLayers, null, { timeout: 5_000 })
+    .catch(() => {
+      throw new Error('window.__aetheriaLayers is missing: the layer tests need the dev server (it is stripped from builds)');
+    });
+}
+
+/** The v2 player's state() through the dev hook, or null before it exists. */
+export async function layersState(page: Page): Promise<any | null> {
+  await layersHook(page);
+  return page.evaluate(() => (window as any).__aetheriaLayers.state());
+}
+
+/** Whether App holds a v2 player now (never in a classic session; gone 3 s after leaving v2). */
+export async function layersCreated(page: Page): Promise<boolean> {
+  await layersHook(page);
+  return page.evaluate(() => (window as any).__aetheriaLayers.created() as boolean);
+}
+
+/** The hook's `mobile`: App's IS_MOBILE_DEVICE (the mobile-ua project and a phone). */
+export async function isMobileBuild(page: Page): Promise<boolean> {
+  await layersHook(page);
+  return page.evaluate(() => (window as any).__aetheriaLayers.mobile as boolean);
+}
+
+/** RMS of what the app's analyser sees on the master bus now (×2 visualizer gain; needs instrumentAudio). */
+export async function busRms(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const A = (window as any).__audio;
+    const analyser = A.edges.map(([, d]: any[]) => d).find((d: any) => d instanceof AnalyserNode) as AnalyserNode | undefined;
+    if (!analyser) return 0;
+    const x = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(x);
+    let sum = 0;
+    for (let i = 0; i < x.length; i++) sum += x[i] * x[i];
+    return Math.sqrt(sum / x.length);
+  });
+}
+
+/** An init script (after instrumentAudio) that wraps AudioScheduledSourceNode.prototype.stop once more and stamps each
+ *  call with performance.now() (instrumentAudio's own wrapper stays untouched); stopsSince counts calls after t. */
+export async function recordStops(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const stamps: number[] = ((window as any).__stopTimes = []);
+    const stop = AudioScheduledSourceNode.prototype.stop;
+    AudioScheduledSourceNode.prototype.stop = function (this: AudioScheduledSourceNode, when?: number) {
+      stamps.push(performance.now());
+      return stop.call(this, when);
+    };
+  });
+}
+
+/** stop() calls on any source after `t` (the page's performance.now()). */
+export async function stopsSince(page: Page, t: number): Promise<number> {
+  return page.evaluate((t) => {
+    const stamps: number[] | undefined = (window as any).__stopTimes;
+    if (!stamps) throw new Error('stopsSince needs recordStops before openApp');
+    return stamps.filter((s) => s > t).length;
+  }, t);
+}
+
+/**
+ * Write a synthetic bandEnvelope (fps 20, every frame `level` in all four
+ * bands, `seconds` long) into the meta record of the library's first track,
+ * as a Deep Scan would. Done from /manifest.json as shrinkSavedLibrary does,
+ * so the app can't save over it; reload into the app afterwards. The
+ * Uint8Arrays survive structured clone (utils/playlistCache.ts).
+ */
+export async function writeBandEnvelope(page: Page, level: number, seconds: number): Promise<void> {
+  await page.goto('/manifest.json');
+  await page.evaluate(
+    async ({ level, seconds }) => {
+      const db: IDBDatabase = await new Promise((resolve, reject) => {
+        const r = indexedDB.open('aetheria-db');
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+      const get = (store: IDBObjectStore, key: string): Promise<any> =>
+        new Promise((resolve, reject) => {
+          const r = store.get(key);
+          r.onsuccess = () => resolve(r.result);
+          r.onerror = () => reject(r.error);
+        });
+      const tx = db.transaction(['playlist-state', 'meta'], 'readwrite');
+      const state = await get(tx.objectStore('playlist-state'), 'current');
+      const id: string | undefined = state?.originalOrder?.[0];
+      const meta = id ? await get(tx.objectStore('meta'), id) : undefined;
+      if (!meta) throw new Error('writeBandEnvelope: no saved first track (import one and wait for the cache)');
+      const frames = Math.ceil(seconds * 20);
+      const band = () => new Uint8Array(frames).fill(level);
+      meta.bandEnvelope = { fps: 20, sub: band(), bass: band(), mid: band(), high: band() };
+      tx.objectStore('meta').put(meta);
+      await new Promise((resolve, reject) => {
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    },
+    { level, seconds }
+  );
 }

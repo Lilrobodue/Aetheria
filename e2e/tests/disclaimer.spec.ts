@@ -5,9 +5,11 @@ import { openApp, openSafety } from './helpers';
 // The launch disclaimer's acceptance is saved per wording version (v14.6):
 // it shows on first launch, then only when its wording changes.
 const KEY = 'aetheria.disclaimer.v1';
-const VERSION = '2026-04-16';
+const VERSION = '2026-10-21'; // v15.0's driving line (before it, '2026-04-16')
 // SHA-256 (first 12 hex) of the disclaimer's words (text nodes trimmed, joined by spaces).
-const WORDING_PIN = '82eec8662a12';
+// v15.0: the new driving line, then the old line's heavy-machinery half as its own sentence (with the old driving
+// line: '82eec8662a12'; the new line alone, never shipped: 'd5c39f327152').
+const WORDING_PIN = 'e11c6705b97a';
 
 const acceptButton = (page: import('@playwright/test').Page) =>
   page.getByRole('button', { name: /I understand, let me begin/ });

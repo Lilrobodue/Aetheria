@@ -4,8 +4,9 @@ import { join } from 'node:path';
 
 // The tests' own port and origin, kept apart from the dev server you run by
 // hand (port 3100): on a phone the tests share Chrome's one profile with you,
-// and they wipe their origin's storage before every test.
-export const TEST_PORT = 3199;
+// and they wipe their origin's storage before every test. E2E_PORT moves it
+// (e.g. a second checkout's suite running alongside).
+export const TEST_PORT = Number(process.env.E2E_PORT) || 3199;
 export const TEST_ORIGIN = `http://localhost:${TEST_PORT}`;
 
 // The Android device the suite drives when E2E_DEVICE is set:

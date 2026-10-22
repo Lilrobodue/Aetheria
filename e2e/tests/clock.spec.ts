@@ -1,6 +1,6 @@
 import { type Page } from '@playwright/test';
 import { test, expect, ON_DEVICE } from './fixtures';
-import { openApp, importTones, elapsedSeconds } from './helpers';
+import { openApp, importTones, elapsedSeconds, seedLayers, layersState, LAYER_ENGINE_KEY } from './helpers';
 
 // v14.8: while music plays, App sets its transport time (the clock text, the
 // seek bar, the φ phase badge and the lock screen's position) four times a
@@ -83,11 +83,17 @@ const seconds = (text: string) => {
   return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
 };
 
-test('playing, App commits a few times a second and the visualizer draws its 30 frames; the clock, the seek bar, the lock screen and the φ gains keep up @mobile', async ({ page }) => {
+// The heat guard runs once per engine (v15.0): Classic, chosen, and v2, the default a new profile plays, with its
+// output answered (Headphones) beforehand as a user's would be. v2's own work (its 250 ms host tick and the player's
+// tick) must set no React state, so it holds the same commit and draw budget. The φ gains are classic's: under v2
+// they are torn down 2 s after it takes over (its host level follows the φ envelope instead).
+async function playingKeepsUp(page: Page, engine: 'classic' | 'default'): Promise<void> {
+  const v2 = engine === 'default';
   // The user's phone, where the renders were the heat (the canvas is CSS-px sized, so this is its load too).
   await page.setViewportSize({ width: 411, height: 752 });
   await recordTransport(page);
-  const dialogs = await openApp(page, { query: '?perf=1' });
+  const dialogs = await openApp(page, { query: '?perf=1', engine });
+  if (v2) await seedLayers(page, { output: 'headphones' });
   await importTones(page, 1, 120);
   await page.getByText('tone-01', { exact: true }).click();
   await expect.poll(() => elapsedSeconds(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
@@ -104,14 +110,34 @@ test('playing, App commits a few times a second and the visualizer draws its 30 
   const span = (t1 - t0) / 1000;
   const within = <V extends { at: number }>(xs: V[]) => xs.filter((x) => x.at >= t0 && x.at <= t1);
 
+  // The engine under test is the one playing: v2's player, never saved as a choice; or classic, with no player.
+  test.info().annotations.push({
+    type: 'hud',
+    description: `${engine}: commits/s ${windows.map((w) => w.commits).join(', ')}; draws/s ${windows.map((w) => w.draws).join(', ')}; rAF/s ${windows.map((w) => w.raf).join(', ')}; φ gain updates/s ${((T.phi - phi0) / span).toFixed(1)}`,
+  });
+  if (v2) {
+    expect((await layersState(page))?.requested?.tone_hz ?? 0, 'the v2 layers play').toBeGreaterThan(0);
+    expect(await page.evaluate((k) => localStorage.getItem(k), LAYER_ENGINE_KEY)).toBeNull();
+  } else {
+    expect(await layersState(page)).toBeNull();
+  }
+
   // Commits: the clock's 4 a second, and little else (every frame, ~60).
   for (const w of windows) expect.soft(w.commits, 'App commits/s').toBeLessThanOrEqual(8);
-  // Draws: never above the visualizer's 30 fps cap, and close to it. A production build holds 30 either
-  // way; on this dev server each of the ~5 commits left still costs a frame or two (React's dev build),
-  // so it draws ~21-26 here, against ~13-19 with App re-rendering every frame. A phone draws fewer.
+  // And per frame (v15.0): re-rendering on every frame drags the frame rate down with it on a busy or slow machine
+  // (the dev server's App commit is slow), so the rate alone can stay under 8 while every frame commits. Taken over
+  // the six windows together: every frame committing is ~1 in each of them; one window the machine stalled (5
+  // commits in 8 frames) is not.
+  const total = (k: 'commits' | 'raf') => windows.reduce((s, w) => s + w[k], 0);
+  expect.soft(total('commits') / Math.max(total('raf'), 1), 'App commits per animation frame').toBeLessThanOrEqual(0.5);
+  // Draws: never above the visualizer's 30 fps cap, and not falling behind. A production build holds 30 either
+  // way. On this dev server each of the ~5 commits left is a long task (React's dev build captures a stack for
+  // every element it creates, which costs more the bigger App is), so the draws follow the machine: ~21-26 when
+  // this was written, and on 2026-10-21 17-18 for v14.8 and 13-16 for v15.0, with the same commits (~130 and
+  // ~145 ms each). Every frame committing is the check above; this one catches a visualizer that falls behind.
   const draws = windows.map((w) => w.draws).sort((a, b) => a - b);
   for (const d of draws) expect.soft(d, 'draws/s never above the 30 fps cap').toBeLessThanOrEqual(31);
-  expect.soft(draws[3], 'draws/s, median').toBeGreaterThanOrEqual(ON_DEVICE ? 12 : 20);
+  expect.soft(draws[3], 'draws/s, median').toBeGreaterThanOrEqual(12);
 
   // The clock text: every second in turn, each shown soon after the music reaches it: within a frame
   // plus React's render, which a busy dev build can delay a few tenths (a 1 s step would lag ~1 s).
@@ -135,9 +161,9 @@ test('playing, App commits a few times a second and the visualizer draws its 30 
   const gaps = position.slice(1).map((at, i) => (at - position[i]) / 1000);
   expect.soft(position.length, 'lock-screen position updates').toBeGreaterThanOrEqual(Math.floor(span) - 1);
   expect.soft(gaps.filter((g) => g < 0.95 || g > 1.6).map((g) => g.toFixed(2)), 'lock-screen updates closer than 0.95 s or further than 1.6 s apart').toEqual([]);
-  // The φ gains still follow every frame: two gains, one call each per animation frame.
+  // The φ gains still follow every frame: two gains, one call each per animation frame (classic's).
   const raf = windows.map((w) => w.raf).sort((a, b) => a - b)[3];
-  expect.soft((T.phi - phi0) / span, `φ gain updates/s (rAF ${raf}/s)`).toBeGreaterThanOrEqual(1.5 * raf);
+  if (!v2) expect.soft((T.phi - phi0) / span, `φ gain updates/s (rAF ${raf}/s)`).toBeGreaterThanOrEqual(1.5 * raf);
 
   // A seek back: the clock follows it there and keeps counting from it.
   const before = await elapsedSeconds(page);
@@ -148,7 +174,14 @@ test('playing, App commits a few times a second and the visualizer draws its 30 
   const sought = await elapsedSeconds(page);
   await expect.poll(() => elapsedSeconds(page), { timeout: 6_000, message: 'the clock counts on after the seek' }).toBeGreaterThanOrEqual(sought + 3);
   expect(dialogs).toEqual([]);
-});
+}
+
+for (const engine of ['classic', 'default'] as const) {
+  const which = engine === 'default' ? 'v2, the default' : 'classic';
+  const keepUp = engine === 'default' ? 'the clock, the seek bar and the lock screen' : 'the clock, the seek bar, the lock screen and the φ gains';
+  test(`playing (${which}), App commits a few times a second and the visualizer draws its 30 frames; ${keepUp} keep up @mobile`, async ({ page }) =>
+    playingKeepsUp(page, engine));
+}
 
 test('paused at any point, the clock, the seek bar and the lock screen show where the music stopped @mobile', async ({ page }) => {
   // While playing, the time is set as the music crosses each quarter second, and once more, to the

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sound Check</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; padding: 16px; background: #0b0f17; color: #e2e8f0; font: 14px/1.5 system-ui, sans-serif; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      h2 { font-size: 15px; margin: 24px 0 4px; }
+      p { color: #94a3b8; margin: 0 0 12px; }
+      .scroll { overflow-x: auto; }
+      table { border-collapse: collapse; width: 100%; font-size: 13px; }
+      th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #1e293b; vertical-align: top; }
+      th { color: #94a3b8; font-weight: 600; }
+      td.m { font-variant-numeric: tabular-nums; }
+      .pass { color: #4ade80; }
+      .fail { color: #f87171; }
+      #warn { display: none; background: #7f1d1d; color: #fee2e2; padding: 8px 12px; border-radius: 6px; margin: 0 0 12px; }
+      #status, #live { color: #94a3b8; margin: 8px 0; }
+      #result { font-weight: 700; margin-top: 16px; }
+      #listen { display: flex; flex-wrap: wrap; gap: 8px; }
+      button { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer; }
+      button:disabled { opacity: 0.4; cursor: default; }
+    </style>
+  </head>
+  <body>
+    <h1>Layer sound v2 check</h1>
+    <p>Dev-only (v14.9). Renders the v2 layer player offline in this browser and checks clicks, retune silence, overlap, fade shapes, levels, frequencies, mono, the drone duty and the player's hygiene against the designed curves (build spec §8). Nothing is stored and no sound plays until you press a Listen button.</p>
+    <div id="warn" role="alert"></div>
+    <div id="status">Starting…</div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Check</th><th>Engine · mode</th><th>Measured</th><th>Threshold</th><th>Pass</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div id="result" data-testid="sound-check-result">Running…</div>
+    <h2>Listen</h2>
+    <p>Replays a scenario live with the player's own clock and tick, for by-ear checks on headphones. Set the volume first: the layers play at their validated levels, which sit against full-scale music (the tone peaks at −28 dBFS).</p>
+    <div id="listen"></div>
+    <div id="live"></div>
+    <script type="module" src="./sound-check.ts"></script>
+  </body>
+</html>

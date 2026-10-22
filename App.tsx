@@ -74,6 +74,43 @@ import {
   INV_PHI_SQUARED
 } from './utils/phiIntegration';
 import { feltCarrierHz, thetaAlphaModHz, solfeggioHz } from './utils/frequencyMapping';
+// Layer sound v2 (v14.9). LayerPlayer is a STATIC import so it is in the offline
+// precache (src/serviceWorker.ts collects the module graph; sw.js serves app
+// source network-first).
+import { LayerPlayer } from './utils/soundV2/layerPlayer';
+import type { LayerPlayerState } from './utils/soundV2/layerPlayer';
+import { plan as v2Plan, toneOf, BANDS, BAND_ORDER, bandForIntensity, phiEnvelope, LEVEL_TONE, LEVEL_BEAT, LEVEL_DRONE_SUB } from './utils/soundV2/aetheria_sound_v2';
+import type { Band } from './utils/soundV2/aetheria_sound_v2';
+import { canonicalLayerHz, renderForOutput, planOutputFor, bandOfPresetName, capBand, sliderGain, gainToDb, readIntensity, BandHysteresis, musicGainFactor, parseLayerEngine, parseLayerOutput, parseOutputAskAgain, parseDroneEnabled, DEFAULT_LAYER_ENGINE, DEFAULT_DRONE_ENABLED, KEY_LAYER_ENGINE, KEY_LAYER_OUTPUT, KEY_LAYER_OUTPUT_ASK_AGAIN, KEY_DRONE_ENABLED, TONE_SLIDER_DEFAULT, BEAT_SLIDER_DEFAULT, V2_TONE_SLIDER_MAX, V2_TONE_SLIDER_STEP, V2_BEAT_SLIDER_MAX, toneLevelKey, defaultToneLevel, parseToneLevel } from './utils/soundV2/layerHost';
+import type { LayerEngine, LayerOutput, CanonicalLayer, BeatRender } from './utils/soundV2/layerHost';
+import { createSoundLog } from './utils/soundV2/soundLog';
+import type { SoundLog, SoundLogFields, StorageLike } from './utils/soundV2/soundLog';
+import LayerSoundPanel from './components/layers/LayerSoundPanel';
+import OutputSheet from './components/layers/OutputSheet';
+import OutputQuickSwitch from './components/layers/OutputQuickSwitch';
+import LayersBadge from './components/layers/LayersBadge';
+import DbReadout from './components/layers/DbReadout';
+import {
+  mergeLayerStatus,
+  layersBadgeText,
+  layersTooltip,
+  bandChipText,
+  toneReadout,
+  beatReadout,
+  feltLineV2,
+  TONE_LEVEL_LABEL,
+  BEAT_LEVEL_LABEL,
+  HEADPHONES_HINT,
+  PRESETS_NOTE_V2,
+  PRESETS_NOTE_CAR_V2,
+  GAMMA_DESCRIPTION_V2,
+  PHI_LEVELS_V2,
+  PHI_BINAURAL_V2,
+  PHI_ENVELOPE_V2,
+  KEEP_COMFORTABLE_V2,
+  SOUND_LOG_SAVE_FAILED,
+} from './components/layers/layerCopy';
+import type { LayerStatus } from './components/layers/layerCopy';
 
 // --- Helpers ---
 
@@ -155,6 +192,30 @@ const SUB_BASS_GLIDE_S = 8;          // smooth pitch glide on track change (guid
 // "Music only" (v14.6): when it flips, the layer bus and the drone glide to 0
 // or back with this time constant: about 1 s to -35 dB, so no click.
 const MUSIC_ONLY_FADE_TAU_S = 0.25;
+// Dev builds only (npm run dev, the e2e server): tests read the v2 player's
+// state. Vite strips this in production.
+const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
+// The v2 layer frequency while classic plays: nothing resolved, nothing planned.
+const NO_LAYER: CanonicalLayer = { f: 0, id: null, canonical: false };
+
+/** localStorage, or null where reading it throws (blocked storage). */
+const safeLocalStorage = (): StorageLike | null => {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage : null;
+  } catch {
+    return null;
+  }
+};
+
+/** An engine's saved tone level (v15.0), else its release default; unreadable storage reads as unset. */
+const storedToneLevel = (engine: LayerEngine): number => {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(toneLevelKey(engine)) : null;
+    return parseToneLevel(raw, engine) ?? defaultToneLevel(engine);
+  } catch {
+    return defaultToneLevel(engine);
+  }
+};
 
 // The band constants and the octave-mapping helpers (octaveInto, feltCarrierHz,
 // thetaAlphaModHz, toSubBass, solfeggioHz) now live in utils/frequencyMapping.ts
@@ -1213,11 +1274,12 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 // Acceptance is saved per wording version (v14.6): the disclaimer shows on
 // first launch, and once more whenever DISCLAIMER_VERSION changes. Change it
 // with ANY change to the disclaimer's wording (App's "Disclaimer Modal" JSX),
-// and only then: restyling or moving the text must not re-show it. v15.0's new
-// driving line changes it. The value is the date the current wording shipped
-// (update 7.7, 632f266); never derive it from the app version. (The e2e suite
-// pins the wording: disclaimer.spec.ts fails when it changes.)
-const DISCLAIMER_VERSION = '2026-04-16';
+// and only then: restyling or moving the text must not re-show it. The value is
+// the date of the current wording: v15.0's driving line, with the old line's
+// heavy-machinery caution kept as its own sentence (2026-10-21; before it,
+// '2026-04-16' from update 7.7, 632f266). Never derive it from the app version.
+// (The e2e suite pins the wording: disclaimer.spec.ts fails when it changes.)
+const DISCLAIMER_VERSION = '2026-10-21';
 // Holds the accepted DISCLAIMER_VERSION. '.v1' is the storage format, like the
 // other aetheria.*.v1 keys. The Nov 2025 key 'aetheria_v3_disclaimer' accepted
 // an older text and is ignored.
@@ -1412,7 +1474,12 @@ const App: React.FC = () => {
   const prefersReducedMotion = usePrefersReducedMotion();
 
   const [volume, setVolume] = useState(0.8);
-  const [solfeggioVolume, setSolfeggioVolume] = useState(0.01);
+  // The tone level, one per engine (v15.0): saved only when the user moves that
+  // engine's slider (chooseToneLevel), so an untouched device keeps each
+  // engine's release default: v2 the lowest step before off, classic its 1 %.
+  // solfeggioVolume (after v2Active, below) is the playing engine's.
+  const [toneLevelV2, setToneLevelV2] = useState<number>(() => storedToneLevel('v2'));
+  const [toneLevelClassic, setToneLevelClassic] = useState<number>(() => storedToneLevel('classic'));
   // Independent gate for the solfeggio oscillator so the user can hear a
   // selected tone without the music track also resuming. Set true by
   // selectFrequency; cleared by every stop (v14.6): pausePlayback (Pause, the
@@ -1475,9 +1542,62 @@ const App: React.FC = () => {
     }
   }, [musicOnly]);
 
-  const classicLayerGain = musicOnly ? 0 : 1;
+  // Layer sound A/B (v14.9). Unset = the release default (v2 since v15.0;
+  // classic before), so the default can still flip: nothing is saved until the
+  // user taps a choice (the v14.7 hexWander lesson). The tap handlers are the
+  // only writers.
+  const [layerEngineChoice, setLayerEngineChoice] = useState<LayerEngine | null>(() => {
+    try { return parseLayerEngine(typeof localStorage !== 'undefined' ? localStorage.getItem(KEY_LAYER_ENGINE) : null); }
+    catch { return null; }
+  });
+  const layerEngine: LayerEngine = layerEngineChoice ?? DEFAULT_LAYER_ENGINE;
+  // v2 output, asked once per device; null = not answered yet, played as headphones.
+  const [layerOutput, setLayerOutput] = useState<LayerOutput | null>(() => {
+    try { return parseLayerOutput(typeof localStorage !== 'undefined' ? localStorage.getItem(KEY_LAYER_OUTPUT) : null); }
+    catch { return null; }
+  });
+  // "Ask me again" until an answer: the question is pending. It is saved, and the answer stays saved beside it, so
+  // layerOutput stays the output in effect (Car stays tone only) across restarts too, and the sheet asks again when
+  // the layers next play. Read once, at load; only meaningful while an output is saved. Blocked storage keeps it for
+  // the session.
+  const [outputAskedAgain, setOutputAskedAgain] = useState<boolean>(() => {
+    try { return parseOutputAskAgain(typeof localStorage !== 'undefined' ? localStorage.getItem(KEY_LAYER_OUTPUT_ASK_AGAIN) : null); }
+    catch { return false; }
+  });
+  // The v2 sub-bass drone switch (headphones only). Unset = on; saved when tapped.
+  const [droneChoice, setDroneChoice] = useState<boolean | null>(() => {
+    try { return parseDroneEnabled(typeof localStorage !== 'undefined' ? localStorage.getItem(KEY_DRONE_ENABLED) : null); }
+    catch { return null; }
+  });
+  const droneEnabled: boolean = droneChoice ?? DEFAULT_DRONE_ENABLED;
+  // Session only: v2 could not start or failed; classic plays (no layers at all for Car: v2CarFallback), and the
+  // panel says so.
+  const [v2Failed, setV2Failed] = useState(false);
+  const v2Active = layerEngine === 'v2' && !v2Failed;
+
+  // The tone level of the engine playing the layers: v2's while v2 plays,
+  // classic's in classic (and after a v2 failure). An engine flip switches
+  // levels in the same render as the engines, so classic rebuilds once. The
+  // safety check may lower it for the session (setSolfeggioVolume); only the
+  // sliders save it.
+  const solfeggioVolume = v2Active ? toneLevelV2 : toneLevelClassic;
+  const setSolfeggioVolume = v2Active ? setToneLevelV2 : setToneLevelClassic;
+  // The two tone sliders' handler: the slider's own engine's level, saved under
+  // that engine's key. The only writer of those keys (a user's move, never an
+  // effect), so a device that never moves a slider follows the release defaults.
+  const chooseToneLevel = useCallback((engine: LayerEngine, v: number) => {
+    (engine === 'v2' ? setToneLevelV2 : setToneLevelClassic)(v);
+    try { if (Number.isFinite(v)) localStorage.setItem(toneLevelKey(engine), String(v)); } catch {}
+  }, []);
+
+  // v2's failure fallback (never a choice of classic) with Car in effect: classic has no Car render (it always plays
+  // its beat and drone), so its layers stay off, as under Music only, and a driver hears only the music.
+  const v2CarFallback = layerEngine === 'v2' && v2Failed && layerOutput === 'car';
+  // 0 under Music only (and the Car fallback), and while v2 plays the layers: an engine flip reuses the Music-only
+  // fade (τ 0.25 s).
+  const classicLayerGain = (musicOnly || v2Active || v2CarFallback) ? 0 : 1;
   // The tone level actually heard, for the effects documentation's records.
-  const heardToneVolume = musicOnly ? 0 : solfeggioVolume;
+  const heardToneVolume = (musicOnly || v2CarFallback) ? 0 : solfeggioVolume;
   // initAudio has empty deps, so it reads the multiplier through this ref
   // (the volumeRef pattern).
   const classicLayerGainRef = useRef(classicLayerGain);
@@ -1772,6 +1892,21 @@ const App: React.FC = () => {
   const [enablePhiMode, setEnablePhiMode] = useState(true); // Enable phi mode by default
   const [phiTimingEnabled, setPhiTimingEnabled] = useState(true); // Enable phi timing by default
 
+  // Layers v2 (v14.9): what the v2 layers should do now. Classic ignores all of this.
+  const outputEffective: LayerOutput = layerOutput ?? 'headphones';
+  const toneOnly = !isPlaying && isSolfeggioActive;
+  const render: BeatRender = toneOnly ? 'off' : renderForOutput(outputEffective);
+  const planOutput = planOutputFor(outputEffective);
+  // Resolved only under v2: canonicalLayerHz warns once per non-crystal value, and classic's console stays v14.7's.
+  const layer: CanonicalLayer = useMemo(
+    () => (v2Active ? canonicalLayerHz(selectedSolfeggio, loShuPerfectGUT) : NO_LAYER),
+    [v2Active, selectedSolfeggio, loShuPerfectGUT]
+  );
+  const presetBand: Band = bandOfPresetName(selectedBinaural.name);
+  const planBand: Band = render === 'pulse' ? capBand(presetBand, 'alpha') : presetBand;
+  const isGammaPlan = render === 'binaural' && planBand === 'gamma';
+  const v2Wanted = v2Active && !musicOnly && layer.f > 0 && (isPlaying || isSolfeggioActive);
+
   // Session duration tracking
   useEffect(() => {
     let interval: number | null = null;
@@ -1863,7 +1998,8 @@ const App: React.FC = () => {
       // Fallback to original detection method — same boundary conversion applies.
       return toHeardHz(await detectDominantFrequency(buffer));
     }
-  }, [solfeggioVolume]);
+    // setSolfeggioVolume follows the playing engine (v15.0), so a flip renews this too.
+  }, [solfeggioVolume, setSolfeggioVolume]);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
@@ -1899,6 +2035,11 @@ const App: React.FC = () => {
   // Continuous sub-bass vibratory drone (Web Audio oscillator → destination).
   const subBassDroneRef = useRef<{ osc: OscillatorNode; gain: GainNode; amGain: GainNode; lfo: OscillatorNode; lfoGain: GainNode } | null>(null);
   const blobUrlsRef = useRef<{ [key: string]: string }>({});
+  // Layers v2 (v14.9): the player (made on the first v2 play, never in classic),
+  // the delayed dispose after leaving v2, and the drone duty carried across it.
+  const layerPlayerRef: { current: LayerPlayer | null } = useRef(null);
+  const layerDisposeTimerRef: { current: number | null } = useRef(null);
+  const layerDutyCarryRef: { current: { ctx: BaseAudioContext; duty: { on_s: number; quiet_s: number; rest_ends_at: number | null; t: number } } | null } = useRef(null);
 
   const solfeggioOscRef = useRef<OscillatorNode | null>(null);
   const solfeggioGainRef = useRef<GainNode | null>(null);
@@ -2391,6 +2532,14 @@ const App: React.FC = () => {
     deleteTracksFromCache([songId]);
   }, [playlist, currentSongIndex]);
 
+  // Layers v2 (v14.9): dispose the layer player when App unmounts. Declared
+  // above the pinned teardown so it runs first.
+  useEffect(() => () => {
+    if (layerDisposeTimerRef.current !== null) window.clearTimeout(layerDisposeTimerRef.current);
+    try { layerPlayerRef.current?.dispose(); } catch {}
+    layerPlayerRef.current = null;
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -2699,6 +2848,9 @@ const App: React.FC = () => {
     if (!audioCtxRef.current) return;
     const ctx = audioCtxRef.current;
     const now = ctx.currentTime;
+    // v2 plays the layers: leave classic's tone as it is (BEFORE the teardown:
+    // stopping it here would click while the bus fades). See the I6 teardown.
+    if (v2Active) return;
 
     if (solfeggioOscRef.current) {
       try { solfeggioOscRef.current.stop(); } catch(e) {}
@@ -2738,7 +2890,7 @@ const App: React.FC = () => {
 
     solfeggioOscRef.current = osc;
     solfeggioGainRef.current = gain;
-  }, [isPlaying, isSolfeggioActive, selectedSolfeggio, solfeggioVolume, enablePhiMode, volume, binauralVolume, loShuPerfectGUT]);
+  }, [isPlaying, isSolfeggioActive, selectedSolfeggio, solfeggioVolume, enablePhiMode, volume, binauralVolume, loShuPerfectGUT, v2Active]);
 
   useEffect(() => {
       if (binauralGainRef.current && audioCtxRef.current) {
@@ -2754,6 +2906,8 @@ const App: React.FC = () => {
   const updateBinaural = useCallback(() => {
     if (!audioCtxRef.current) return;
     const ctx = audioCtxRef.current;
+    // v2 plays the layers: leave classic's beat as it is, before its teardown (as updateSolfeggio).
+    if (v2Active) return;
     
     [binauralLeftOscRef, binauralRightOscRef, binauralLeftPhaseRef, binauralRightPhaseRef].forEach(ref => {
       if (ref.current) { try { ref.current.stop(); } catch(e){} ref.current.disconnect(); ref.current = null; }
@@ -2812,7 +2966,7 @@ const App: React.FC = () => {
     binauralGainRef.current = mainGain;
     binauralLeftPhaseRef.current = leftPhaseNode;
     binauralRightPhaseRef.current = rightPhaseNode;
-  }, [isPlaying, selectedBinaural, enablePhiMode, volume, binauralVolume, solfeggioVolume]); 
+  }, [isPlaying, selectedBinaural, enablePhiMode, volume, binauralVolume, solfeggioVolume, v2Active]); 
 
   useEffect(() => { updateSolfeggio(); }, [updateSolfeggio]);
   useEffect(() => { updateBinaural(); }, [updateBinaural]);
@@ -2879,8 +3033,9 @@ const App: React.FC = () => {
   // synth layers and the old logic was pinned to Delta forever. Instead we read the
   // PRE-SCANNED per-track band envelope (the same data the visualizer uses) at the
   // live playback position — real per-song AND in-song energy, no audio-graph tap.
+  // Under v2 its own adaptive effect (with hysteresis and caps) moves the band.
   useEffect(() => {
-    if (!isAdaptiveBinaural || !isPlaying) return;
+    if (v2Active || !isAdaptiveBinaural || !isPlaying) return;
     const env = currentSongIndex >= 0 ? playlist[currentSongIndex]?.bandEnvelope : null;
     if (!env) return;   // scan failed / no envelope → leave the manual band untouched
 
@@ -2919,7 +3074,7 @@ const App: React.FC = () => {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [isAdaptiveBinaural, isPlaying, selectedBinaural, currentSongIndex, playlist]);
+  }, [isAdaptiveBinaural, isPlaying, selectedBinaural, currentSongIndex, playlist, v2Active]);
 
   // Log phi integration on mount
   useEffect(() => {
@@ -3120,6 +3275,418 @@ const App: React.FC = () => {
     node.lfo.frequency.setValueAtTime(node.lfo.frequency.value, t);
     node.lfo.frequency.exponentialRampToValueAtTime(mod, t + SUB_BASS_GLIDE_S);
   }, [selectedSolfeggio]);
+
+  // ---------------------------------------------------------------------------
+  // Layers v2 host (v14.9). Classic sessions never create the player; every
+  // call is isolated, so a v2 failure can never unmount the app (no error
+  // boundary yet) — classic plays instead. Nothing here sets React state from a
+  // timer or a tick (heat): the player reports phase and drone-rest
+  // transitions only, and the level tick only talks to the player.
+  const [layerStatus, setLayerStatus] = useState<LayerStatus | null>(null);   // transitions only
+  const onLayerState = useCallback((s: LayerPlayerState) => setLayerStatus((prev: LayerStatus | null) => mergeLayerStatus(prev, s)), []);
+  const onLayerError = useCallback((err: unknown, where: string) => {
+    console.error(`Layers v2 failed in ${where}; classic is playing.`, err);
+    setV2Failed(true);
+  }, []);
+  const ensureLayerPlayer = useCallback((): LayerPlayer | null => {
+    const p = layerPlayerRef.current;
+    if (p && !p.disposed) return p;
+    const ctx = audioCtxRef.current, bus = masterBusRef.current;
+    if (!ctx || !bus || ctx.state === 'closed') return null;
+    const carry = layerDutyCarryRef.current;
+    try {
+      const np = LayerPlayer.for(ctx, bus, { onState: onLayerState, onError: onLayerError, resumeDuty: carry && carry.ctx === ctx ? carry.duty : null });
+      layerPlayerRef.current = np;
+      setLayerStatus(null);   // a new player: forget the last one's status (its own first transition follows)
+      return np;
+    } catch (err) {
+      console.error('Layers v2 unavailable; classic is playing.', err);
+      setV2Failed(true);
+      return null;
+    }
+  }, [onLayerState, onLayerError]);
+  // Leaving v2 (I1): the fade happens at once (stopLayersNow); 3 s later the
+  // player is disposed — its oscillators, gains and tick must not outlive the
+  // visit in classic — unless v2 came back meanwhile (a quick re-flip, S24).
+  const cancelLayerDispose = useCallback(() => {
+    if (layerDisposeTimerRef.current !== null) {
+      window.clearTimeout(layerDisposeTimerRef.current);
+      layerDisposeTimerRef.current = null;
+    }
+  }, []);
+  const scheduleLayerDispose = useCallback(() => {
+    cancelLayerDispose();
+    layerDisposeTimerRef.current = window.setTimeout(() => {
+      layerDisposeTimerRef.current = null;
+      const p = layerPlayerRef.current;
+      layerPlayerRef.current = null;
+      if (!p) return;
+      // The next player on this context resumes the drone duty, so a flip counts as quiet time.
+      try { const s = p.state(); layerDutyCarryRef.current = { ctx: p.ctx, duty: { ...s.drone, t: s.t } }; } catch {}
+      try { p.dispose(); } catch {}
+    }, 3000);
+  }, [cancelLayerDispose]);
+  const callPlayer = useCallback((fn: (p: LayerPlayer) => void) => {
+    const p = layerPlayerRef.current;
+    if (!p || p.disposed) return;
+    try {
+      fn(p);
+    } catch (err) {
+      console.error('Layers v2 failed; classic is playing.', err);
+      try { p.dispose(); } catch {}
+      layerPlayerRef.current = null;
+      setV2Failed(true);
+    }
+  }, []);
+  // Stop-class actions (Emergency Stop, Music only on, Safety Mute, leaving v2): a fast host fall, then silence.
+  const stopLayersNow = useCallback((glideS: number) => callPlayer((p) => { p.setHostLevel(0, { glideS }); p.play(null); }), [callPlayer]);
+  // A failed v2 is done for the session: dispose at once; classicLayerGain brings classic back.
+  useEffect(() => {
+    if (!v2Failed) return;
+    cancelLayerDispose();
+    try { layerPlayerRef.current?.dispose(); } catch {}
+    layerPlayerRef.current = null;
+  }, [v2Failed, cancelLayerDispose]);
+
+  // The A/B choices are written only here, from taps (no write effects).
+  const chooseLayerEngine = useCallback((e: LayerEngine) => {
+    // A tap on the pressed default before any choice is not a choice: nothing is saved, so the profile keeps
+    // following the release default (I9; v2 since v15.0). Keeping v2 whatever a later default means Classic, then v2.
+    if (layerEngineChoice === null && e === layerEngine) return;
+    setLayerEngineChoice(e);
+    try { localStorage.setItem(KEY_LAYER_ENGINE, e); } catch {}
+  }, [layerEngineChoice, layerEngine]);
+  // An answer (the sheet or the panel's Output group): applied and saved; it ends an "Ask me again", whose saved
+  // question goes only once the answer is saved (a failed save leaves it for the next session to ask).
+  const chooseLayerOutput = useCallback((o: LayerOutput) => {
+    setLayerOutput(o);
+    setOutputAskedAgain(false);
+    try { localStorage.setItem(KEY_LAYER_OUTPUT, o); localStorage.removeItem(KEY_LAYER_OUTPUT_ASK_AGAIN); } catch {}
+  }, []);
+  const toggleDrone = useCallback(() => {
+    const next = !droneEnabled;
+    setDroneChoice(next);
+    try { localStorage.setItem(KEY_DRONE_ENABLED, String(next)); } catch {}
+  }, [droneEnabled]);
+  const toggleMusicOnly = useCallback(() => setMusicOnly((v: boolean) => !v), []);
+
+  // Live inputs for the stable callbacks below (the level tick reads them 4×/s).
+  const v2InRef: { current: { volume: number; isPlaying: boolean; phiOn: boolean } } = useRef({ volume, isPlaying, phiOn: enablePhiMode && phiTimingEnabled });
+  useEffect(() => { v2InRef.current = { volume, isPlaying, phiOn: enablePhiMode && phiTimingEnabled }; }, [volume, isPlaying, enablePhiMode, phiTimingEnabled]);
+  const v2EnvRef: { current: number } = useRef(1);
+  // The host level the v2 layers sit under: the music's own level × the φ envelope. No presence or Music-only
+  // factor, no LAYER_BALANCE_ATTEN. Reads the element itself, never currTime / currDuration (stale after a swap;
+  // the RAF stops in hidden tabs). Tone-only (no music) is volume × MUSIC_OUTPUT_LEVEL on every device.
+  const hostLevelNow = useCallback((): number => {
+    const s = v2InRef.current, el = mainAudioRef.current;
+    let env = v2EnvRef.current;
+    if (!s.isPlaying || !s.phiOn) env = 1;                                    // tone-only and φ timing off: no envelope
+    else if (el && Number.isFinite(el.duration) && el.duration > 0) env = phiEnvelope(el.currentTime || 0, el.duration);
+    // else hold the last value: NaN right after a swap, Infinity for recorder WebMs (phiEnvelope(·, ∞) = 0 would silence a track)
+    v2EnvRef.current = env;
+    const expected = Math.max(0, Math.min(1, s.volume * MUSIC_OUTPUT_LEVEL * (IS_MOBILE_DEVICE ? MOBILE_MUSIC_DUCK_COMPENSATION : 1)));
+    const takes = !el || Math.abs(el.volume - expected) < 0.02;               // iOS: el.volume reads 1 whatever is set
+    return musicGainFactor(s.volume, { musicPlaying: s.isPlaying, mobile: IS_MOBILE_DEVICE, elementVolumeTakes: takes, duckCompensation: MOBILE_MUSIC_DUCK_COMPENSATION }) * MUSIC_OUTPUT_LEVEL * env;
+  }, []);
+  const v2Gains = () => ({ tone: sliderGain(solfeggioVolume, TONE_SLIDER_DEFAULT), beat: sliderGain(binauralVolume, BEAT_SLIDER_DEFAULT), drone: droneEnabled ? 1 : 0 });
+
+  // The plan, in one task per change (the player batches nothing across tasks). planBand is read but only
+  // isGammaPlan is a dependency: within delta…beta the carrier never moves, so band steps reach the player
+  // through the beat effect alone.
+  const prevV2ActiveRef: { current: boolean } = useRef(false);
+  const prevMusicOnlyRef: { current: boolean } = useRef(musicOnly);
+  useEffect(() => {
+    const wasActive = prevV2ActiveRef.current; prevV2ActiveRef.current = v2Active;
+    const musicOnlyOn = !prevMusicOnlyRef.current && musicOnly; prevMusicOnlyRef.current = musicOnly;
+    if (!v2Active) { if (wasActive) { stopLayersNow(0.25); scheduleLayerDispose(); } return; }   // classic: no player calls (none at all once disposed, 3 s on)
+    cancelLayerDispose();                                                   // back within 3 s: keep the player (S24)
+    if (!v2Wanted) { if (musicOnlyOn) stopLayersNow(0.1); else callPlayer((p) => p.play(null)); return; }  // pause = designed fades
+    if (!ensureLayerPlayer()) return;
+    const p2 = v2Plan(layer.f, planOutput, render === 'binaural' ? 'binaural' : 'monaural', BANDS[planBand]);
+    callPlayer((p) => { p.setHostLevel(hostLevelNow()); p.setLayerGains(v2Gains()); p.play(p2, render, !toneOnly); });
+  }, [v2Active, v2Wanted, layer.f, planOutput, render, toneOnly, isGammaPlan, musicOnly, ensureLayerPlayer, callPlayer, stopLayersNow, hostLevelNow, scheduleLayerDispose, cancelLayerDispose]);
+
+  // Slider gains and the beat (band steps glide, τ 3 s, in the player).
+  useEffect(() => { if (v2Active) callPlayer((p) => p.setLayerGains(v2Gains())); }, [v2Active, solfeggioVolume, binauralVolume, droneEnabled, callPlayer]);
+  useEffect(() => { if (v2Active) callPlayer((p) => p.setBeat(BANDS[planBand])); }, [v2Active, planBand, callPlayer]);
+
+  // The host follows the music 4×/s while v2 is wanted. A seek or a track change (the scrubber, the lock screen,
+  // the car's ±10 s, a gapless swap) or a φ toggle glides it over 1.5 s for 2 s; the player ignores a resend
+  // within 0.1 dB of the ramp in flight. Stops never come through here (stopLayersNow). No React state.
+  const v2LoopRef: { current: { pos: number; wall: number; src: string; glideUntil: number; phiKey: string } } = useRef({ pos: 0, wall: 0, src: '', glideUntil: 0, phiKey: '' });
+  useEffect(() => {
+    if (!v2Active || !v2Wanted) return;                                      // nothing wanted: the host is held, never resent
+    const tick = () => {
+      const L = v2LoopRef.current, el = mainAudioRef.current, now = performance.now();
+      if (el) {
+        const pos = el.currentTime || 0, src = el.currentSrc || el.src || '';
+        if (L.wall > 0) {
+          const expected = L.pos + (el.paused ? 0 : ((now - L.wall) / 1000) * (el.playbackRate || 1));
+          if (src !== L.src || Math.abs(pos - expected) > 1) L.glideUntil = now + 2000;   // seek / track change
+        }
+        L.pos = pos; L.wall = now; L.src = src;
+      }
+      const s = v2InRef.current, phiKey = `${s.phiOn}|${s.isPlaying}`;
+      if (L.phiKey && phiKey !== L.phiKey) L.glideUntil = now + 2000;        // φ toggles, play after tone-only
+      L.phiKey = phiKey;
+      const level = hostLevelNow();
+      callPlayer((p) => p.setHostLevel(level, now < L.glideUntil ? { glideS: 1.5 } : undefined));
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => { window.clearInterval(id); v2LoopRef.current.wall = 0; };
+  }, [v2Active, v2Wanted, callPlayer, hostLevelNow]);
+
+  // I6: 2 s after v2 takes over (classic's bus is at −69.5 dB by then), stop classic's tone and beat nodes behind
+  // it, so they don't run (and get automated by the φ loop) for the whole visit. Every reader of these refs is
+  // null-safe, and a flip back rebuilds them. The classic drone is pinned (keep-alive): it stays, silent at
+  // classicLayerGain 0.
+  useEffect(() => {
+    if (!v2Active) return;
+    const id = window.setTimeout(() => {
+      for (const ref of [solfeggioOscRef, binauralLeftOscRef, binauralRightOscRef, binauralLeftPhaseRef, binauralRightPhaseRef] as { current: AudioScheduledSourceNode | null }[]) {
+        const n = ref.current;
+        if (!n) continue;
+        try { n.stop(); } catch {}
+        try { n.disconnect(); } catch {}
+        ref.current = null;
+      }
+      for (const ref of [solfeggioGainRef, binauralGainRef, binauralMergerRef] as { current: AudioNode | null }[]) {
+        const n = ref.current;
+        if (!n) continue;
+        try { n.disconnect(); } catch {}
+        ref.current = null;
+      }
+    }, 2000);
+    return () => window.clearTimeout(id);
+  }, [v2Active]);
+
+  // v2 adaptive band: direction hysteresis (two agreeing 3 s ticks per step) and caps (beta on headphones, alpha
+  // for the pulse); off for the car and tone-only. Keyed on the playing song's envelope object, so a band step or a
+  // Deep Scan patch of another song doesn't re-arm it. The preset it writes is UI-only under v2 (updateBinaural is
+  // guarded); the beat effect above hands the band to the player.
+  const selectedBinauralRef: { current: BinauralPreset } = useRef(selectedBinaural);
+  useEffect(() => { selectedBinauralRef.current = selectedBinaural; }, [selectedBinaural]);
+  const currentBandEnvelope = currentSongIndex >= 0 ? (playlist[currentSongIndex]?.bandEnvelope ?? null) : null;   // not named currentTrack (pinned)
+  useEffect(() => {
+    if (!v2Active || !isAdaptiveBinaural || !isPlaying || render === 'off' || !currentBandEnvelope) return;
+    const env = currentBandEnvelope, hyst = new BandHysteresis(), cap: Band = render === 'pulse' ? 'alpha' : 'beta';
+    const id = window.setInterval(() => {
+      const el = mainAudioRef.current;
+      if (!el) return;
+      const target = capBand(bandForIntensity(readIntensity(env, el.currentTime || 0)), cap);
+      const next = hyst.tick(target, bandOfPresetName(selectedBinauralRef.current.name));
+      if (next) setSelectedBinaural(BINAURAL_PRESETS[BAND_ORDER.indexOf(next)]);
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [v2Active, isAdaptiveBinaural, isPlaying, render, currentBandEnvelope]);
+
+  // The output question (v2 only), opened here and never from playTrack, once the v2 layers are wanted (a play or a
+  // tone with Music only off: a saved Music only, v14.6's, keeps it away until the layers can be heard). The music
+  // keeps playing and the layers act as headphones until it is answered; "Ask me later" waits for the next session
+  // (page load). "Ask me again" asks the same way (now if the layers are wanted, else when they next are: under
+  // Music only, not before it is off), but the output in effect stays until the answer, across restarts: it keeps
+  // the saved answer and saves the question, so "Ask me later" (or a restart) leaves both for the next session.
+  const [showOutputSheet, setShowOutputSheet] = useState(false);
+  const outputSheetLaterRef: { current: boolean } = useRef(false);
+  useEffect(() => {
+    if (!v2Active || (layerOutput !== null && !outputAskedAgain)) { setShowOutputSheet(false); return; }
+    if (v2Wanted && !outputSheetLaterRef.current) setShowOutputSheet(true);
+  }, [v2Active, layerOutput, outputAskedAgain, v2Wanted]);
+  const outputSheetLater = useCallback(() => {
+    outputSheetLaterRef.current = true;
+    setShowOutputSheet(false);
+  }, []);
+  const askOutputAgain = useCallback(() => {
+    setOutputAskedAgain(true);
+    try { localStorage.setItem(KEY_LAYER_OUTPUT_ASK_AGAIN, '1'); } catch {}
+    outputSheetLaterRef.current = false;
+  }, []);
+
+  // Tests read the v2 player through this hook (dev builds only; production strips it).
+  useEffect(() => {
+    if (!IS_DEV_BUILD) return;
+    const w = window as unknown as { __aetheriaLayers?: unknown };
+    w.__aetheriaLayers = { state: () => layerPlayerRef.current?.state() ?? null, created: () => layerPlayerRef.current !== null, mobile: IS_MOBILE_DEVICE };
+    return () => { delete w.__aetheriaLayers; };
+  }, []);
+
+  // The sound log (Q10): what the layers played in each listening session, for the by-ear A/B, in both engines —
+  // but only once an engine has been chosen. A session opens when layers are wanted or the music starts, and closes
+  // 60 s after neither (or on pagehide). One entry per change of what is heard; levels ride along but never trigger
+  // one. Saved at most every 5 s and whenever the page hides; a failed save says so once per page load.
+  const soundLogOn = layerEngineChoice !== null;
+  const soundLogRef: { current: SoundLog | null } = useRef(null);
+  const soundSessionRef: { current: { open: boolean; closeTimer: number | null; saveTimer: number | null; warned: boolean } } =
+    useRef({ open: false, closeTimer: null, saveTimer: null, warned: false });
+  const flushSoundLog = useCallback(() => {
+    const S = soundSessionRef.current, log = soundLogRef.current;
+    if (S.saveTimer !== null) { window.clearTimeout(S.saveTimer); S.saveTimer = null; }
+    if (!log || log.flush() || S.warned) return;
+    S.warned = true;
+    showStatusToast(SOUND_LOG_SAVE_FAILED);
+  }, [showStatusToast]);
+  const saveSoundLogSoon = useCallback(() => {
+    const S = soundSessionRef.current;
+    if (S.saveTimer !== null) return;
+    S.saveTimer = window.setTimeout(() => { S.saveTimer = null; flushSoundLog(); }, 5000);
+  }, [flushSoundLog]);
+  useEffect(() => {
+    if (!soundLogOn || soundLogRef.current) return;
+    const log = createSoundLog(safeLocalStorage());
+    log.load();                                                               // the load gate: nothing is written before it
+    soundLogRef.current = log;
+  }, [soundLogOn]);
+  const layersOnNow = v2Active ? v2Wanted : (!musicOnly && !v2CarFallback && (isPlaying || isSolfeggioActive));
+  const listeningNow = soundLogOn && (layersOnNow || isPlaying);
+  const logRender: SoundLogFields['render'] = !layersOnNow
+    ? 'none'
+    : v2Active
+      ? (layerStatus?.mono && render === 'binaural' ? 'pulse' : render)
+      : isPlaying ? 'binaural' : 'off';
+  const logF = v2Active ? layer.f : applyLoShuPerfectMap(selectedSolfeggio);
+  const statusKey = layerStatus?.key ?? '', statusResting = layerStatus?.resting ?? false;
+  // What is heard now, as a log entry. v2: Hz from the player's last transition, dB = the validated level × the
+  // slider gain. Classic: its own formulas without the φ timing multiplier (−26 / −23 / −20 dB at the defaults).
+  const soundLogEntry = (): SoundLogFields => {
+    const on = layersOnNow;
+    if (v2Active) {
+      const st = layerStatus, g = v2Gains();
+      const beatOn = on && !!st && render !== 'off', droneOn = on && !!st && st.drone > 0;
+      return {
+        engine: 'v2', sound_version: 2, output: layerOutput ?? 'assumed', render: logRender, f: layer.f,
+        tone_hz: on && st ? st.tone : 0, carrier_hz: beatOn && st ? st.carrier : 0, partner_hz: beatOn && st ? st.partner : 0,
+        beat_hz: beatOn && st ? st.beat : 0, drone_hz: droneOn && st ? st.drone : 0, pulse_hz: droneOn && st ? st.pulse : 0,
+        tone_db: on ? gainToDb(LEVEL_TONE * g.tone) : null,
+        beat_db: beatOn ? gainToDb(LEVEL_BEAT * g.beat) : null,
+        drone_db: droneOn ? gainToDb(LEVEL_DRONE_SUB * g.drone) : null,
+        drone_resting: !!st && st.resting, music_only: musicOnly, v2_failed: v2Failed,
+      };
+    }
+    const mapped = applyLoShuPerfectMap(selectedSolfeggio), music = on && isPlaying;
+    const phi = enablePhiMode
+      ? integratePhiVolumes(volume, binauralVolume, solfeggioVolume, true)
+      : { music: volume, binaural: binauralVolume, solfeggio: solfeggioVolume };
+    const bus = volume * MUSIC_OUTPUT_LEVEL * LAYER_BALANCE_ATTEN * classicLayerGain;
+    const reMusic = (x: number): number | null => (volume > 0 ? gainToDb((x * bus) / volume) : null);
+    return {
+      engine: 'classic', sound_version: 1, output: layerOutput ?? 'assumed', render: logRender, f: mapped,
+      tone_hz: on ? solfeggioHz(mapped) : 0, carrier_hz: music ? 200 : 0, partner_hz: music ? 200 + selectedBinaural.delta : 0,
+      beat_hz: music ? selectedBinaural.delta : 0, drone_hz: music ? feltCarrierHz(mapped) : 0, pulse_hz: music ? thetaAlphaModHz(mapped) : 0,
+      tone_db: on ? reMusic(phi.solfeggio) : null, beat_db: music ? reMusic(phi.binaural) : null,
+      drone_db: music ? gainToDb(SUB_BASS_DRONE_LEVEL * classicLayerGain) : null,
+      drone_resting: false, music_only: musicOnly, v2_failed: v2Failed,
+    };
+  };
+  useEffect(() => {
+    const log = soundLogRef.current;
+    if (!log) return;
+    const S = soundSessionRef.current, now = Date.now();
+    if (listeningNow) {
+      if (S.closeTimer !== null) { window.clearTimeout(S.closeTimer); S.closeTimer = null; }
+      log.open(now);
+      S.open = true;
+    } else if (S.open && S.closeTimer === null) {
+      S.closeTimer = window.setTimeout(() => {
+        S.closeTimer = null;
+        S.open = false;
+        log.close(Date.now());
+        flushSoundLog();
+      }, 60000);
+    }
+    if (!S.open || (v2Active && layersOnNow && !layerStatus)) return;   // v2: wait for the player's first transition
+    if (log.note(soundLogEntry(), now)) saveSoundLogSoon();
+  }, [listeningNow, v2Active, v2Failed, musicOnly, layersOnNow, layerOutput, logRender, logF, droneEnabled, statusKey, statusResting, flushSoundLog, saveSoundLogSoon]);
+  // Band steps, retunes and drone rests are counted into the open session.
+  const prevBandNameRef: { current: string } = useRef(selectedBinaural.name);
+  useEffect(() => {
+    if (prevBandNameRef.current === selectedBinaural.name) return;
+    prevBandNameRef.current = selectedBinaural.name;
+    const log = soundLogRef.current;
+    if (!log || !soundSessionRef.current.open) return;
+    log.count('band');
+    saveSoundLogSoon();
+  }, [selectedBinaural, saveSoundLogSoon]);
+  const prevLayerStatusRef: { current: LayerStatus | null } = useRef(null);
+  useEffect(() => {
+    const prev = prevLayerStatusRef.current;
+    prevLayerStatusRef.current = layerStatus;
+    const log = soundLogRef.current;
+    if (!layerStatus || !log || !soundSessionRef.current.open) return;
+    let counted = false;
+    if (layerStatus.phase === 'retuning' && prev?.phase !== 'retuning') { log.count('retune'); counted = true; }
+    if (layerStatus.resting && !prev?.resting) { log.count('rest'); counted = true; }
+    if (counted) saveSoundLogSoon();
+  }, [layerStatus, saveSoundLogSoon]);
+  useEffect(() => {
+    if (!soundLogOn) return;
+    const onPageHide = () => {
+      const log = soundLogRef.current, S = soundSessionRef.current;
+      if (!log) return;
+      if (S.closeTimer !== null) { window.clearTimeout(S.closeTimer); S.closeTimer = null; }
+      if (S.open) { log.close(Date.now()); S.open = false; }
+      flushSoundLog();
+    };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flushSoundLog(); };
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [soundLogOn, flushSoundLog]);
+  const exportSoundLog = useCallback(() => {
+    const log = soundLogRef.current;
+    if (!log) return;
+    try {
+      const d = new Date(), p2 = (n: number) => String(n).padStart(2, '0');
+      const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}`;
+      const url = URL.createObjectURL(new Blob([log.exportJson()], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `aetheria-sound-log-${stamp}.json`;
+      a.click();
+      // Revoked once the download has started (an immediate revoke can cancel it in some browsers).
+      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err) {
+      console.error('Sound log export failed:', err);
+      showStatusToast('The sound log could not be exported.');
+    }
+  }, [showStatusToast]);
+
+  // The A/B chrome. Harmonic Control's panel is always there; the status-row badge and the transport's quick
+  // switch appear once an engine has been chosen, or while v2 is the engine (Q8). One memoised props object and
+  // memoised strings, so App's renders while playing (a few a second since v14.8's quarter-second clock) never
+  // reach the memo'd pieces.
+  const showLayerChrome = layerEngineChoice !== null || layerEngine === 'v2';
+  const layerPanelProps = useMemo(() => ({
+    engine: layerEngine,
+    engineChosen: layerEngineChoice !== null,
+    v2Failed,
+    output: layerOutput,
+    askedAgain: outputAskedAgain,
+    droneEnabled,
+    musicOnly,
+    canExportLog: soundLogOn,
+    onChooseEngine: chooseLayerEngine,
+    onChooseOutput: chooseLayerOutput,
+    onAskAgain: askOutputAgain,
+    onToggleDrone: toggleDrone,
+    onToggleMusicOnly: toggleMusicOnly,
+    onExportLog: exportSoundLog,
+  }), [layerEngine, layerEngineChoice, v2Failed, layerOutput, outputAskedAgain, droneEnabled, musicOnly, soundLogOn, chooseLayerEngine, chooseLayerOutput, askOutputAgain, toggleDrone, toggleMusicOnly, exportSoundLog]);
+  const [layerSwitchOpen, setLayerSwitchOpen] = useState(false);
+  const openLayerSwitch = useCallback(() => setLayerSwitchOpen(true), []);
+  const layersBadgeLabel = useMemo(() => layersBadgeText(layerEngine, v2Failed, layerOutput, layer.f), [layerEngine, v2Failed, layerOutput, layer.f]);
+  const layersBadgeTooltip = useMemo(() => layersTooltip(layerEngine, v2Failed, layerStatus, layerOutput), [layerEngine, v2Failed, layerStatus, layerOutput]);
+  const bandChipLabel = useMemo(
+    () => bandChipText(v2Active, selectedBinaural.name, render, presetBand, planBand),
+    [v2Active, selectedBinaural.name, render, presetBand, planBand]
+  );
+  // The v2 sliders' dB readouts. The beat slider follows the output (the car has no beat), not tone-only.
+  const toneLevelText = useMemo(() => toneReadout(sliderGain(solfeggioVolume, TONE_SLIDER_DEFAULT)), [solfeggioVolume]);
+  const outputRender = renderForOutput(outputEffective);
+  const beatLevelText = useMemo(() => beatReadout(sliderGain(binauralVolume, BEAT_SLIDER_DEFAULT), outputRender), [binauralVolume, outputRender]);
 
   // Background-playback watchdog.
   //
@@ -4663,7 +5230,7 @@ const App: React.FC = () => {
         analysisInfo += `• Can be used at comfortable volume\n`;
       } else if (regime === 'HEART') {
         analysisInfo += `• Use subtle resonance mode\n`;
-        analysisInfo += `• Keep volume low (feeling vs hearing)\n`;
+        analysisInfo += v2Active ? `${KEEP_COMFORTABLE_V2}\n` : `• Keep volume low (feeling vs hearing)\n`;
         analysisInfo += `• Limit sessions to 20-30 minutes\n`;
         analysisInfo += `• Good for emotional and energetic work\n`;
       } else {
@@ -6381,7 +6948,7 @@ registerProcessor('wav-capture', WavCapture);
                   <Waves size={16} className="text-blue-500 shrink-0" />
                   Audio Warning
                 </h3>
-                <p className="ml-6">Contains binaural beats, solfeggio frequencies, and sustained low-frequency tones. Do not use while driving or operating heavy machinery. Start at low volume — audio at sustained high levels can damage hearing. Take regular breaks during extended listening sessions.</p>
+                <p className="ml-6">Contains binaural beats, solfeggio frequencies, and sustained low-frequency tones. Beats and the drone are for when you can relax. While driving, use Car output (only the music and a quiet tone) and your car&#39;s own controls. Do not use while operating heavy machinery. Start at low volume — audio at sustained high levels can damage hearing. Take regular breaks during extended listening sessions.</p>
               </div>
 
               {/* Contraindications */}
@@ -6541,6 +7108,10 @@ registerProcessor('wav-capture', WavCapture);
               )}
           </div>
 
+          {/* v2's output question (v14.9): a non-blocking sheet, v2 only, between the header and the player bar
+              (uiInsets, as the Spectrum lens), so the transport stays usable while it is open (v15.0). */}
+          <OutputSheet open={showOutputSheet} insets={uiInsets} onChoose={chooseLayerOutput} onLater={outputSheetLater} />
+
           {/* Analysis Notification */}
           {analysisNotification && (
             <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[100] max-w-lg">
@@ -6622,7 +7193,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v14.8</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.0</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -7924,25 +8495,8 @@ registerProcessor('wav-capture', WavCapture);
                 
                 <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar pb-32">
 
-                   {/* Music only (v14.6): tone, beat and drone off; the music plays on. Saved. */}
-                   <div className="flex items-center justify-between gap-3 p-4 rounded-xl border border-slate-700 bg-slate-900/50">
-                      <div className="flex items-center gap-2 min-w-0">
-                          <VolumeX className={`w-5 h-5 shrink-0 ${musicOnly ? 'text-orange-400' : 'text-slate-500'}`} />
-                          <div className="min-w-0">
-                              <div className="text-xs font-bold uppercase tracking-widest text-slate-300">Music only</div>
-                              <div className="text-[10px] text-slate-500">Tone, beat and drone off. The music plays on. Saved.</div>
-                          </div>
-                      </div>
-                      <button
-                          role="switch"
-                          aria-checked={musicOnly}
-                          aria-label="Music only"
-                          onClick={() => setMusicOnly((v: boolean) => !v)}
-                          className={`w-10 h-5 rounded-full relative transition-colors shrink-0 ${musicOnly ? 'bg-orange-500' : 'bg-slate-700'}`}
-                      >
-                          <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-transform ${musicOnly ? 'left-6' : 'left-1'}`}></div>
-                      </button>
-                   </div>
+                   {/* Music only (v14.6, the same switch) and the layer sound A/B (v14.9). */}
+                   <LayerSoundPanel variant="panel" {...layerPanelProps} />
 
                    {/* Phi Integration Panel */}
                    <div className="border border-purple-500/30 rounded-xl overflow-hidden bg-slate-900/50 shadow-[0_0_15px_rgba(147,51,234,0.1)]">
@@ -7965,11 +8519,11 @@ registerProcessor('wav-capture', WavCapture);
                               <div className="mt-3 space-y-2 text-xs text-purple-200">
                                   <div className="flex items-center gap-2">
                                       <div className="w-2 h-2 rounded-full bg-purple-400"></div>
-                                      <span>Volume Ratios: 1.0 : {INV_PHI.toFixed(3)} : {INV_PHI_SQUARED.toFixed(3)}</span>
+                                      <span>{v2Active ? PHI_LEVELS_V2 : <>Volume Ratios: 1.0 : {INV_PHI.toFixed(3)} : {INV_PHI_SQUARED.toFixed(3)}</>}</span>
                                   </div>
                                   <div className="flex items-center gap-2">
                                       <div className="w-2 h-2 rounded-full bg-purple-400"></div>
-                                      <span>Binaural Phase: 137.5° golden angle offset</span>
+                                      <span>{v2Active ? PHI_BINAURAL_V2 : 'Binaural Phase: 137.5° golden angle offset'}</span>
                                   </div>
                                   <div className="flex items-center gap-2 justify-between">
                                       <div className="flex items-center gap-2">
@@ -7983,6 +8537,9 @@ registerProcessor('wav-capture', WavCapture);
                                           <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${phiTimingEnabled ? 'left-4.5' : 'left-0.5'}`}></div>
                                       </button>
                                   </div>
+                                  {v2Active && (
+                                      <div className="pl-4 text-[10px] text-purple-300 leading-snug">{PHI_ENVELOPE_V2}</div>
+                                  )}
                                   {phiTimingEnabled && currDuration > 0 && (
                                       <div className="mt-2 p-2 bg-purple-900/30 rounded border border-purple-700/30">
                                           <div className="text-[10px] text-purple-300">
@@ -8536,6 +9093,24 @@ registerProcessor('wav-capture', WavCapture);
                         </div>
                       </>
                     )}
+                    {v2Active ? (
+                    // v2: the tone's level in dB re the validated −26 dB (v2's own level since v15.0; the slider stops at the cap).
+                    <div className="mt-4 bg-slate-900 p-4 rounded-xl border border-slate-800">
+                      <div className="flex justify-between text-xs text-slate-400 mb-2">
+                         <span id="v2-tone-level-label">{TONE_LEVEL_LABEL}</span>
+                         <DbReadout id="v2-tone-level-readout" text={toneLevelText} />
+                      </div>
+                      <input
+                        type="range"
+                        min="0" max={V2_TONE_SLIDER_MAX} step={V2_TONE_SLIDER_STEP}
+                        value={Math.min(solfeggioVolume, V2_TONE_SLIDER_MAX)}
+                        onChange={(e) => chooseToneLevel('v2', parseFloat(e.target.value))}
+                        aria-labelledby="v2-tone-level-label"
+                        aria-valuetext={toneLevelText}
+                        className="w-full accent-gold-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer touch-none"
+                      />
+                    </div>
+                    ) : (
                     <div className="mt-4 bg-slate-900 p-4 rounded-xl border border-slate-800">
                       <div className="flex justify-between text-xs text-slate-400 mb-2">
                          <span>Layer Intensity</span>
@@ -8545,10 +9120,11 @@ registerProcessor('wav-capture', WavCapture);
                         type="range" 
                         min="0" max="1" step="0.01" 
                         value={solfeggioVolume}
-                        onChange={(e) => setSolfeggioVolume(parseFloat(e.target.value))}
+                        onChange={(e) => chooseToneLevel('classic', parseFloat(e.target.value))}
                         className="w-full accent-gold-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer touch-none"
                       />
                     </div>
+                    )}
                   </div>
 
                   <div>
@@ -8561,6 +9137,7 @@ registerProcessor('wav-capture', WavCapture);
                             <Sparkles size={10} /> {isAdaptiveBinaural ? 'Adaptive ON' : 'Adaptive OFF'}
                         </button>
                     </div>
+                    {v2Active && <p className="-mt-2 mb-3 text-[10px] text-slate-500 leading-snug">{HEADPHONES_HINT}</p>}
 
                     <div className="space-y-3">
                        {BINAURAL_PRESETS.map((p) => (
@@ -8574,11 +9151,13 @@ registerProcessor('wav-capture', WavCapture);
                             </div>
                             <div className="flex-1">
                                 <span className="block text-sm font-bold text-slate-200">{p.name} ({p.delta}Hz)</span>
-                                <span className="text-[10px] text-slate-400">{p.description}</span>
+                                <span className="text-[10px] text-slate-400">{v2Active && p.name === 'Gamma' ? GAMMA_DESCRIPTION_V2 : p.description}</span>
                             </div>
                           </div>
                        ))}
                     </div>
+                    {/* Car renders off (no beat, no pulse, no adaptive band), so it gets its own line. */}
+                    {v2Active && <p className="mt-3 text-[10px] text-slate-400 leading-snug">{outputRender === 'off' ? PRESETS_NOTE_CAR_V2 : PRESETS_NOTE_V2}</p>}
                   </div>
                   
                   {/* Advanced Features Section */}
@@ -8654,6 +9233,8 @@ registerProcessor('wav-capture', WavCapture);
                         onToggleDocumentation={() => setIsDocumentingEffects(!isDocumentingEffects)}
                         currentFrequency={selectedSolfeggio}
                         currentVolume={heardToneVolume}
+                        // v2 reads its tone level in dB here too (its v15.0 default, 0.05 %, would print "0%"); classic keeps its percent.
+                        currentVolumeText={v2Active && !musicOnly ? toneLevelText : undefined}
                         sessionDuration={sessionDuration}
                         isPlaying={isPlaying}
                         onSessionStart={(data) => {
@@ -8748,7 +9329,9 @@ registerProcessor('wav-capture', WavCapture);
                           <span className="text-yellow-400 font-bold text-sm">Subtle Resonance Mode Active</span>
                         </div>
                         <div className="text-xs text-yellow-200">
-                          High frequency detected ({selectedSolfeggio}Hz). Focus on feeling rather than hearing.
+                          {v2Active && layer.f > 0
+                            ? feltLineV2(selectedSolfeggio, toneOf(layer.f, planOutput))
+                            : <>High frequency detected ({selectedSolfeggio}Hz). Focus on feeling rather than hearing.</>}
                         </div>
                       </div>
                     )}
@@ -9100,7 +9683,8 @@ registerProcessor('wav-capture', WavCapture);
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-400">Volume</span>
-                          <span className="text-white">{musicOnly ? 'Layers off' : `${Math.round(solfeggioVolume * 100)}%`}</span>
+                          {/* v2 reads its tone level in dB (its v15.0 default, 0.05 %, would round to "0%"); the Car fallback plays no layers. */}
+                          <span className="text-white">{musicOnly || v2CarFallback ? 'Layers off' : v2Active ? toneLevelText : `${Math.round(solfeggioVolume * 100)}%`}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-400">Mode</span>
@@ -9117,7 +9701,7 @@ registerProcessor('wav-capture', WavCapture);
                       <div className="space-y-1 text-xs text-slate-400">
                         {selectedSolfeggio > 963 ? (
                           <>
-                            <div>• Keep volume low (feeling vs hearing)</div>
+                            <div>{v2Active ? KEEP_COMFORTABLE_V2 : '• Keep volume low (feeling vs hearing)'}</div>
                             <div>• Focus on subtle body sensations</div>
                             <div>• Limit session to 15-30 minutes</div>
                             <div>• Take breaks between sessions</div>
@@ -9141,6 +9725,8 @@ registerProcessor('wav-capture', WavCapture);
                           onClick={() => {
                             // The same stop as Pause and the lock-screen pause:
                             // the music, the anchor and every layer (v14.6).
+                            // Under v2 the layers fall in 0.1 s first (classic: no player, no call).
+                            stopLayersNow(0.1);
                             pausePlayback();
                             setShowSafetyProtocols(false);
                           }}
@@ -9618,8 +10204,11 @@ registerProcessor('wav-capture', WavCapture);
                            );
                          })()}
                          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                            <Waves size={8} /> {selectedBinaural.name}
+                            <Waves size={8} /> {v2Active ? bandChipLabel : selectedBinaural.name}
                          </span>
+                         {showLayerChrome && (
+                           <LayersBadge text={layersBadgeLabel} tooltip={layersBadgeTooltip} onOpen={openLayerSwitch} />
+                         )}
                          {musicOnly && (
                            <span
                              data-testid="music-only-chip"
@@ -9696,6 +10285,19 @@ registerProcessor('wav-capture', WavCapture);
 
                             <button onClick={handleNext} aria-label="Next track" className="text-slate-300 hover:text-white transition-colors"><SkipForward size={16}/></button>
                             <button onClick={() => setIsLoop(!isLoop)} aria-label="Repeat" aria-pressed={isLoop} className={`${isLoop ? 'text-gold-500' : 'text-slate-600'} hover:text-white transition-colors`}><Repeat size={14}/></button>
+
+                            {/* Layer sound and output (v14.9): shown once an engine has been chosen, or under v2. */}
+                            {showLayerChrome && (
+                                <OutputQuickSwitch
+                                    engine={layerEngine}
+                                    v2Failed={v2Failed}
+                                    output={layerOutput}
+                                    musicOnly={musicOnly}
+                                    open={layerSwitchOpen}
+                                    onOpenChange={setLayerSwitchOpen}
+                                    panelProps={layerPanelProps}
+                                />
+                            )}
 
                             {/* Lo Shu Walk shortcut — opens a popover with the three walks. */}
                             <button
@@ -9873,6 +10475,21 @@ registerProcessor('wav-capture', WavCapture);
                             </div>
                             
                             {/* Binaural */}
+                            {v2Active ? (
+                            // v2: the beat's level in dB re the validated −23 dB per ear; the car has no beat.
+                            <div className="flex items-center gap-2 group/bin">
+                                <Zap size={14} className={`transition-colors ${outputRender === 'off' ? 'text-slate-700' : 'text-slate-500 group-hover/bin:text-blue-400'}`} />
+                                <input
+                                    type="range" min="0" max={V2_BEAT_SLIDER_MAX} step="0.001"
+                                    value={Math.min(binauralVolume, V2_BEAT_SLIDER_MAX)} onChange={e => setBinauralVolume(parseFloat(e.target.value))}
+                                    disabled={outputRender === 'off'}
+                                    aria-label={BEAT_LEVEL_LABEL}
+                                    aria-valuetext={beatLevelText}
+                                    className={`w-16 sm:w-20 h-1 bg-slate-700 rounded-lg appearance-none accent-blue-500 transition-all ${outputRender === 'off' ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:h-1.5'}`}
+                                    title={beatLevelText}
+                                />
+                            </div>
+                            ) : (
                             <div className="flex items-center gap-2 group/bin">
                                 <Zap size={14} className="text-slate-500 group-hover/bin:text-blue-400 transition-colors" />
                                 <input 
@@ -9882,6 +10499,7 @@ registerProcessor('wav-capture', WavCapture);
                                     title={`Binaural Volume: ${Math.round(binauralVolume/0.2*100)}%`}
                                 />
                             </div>
+                            )}
 
                              {/* Zen Mode Button */}
                              <div className="w-px h-6 bg-slate-800 hidden sm:block ml-2"></div>
