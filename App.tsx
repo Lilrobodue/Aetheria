@@ -109,6 +109,9 @@ import {
   PHI_ENVELOPE_V2,
   KEEP_COMFORTABLE_V2,
   SOUND_LOG_SAVE_FAILED,
+  BEAT_OFF_CAR_FALLBACK,
+  V2_UNAVAILABLE_CAR_TONE,
+  V2_UNAVAILABLE_CAR_RECORDING,
 } from './components/layers/layerCopy';
 import type { LayerStatus } from './components/layers/layerCopy';
 
@@ -3033,9 +3036,10 @@ const App: React.FC = () => {
   // synth layers and the old logic was pinned to Delta forever. Instead we read the
   // PRE-SCANNED per-track band envelope (the same data the visualizer uses) at the
   // live playback position — real per-song AND in-song energy, no audio-graph tap.
-  // Under v2 its own adaptive effect (with hysteresis and caps) moves the band.
+  // Under v2 its own adaptive effect (with hysteresis and caps) moves the band;
+  // under v2's Car fallback no beat plays, so nothing moves it (v15.0.1).
   useEffect(() => {
-    if (v2Active || !isAdaptiveBinaural || !isPlaying) return;
+    if (v2Active || v2CarFallback || !isAdaptiveBinaural || !isPlaying) return;
     const env = currentSongIndex >= 0 ? playlist[currentSongIndex]?.bandEnvelope : null;
     if (!env) return;   // scan failed / no envelope → leave the manual band untouched
 
@@ -3074,7 +3078,7 @@ const App: React.FC = () => {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [isAdaptiveBinaural, isPlaying, selectedBinaural, currentSongIndex, playlist, v2Active]);
+  }, [isAdaptiveBinaural, isPlaying, selectedBinaural, currentSongIndex, playlist, v2Active, v2CarFallback]);
 
   // Log phi integration on mount
   useEffect(() => {
@@ -3679,14 +3683,19 @@ const App: React.FC = () => {
   const openLayerSwitch = useCallback(() => setLayerSwitchOpen(true), []);
   const layersBadgeLabel = useMemo(() => layersBadgeText(layerEngine, v2Failed, layerOutput, layer.f), [layerEngine, v2Failed, layerOutput, layer.f]);
   const layersBadgeTooltip = useMemo(() => layersTooltip(layerEngine, v2Failed, layerStatus, layerOutput), [layerEngine, v2Failed, layerStatus, layerOutput]);
+  // The Car fallback reads as v2's Car (render 'off': 'Beat off'), not as classic's preset: it plays no beat.
   const bandChipLabel = useMemo(
-    () => bandChipText(v2Active, selectedBinaural.name, render, presetBand, planBand),
-    [v2Active, selectedBinaural.name, render, presetBand, planBand]
+    () => bandChipText(v2Active || v2CarFallback, selectedBinaural.name, render, presetBand, planBand),
+    [v2Active, v2CarFallback, selectedBinaural.name, render, presetBand, planBand]
   );
-  // The v2 sliders' dB readouts. The beat slider follows the output (the car has no beat), not tone-only.
+  // The v2 sliders' dB readouts. The beat slider follows the output (the car has no beat), not tone-only; under the Car
+  // fallback (v15.0.1) it is v2's Car slider, off, and its title says why.
   const toneLevelText = useMemo(() => toneReadout(sliderGain(solfeggioVolume, TONE_SLIDER_DEFAULT)), [solfeggioVolume]);
   const outputRender = renderForOutput(outputEffective);
-  const beatLevelText = useMemo(() => beatReadout(sliderGain(binauralVolume, BEAT_SLIDER_DEFAULT), outputRender), [binauralVolume, outputRender]);
+  const beatLevelText = useMemo(
+    () => (v2CarFallback ? BEAT_OFF_CAR_FALLBACK : beatReadout(sliderGain(binauralVolume, BEAT_SLIDER_DEFAULT), outputRender)),
+    [v2CarFallback, binauralVolume, outputRender]
+  );
 
   // Background-playback watchdog.
   //
@@ -6495,6 +6504,8 @@ const App: React.FC = () => {
     setIsSolfeggioActive(true);
     if (musicOnly) {
       showStatusToast('Music only is on, so the tone is silent. Turn it off in Harmonic Control.');
+    } else if (v2CarFallback) {
+      showStatusToast(V2_UNAVAILABLE_CAR_TONE);
     }
   };
 
@@ -6666,12 +6677,12 @@ registerProcessor('wav-capture', WavCapture);
       };
   };
 
-  // Under Music only the layers are silent, so a recording that couldn't tap
-  // the music (a browser without captureStream, or no track loaded yet) would
-  // be silence. Say so; don't block it.
+  // Under Music only (and v2's Car fallback, v15.0.1) the layers are silent, so
+  // a recording that couldn't tap the music (a browser without captureStream,
+  // or no track loaded yet) would be silence. Say so; don't block it.
   const warnIfRecordingSilent = () => {
-      if (musicOnly && !recordMusicAttachedRef.current) {
-          showStatusToast("Music only is on and the music can't be recorded here, so this recording will be silent.", { durationMs: 8000 });
+      if ((musicOnly || v2CarFallback) && !recordMusicAttachedRef.current) {
+          showStatusToast(musicOnly ? "Music only is on and the music can't be recorded here, so this recording will be silent." : V2_UNAVAILABLE_CAR_RECORDING, { durationMs: 8000 });
       }
   };
 
@@ -7193,7 +7204,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.0</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.0.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -10204,7 +10215,7 @@ registerProcessor('wav-capture', WavCapture);
                            );
                          })()}
                          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                            <Waves size={8} /> {v2Active ? bandChipLabel : selectedBinaural.name}
+                            <Waves size={8} /> {v2Active || v2CarFallback ? bandChipLabel : selectedBinaural.name}
                          </span>
                          {showLayerChrome && (
                            <LayersBadge text={layersBadgeLabel} tooltip={layersBadgeTooltip} onOpen={openLayerSwitch} />
@@ -10293,6 +10304,7 @@ registerProcessor('wav-capture', WavCapture);
                                     v2Failed={v2Failed}
                                     output={layerOutput}
                                     musicOnly={musicOnly}
+                                    sheetOpen={showOutputSheet}
                                     open={layerSwitchOpen}
                                     onOpenChange={setLayerSwitchOpen}
                                     panelProps={layerPanelProps}
@@ -10475,8 +10487,8 @@ registerProcessor('wav-capture', WavCapture);
                             </div>
                             
                             {/* Binaural */}
-                            {v2Active ? (
-                            // v2: the beat's level in dB re the validated −23 dB per ear; the car has no beat.
+                            {v2Active || v2CarFallback ? (
+                            // v2: the beat's level in dB re the validated −23 dB per ear; the car has no beat (nor its fallback: no layers).
                             <div className="flex items-center gap-2 group/bin">
                                 <Zap size={14} className={`transition-colors ${outputRender === 'off' ? 'text-slate-700' : 'text-slate-500 group-hover/bin:text-blue-400'}`} />
                                 <input

@@ -465,6 +465,14 @@ check(formatDb(gainToDb(MAX_BOOST)!) === '+12.0 dB' && formatDb(gainToDb(MAX_BOO
   check(copy.CLASSIC_OUTPUT_NOTE
     === 'Output and Car apply to v2. Classic plays its beat and drone whatever the output: for driving, use v2 with Car output, or Music only.',
     'copy: the classic note (Car is v2 only)');
+  // v15.0.1: in a session where v2 has failed, v2 with Car plays no layers at all (App's v2CarFallback).
+  check(copy.CLASSIC_OUTPUT_NOTE_V2_FAILED
+    === 'Output and Car apply to v2, which is unavailable on this device. Classic plays its beat and drone whatever the output: '
+      + 'for driving, choose v2 with Car output (the layers turn off), or Music only.',
+    'copy: the classic note once v2 has failed this session');
+  check(copy.OUTPUT_V2_FAILED_NOTE
+    === "v2 is unavailable on this device: Car turns the layers off; any other output plays classic's beat and drone.",
+    "copy: the Output group's one line after a v2 failure");
   check(copy.OUTPUT_LABELS.headphones === 'Headphones' && copy.OUTPUT_LABELS.speakers === 'Speakers'
     && copy.OUTPUT_LABELS.phone === 'Phone speaker' && copy.OUTPUT_LABELS.car === 'Car'
     && copy.OUTPUT_DESCRIPTIONS.headphones === 'Binaural beat + sub-bass drone. Both earbuds in; mono audio and spatial audio off.'
@@ -486,6 +494,12 @@ check(formatDb(gainToDb(MAX_BOOST)!) === '+12.0 dB' && formatDb(gainToDb(MAX_BOO
     && copy.V2_UNAVAILABLE === 'v2 unavailable on this device: classic is playing.'
     && copy.V2_UNAVAILABLE_CAR === 'v2 unavailable on this device. For Car output the layers are off; only the music plays.',
     'copy: drone, ask again, export, v2 failed (and for Car)');
+  // The Car fallback's cues, as Music only's (v15.0.1): the beat slider's title, a tone tap, a recording without the music.
+  check(copy.BEAT_OFF_CAR_FALLBACK === 'Car: layers off (v2 unavailable)'
+    && copy.V2_UNAVAILABLE_CAR_TONE === 'v2 unavailable on this device. For Car output the layers are off, so the tone is silent.'
+    && copy.V2_UNAVAILABLE_CAR_RECORDING
+      === "v2 unavailable on this device. For Car output the layers are off and the music can't be recorded here, so this recording will be silent.",
+    "copy: the Car fallback's beat slider title, tone-tap toast and recording warning");
   check(copy.SHEET_HEADING === 'What are you listening on?'
     && copy.SHEET_BODY === 'The layers are shaped for your output. Change it any time with the layers button in the player.'
     && copy.SHEET_LATER === 'Ask me later' && copy.QUICK_SWITCH_LABEL === 'Layer sound and output',

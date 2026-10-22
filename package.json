@@ -1,7 +1,7 @@
 {
-  "name": "v15.0-aetheria:-harmonic-resonance-player",
+  "name": "v15.0.1-aetheria:-harmonic-resonance-player",
   "private": true,
-  "version": "15.0.0",
+  "version": "15.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",

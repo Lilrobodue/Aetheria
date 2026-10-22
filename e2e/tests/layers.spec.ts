@@ -927,6 +927,52 @@ test('v2: with storage blocked, Ask me again and its answer hold for the session
   expect(dialogs).toEqual([]);
 });
 
+/** The transport's layers popover (OutputQuickSwitch); the output question is a dialog of its own, named by its heading. */
+const layersPopover = (page: Page) => page.getByRole('dialog', { name: 'Layer sound and output', exact: true });
+
+test('one Escape answers the output question over the layers popover, and the next one closes the popover', async ({ page }) => {
+  const errors = pageErrors(page);
+  const dialogs = await openApp(page);
+  await seedLayers(page, { engine: 'v2', output: 'car' });
+  await importTones(page, 1, 120);
+  await startTrack(page);
+
+  // The popover first, then the question over it: "Ask me again" there while the layers play asks at once.
+  await quickSwitch(page).click();
+  await expect(layersPopover(page)).toBeVisible();
+  await layersPopover(page).getByRole('button', { name: 'Ask me again', exact: true }).click();
+  await expect(outputSheet(page)).toBeVisible();
+  // The question sits on top: one Escape is its "Ask me later" (the answer and the question stay saved) and nothing
+  // else; the popover under it stays open (both used to go at once). The next Escape closes the popover.
+  await page.keyboard.press('Escape');
+  await expect(outputSheet(page)).toHaveCount(0);
+  expect(await storedOutput(page)).toEqual({ output: 'car', askAgain: '1' });
+  await page.waitForTimeout(500);
+  await expect(layersPopover(page), 'the popover after the first Escape').toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(layersPopover(page)).toHaveCount(0);
+  await expect(outputSheet(page)).toHaveCount(0);
+
+  // The question first (a new session asks again when the layers play), then the popover opened from the player bar
+  // under it: the same, one Escape each, the question's first.
+  await expectCache(page, { blobs: 1, library: 1 });
+  await page.reload();
+  await acceptDisclaimer(page);
+  await startTrack(page);
+  await expect(outputSheet(page)).toBeVisible();
+  await quickSwitch(page).click();
+  await expect(layersPopover(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(outputSheet(page)).toHaveCount(0);
+  await page.waitForTimeout(500);
+  await expect(layersPopover(page), 'the popover after the first Escape').toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(layersPopover(page)).toHaveCount(0);
+  expect(await storedOutput(page)).toEqual({ output: 'car', askAgain: '1' });
+  expect(errors).toEqual([]);
+  expect(dialogs).toEqual([]);
+});
+
 test('a saved Music only keeps the output question away until the layers are wanted; on a phone it leaves the transport free @mobile', async ({ page }) => {
   const errors = pageErrors(page);
   const dialogs = await openApp(page, { engine: 'default' });
@@ -1257,6 +1303,16 @@ test('if the v2 player fails mid-session, classic takes over and nothing throws'
 });
 
 const V2_UNAVAILABLE_CAR = 'v2 unavailable on this device. For Car output the layers are off; only the music plays.';
+// v15.0.1: the classic note once v2 has failed this session, the Output group's line after a v2 failure, and the Car
+// fallback's cues (layerCopy.ts).
+const CLASSIC_OUTPUT_NOTE_V2_FAILED =
+  'Output and Car apply to v2, which is unavailable on this device. Classic plays its beat and drone whatever the output: ' +
+  'for driving, choose v2 with Car output (the layers turn off), or Music only.';
+const OUTPUT_V2_FAILED_NOTE = "v2 is unavailable on this device: Car turns the layers off; any other output plays classic's beat and drone.";
+const BEAT_OFF_CAR_FALLBACK = 'Car: layers off (v2 unavailable)';
+const V2_UNAVAILABLE_CAR_TONE = 'v2 unavailable on this device. For Car output the layers are off, so the tone is silent.';
+const V2_UNAVAILABLE_CAR_RECORDING =
+  "v2 unavailable on this device. For Car output the layers are off and the music can't be recorded here, so this recording will be silent.";
 
 test('if the v2 player fails mid-session with Car saved, classic stays silent and only the music plays @mobile', async ({ page }) => {
   const errors = pageErrors(page);
@@ -1298,8 +1354,9 @@ test('if the v2 player fails mid-session with Car saved, classic stays silent an
   expect(await elapsedSeconds(page), 'the music moved on').toBeGreaterThan(t0);
 
   // Classic chosen afterwards is classic as it was (Car never applies to it, and the panel says so): its layers return.
+  // Its note is this session's (v15.0.1): with v2 failed, v2 with Car is the layers off, not a quiet tone.
   await engineButton(page, 'Classic').click();
-  await expect(classicNote(page)).toHaveText(CLASSIC_OUTPUT_NOTE);
+  await expect(classicNote(page)).toHaveText(CLASSIC_OUTPUT_NOTE_V2_FAILED);
   await expect(page.getByTestId('v2-unavailable')).toHaveText('v2 unavailable on this device: classic is playing.');
   await expect(badge(page)).toHaveAttribute('aria-label', 'Layers classic');
   await expect.poll(async () => (await layerState(page)).busLast).toEqual({ target: BUS, tau: 0.25 });
@@ -1307,6 +1364,133 @@ test('if the v2 player fails mid-session with Car saved, classic stays silent an
   await expect.poll(async () => (await layerState(page)).toneSounding).toBe(true);
   await expect.poll(() => busRms(page), { timeout: 2_000 }).toBeGreaterThan(1e-3);
   expect((await layerState(page)).music?.paused, 'the music plays on').toBe(false);
+  expect(errors).toEqual([]);
+  expect(dialogs).toEqual([]);
+});
+
+test("after v2 fails, the Output group stays with one line on what it does then, and Car there silences classic at once @mobile", async ({ page }) => {
+  const errors = pageErrors(page);
+  await instrumentAudio(page);
+  const dialogs = await openApp(page);
+  await seedLayers(page, { engine: 'v2', output: 'headphones' });
+  await importTones(page, 1, 60);
+  await startTrack(page);
+  await openHarmonicControl(page);
+  await tapTraditional(page, 528);
+  await expect.poll(async () => (await layersState(page))?.requested?.tone_hz ?? 0).toBe(528);
+  // The mid-session failure (above): the next retune's close throws inside play(), and App drops v2 for the session.
+  await page.evaluate(() => {
+    const player = ((globalThis as any)[Symbol.for('aetheria.soundV2.layerPlayers.v1')] ?? [])[0];
+    player.gateTB.param.linearRampToValueAtTime = () => {
+      throw new DOMException('test: the gate failed', 'InvalidStateError');
+    };
+  });
+  await tapTraditional(page, 417);
+  await expect(page.getByTestId('v2-unavailable')).toHaveText('v2 unavailable on this device: classic is playing.');
+  // Headphones: classic plays its beat and drone.
+  await expect.poll(async () => (await layerState(page)).busLast?.target).toBe(BUS);
+  await expect.poll(async () => (await layerState(page)).droneLast?.target).toBeCloseTo(DRONE, 6);
+
+  // The Output group stays, so Car can still be chosen, with the line for this state in place of v2's descriptions;
+  // v2's drone switch and "Ask me again" go.
+  const group = page.getByRole('group', { name: 'Output', exact: true });
+  await expect(group).toBeVisible();
+  await expect(group.getByText(OUTPUT_V2_FAILED_NOTE, { exact: true })).toBeVisible();
+  await expect(group.getByText('Binaural beat + sub-bass drone. Both earbuds in; mono audio and spatial audio off.', { exact: true }))
+    .toHaveCount(0);
+  await expect(outputButton(page, 'Headphones')).toHaveAttribute('aria-pressed', 'true');
+  await expect(droneSwitch(page)).toHaveCount(0);
+  await expect(askAgainButton(page)).toHaveCount(0);
+  await expect(quickSwitch(page).locator('svg')).toHaveClass(/lucide-layers/);
+
+  // Car: saved, and classic's layers fall at once (Music only's fade, τ 0.25 s), so only the music plays.
+  await outputButton(page, 'Car').click();
+  expect(await storedOutput(page)).toEqual({ output: 'car', askAgain: null });
+  await expect(outputButton(page, 'Car')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(async () => (await layerState(page)).busLast).toEqual({ target: 0, tau: 0.25 });
+  await expect.poll(async () => (await layerState(page)).droneLast?.target).toBe(0);
+  await expect.poll(() => busRms(page), { timeout: 5_000, message: 'the master bus RMS after Car' }).toBeLessThan(1e-4);
+  expect((await layerState(page)).music?.paused, 'the music plays on').toBe(false);
+  await expect(page.getByTestId('v2-unavailable')).toHaveText(V2_UNAVAILABLE_CAR);
+  await expect(badge(page)).toHaveAttribute('aria-label', 'Layers off · Car · v2 unavailable');
+  await expect(quickSwitch(page).locator('svg')).toHaveClass(/lucide-volume-x/);
+  await expect(group.getByText(OUTPUT_V2_FAILED_NOTE, { exact: true })).toBeVisible();
+  await expect(droneSwitch(page)).toHaveCount(0);
+  await expect(askAgainButton(page)).toHaveCount(0);
+
+  // Any other output plays classic's beat and drone again, as the line says.
+  await outputButton(page, 'Speakers').click();
+  expect(await storedOutput(page)).toEqual({ output: 'speakers', askAgain: null });
+  await expect.poll(async () => (await layerState(page)).busLast).toEqual({ target: BUS, tau: 0.25 });
+  await expect.poll(async () => (await layerState(page)).droneLast?.target).toBeCloseTo(DRONE, 6);
+  await expect(badge(page)).toHaveAttribute('aria-label', 'Layers classic · v2 unavailable');
+  await expect(quickSwitch(page).locator('svg')).toHaveClass(/lucide-layers/);
+  expect(errors).toEqual([]);
+  expect(dialogs).toEqual([]);
+});
+
+test('if v2 cannot start with Car saved, every cue says the layers are off: the quick switch, the band chip, the beat slider, the adaptive band, a tone tap and a recording @mobile', async ({ page }) => {
+  const errors = pageErrors(page);
+  await instrumentAudio(page);
+  await failLayersOnce(page);
+  await recordAdaptive(page);
+  const dialogs = await openApp(page);
+  await seedLayers(page, { engine: 'v2', output: 'car' });
+  await importTones(page, 1, 120);
+  await expectCache(page, { blobs: 1, meta: 1, library: 1 });
+  // As if Deep-Scanned at full intensity: classic's adaptive, were it to run, would step the band toward Gamma every 3 s.
+  await writeBandEnvelope(page, 255, 120);
+  await page.goto('/');
+  await acceptDisclaimer(page);
+  // v2 with Car: its icon, no beat on the chip, and its beat slider off.
+  const icon = quickSwitch(page).locator('svg');
+  const beat = page.getByRole('slider', { name: 'Beat level' });
+  await expect(icon).toHaveClass(/lucide-car/);
+  await expect(bandChip(page)).toHaveText('Beat off');
+  await expect(beat).toBeDisabled();
+  await expect(beat).toHaveAttribute('title', 'Car: tone only');
+
+  // The play's v2 player cannot start (or the tone tap's, if the track's own frequency is no crystal): classic would take
+  // over, but it has no Car render, so the layers stay off (v14.9's fallback; the music plays on).
+  await page.evaluate(() => ((window as any).__failLayersOnce = true));
+  await startTrack(page);
+  await openHarmonicControl(page);
+  await tapTraditional(page, 528);
+  await expect(page.getByTestId('v2-unavailable')).toHaveText(V2_UNAVAILABLE_CAR);
+  const failedAt = await pageNow(page);
+  expect(await page.evaluate(() => !(window as any).__failLayersOnce), 'the merger failure was hit').toBe(true);
+  await expect(badge(page)).toHaveAttribute('aria-label', 'Layers off · Car · v2 unavailable');
+
+  // Every cue says so, as under Music only: the quick switch's icon, the chip (no beat), and v2's Car slider, off, with
+  // a title that says why; never classic's Layers icon, its preset's name or its "Binaural Volume" slider.
+  await expect(icon).toHaveClass(/lucide-volume-x/);
+  await expect(bandChip(page)).toHaveText('Beat off');
+  await expect(beat).toBeDisabled();
+  await expect(beat).toHaveAttribute('title', BEAT_OFF_CAR_FALLBACK);
+  await expect(beat).toHaveAttribute('aria-valuetext', BEAT_OFF_CAR_FALLBACK);
+  await expect(page.getByTitle(/^Binaural Volume/)).toHaveCount(0);
+  // Nothing moves the band while the music plays: neither adaptive effect arms its 3 s interval (classic's would arm at
+  // once and step toward Gamma), and the chip has shown only 'Beat off' since the page loaded.
+  await page.waitForTimeout(Math.max(0, failedAt + 4_000 - (await pageNow(page))));
+  const log = await adaptiveLog(page);
+  test.info().annotations.push({ type: 'adaptive', description: adaptiveReport(log, 0) || 'nothing armed, no chip change' });
+  expect(eventsAfter(log, 0, 'arm'), '3 s adaptive intervals armed').toEqual([]);
+  expect([...new Set(eventsAfter(log, 0, 'chip').map((x) => x.text))], 'what the chip showed').toEqual(['Beat off']);
+  expect((await layerState(page)).music?.paused, 'the music plays on').toBe(false);
+
+  // A tone tap says why it is silent.
+  await tapTraditional(page, 417);
+  await expect(page.getByText(V2_UNAVAILABLE_CAR_TONE, { exact: true })).toBeVisible();
+
+  // So does a recording that can't tap the music (as in a browser without captureStream): it would be silence.
+  await page.evaluate(() => delete (HTMLMediaElement.prototype as any).captureStream);
+  await page.locator('header button:has(svg.lucide-circle)').click();
+  await page.getByRole('button', { name: 'Audio Only' }).click();
+  await expect(page.getByRole('button', { name: 'REC' })).toBeVisible();
+  await expect(page.getByText(V2_UNAVAILABLE_CAR_RECORDING, { exact: true })).toBeVisible();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'REC' }).click();
+  await download;
   expect(errors).toEqual([]);
   expect(dialogs).toEqual([]);
 });

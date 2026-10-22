@@ -26,6 +26,10 @@ export const ENGINE_NOTE = 'v2 is the default. Classic stays available: compare 
 /** Under classic (chosen): it has no output, so the panel says where Car is. */
 export const CLASSIC_OUTPUT_NOTE =
   'Output and Car apply to v2. Classic plays its beat and drone whatever the output: for driving, use v2 with Car output, or Music only.';
+/** The same, in a session where v2 has failed (v15.0.1): v2 with Car then plays no layers at all (App's v2CarFallback). */
+export const CLASSIC_OUTPUT_NOTE_V2_FAILED =
+  'Output and Car apply to v2, which is unavailable on this device. Classic plays its beat and drone whatever the output: ' +
+  'for driving, choose v2 with Car output (the layers turn off), or Music only.';
 export const ENGINE_ORDER: readonly LayerEngine[] = ['classic', 'v2'];
 export const ENGINE_LABELS: Readonly<Record<LayerEngine, string>> = { classic: 'Classic', v2: 'v2' };
 
@@ -43,6 +47,10 @@ export const OUTPUT_DESCRIPTIONS: Readonly<Record<LayerOutput, string>> = {
   phone: "A gentle pulse; the tone moves up into the phone's range; no drone.",
   car: 'Tone only.',
 };
+/** The Output group's one line after a v2 failure (v15.0.1), in place of v2's descriptions: classic plays then, and
+ *  has no Car render, so Car is the layers off (App's v2CarFallback). */
+export const OUTPUT_V2_FAILED_NOTE =
+  "v2 is unavailable on this device: Car turns the layers off; any other output plays classic's beat and drone.";
 export const OUTPUT_ASSUMED = '(assumed)';
 export const OUTPUT_ASSUMED_NOTE = 'Not answered yet: playing as headphones.';
 /** After "Ask me again", until an answer: the output in effect stays (it is not "assumed"), still saved, so a restart
@@ -64,6 +72,12 @@ export const EXPORT_LOG_LABEL = 'Export sound log';
 export const V2_UNAVAILABLE = 'v2 unavailable on this device: classic is playing.';
 /** v2's failure with Car in effect: classic has no Car render, so its layers stay off (App's classicLayerGain). */
 export const V2_UNAVAILABLE_CAR = 'v2 unavailable on this device. For Car output the layers are off; only the music plays.';
+/** That Car fallback's cues (v15.0.1), as Music only's: the beat slider's title, a frequency tap's toast, and the warning
+ *  for a recording that can't tap the music. */
+export const BEAT_OFF_CAR_FALLBACK = 'Car: layers off (v2 unavailable)';
+export const V2_UNAVAILABLE_CAR_TONE = 'v2 unavailable on this device. For Car output the layers are off, so the tone is silent.';
+export const V2_UNAVAILABLE_CAR_RECORDING =
+  "v2 unavailable on this device. For Car output the layers are off and the music can't be recorded here, so this recording will be silent.";
 
 export const SHEET_HEADING = 'What are you listening on?';
 export const SHEET_BODY =

@@ -1,11 +1,14 @@
 // components/layers/OutputQuickSwitch.tsx
 //
 // The transport's layer button (v14.9), between Repeat and the Lo Shu button:
-// its icon says what the layers are doing (VolumeX under Music only, Layers in
-// classic, else the v2 output) and it opens the layer panel in a popover, in
-// the Lo Shu popover's pattern (a fixed click-away catcher plus the panel,
-// portalled to the body). App owns `open`, so the status-row badge opens the
-// same popover. Shown only once an engine has been chosen (or v2 is the
+// its icon says what the layers are doing (VolumeX under Music only and under
+// v2's failure with Car, which plays no layers either; Layers in classic, else
+// the v2 output) and it opens the layer panel in a popover, in the Lo Shu
+// popover's pattern (a fixed click-away catcher plus the panel, portalled to
+// the body). App owns `open`, so the status-row badge opens the same popover.
+// Escape closes it, except while the output question is open: that sheet sits
+// above it and its Escape is the sheet's "Ask me later" (v15.0.1: one Escape,
+// one overlay). Shown only once an engine has been chosen (or v2 is the
 // engine).
 
 import React, { useEffect } from 'react';
@@ -21,24 +24,28 @@ interface Props {
   v2Failed: boolean;
   output: LayerOutput | null;
   musicOnly: boolean;
+  /** The output question (OutputSheet) is open: it sits above the popover, so Escape answers it until it closes. */
+  sheetOpen: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** One memoised object from App, shared with Harmonic Control's panel. */
   panelProps: Omit<LayerSoundPanelProps, 'variant'>;
 }
 
-const OutputQuickSwitch: React.FC<Props> = ({ engine, v2Failed, output, musicOnly, open, onOpenChange, panelProps }) => {
+const OutputQuickSwitch: React.FC<Props> = ({ engine, v2Failed, output, musicOnly, sheetOpen, open, onOpenChange, panelProps }) => {
   useEffect(() => {
-    if (!open) return;
+    if (!open || sheetOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onOpenChange(false);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, onOpenChange]);
+  }, [open, sheetOpen, onOpenChange]);
 
   const v2 = engine === 'v2' && !v2Failed;
-  const Icon = musicOnly
+  // v2's failure with Car in effect plays no layers at all (App's v2CarFallback): the icon says so, as under Music only.
+  const layersOff = musicOnly || (engine === 'v2' && v2Failed && output === 'car');
+  const Icon = layersOff
     ? VolumeX
     : !v2
       ? Layers
@@ -49,7 +56,7 @@ const OutputQuickSwitch: React.FC<Props> = ({ engine, v2Failed, output, musicOnl
           : output === 'car'
             ? Car
             : Headphones;
-  const tint = musicOnly ? 'text-orange-400' : v2 ? 'text-indigo-300' : 'text-slate-600';
+  const tint = layersOff ? 'text-orange-400' : v2 ? 'text-indigo-300' : 'text-slate-600';
 
   return (
     <>

@@ -2,7 +2,7 @@
   "name": "aetheria-e2e",
   "private": true,
   "type": "module",
-  "description": "Dev-only browser tests for Aetheria. Kept out of the root package so the Node 18 deploy (npm ci + vite build) never installs it.",
+  "description": "Dev-only browser tests for Aetheria. Kept out of the root package so the deploy (npm ci + vite build) never installs it.",
   "scripts": {
     "test": "playwright test",
     "test:device": "node run-device.mjs"

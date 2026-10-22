@@ -64,8 +64,8 @@ Node, tsc and the pin check all accept):
 ## Running the checks
 
 `npm run check:sound` runs the vendored package's 8,898 vector checks and this folder's checks with
-plain `node`, which needs **Node ≥ 22.18** (it runs `.ts` by stripping types). CI's Node 18 cannot run
-it, so it is a local gate before every push (deploy.yml is unchanged). Everything Node runs here is
+plain `node`, which needs **Node ≥ 22.18** (it runs `.ts` by stripping types). The deploy workflow
+(Node 22 since v15.0.1) only builds, so the checks stay a local gate before every push. Everything Node runs here is
 erasable TypeScript: no enums, namespaces, parameter properties or decorators; type-only imports
 are separate `import type` lines; relative imports carry `.ts`; nothing imports `types.ts` or
 `constants.ts` at run time (`types.ts` exports an enum).
