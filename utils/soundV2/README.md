@@ -112,7 +112,9 @@ settles at when a fall is sent in silence.
   on plan changes, `setBeat()` on band steps, `setLayerGains()` from the sliders, `setHostLevel()` from
   a 250 ms tick while layers are wanted. Leaving v2 fades the layers at once and disposes the player 3 s
   later; the next player resumes the drone duty.
-- **Key fit (v15.2, v2 only, off by default; `aetheria.keyFit.v1`, written only from its switch):** the
+- **Key fit (v15.2, v2 only; on by default since v15.2.1, off in v15.2; `aetheria.keyFit.v1`, written
+  only from its switch, so a tapped Off stays off, a tapped On stays on, and only an unset profile follows
+  the release default `DEFAULT_KEY_FIT`):** the
   player plays into one `KeyFitDuck` per context, which lowers the tone, beat and drone together by 0 to
   6 dB where the canonical tone would rub against the playing track's key data (none without key data, for
   an unclear key, or for the tone alone), gliding with τ 2 s, or 0.05 s when the switch flips; the music

@@ -42,8 +42,10 @@ import type { ParamEvent } from './layerSchedule.ts';
 import type { LayerPlayerState } from './layerPlayer.ts';
 
 export const KEY_FIT_STORAGE_KEY = 'aetheria.keyFit.v1';
-/** Key fit before it is ever tapped (D11). */
-export const DEFAULT_KEY_FIT = false;
+/** Key fit before it is ever tapped (D11): on since v15.2.1 (off in v15.2, until the user's by-ear check passed).
+ *  The saved choice always wins over it: KEY_FIT_STORAGE_KEY is written only when the switch is tapped, so a profile
+ *  that tapped Off stays off and one that tapped On stays on; only a profile that never tapped (unset) follows this. */
+export const DEFAULT_KEY_FIT = true;
 /** The duck's glide (spec §3.3, "smoothed over 2 s"), and the switch's (P2R-12: an A/B by ear needs it at once). */
 export const DUCK_TAU_S = 2, DUCK_FLIP_TAU_S = 0.05;
 /** A smaller change of target sends nothing (D3, D15). */

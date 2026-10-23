@@ -36,7 +36,8 @@ import {
 // whose stored key data (chroma, A4, confidence, key) and crystal are seeded into IndexedDB (helpers.seedTracks),
 // so every expected duck is v2's own musicFit on synthetic data: one-hot C# under 528 Hz rubs (−6 dB at confidence
 // 0.9, −3 dB at 0.6, none at 0.4: an unclear key), one-hot F# sits well (0 dB). Every test ends with no dialog and
-// no page error.
+// no page error. The first test is about the default (on since v15.2.1, off in v15.2) and leaves the switch unset;
+// every other test sets it itself (setup's keyFit), so none of them depends on the default.
 
 const ONE = (k: number): number[] => Array.from({ length: 12 }, (_, i) => (i === k ? 1 : 0));
 const RUB_09: SeedKey = { chroma: ONE(1), chromaA4Hz: 440, keyConfidence: 0.9, musicKey: 'C#' }; // −6.0 dB at 528
@@ -145,39 +146,60 @@ const musicLevel = (page: Page) =>
     return m ? { volume: m.volume, rate: m.playbackRate } : null;
   });
 
-test('Key fit is off by default, saved only when tapped, and v2 only', async ({ page }) => {
+test('Key fit is on by default, saved only when tapped, and v2 only', async ({ page }) => {
+  // v15.2.1: on by default for a profile that never tapped the switch (v15.2 shipped it off). Only a tap writes the
+  // key, so a tapped Off stays off across a reload, and an unset profile keeps following the release default.
   const errors = pageErrors(page);
   const dialogs = await setup(page, {
     output: 'headphones', tones: [3, 30],
     seeds: [{ index: 0, crystal: 528, key: RUB_09 }, { index: 1, crystal: 528, key: FIT_09 }, { index: 2, crystal: 528, key: null }],
   });
   await openHarmonicControl(page);
-  await expect(keyFitSwitch(page)).toHaveAttribute('aria-checked', 'false');
+  await expect(keyFitSwitch(page)).toHaveAttribute('aria-checked', 'true');
   expect(await stored(page, KEY_FIT_KEY)).toBeNull();
 
+  // Unset: the duck applies on a track that rubs, and the chip shows it; playing it writes nothing.
+  await startTrack(page);
+  await expect.poll(async () => (await layersState(page))?.requested?.tone_hz ?? 0).toBe(528);
+  await chipSays(page, 'Key fit −6.0 dB');
+  expect((await keyFitState(page)).target_db).toBe(-6);
+  await expect(keyFitStatus(page)).toHaveText('On. On this track the layers are 6.0 dB softer.');
+  expect(await stored(page, KEY_FIT_KEY), 'nothing saved before a tap').toBeNull();
+
+  // Nor does a reload: still on, still unset.
+  await page.reload();
+  await acceptDisclaimer(page);
+  await openHarmonicControl(page);
+  await expect(keyFitSwitch(page)).toHaveAttribute('aria-checked', 'true');
+  expect(await stored(page, KEY_FIT_KEY), 'nothing saved by a load').toBeNull();
+
+  // A tap turns it off and saves that; the chip goes, and the card says what it would do.
+  await startTrack(page);
+  await chipSays(page, 'Key fit −6.0 dB');
+  await keyFitSwitch(page).click();
+  expect(await stored(page, KEY_FIT_KEY)).toBe('false');
+  await expect(keyFitChip(page)).toHaveCount(0);
+  await expect(keyFitStatus(page)).toHaveText('Off. On this track it would make the layers 6.0 dB softer.');
+  await expect.poll(async () => (await keyFitState(page)).target_db).toBe(0);
+
+  // Saved: still off after a reload, the default notwithstanding; the new duck is never sent anything.
+  await page.reload();
+  await acceptDisclaimer(page);
+  await openHarmonicControl(page);
+  await expect(keyFitSwitch(page)).toHaveAttribute('aria-checked', 'false');
   await startTrack(page);
   await expect.poll(async () => (await layersState(page))?.requested?.tone_hz ?? 0).toBe(528);
   await expect(keyFitChip(page)).toHaveCount(0);
   const s0 = await keyFitState(page);
   expect({ target_db: s0.target_db, sends: s0.sends, value: s0.value }).toEqual({ target_db: 0, sends: 0, value: 1 });
   await expect(keyFitStatus(page)).toHaveText('Off. On this track it would make the layers 6.0 dB softer.');
+  expect(await stored(page, KEY_FIT_KEY)).toBe('false');
 
-  // A tap turns it on and saves it; the chip shows the duck that applies.
+  // A tap turns it on again and saves that.
   await keyFitSwitch(page).click();
   expect(await stored(page, KEY_FIT_KEY)).toBe('true');
   await chipSays(page, 'Key fit −6.0 dB');
   await expect(keyFitStatus(page)).toHaveText('On. On this track the layers are 6.0 dB softer.');
-
-  // Saved: still on after a reload; a tap turns it off, saves that, and the chip goes.
-  await page.reload();
-  await acceptDisclaimer(page);
-  await openHarmonicControl(page);
-  await expect(keyFitSwitch(page)).toHaveAttribute('aria-checked', 'true');
-  await startTrack(page);
-  await chipSays(page, 'Key fit −6.0 dB');
-  await keyFitSwitch(page).click();
-  expect(await stored(page, KEY_FIT_KEY)).toBe('false');
-  await expect(keyFitChip(page)).toHaveCount(0);
 
   // Classic: no card, no chip, no duck, no v2 player.
   await seedLayers(page, { engine: 'classic', keyFit: true });

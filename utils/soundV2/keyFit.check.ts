@@ -232,7 +232,10 @@ const data = (chroma: number[], a4: number, conf: number | undefined, key: strin
 {
   check(parseKeyFit('true') === true && parseKeyFit('false') === false, "D: 'true' / 'false' parse");
   for (const raw of [null, '', '1', 'TRUE', ' true']) check(parseKeyFit(raw) === null, `D: ${JSON.stringify(raw)} is unset`);
-  check(DEFAULT_KEY_FIT === false && KEY_FIT_STORAGE_KEY === 'aetheria.keyFit.v1', 'D: off by default, saved as aetheria.keyFit.v1');
+  check(DEFAULT_KEY_FIT === true && KEY_FIT_STORAGE_KEY === 'aetheria.keyFit.v1', 'D: on by default (v15.2.1), saved as aetheria.keyFit.v1');
+  // App's rule (keyFitChoice ?? DEFAULT_KEY_FIT): a saved tap wins, either way; only an unset profile follows the default.
+  check((parseKeyFit('false') ?? DEFAULT_KEY_FIT) === false && (parseKeyFit('true') ?? DEFAULT_KEY_FIT) === true
+    && (parseKeyFit(null) ?? DEFAULT_KEY_FIT) === true, 'D: a tapped Off stays off, a tapped On stays on, unset is on');
   check(DUCK_TAU_S === 2 && DUCK_FLIP_TAU_S === 0.05 && DUCK_MIN_STEP_DB === 0.01 && DUCK_MAX_HOLD_S === 7 && NO_DUCK_DB === 0.05
     && DUCK_REST_GUARD_S === 0.5 && DUCK_TRACK_HOLD_S === 1, 'D: the constants');
   // A2: the longest wait App can ask for (a retune's 3.02 s, then a rest within the guard and its 3 s close) is not cut.

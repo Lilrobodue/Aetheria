@@ -1605,7 +1605,8 @@ const App: React.FC = () => {
     catch { return null; }
   });
   const droneEnabled: boolean = droneChoice ?? DEFAULT_DRONE_ENABLED;
-  // Key fit (v15.2), v2 only: off until tapped on; saved only from the tap, so unset follows the release default.
+  // Key fit (v15.2), v2 only: saved only from the tap, so a tapped Off stays off and a tapped On stays on; unset
+  // follows the release default (DEFAULT_KEY_FIT: on since v15.2.1, off in v15.2).
   const [keyFitChoice, setKeyFitChoice] = useState<boolean | null>(() => {
     try { return parseKeyFit(typeof localStorage !== 'undefined' ? localStorage.getItem(KEY_FIT_STORAGE_KEY) : null); }
     catch { return null; }
@@ -7552,7 +7553,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.2.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

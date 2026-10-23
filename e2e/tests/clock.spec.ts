@@ -88,7 +88,9 @@ const seconds = (text: string) => {
 // tick) must set no React state, so it holds the same commit and draw budget. The φ gains are classic's: under v2
 // they are torn down 2 s after it takes over (its host level follows the φ envelope instead). v15.2 adds a third run,
 // v2 with Key fit on and a ducked track (the heat rule, build spec D16): the same budget, and the duck is sent
-// nothing at all while the track plays on (its request counter stays put across the six windows).
+// nothing at all while the track plays on (its request counter stays put across the six windows). Key fit is on by
+// default since v15.2.1, so the two v2 runs set the switch themselves, off and on, and still compare the two: the
+// plain run saves Key fit off (and shows no chip), the Key fit run saves it on.
 async function playingKeepsUp(page: Page, engine: 'classic' | 'default' | 'keyfit'): Promise<void> {
   const v2 = engine !== 'classic';
   const keyFit = engine === 'keyfit';
@@ -96,7 +98,7 @@ async function playingKeepsUp(page: Page, engine: 'classic' | 'default' | 'keyfi
   await page.setViewportSize({ width: 411, height: 752 });
   await recordTransport(page);
   const dialogs = await openApp(page, { query: '?perf=1', engine: v2 ? 'default' : 'classic' });
-  if (v2) await seedLayers(page, keyFit ? { output: 'headphones', keyFit: true } : { output: 'headphones' });
+  if (v2) await seedLayers(page, { output: 'headphones', keyFit });
   await importTones(page, 1, 120);
   if (keyFit) {
     // The track at 528 Hz with key data that rubs (one-hot C#, confidence 0.9: −6 dB), then back to the HUD page.
@@ -108,6 +110,7 @@ async function playingKeepsUp(page: Page, engine: 'classic' | 'default' | 'keyfi
   await page.getByText('tone-01', { exact: true }).click();
   await expect.poll(() => elapsedSeconds(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
   if (keyFit) await expect(keyFitChip(page)).toHaveAttribute('aria-label', 'Key fit −6.0 dB', { timeout: 10_000 });
+  else if (v2) await expect(keyFitChip(page), 'the plain v2 run plays with Key fit off').toHaveCount(0);
   const requests0 = keyFit ? (await keyFitState(page)).requests : 0;
 
   // Six whole HUD windows of steady playing, from the one after the window under way.
@@ -191,7 +194,7 @@ async function playingKeepsUp(page: Page, engine: 'classic' | 'default' | 'keyfi
 }
 
 for (const engine of ['classic', 'default', 'keyfit'] as const) {
-  const which = engine === 'default' ? 'v2, the default' : engine === 'keyfit' ? 'v2 with Key fit on' : 'classic';
+  const which = engine === 'default' ? 'v2, the default, with Key fit off' : engine === 'keyfit' ? 'v2 with Key fit on' : 'classic';
   const keepUp = engine !== 'classic' ? 'the clock, the seek bar and the lock screen' : 'the clock, the seek bar, the lock screen and the φ gains';
   test(`playing (${which}), App commits a few times a second and the visualizer draws its 30 frames; ${keepUp} keep up @mobile`, async ({ page }) =>
     playingKeepsUp(page, engine));
