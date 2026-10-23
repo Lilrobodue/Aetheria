@@ -80,6 +80,14 @@ interface CachedMeta {
   intervalAnalysis?: Song['intervalAnalysis'];
   isAetheriaCandidate?: boolean;
   bandEnvelope?: Song['bandEnvelope'];
+  // Analyse tracks (v15.1): the visual envelope and the key-analysis fields.
+  visualEnvelope?: Song['visualEnvelope'];
+  chroma?: Song['chroma'];
+  chromaA4Hz?: Song['chromaA4Hz'];
+  musicKey?: Song['musicKey'];
+  keyConfidence?: Song['keyConfidence'];
+  chromaVersion?: Song['chromaVersion'];
+  analysisFailedV?: Song['analysisFailedV'];
 }
 
 interface CachedState {
@@ -204,7 +212,27 @@ function toMeta(song: Song): CachedMeta {
     intervalAnalysis: song.intervalAnalysis,
     isAetheriaCandidate: song.isAetheriaCandidate,
     bandEnvelope: song.bandEnvelope,
+    visualEnvelope: song.visualEnvelope,
+    chroma: song.chroma,
+    chromaA4Hz: song.chromaA4Hz,
+    musicKey: song.musicKey,
+    keyConfidence: song.keyConfidence,
+    chromaVersion: song.chromaVersion,
+    analysisFailedV: song.analysisFailedV,
   };
+}
+
+/** The key-analysis fields of a stored record, or none if they don't hold together (a record from a broken
+ *  or future version): the track is then simply analysed again. chroma must stay a plain Array of 12. */
+function keyFieldsOf(meta: CachedMeta | undefined): Pick<Song, 'chroma' | 'chromaA4Hz' | 'musicKey' | 'keyConfidence' | 'chromaVersion'> {
+  if (!meta || typeof meta.chromaVersion !== 'number') return {};
+  if (meta.chroma === undefined) return { chromaVersion: meta.chromaVersion };   // analysed, no pitch found
+  const c = meta.chroma;
+  const ok = Array.isArray(c) && c.length === 12 && c.every((v) => Number.isFinite(v)) &&
+    Number.isFinite(meta.chromaA4Hz) && typeof meta.musicKey === 'string' && Number.isFinite(meta.keyConfidence);
+  return ok
+    ? { chroma: c, chromaA4Hz: meta.chromaA4Hz, musicKey: meta.musicKey, keyConfidence: meta.keyConfidence, chromaVersion: meta.chromaVersion }
+    : {};
 }
 
 /** Dedupe songs across playlist + originalPlaylist (a track can appear in both),
@@ -577,6 +605,9 @@ async function restorePlaylist(): Promise<RestoredPlaylist | null> {
         intervalAnalysis: meta?.intervalAnalysis,
         isAetheriaCandidate: meta?.isAetheriaCandidate,
         bandEnvelope: meta?.bandEnvelope,
+        visualEnvelope: meta?.visualEnvelope,
+        ...keyFieldsOf(meta),
+        analysisFailedV: typeof meta?.analysisFailedV === 'number' ? meta.analysisFailedV : undefined,
       };
     };
     const songsOf = (ids: readonly string[]): Song[] =>

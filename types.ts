@@ -21,6 +21,18 @@ export interface Song {
   // so direct-to-OS playback is untouched). Every big bass drop is known in
   // advance, so none are ever missed.
   bandEnvelope?: BandEnvelope;
+  // Analyse tracks (v15.1): a band envelope made from a 22050 Hz decode, for a track Deep Scan never enveloped
+  // (Auto-Distributed tracks, fresh imports). It drives the VISUALS only: the Visualizer takes bandEnvelope
+  // first, then this; the adaptive beat band reads bandEnvelope alone, so an analysed track's band stays still.
+  visualEnvelope?: BandEnvelope;
+  // Key analysis (v15.1: utils/soundV2/chroma.ts, a port of the reference key analyser). All optional: imports,
+  // and tracks from before v15.1, have none until Analyse tracks (or a desktop Deep Scan) runs.
+  chroma?: number[];         // 12 values C..B, sum ≈ 1, 4 dp. A PLAIN array: v15.2's key fit needs Array.isArray
+  chromaA4Hz?: number;       // the A the file's own tuning sits on, before the app's 432 retune; 2 dp
+  musicKey?: string;         // 'C'..'B' or 'Cm'..'Bm' (sharps); '' when the chroma is flat. Not `key`
+  keyConfidence?: number;    // Krumhansl-Kessler correlation, 3 dp (under ~0.45 is what noise gives)
+  chromaVersion?: number;    // the CHROMA_VERSION it was analysed with; set also when no pitch was found
+  analysisFailedV?: number;  // the CHROMA_VERSION at which Analyse tracks gave up on it (3 failed reads, or the app closed on it)
 }
 
 /** Per-band energy over time, sampled at `fps` frames/sec. Each array holds

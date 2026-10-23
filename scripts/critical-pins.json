@@ -2,7 +2,7 @@
   "App.tsx#IS_MOBILE_DEVICE": "6ad99e41a883999a0f49f3980bc19ed7a5911ad6f47ad0568f05b4350bdcfb94",
   "App.tsx#initAudio": "3cc1c08deaa3a37b0a356e99da3fb6112c2452bc1477402ca19d532f671d5563",
   "App.tsx#applyMusicElementVolume": "96827685ae95e7ed9ec7398210a1b2bc23b0451f0f29a0fc93ab78d45704b71c",
-  "App.tsx#currentTrack": "226054f2ff4d1f9d458bd638cf265ee429db2196466c8f39968c616165ab9da1",
+  "App.tsx#currentTrack": "0622a91b124adb996b2600f7a1ac802eed42042093e717c8a085b64ff7228c05",
   "App.tsx#AUTO_ADVANCE_LOOKAHEAD_S": "c78a31adbffc78534d93328b62646260eeea9c1d9439c8f593cc77ead7741e0c",
   "App.tsx#resolveNext": "c6b243f0c9337cd42847b4ff7112346ddd420f1695e6fa31a2169bc5c61ee7fb",
   "App.tsx#tryGaplessAdvance": "c0fe3e8cd85ab0e1d5955652a5aa2a10ef577196083ad4711bcbd388ac69fd3d",

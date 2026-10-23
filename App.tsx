@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
@@ -36,7 +36,7 @@ import {
   appendToLibrary,
   splitOrphans,
 } from './utils/library/listOps';
-import { countCommit } from './utils/perfHud';
+import { countCommit, reportPassWork } from './utils/perfHud';
 import {
   analyzeFractalFrequencies,
   assessFrequencySafety,
@@ -85,6 +85,10 @@ import { canonicalLayerHz, renderForOutput, planOutputFor, bandOfPresetName, cap
 import type { LayerEngine, LayerOutput, CanonicalLayer, BeatRender } from './utils/soundV2/layerHost';
 import { createSoundLog } from './utils/soundV2/soundLog';
 import type { SoundLog, SoundLogFields, StorageLike } from './utils/soundV2/soundLog';
+// Analyse tracks (v15.1): key analysis and visual sync. Static imports, so they are in the offline precache.
+import { createDecodeContext, analyseKeyOf, needsKey } from './utils/soundV2/keyAnalysis';
+import { startPass, capsFor, countAnalysable, upcomingIds, passStartText, passEndText, passButtonText, passEtaMinutes, PASS_IDLE, DEFAULT_TUNING, ANALYSE_INFLIGHT_KEY } from './utils/library/analysePass';
+import type { PassHandle, PassProgress, PassTuning, PassSummary, PassPlan, StepRecord } from './utils/library/analysePass';
 import LayerSoundPanel from './components/layers/LayerSoundPanel';
 import OutputSheet from './components/layers/OutputSheet';
 import OutputQuickSwitch from './components/layers/OutputQuickSwitch';
@@ -200,6 +204,19 @@ const MUSIC_ONLY_FADE_TAU_S = 0.25;
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 // The v2 layer frequency while classic plays: nothing resolved, nothing planned.
 const NO_LAYER: CanonicalLayer = { f: 0, id: null, canonical: false };
+// Analyse tracks (v15.1) treats a phone as a phone even with "Desktop site" on, which hides it from
+// IS_MOBILE_DEVICE's user-agent test: a coarse primary pointer counts too. Used only by the pass and by
+// Deep Scan's key step.
+const ANALYSE_MOBILE = IS_MOBILE_DEVICE ||
+  (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
+// Its length and size caps, tiered by device memory: decoding peaks at about the file's bytes plus twice its
+// full-rate PCM (utils/library/analysePass.ts capsFor).
+const ANALYSE_CAPS = capsFor(ANALYSE_MOBILE, typeof navigator !== 'undefined' ? (navigator as any).deviceMemory : undefined);
+// The key analysis's yield between slices, for the pass and for Deep Scan's key step: a MessageChannel round trip.
+// Never a timer: a hidden, silent desktop page throttles chained timers to one wake-up a second, then one a
+// minute (spec D17); a message is never throttled.
+const yieldToTask = (): Promise<void> =>
+  new Promise<void>(r => { const ch = new MessageChannel(); ch.port1.onmessage = () => { ch.port1.close(); r(); }; ch.port2.postMessage(0); });
 
 /** localStorage, or null where reading it throws (blocked storage). */
 const safeLocalStorage = (): StorageLike | null => {
@@ -435,7 +452,8 @@ const detectFrequencyPeaks = async (buffer: AudioBuffer): Promise<IntervalPeak[]
 // band is normalised to its own peak so quiet bands still read; truly silent
 // bands stay at zero. Wrapped by the caller in try/catch — analysis failure
 // must never break a scan (the visualizer falls back to a deterministic pulse).
-const analyzeBandEnvelopes = async (buffer: AudioBuffer, fps = 20): Promise<BandEnvelope | undefined> => {
+// `beforeBand` (Analyse tracks) runs before each band's render and may throw to abandon the envelope.
+const analyzeBandEnvelopes = async (buffer: AudioBuffer, fps = 20, beforeBand?: (band: number) => Promise<void>): Promise<BandEnvelope | undefined> => {
   const SR = 8000;                                   // Nyquist 4 kHz — covers sub/bass/mid and the ≥2 kHz "high" proxy
   const MAX_SECONDS = 1800;                           // cap absurdly long files so envelopes stay small
   const seconds = Math.min(buffer.duration || 0, MAX_SECONDS);
@@ -471,19 +489,23 @@ const analyzeBandEnvelopes = async (buffer: AudioBuffer, fps = 20): Promise<Band
     return u;
   };
 
+  if (beforeBand) await beforeBand(0);
   const sub = await renderBand((ctx, src) => {
     const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 60; f.Q.value = 0.7;
     src.connect(f); return f;
   });
+  if (beforeBand) await beforeBand(1);
   const bass = await renderBand((ctx, src) => {
     const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 60;
     const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 250;
     src.connect(hp); hp.connect(lp); return lp;
   });
+  if (beforeBand) await beforeBand(2);
   const mid = await renderBand((ctx, src) => {
     const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 700; f.Q.value = 0.7;
     src.connect(f); return f;
   });
+  if (beforeBand) await beforeBand(3);
   const high = await renderBand((ctx, src) => {
     const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 2000;
     src.connect(f); return f;
@@ -2115,6 +2137,15 @@ const App: React.FC = () => {
     libraryRef.current = originalPlaylist;
   }, [originalPlaylist]);
 
+  // Analyse tracks (v15.1): true from a run's start until its loop has exited (a stop flips the UI at once while
+  // the loop finishes its current step); the running pass, for Clear, Reload and Stop.
+  const passLoopActiveRef: { current: boolean } = useRef(false);
+  const analysePassRef: { current: PassHandle | null } = useRef(null);
+  // True while playTrack decodes a track that has no crystal (its isAnalyzing), so the pass never decodes at the
+  // same time. Mirrored in a layout effect: playTrack is pinned and stays untouched.
+  const playStartBusyRef: { current: boolean } = useRef(false);
+  useLayoutEffect(() => { playStartBusyRef.current = isAnalyzing; }, [isAnalyzing]);
+
   // Session values for handlers created once (the update banner's Reload).
   const sessionRef = useRef({ loShuWalkMode, selectedSolfeggio, isScanning });
   useEffect(() => {
@@ -2134,8 +2165,10 @@ const App: React.FC = () => {
     reloadingRef.current = true;
     showStatusToast('Saving your library before reloading…', { sticky: true });
     // (Fields, not `let`s: TypeScript doesn't see the listeners assign them.)
-    const outcome: { failed: boolean; failedWhat: 'tracks' | 'state' | null; timedOut: boolean; stoppedScan: boolean } =
-      { failed: false, failedWhat: null, timedOut: false, stoppedScan: false };
+    const outcome: { failed: boolean; failedWhat: 'tracks' | 'state' | null; timedOut: boolean; stoppedScan: boolean; stoppedPass: boolean } =
+      { failed: false, failedWhat: null, timedOut: false, stoppedScan: false, stoppedPass: false };
+    // Analyse tracks' results (every result of the run: stop('reload') applies nothing itself), merged into what this reload saves.
+    const passHold: { results: ReadonlyMap<string, Partial<Song>> | null } = { results: null };
     // What the saves report while flushing, by kind: a failure counts only if
     // no save that STARTED after it succeeded (the rule the warnings use) — a
     // save already running when Reload was tapped may fail, and the flush's
@@ -2154,6 +2187,10 @@ const App: React.FC = () => {
         outcome.stoppedScan = true;
         (window as any).cancelAetheriaAnalysis?.({ quiet: true });
       }
+      if (analysePassRef.current) {
+        outcome.stoppedPass = true;
+        passHold.results = analysePassRef.current.stop('reload') as ReadonlyMap<string, Partial<Song>>;
+      }
       cancelPendingSaves();
       await waitForBlobSaves();
       const playOrder = stateRef.current.playlist;
@@ -2165,10 +2202,13 @@ const App: React.FC = () => {
       // snapshot.
       const { playlist: nowOrder, currentSongIndex: cursor } = stateRef.current;
       const nowLibrary = libraryRef.current;
-      if (nowOrder.length || nowLibrary.length) {
+      const merged = passHold.results;
+      const saveOrder = merged && merged.size ? patchById(nowOrder, merged) : nowOrder;
+      const saveLibrary = merged && merged.size ? patchById(nowLibrary, merged) : nowLibrary;
+      if (saveOrder.length || saveLibrary.length) {
         await saveMetaAndState(
-          nowOrder,
-          nowLibrary,
+          saveOrder,
+          saveLibrary,
           cursor,
           sessionRef.current.loShuWalkMode,
           sessionRef.current.selectedSolfeggio
@@ -2204,10 +2244,17 @@ const App: React.FC = () => {
       const scanNote = outcome.stoppedScan
         ? ' Deep Scan was stopped; start it again to finish (tracks already scanned are kept).'
         : '';
+      // The page stays, so the pass's results stay in memory too (re-applying is harmless: patchById is per field).
+      const held = passHold.results;
+      if (held?.size) {
+        setOriginalPlaylist(prev => patchById(prev, held));
+        setPlaylist(prev => patchById(prev, held));
+      }
+      const passNote = outcome.stoppedPass ? ' Analyse tracks was stopped; tap it again to finish (tracks already analysed are kept).' : '';
       showStatusToast(
         outcome.timedOut
-          ? `Your library is still being saved, so the update is waiting. Tap Reload again in a moment.${scanNote}`
-          : `Some of your library couldn't be saved, so the update is waiting: reloading now would lose it.${scanNote}`,
+          ? `Your library is still being saved, so the update is waiting. Tap Reload again in a moment.${scanNote}${passNote}`
+          : `Some of your library couldn't be saved, so the update is waiting: reloading now would lose it.${scanNote}${passNote}`,
         {
           sticky: true,
           actionLabel: 'Reload anyway',
@@ -4021,6 +4068,10 @@ const App: React.FC = () => {
       showStatusToast('The previous scan is still finishing. Try again in a moment.');
       return;
     }
+    if (passLoopActiveRef.current) {
+      showStatusToast('Deep Scan is unavailable while Analyse tracks runs. Stop it first, or wait for it to finish.');
+      return;
+    }
     initAudio();
     // Deep Scan analyses the LIBRARY, whatever the play order shows. It used to
     // scan the play order and write that list back over the library when it
@@ -4058,12 +4109,13 @@ const App: React.FC = () => {
     const results = new Map<string, Partial<Song>>();
     let processedCount = 0;
     let shouldCancel = false;
+    let keyDecodeCtx: OfflineAudioContext | null = null;
     const startTime = Date.now();
 
     // One track's results, applied by id to the library and the play order
     // (every repeat of the track in a walk included).
     const applyResult = (id: string, patch: Partial<Song>) => {
-      results.set(id, patch);
+      results.set(id, { ...results.get(id), ...patch });
       const patches = new Map([[id, patch]]);
       setOriginalPlaylist(prev => patchById(prev, patches));
       setPlaylist(prev => patchById(prev, patches));
@@ -4104,6 +4156,7 @@ const App: React.FC = () => {
 
         console.log(`Analyzing ${qi + 1}/${total}: ${song.name}`);
 
+        let decodedSeconds = 0;
         try {
           const file = song.file;
 
@@ -4117,7 +4170,8 @@ const App: React.FC = () => {
           await new Promise(resolve => setTimeout(resolve, 10));
           
           const audioBuffer = await audioCtxRef.current!.decodeAudioData(arrayBuffer);
-          
+          decodedSeconds = audioBuffer.duration;
+
           // Another yield after decode
           await new Promise(resolve => setTimeout(resolve, 10));
 
@@ -4203,6 +4257,27 @@ const App: React.FC = () => {
           });
         }
 
+        // Key data (v15.1), desktop only: a second, 22050 Hz decode. Phones leave it to Analyse tracks (one decode).
+        if (!ANALYSE_MOBILE && !shouldCancel && decodedSeconds > 0 && decodedSeconds <= ANALYSE_CAPS.seconds) {
+          const fresh = libraryRef.current.find(s => s.id === song.id);
+          if (fresh && needsKey({ ...fresh, ...results.get(song.id) })) {
+            try {
+              keyDecodeCtx = keyDecodeCtx ?? createDecodeContext();
+              if (keyDecodeCtx) {
+                const buf = await keyDecodeCtx.decodeAudioData(await fresh.file.arrayBuffer());
+                const fields = await analyseKeyOf(buf, {
+                  sliceMs: 8,
+                  yieldFn: yieldToTask,
+                  shouldCancel: () => shouldCancel,
+                });
+                if (fields && !shouldCancel) applyResult(song.id, fields);
+              }
+            } catch (keyErr) {
+              console.warn('Key analysis failed for', song.name, keyErr);
+            }
+          }
+        }
+
         processedCount++;
 
         // Update progress
@@ -4270,6 +4345,127 @@ const App: React.FC = () => {
       }
     }
   };
+
+  // ── Analyse tracks (v15.1): key data and visual sync, one user-started pass (utils/library/analysePass.ts) ──
+  const [pass, setPass] = useState<PassProgress>(PASS_IDLE);
+  const passStateRef: { current: PassProgress } = useRef(PASS_IDLE);
+  const passTuningRef: { current: PassTuning } = useRef({ ...DEFAULT_TUNING });
+  const passLogRef: { current: StepRecord[] } = useRef([]);
+  const passLastRef: { current: PassSummary | null } = useRef(null);   // the last run's summary, for the dev hook
+  const passRunsRef: { current: number } = useRef(0);                  // finished runs, for the dev hook
+  const passPlanRef: { current: PassPlan | null } = useRef(null);      // the last run's plan, for the dev hook
+  const passPhaseLogRef: { current: { t: number; phase: PassProgress['phase']; hold: PassProgress['hold'] }[] } = useRef([]);  // dev builds only
+  const analyseCounts = useMemo(() => countAnalysable(dedupeById(originalPlaylist), ANALYSE_CAPS), [originalPlaylist]);
+
+  const startAnalysePass = () => {
+    if (passLoopActiveRef.current) { showStatusToast('The previous analysis is still stopping. Try again in a moment.'); return; }
+    if (scanLoopActiveRef.current) { showStatusToast('Analyse tracks is unavailable while Deep Scan runs.'); return; }
+    if (isRestoring) { showStatusToast('Your library is still loading. Try again in a moment.'); return; }
+    const retryFailed = analyseCounts.todo === 0 && analyseCounts.failed > 0;
+    if (analyseCounts.todo === 0 && !retryFailed) {
+      showStatusToast(analyseCounts.tooLong > 0 ? 'Every track this device can analyse is analysed.' : 'Every track is analysed.');
+      return;
+    }
+    const decodeCtx = createDecodeContext();
+    if (!decodeCtx) { showStatusToast("This browser can't analyse tracks."); return; }
+    const gen = cacheGeneration();
+    passLogRef.current = [];
+    passPhaseLogRef.current = [];
+    const handle = startPass<AudioBuffer>({
+      mobile: ANALYSE_MOBILE, caps: ANALYSE_CAPS, tuning: { ...passTuningRef.current }, retryFailed,
+      now: () => performance.now(),
+      sleep: (ms) => new Promise<void>(r => setTimeout(r, ms)),
+      yieldNow: yieldToTask,
+      isHidden: () => document.hidden,
+      onVisible: (cb) => { const on = () => { if (!document.hidden) cb(); }; document.addEventListener('visibilitychange', on); return () => document.removeEventListener('visibilitychange', on); },
+      // A reload, a navigation or a closed tab clears the crash marker (a renderer killed for memory fires nothing).
+      onPageHide: (cb) => { window.addEventListener('pagehide', cb); return () => window.removeEventListener('pagehide', cb); },
+      playback: () => {
+        const el = mainAudioRef.current, starting = playStartBusyRef.current;
+        if (!el) return starting ? { paused: true, duration: NaN, currentTime: 0, playbackRate: 1, starting } : null;
+        return { paused: el.paused, duration: el.duration, currentTime: el.currentTime, playbackRate: el.playbackRate, starting };
+      },
+      // performance.memory: precise only where the renderer is locked to a site (desktop Chrome); Android's is
+      // bucketized and cached for 20 minutes. The pass trusts it only once it has seen it move across a decode.
+      heap: () => { const m = (performance as any).memory; return m && m.jsHeapSizeLimit > 0 ? { used: m.usedJSHeapSize, limit: m.jsHeapSizeLimit } : null; },
+      marker: {
+        read: () => { try { return localStorage.getItem(ANALYSE_INFLIGHT_KEY); } catch { return null; } },
+        write: (v) => { try { if (v === null) localStorage.removeItem(ANALYSE_INFLIGHT_KEY); else localStorage.setItem(ANALYSE_INFLIGHT_KEY, v); } catch {} },
+      },
+      library: () => libraryRef.current,
+      playOrder: () => stateRef.current.playlist,
+      playingId: () => { const s = stateRef.current; return s.currentSongIndex >= 0 ? (s.playlist[s.currentSongIndex]?.id ?? null) : null; },
+      upcomingIds: () => upcomingIds(stateRef.current),
+      alive: () => appMountedRef.current && cacheGeneration() === gen,
+      probeDuration: (s) => getAudioDuration((s as Song).file),
+      readFile: (s) => (s as Song).file.arrayBuffer(),
+      decode: (bytes) => decodeCtx.decodeAudioData(bytes),
+      envelope: (buf, beforeBand) => analyzeBandEnvelopes(buf, 20, beforeBand),
+      key: (buf, o) => analyseKeyOf(buf, o),
+      apply: (patches) => {
+        const p = patches as ReadonlyMap<string, Partial<Song>>;
+        setOriginalPlaylist(prev => patchById(prev, p));
+        setPlaylist(prev => patchById(prev, p));
+      },
+      progress: (p) => {
+        passStateRef.current = p;
+        setPass(p);
+        if (IS_DEV_BUILD) { passPhaseLogRef.current.push({ t: performance.now(), phase: p.phase, hold: p.hold }); if (passPhaseLogRef.current.length > 4000) passPhaseLogRef.current.shift(); }
+      },
+      onStep: (r) => {
+        if (r.kind !== 'flush') reportPassWork(r.kind === 'slice' ? 'main' : 'native', r.ms);
+        if (IS_DEV_BUILD) { passLogRef.current.push(r); if (passLogRef.current.length > 4000) passLogRef.current.shift(); }
+      },
+    });
+    passLoopActiveRef.current = true;
+    analysePassRef.current = handle;
+    passPlanRef.current = handle.plan;
+    showStatusToast(passStartText(handle.plan, passEtaMinutes(handle.plan.seconds, ANALYSE_MOBILE), ANALYSE_MOBILE));
+    handle.done
+      .then((summary) => { passLastRef.current = summary; const msg = passEndText(summary); if (msg) showStatusToast(msg, { durationMs: 10_000 }); })
+      .catch((err) => console.warn('[Analyse] ended with an error', err))   // done never rejects; belt and braces
+      .finally(() => {
+        passLoopActiveRef.current = false;
+        if (analysePassRef.current === handle) analysePassRef.current = null;
+        passRunsRef.current++;
+        passStateRef.current = PASS_IDLE;
+        setPass(PASS_IDLE);
+      });
+  };
+
+  // The button: Stop while a run is going (not while it is stopping), otherwise Start (its refusals included).
+  const onAnalyseTap = () => {
+    const running = analysePassRef.current;
+    if (running && passStateRef.current.phase !== 'stopping') { running.stop('user'); return; }
+    startAnalysePass();
+  };
+
+  // Tests read and pace Analyse tracks through this hook (dev builds only; production strips it).
+  useEffect(() => {
+    if (!IS_DEV_BUILD) return;
+    const w = window as unknown as { __aetheriaAnalyse?: unknown };
+    w.__aetheriaAnalyse = {
+      state: () => passStateRef.current,        // PASS_IDLE again once a run ends
+      last: () => passLastRef.current,          // the last run's PassSummary (null before the first)
+      runs: () => passRunsRef.current,          // finished runs: wait for it to grow, then read last()
+      log: () => passLogRef.current.slice(),    // this run's StepRecords (cleared at each start)
+      plan: () => passPlanRef.current,          // the last run's plan (null before the first)
+      phases: () => passPhaseLogRef.current.slice(),   // this run's progress phases and holds, on the page clock
+      playing: () => {
+        const s = stateRef.current;
+        const t = s.currentSongIndex >= 0 ? s.playlist[s.currentSongIndex] : undefined;
+        if (!t) return null;
+        const env = t.bandEnvelope ?? t.visualEnvelope;
+        return { id: t.id, name: t.name, envelope: env?.bass.length ?? 0, source: t.bandEnvelope ? 'scan' : t.visualEnvelope ? 'analyse' : null, key: t.musicKey ?? null };
+      },
+      tune: (o: Partial<PassTuning>) => { Object.assign(passTuningRef.current, o); },   // read at the next start
+      mobile: ANALYSE_MOBILE,
+    };
+    return () => { delete w.__aetheriaAnalyse; };
+  }, []);
+
+  // Analyse tracks ends with App (a run parked on a hidden page would otherwise wait for ever).
+  useEffect(() => () => { analysePassRef.current?.stop('unmount'); }, []);
 
   // New interruptible fractal analysis function
   const analyzeFractalFrequenciesInterruptible = async (
@@ -4748,6 +4944,8 @@ const App: React.FC = () => {
     // Stop a running Deep Scan: it would go on analysing the cleared tracks
     // (quietly: no end-of-scan summary for a library that is gone).
     (window as any).cancelAetheriaAnalysis?.({ quiet: true });
+    // And Analyse tracks: what it holds belongs to the library being cleared.
+    analysePassRef.current?.stop('clear');
 
     // Stop playback, a tone-only session included.
     setIsPlaying(false);
@@ -6870,17 +7068,22 @@ registerProcessor('wav-capture', WavCapture);
   // actually changes. A fresh object every render reset the lock-screen
   // metadata and forced a position-state update on every render — both visible
   // as lock-screen flicker.
+  // The playing song's plain values for the media-session memo: a by-id patch (Deep Scan, Analyse tracks)
+  // makes new song objects without changing these, and must not re-send the lock-screen card.
+  const nowPlaying = currentSongIndex >= 0 ? playlist[currentSongIndex] : undefined;
+  const nowPlayingId = nowPlaying?.id;
+  const nowPlayingName = nowPlaying?.name;
+  const nowPlayingCrystal = nowPlaying?.closestSolfeggio;
   const currentTrack: Track | null = useMemo(() => {
-    const song = currentSongIndex >= 0 ? playlist[currentSongIndex] : null;
-    if (!song) return null;
-    const freq = song.closestSolfeggio || selectedSolfeggio;
+    if (nowPlayingId === undefined) return null;
+    const freq = nowPlayingCrystal || selectedSolfeggio;
     return {
-      title: song.name,
+      title: nowPlayingName as string,
       artist: 'Aetheria Harmonic Player',
       album: `${freq}Hz • ${getFrequencyRegime(freq)} Regime`,
       artworkUrl: '/images/icon-192x192.png',
     };
-  }, [currentSongIndex, playlist, selectedSolfeggio]);
+  }, [currentSongIndex, nowPlayingId, nowPlayingName, nowPlayingCrystal, selectedSolfeggio]);
 
   useMediaSession({
     track: currentTrack,
@@ -7186,7 +7389,7 @@ registerProcessor('wav-capture', WavCapture);
             frequencyColorMode={frequencyColorMode}
             loShuWalkMode={loShuWalkMode}
             loShuWalkStep={loShuWalkMode ? currentSongIndex : -1}
-            bandEnvelope={currentSongIndex >= 0 ? (playlist[currentSongIndex]?.bandEnvelope ?? null) : null}
+            bandEnvelope={currentSongIndex >= 0 ? (playlist[currentSongIndex]?.bandEnvelope ?? playlist[currentSongIndex]?.visualEnvelope ?? null) : null}
             audioElementRef={mainAudioRef}
             uiInsets={uiInsets}
         />
@@ -7204,7 +7407,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.0.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -8182,20 +8385,43 @@ registerProcessor('wav-capture', WavCapture);
                  <span className="text-gold-400 font-bold">Auto-Distribute Frequencies</span>
                </button>
 
+               {/* Analyse tracks (v15.1): key data and visual sync, for both engines. Its refusals all live in
+                   startAnalysePass, so a tap on a blocked button explains itself (aria-disabled, not disabled). */}
+               {originalPlaylist.length > 0 && (() => {
+                 const t = passButtonText(pass, analyseCounts, { deepScan: isScanning, restoring: isRestoring, mobile: ANALYSE_MOBILE });
+                 const running = pass.phase !== 'idle';
+                 return (
+                   <button
+                     data-testid="analyse-tracks"
+                     aria-disabled={t.blocked || undefined}
+                     title={t.blocked ? t.sub : undefined}
+                     onClick={onAnalyseTap}
+                     className={`mb-3 w-full flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border text-xs font-medium tracking-wide transition-all ${
+                       t.blocked ? 'opacity-40 cursor-not-allowed bg-slate-900 border-slate-800 text-slate-400'
+                       : running ? 'bg-sky-900/20 border-sky-500/40 text-sky-300 active:scale-95'
+                       : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-600 active:scale-95'}`}
+                   >
+                     <span className="flex items-center gap-2"><Music size={14} /><span className="font-bold">{t.title}</span></span>
+                     <span className="text-[10px] text-slate-400">{t.sub}</span>
+                   </button>
+                 );
+               })()}
+
                {/* Tools Section */}
                <div className="grid grid-cols-2 gap-2">
-                   <button 
+                   <button
+                    aria-disabled={pass.phase !== 'idle' || undefined}
                     onClick={isScanning ? () => {
                       if ((window as any).cancelAetheriaAnalysis) {
                         (window as any).cancelAetheriaAnalysis();
                       }
                     } : scanLibrary}
                     className={`flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border transition-all active:scale-95 ${
-                      isScanning 
-                        ? 'bg-blue-900/30 border-blue-500 text-blue-400 animate-pulse hover:bg-red-900/30 hover:border-red-500 hover:text-red-400' 
+                      isScanning
+                        ? 'bg-blue-900/30 border-blue-500 text-blue-400 animate-pulse hover:bg-red-900/30 hover:border-red-500 hover:text-red-400'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-600'
-                    }`}
-                    title={isScanning ? 'Click to cancel deep analysis' : 'Start deep fractal analysis (slow but thorough)'}
+                    }${pass.phase !== 'idle' ? ' opacity-40' : ''}`}
+                    title={pass.phase !== 'idle' ? 'Unavailable while Analyse tracks runs' : isScanning ? 'Click to cancel deep analysis' : 'Start deep fractal analysis (slow but thorough)'}
                    >
                      <Search size={16} className="mb-1" />
                      {isScanning ? (
@@ -8420,6 +8646,11 @@ registerProcessor('wav-capture', WavCapture);
                                   {song.closestSolfeggio}Hz
                                 </span>
                               )}
+                              {song.musicKey ? (
+                                <span className="text-[8px] px-1 rounded bg-slate-800 text-slate-300 h-fit" title={`Key ${song.musicKey} (confidence ${(song.keyConfidence ?? 0).toFixed(2)})`}>
+                                  {song.musicKey}
+                                </span>
+                              ) : null}
                               {song.fractalAnalysis && song.fractalAnalysis.goldenRatioAlignment > 0.7 && (
                                 <span className="text-[8px] px-1 rounded bg-purple-800 text-purple-300 h-fit" title="High Golden Ratio Alignment">
                                   Φ{Math.round(song.fractalAnalysis.goldenRatioAlignment * 100)}%
@@ -10258,7 +10489,14 @@ registerProcessor('wav-capture', WavCapture);
                              Analyzing {scanProgress}%
                            </span>
                          )}
-                         
+
+                         {pass.phase !== 'idle' && (
+                           <span data-testid="analyse-chip" title="Analyse tracks is running. Its button in the library panel stops it."
+                                 className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                             <Music size={8} /> Analysing {pass.done}/{pass.total}
+                           </span>
+                         )}
+
                          <span data-testid="transport-time" className="font-mono text-slate-600 ml-1">
                             {formatDuration(currTime)} / {formatDuration(currDuration)}
                          </span>

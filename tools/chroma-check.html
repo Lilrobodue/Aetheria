@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chroma Check</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; padding: 16px; background: #0b0f17; color: #e2e8f0; font: 14px/1.5 system-ui, sans-serif; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p { color: #94a3b8; margin: 0 0 12px; }
+      code { color: #cbd5e1; }
+      #status { color: #94a3b8; margin: 8px 0; }
+      #result { font-weight: 700; margin-top: 12px; }
+      pre { font: 12px/1.45 ui-monospace, monospace; white-space: pre; overflow-x: auto; background: #111827; padding: 8px; border-radius: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>Key analysis parity</h1>
+    <p>Dev-only (v15.1). Decodes each reference track on this browser's production path (an <code>OfflineAudioContext</code> at 22050 Hz, then <code>analyseKeyOf</code>) and compares it with the reference analyser's stored chroma, A4, key and confidence (build spec §11.3). Parameters: <code>lib</code> (library.json URL), <code>src</code> (audio base URL), <code>ext</code> (wav or mp3), <code>bounds</code> (tolerant or mp3), optional <code>list</code> (a JSON array of sources) and <code>env</code> (compare envelopes on every Nth track). Rows are by library index.</p>
+    <div id="status">Starting…</div>
+    <div id="result" data-testid="chroma-check-result">Running…</div>
+    <pre id="rows"></pre>
+    <script type="module" src="./chroma-check.ts"></script>
+  </body>
+</html>

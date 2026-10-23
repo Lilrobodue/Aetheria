@@ -269,10 +269,18 @@ export async function instrumentAudio(page: Page): Promise<void> {
       return merger.apply(this, args);
     };
     const play = HTMLMediaElement.prototype.play;
+    A.musicEnded = 0;
     HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
       const src = this.getAttribute('src') || '';
-      if (src.startsWith('blob:')) A.music = this;
-      else if (src.startsWith('data:')) A.anchor = this;
+      if (src.startsWith('blob:')) {
+        // The first time the music element is seen, count its natural ends (v15.1): a gapless swap never lets
+        // the track reach `ended`.
+        if (!A.musicEndedHooked) {
+          A.musicEndedHooked = true;
+          this.addEventListener('ended', () => { A.musicEnded++; });
+        }
+        A.music = this;
+      } else if (src.startsWith('data:')) A.anchor = this;
       return play.call(this);
     };
     const pause = HTMLMediaElement.prototype.pause;
@@ -399,6 +407,13 @@ export interface CacheCounts {
   analysed: number;
   /** Saved library entries counted with repeats (library counts unique ids). */
   libraryRaw: number;
+  /** Analyse tracks (v15.1): metadata records analysed for key data (chromaVersion 1, a chroma or none found). */
+  keyed: number;
+  /** Records with Analyse tracks' visual envelope, and with Deep Scan's band envelope. */
+  envVisual: number;
+  envScan: number;
+  /** Records Analyse tracks marked as unreadable (analysisFailedV 1). */
+  failedMarks: number;
 }
 
 /** What the app has persisted in IndexedDB ('aetheria-db'). */
@@ -439,6 +454,10 @@ export async function cacheCounts(page: Page): Promise<CacheCounts> {
       library: state ? new Set(state.originalOrder).size : 0,
       libraryRaw: state ? state.originalOrder.length : 0,
       playOrder: state ? state.playlistOrder.length : 0,
+      keyed: metas.filter((m) => m.chromaVersion === 1).length,
+      envVisual: metas.filter((m) => (m.visualEnvelope?.bass?.length ?? 0) > 0).length,
+      envScan: metas.filter((m) => (m.bandEnvelope?.bass?.length ?? 0) > 0).length,
+      failedMarks: metas.filter((m) => m.analysisFailedV === 1).length,
     };
     db.close();
     return out;
@@ -597,5 +616,312 @@ export async function writeBandEnvelope(page: Page, level: number, seconds: numb
       db.close();
     },
     { level, seconds }
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Analyse tracks (v15.1)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** One stored metadata record, as Analyse tracks' tests read it. */
+export interface MetaRecord {
+  id: string;
+  name: string;
+  duration: number | null;
+  harmonicFreq: number | null;
+  closestSolfeggio: number | null;
+  harmonicDeviation: number | null;
+  chromaVersion: number | null;
+  chromaIsArray: boolean;
+  chroma: number[] | null;
+  musicKey: string | null;
+  chromaA4Hz: number | null;
+  keyConfidence: number | null;
+  envScan: number;
+  envVisual: number;
+  analysisFailedV: number | null;
+}
+
+/** Every stored metadata record ('aetheria-db' → meta), in the library's saved order where it has one. */
+export async function metaRecords(page: Page): Promise<MetaRecord[]> {
+  return page.evaluate(async () => {
+    const db: IDBDatabase = await new Promise((resolve, reject) => {
+      const r = indexedDB.open('aetheria-db');
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    const read = (store: string, op: (s: IDBObjectStore) => IDBRequest): Promise<any> =>
+      db.objectStoreNames.contains(store)
+        ? new Promise((resolve, reject) => {
+            const r = op(db.transaction(store, 'readonly').objectStore(store));
+            r.onsuccess = () => resolve(r.result);
+            r.onerror = () => reject(r.error);
+          })
+        : Promise.resolve(undefined);
+    const metas: any[] = (await read('meta', (s) => s.getAll())) ?? [];
+    const state: any = await read('playlist-state', (s) => s.get('current'));
+    db.close();
+    const order: string[] = state?.originalOrder ?? [];
+    const rank = (id: string) => { const i = order.indexOf(id); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
+    metas.sort((a, b) => rank(a.id) - rank(b.id) || String(a.name).localeCompare(String(b.name)));
+    const num = (v: unknown) => (typeof v === 'number' ? v : null);
+    return metas.map((m) => ({
+      id: m.id,
+      name: m.name,
+      duration: num(m.duration),
+      harmonicFreq: num(m.harmonicFreq),
+      closestSolfeggio: num(m.closestSolfeggio),
+      harmonicDeviation: num(m.harmonicDeviation),
+      chromaVersion: num(m.chromaVersion),
+      chromaIsArray: Array.isArray(m.chroma),
+      chroma: m.chroma ? Array.from(m.chroma as ArrayLike<number>) : null,
+      musicKey: typeof m.musicKey === 'string' ? m.musicKey : null,
+      chromaA4Hz: num(m.chromaA4Hz),
+      keyConfidence: num(m.keyConfidence),
+      envScan: m.bandEnvelope?.bass?.length ?? 0,
+      envVisual: m.visualEnvelope?.bass?.length ?? 0,
+      analysisFailedV: num(m.analysisFailedV),
+    }));
+  });
+}
+
+/** The saved playlist state (the 'playlist-state' store's 'current' record), or null. */
+export async function savedState(page: Page): Promise<any | null> {
+  return page.evaluate(async () => {
+    const db: IDBDatabase = await new Promise((resolve, reject) => {
+      const r = indexedDB.open('aetheria-db');
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    if (!db.objectStoreNames.contains('playlist-state')) { db.close(); return null; }
+    const state = await new Promise((resolve, reject) => {
+      const r = db.transaction('playlist-state', 'readonly').objectStore('playlist-state').get('current');
+      r.onsuccess = () => resolve(r.result ?? null);
+      r.onerror = () => reject(r.error);
+    });
+    db.close();
+    return state;
+  });
+}
+
+/** From the next page load on, count blob-save RUNS in window.__blobSaveRuns: each one reads the stored keys
+ *  of the 'blobs' store once (playlistCache.ts writeNewBlobs). Recover and Discard read them too. */
+export async function countBlobSaves(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__blobSaveRuns = 0;
+    const getAllKeys = IDBObjectStore.prototype.getAllKeys;
+    IDBObjectStore.prototype.getAllKeys = function (this: IDBObjectStore, ...args: unknown[]) {
+      if (this.name === 'blobs') w.__blobSaveRuns++;
+      return (getAllKeys as any).apply(this, args);
+    } as typeof getAllKeys;
+  });
+}
+
+/** From the next page load on, document.hidden and visibilityState follow window.__hidden (false at load);
+ *  window.__setHidden(b) changes it and fires visibilitychange, as a screen lock would. */
+export async function controllableVisibility(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__hidden = false;
+    Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: () => !!w.__hidden });
+    Object.defineProperty(Document.prototype, 'visibilityState', { configurable: true, get: () => (w.__hidden ? 'hidden' : 'visible') });
+    w.__setHidden = (b: boolean) => {
+      w.__hidden = !!b;
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+  });
+}
+
+/** From the next page load on, log every setInterval(fn, 3000) — the app's only such intervals are the two
+ *  adaptive-band effects' — as { t, e: 'arm' | 'clear', id } in window.__intervals3s (page clock). */
+export async function recordIntervals3s(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const log: { t: number; e: string; id: number }[] = ((window as any).__intervals3s = []);
+    const live = new Set<number>();
+    const set = window.setInterval, clear = window.clearInterval;
+    (window as any).setInterval = (handler: unknown, ms?: number, ...args: unknown[]) => {
+      const id: number = set.call(window, handler as TimerHandler, ms, ...args);
+      if (ms === 3000 && typeof handler === 'function') {
+        live.add(id);
+        log.push({ t: performance.now(), e: 'arm', id });
+      }
+      return id;
+    };
+    (window as any).clearInterval = (id?: number) => {
+      if (id !== undefined && live.delete(id)) log.push({ t: performance.now(), e: 'clear', id });
+      clear.call(window, id);
+    };
+  });
+}
+
+/** From the next page load on, record every MediaSession metadata set as { t, title } in window.__metaSets. */
+export async function recordMediaMetadata(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const sets: { t: number; title: string | null }[] = ((window as any).__metaSets = []);
+    const proto = (window as any).MediaSession?.prototype;
+    const d = proto && Object.getOwnPropertyDescriptor(proto, 'metadata');
+    if (!d || !d.set) return;
+    Object.defineProperty(proto, 'metadata', {
+      ...d,
+      set(v: MediaMetadata | null) {
+        sets.push({ t: performance.now(), title: v ? v.title : null });
+        d.set!.call(this, v);
+      },
+    });
+  });
+}
+
+/** From the next page load on, record each LIVE-context decode (AudioContext, not OfflineAudioContext) as
+ *  { start, end } in window.__liveDecodes; while window.__slowLiveDecode is true one resolves 3 s late. */
+export async function recordLiveDecodes(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__liveDecodes = [];
+    w.__slowLiveDecode = false;
+    const decode = BaseAudioContext.prototype.decodeAudioData;
+    Object.defineProperty(AudioContext.prototype, 'decodeAudioData', {
+      configurable: true,
+      writable: true,
+      value: function (this: AudioContext, data: ArrayBuffer, ...rest: unknown[]) {
+        const rec = { start: performance.now(), end: -1 };
+        w.__liveDecodes.push(rec);
+        const slow = !!w.__slowLiveDecode;
+        return (decode as any).call(this, data, ...rest).then(async (buf: AudioBuffer) => {
+          if (slow) await new Promise((r) => setTimeout(r, 3000));
+          rec.end = performance.now();
+          return buf;
+        }, (err: unknown) => {
+          rec.end = performance.now();
+          throw err;
+        });
+      },
+    });
+  });
+}
+
+/** From the next page load on, count OfflineAudioContext decodes at 22050 Hz (the key analysis's decodes, Analyse
+ *  tracks' and Deep Scan's) in window.__keyDecodes. */
+export async function countKeyDecodes(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__keyDecodes = 0;
+    const decode = BaseAudioContext.prototype.decodeAudioData;
+    Object.defineProperty(OfflineAudioContext.prototype, 'decodeAudioData', {
+      configurable: true,
+      writable: true,
+      value: function (this: OfflineAudioContext, ...args: unknown[]) {
+        if (this.sampleRate === 22050) w.__keyDecodes++;
+        return (decode as any).apply(this, args);
+      },
+    });
+  });
+}
+
+/** From the next page load on, record how the key analysis (utils/soundV2/keyAnalysis.ts and chroma.ts) yields, in
+ *  window.__keyYields: each setTimeout and each MessagePort postMessage called from inside it (found by the call
+ *  stack), with the first timers' stacks for a failure message. A hidden, silent desktop page throttles chained
+ *  timers to one wake-up a second, then one a minute; a message is never throttled. */
+export async function recordKeyYields(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const rec = ((window as any).__keyYields = { timers: 0, messages: 0, timerStacks: [] as string[] });
+    const insideKeyAnalysis = (): string | null => {
+      const E = Error as unknown as { stackTraceLimit: number };
+      const limit = E.stackTraceLimit;
+      E.stackTraceLimit = 40;
+      const stack = new Error().stack ?? '';
+      E.stackTraceLimit = limit;
+      return /\/utils\/soundV2\/(keyAnalysis|chroma)\.ts/.test(stack) ? stack : null;
+    };
+    const setTimer = window.setTimeout;
+    (window as any).setTimeout = function (...args: unknown[]) {
+      const stack = insideKeyAnalysis();
+      if (stack) {
+        rec.timers++;
+        if (rec.timerStacks.length < 3) rec.timerStacks.push(stack);
+      }
+      return (setTimer as any).apply(window, args);
+    };
+    const post = MessagePort.prototype.postMessage;
+    MessagePort.prototype.postMessage = function (this: MessagePort, ...args: unknown[]) {
+      if (insideKeyAnalysis()) rec.messages++;
+      return (post as any).apply(this, args);
+    };
+  });
+}
+
+/** Analyse tracks' dev hook, window.__aetheriaAnalyse (App.tsx; dev builds only, like __aetheriaLayers). */
+export async function analyseHook(page: Page): Promise<void> {
+  await page
+    .waitForFunction(() => !!(window as any).__aetheriaAnalyse, null, { timeout: 5_000 })
+    .catch(() => {
+      throw new Error('window.__aetheriaAnalyse is missing: the analyse tests need the dev server (it is stripped from builds)');
+    });
+}
+
+export interface AnalyseState { phase: 'idle' | 'running' | 'holding' | 'parked' | 'stopping'; hold: string | null; done: number; total: number; failed: number; tooLong: number; etaMin: number | null }
+export interface AnalyseSummary { outcome: 'finished' | 'stopped' | 'error'; reason?: string; analysed: number; envelopes: number; keys: number; failed: number; tooLong: number; crashSkipped: number; ms: number }
+export interface AnalyseStep { kind: 'probe' | 'read' | 'decode' | 'envelope' | 'slice' | 'flush'; at: number; ms: number; left: number | null; into: number | null; leftEnd: number | null; id?: string; band?: number; ids?: string[]; slowed?: boolean }
+export interface AnalysePlan { total: number; seconds: number; playingFirst: boolean; retry: boolean; crashSkipped: number }
+
+const hookCall = async <T>(page: Page, fn: string, arg?: unknown): Promise<T> => {
+  await analyseHook(page);
+  return page.evaluate(({ fn, arg }) => (window as any).__aetheriaAnalyse[fn](arg), { fn, arg }) as Promise<T>;
+};
+export const analyseState = (page: Page) => hookCall<AnalyseState>(page, 'state');
+export const analyseLast = (page: Page) => hookCall<AnalyseSummary | null>(page, 'last');
+export const analyseRuns = (page: Page) => hookCall<number>(page, 'runs');
+export const analyseLog = (page: Page) => hookCall<AnalyseStep[]>(page, 'log');
+export const analysePlan = (page: Page) => hookCall<AnalysePlan | null>(page, 'plan');
+export const analysePhases = (page: Page) => hookCall<{ t: number; phase: string; hold: string | null }[]>(page, 'phases');
+export const analysePlaying = (page: Page) =>
+  hookCall<{ id: string; name: string; envelope: number; source: 'scan' | 'analyse' | null; key: string | null } | null>(page, 'playing');
+/** Pace the next run (read at its start): flushMs, duty, nativeLeftS, sliceMs. */
+export async function analyseTune(page: Page, o: { flushMs?: number; duty?: number | null; nativeLeftS?: number | null; sliceMs?: number | null }): Promise<void> {
+  await analyseHook(page);
+  await page.evaluate((o) => (window as any).__aetheriaAnalyse.tune(o), o);
+}
+/** The hook's `mobile`: App's ANALYSE_MOBILE (the mobile-ua project and a phone). */
+export async function analyseMobile(page: Page): Promise<boolean> {
+  await analyseHook(page);
+  return page.evaluate(() => (window as any).__aetheriaAnalyse.mobile as boolean);
+}
+/** Wait until `runs()` ≥ n (a run's end: then read analyseLast). */
+export async function waitRuns(page: Page, n: number, timeout = 120_000): Promise<void> {
+  await analyseHook(page);
+  await page.waitForFunction((n) => (window as any).__aetheriaAnalyse.runs() >= n, n, { timeout, polling: 250 });
+}
+
+/** The Visualizer's dev hook, window.__aetheriaVisualizer (components/Visualizer.tsx; dev builds only): the frame
+ *  count of the envelope its RAF loop samples now, or 0 without one (the visuals then use their fallback motion). */
+export async function visualizerEnvelope(page: Page): Promise<number> {
+  await page
+    .waitForFunction(() => !!(window as any).__aetheriaVisualizer, null, { timeout: 5_000 })
+    .catch(() => {
+      throw new Error('window.__aetheriaVisualizer is missing: this test needs the dev server (it is stripped from builds)');
+    });
+  return page.evaluate(() => (window as any).__aetheriaVisualizer.envelope() as number);
+}
+
+/**
+ * Import files from a URL base (e.g. the read-only parity server) through the "Add files" input: fetched in the
+ * page, made into Files and handed over as a pick would (a phone can't read this computer's disk).
+ */
+export async function importUrls(page: Page, base: string, names: string[]): Promise<void> {
+  await page.evaluate(
+    async ({ base, names }) => {
+      const input = document.querySelector('input[aria-label="Add files"]') as HTMLInputElement;
+      const picked = new DataTransfer();
+      for (const name of names) {
+        const r = await fetch(`${base.replace(/\/$/, '')}/${encodeURIComponent(name)}`);
+        if (!r.ok) throw new Error(`importUrls: ${r.status} for file #${names.indexOf(name)}`);
+        const blob = await r.blob();
+        const type = blob.type || (name.endsWith('.mp3') ? 'audio/mpeg' : name.endsWith('.wav') ? 'audio/wav' : '');
+        picked.items.add(new File([blob], name, { type }));
+      }
+      input.files = picked.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+    { base, names }
   );
 }

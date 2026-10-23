@@ -16,6 +16,10 @@
 //             frame (cells, tokens, caps and cores; 0.0 once a pause has faded
 //             it out) and the layer's own time per frame (µs). Absent in
 //             windows where the Spectrum layer didn't run.
+//   pass      (own line) while Analyse tracks works (v15.1): its main-thread
+//             time (key-analysis slices) and its native steps' time (probe,
+//             read, decode, envelope renders), in ms per second. Absent in
+//             windows where it did no work.
 //
 // OFF by default and free when off: the counters are a single boolean test.
 // Turn it on with ?perf=1 in the URL and off with ?perf=0. The choice is kept
@@ -84,6 +88,15 @@ export function reportSpectrumFrame(drawn: number, us: number): void {
   specUs += us;
 }
 
+let passMainMs = 0;
+let passNativeMs = 0;
+/** Analyse tracks (v15.1): the time its steps took. main = chroma and downmix slices; native = probe, file
+ *  read, decode and envelope renders (mostly on other threads). Free when the HUD is off. */
+export function reportPassWork(kind: 'main' | 'native', ms: number): void {
+  if (!perfHudEnabled) return;
+  if (kind === 'main') passMainMs += ms; else passNativeMs += ms;
+}
+
 let started = false;
 
 export function startPerfHud(): void {
@@ -137,8 +150,11 @@ export function startPerfHud(): void {
     if (specFrames > 0) {
       line += ` · spec ${(specDrawn / specFrames).toFixed(1)}/f ${Math.round(specUs / specFrames)}µs`;
     }
-    // The hex and spec parts get their own lines on screen: one line overflows a phone.
-    el.textContent = line.replace(' · hex', '\nhex').replace(' · spec', '\nspec');
+    if (passMainMs > 0 || passNativeMs > 0) {
+      line += ` · pass main ${Math.round(passMainMs / s)} ms/s native ${Math.round(passNativeMs / s)} ms/s`;
+    }
+    // The hex, spec and pass parts get their own lines on screen: one line overflows a phone.
+    el.textContent = line.replace(' · hex', '\nhex').replace(' · spec', '\nspec').replace(' · pass', '\npass');
     console.log('[perf] ' + line);
     draws = 0;
     rafs = 0;
@@ -154,5 +170,7 @@ export function startPerfHud(): void {
     specFrames = 0;
     specDrawn = 0;
     specUs = 0;
+    passMainMs = 0;
+    passNativeMs = 0;
   }, 1000);
 }

@@ -50,6 +50,9 @@ interface VisualizerProps {
   uiInsets?: { top: number; bottom: number };
 }
 const NO_INSETS = { top: 0, bottom: 0 };
+// Dev builds only (npm run dev, the e2e server): tests read which envelope drives the visuals. Vite strips this
+// in production, as it does App's.
+const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 // 27 Aetheria frequencies arranged into [GUT, HEART, HEAD] layers, ordered
 // by Lo Shu position 1..9 (so index 0 == position 1).
@@ -830,6 +833,14 @@ const Visualizer: React.FC<VisualizerProps> = ({
   // change. audioElementRef is already a stable ref, read directly in the loop.
   const bandEnvelopeRef = useRef<BandEnvelope | null>(bandEnvelope);
   useEffect(() => { bandEnvelopeRef.current = bandEnvelope; }, [bandEnvelope]);
+  // Tests read the envelope the RAF loop samples through this hook (dev builds only; production strips it): its
+  // frame count, or 0 without one (the visuals then use their fallback motion).
+  useEffect(() => {
+    if (!IS_DEV_BUILD) return;
+    const w = window as unknown as { __aetheriaVisualizer?: unknown };
+    w.__aetheriaVisualizer = { envelope: () => bandEnvelopeRef.current?.bass.length ?? 0 };
+    return () => { delete w.__aetheriaVisualizer; };
+  }, []);
   
   // Tempo Detection
   const beatHistoryRef = useRef<number[]>([]);

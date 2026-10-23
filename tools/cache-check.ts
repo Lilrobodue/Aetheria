@@ -457,6 +457,39 @@ test('A failed metadata save is reported, and the library order is still saved',
   expect((await keys('playlist-state')).join() === 'current', 'the state record (written first) is saved');
 });
 
+test('Key-analysis and visual-envelope fields survive a save and a restore; a malformed chroma is dropped', async () => {
+  // Analyse tracks (v15.1). Fresh ids: the tombstones of earlier tests persist on this page.
+  useDb('keys');
+  const chroma = [0.1, 0.05, 0.2, 0.03, 0.12, 0.08, 0.04, 0.15, 0.02, 0.11, 0.06, 0.04];
+  const band = (seed: number) => Uint8Array.from({ length: 40 }, (_, i) => (i * 7 + seed) % 256);
+  const env = { fps: 20, sub: band(1), bass: band(2), mid: band(3), high: band(4) };
+  const ka = song('ka', { chroma, chromaA4Hz: 441.15, musicKey: 'Dm', keyConfidence: 0.825, chromaVersion: 1, visualEnvelope: env });
+  const kb = song('kb', { chroma: new Float32Array(12).fill(1 / 12) as any, chromaA4Hz: 440, musicKey: 'C', keyConfidence: 0.7, chromaVersion: 1 });
+  const kc = song('kc', { chromaVersion: 1, analysisFailedV: 1 });
+  await saveBlobs([ka, kb, kc], [ka, kb, kc]);
+  await saveMetaAndState([ka, kb, kc], [ka, kb, kc], 0, null, 528);
+  const restored = await restorePlaylist();
+  expect(!!restored, 'restore returned a playlist');
+  const by = new Map(restored!.originalPlaylist.map((s) => [s.id, s]));
+  const a1 = by.get('ka');
+  const b1 = by.get('kb');
+  const c1 = by.get('kc');
+  expect(!!a1 && !!b1 && !!c1, `all three restored (saw ${[...by.keys()].join()})`);
+  expect(Array.isArray(a1!.chroma) && a1!.chroma!.length === 12 && a1!.chroma!.every((v, i) => v === chroma[i]),
+    `ka's chroma is the same plain Array of 12 (saw ${JSON.stringify(a1!.chroma)})`);
+  expect(a1!.chromaA4Hz === 441.15 && a1!.musicKey === 'Dm' && a1!.keyConfidence === 0.825 && a1!.chromaVersion === 1,
+    `ka's key fields are kept (saw ${a1!.chromaA4Hz} ${a1!.musicKey} ${a1!.keyConfidence} ${a1!.chromaVersion})`);
+  const v = a1!.visualEnvelope;
+  const same = (x: unknown, y: Uint8Array) => x instanceof Uint8Array && x.length === y.length && x.every((b, i) => b === y[i]);
+  expect(!!v && v.fps === 20 && same(v.sub, env.sub) && same(v.bass, env.bass) && same(v.mid, env.mid) && same(v.high, env.high),
+    "ka's visualEnvelope comes back with the same bytes");
+  expect(b1!.chroma === undefined && b1!.chromaA4Hz === undefined && b1!.musicKey === undefined &&
+    b1!.keyConfidence === undefined && b1!.chromaVersion === undefined,
+    `kb's malformed chroma drops every key field (saw ${JSON.stringify({ c: b1!.chroma, v: b1!.chromaVersion, k: b1!.musicKey })})`);
+  expect(c1!.chromaVersion === 1 && c1!.analysisFailedV === 1 && c1!.chroma === undefined,
+    `kc keeps chromaVersion and analysisFailedV, with no chroma (saw ${c1!.chromaVersion} ${c1!.analysisFailedV})`);
+});
+
 // --- runner ------------------------------------------------------------------
 (async () => {
   const list = document.getElementById('tests')!;

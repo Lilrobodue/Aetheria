@@ -68,6 +68,9 @@ tab.on('console', (m) => {
     // v14.8: the Spectrum layer's part, present only in windows where it ran.
     const sp = / · spec ([\d.]+)\/f (\d+)µs/.exec(t);
     if (sp) { entry.specDrawn = +sp[1]; entry.specUs = +sp[2]; }
+    // v15.1: Analyse tracks' work (ms per second, main thread and native steps), present only in windows where it worked.
+    const ps = / · pass main (\d+) ms\/s native (\d+) ms\/s/.exec(t);
+    if (ps) { entry.passMainMs = +ps[1]; entry.passNativeMs = +ps[2]; }
     perf.push(entry);
   } else if (m.type() === 'error') errors.push(t);
 });
@@ -138,6 +141,8 @@ const summary = {
   commits: stat('commits'),
   // Spectrum hexagons drawn per frame and the layer's µs per frame (null when it never ran).
   spec: steady.some((p) => p.specDrawn !== undefined) ? { drawnPerFrame: stat('specDrawn'), us: stat('specUs') } : null,
+  // Analyse tracks' ms of work per second while it ran (null when it never did).
+  pass: steady.some((p) => p.passMainMs !== undefined) ? { mainMsPerS: stat('passMainMs'), nativeMsPerS: stat('passNativeMs'), windows: steady.filter((p) => p.passMainMs !== undefined).length } : null,
   longTasksPerMin: +((steady.reduce((s, p) => s + p.longTasks, 0) / Math.max(1, steady.length)) * 60).toFixed(1),
   longMsPerMin: Math.round((steady.reduce((s, p) => s + p.longMs, 0) / Math.max(1, steady.length)) * 60),
   temps: {

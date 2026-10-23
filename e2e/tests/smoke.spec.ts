@@ -416,5 +416,5 @@ test('the perf HUD is off unless switched on', async ({ page }) => {
 
 test('cache round trips pass on a throwaway database', async ({ page }) => {
   await page.goto('/tools/cache-check.html');
-  await expect(page.getByTestId('cache-check-result')).toHaveText('ALL PASS (16)', { timeout: 30_000 });
+  await expect(page.getByTestId('cache-check-result')).toHaveText('ALL PASS (17)', { timeout: 30_000 });
 });
