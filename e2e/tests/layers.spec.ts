@@ -1732,7 +1732,7 @@ test('with v2 selected the hex Pulse mode still wanders while music plays', asyn
 // PC (headless Chrome 155 and Edge 155, the e2e dev server, 2026-10-21): 18–22 s a test in Chrome, 18–25 s in Edge
 // with its launch. The timeout is twice that, but at least 120 s.
 const SOUND_CHECK_TIMEOUT = 120_000;
-const SOUND_CHECK_ROWS = 37; // rows Chromium runs (Firefox would skip the suspend mode)
+const SOUND_CHECK_ROWS = 46; // rows Chromium runs (Firefox would skip the suspend mode; v15.2 adds Key fit's C14, C14b, C15 and C15c)
 
 test('the sound-check page passes in Chrome (desktop only)', async ({ page }) => {
   test.skip(ON_DEVICE, 'renders ~50 M frames: too long for the phone, and it would warm it before the soak');

@@ -482,6 +482,8 @@ export const SOUND_LOG_KEY = 'aetheria.soundSessions.v1';
 // The tone level, one per engine (v15.0), saved only when that engine's slider is moved.
 export const TONE_LEVEL_V2_KEY = 'aetheria.toneLevelV2.v1';
 export const TONE_LEVEL_CLASSIC_KEY = 'aetheria.toneLevelClassic.v1';
+// Key fit (v15.2): 'true' / 'false', written only when the switch is tapped; unset = the release default (off).
+export const KEY_FIT_KEY = 'aetheria.keyFit.v1';
 
 /** Move a range slider as a drag does: the new value, then an input event (React's onChange). The native value
  *  setter is used because React's own setter on the element would swallow the change. */
@@ -496,15 +498,16 @@ export async function setSlider(slider: Locator, value: number): Promise<void> {
 /** Store A/B choices the way a tap would, then reload into the app (openApp first). */
 export async function seedLayers(
   page: Page,
-  s: { engine?: 'classic' | 'v2'; output?: 'headphones' | 'speakers' | 'phone' | 'car'; drone?: boolean }
+  s: { engine?: 'classic' | 'v2'; output?: 'headphones' | 'speakers' | 'phone' | 'car'; drone?: boolean; keyFit?: boolean }
 ): Promise<void> {
   await page.evaluate(
     ({ s, keys }) => {
       if (s.engine) localStorage.setItem(keys.engine, s.engine);
       if (s.output) localStorage.setItem(keys.output, s.output);
       if (s.drone !== undefined) localStorage.setItem(keys.drone, String(s.drone));
+      if (s.keyFit !== undefined) localStorage.setItem(keys.keyFit, String(s.keyFit));
     },
-    { s, keys: { engine: LAYER_ENGINE_KEY, output: LAYER_OUTPUT_KEY, drone: DRONE_KEY } }
+    { s, keys: { engine: LAYER_ENGINE_KEY, output: LAYER_OUTPUT_KEY, drone: DRONE_KEY, keyFit: KEY_FIT_KEY } }
   );
   await page.reload();
   await acceptDisclaimer(page);
@@ -924,4 +927,106 @@ export async function importUrls(page: Page, base: string, names: string[]): Pro
     },
     { base, names }
   );
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Key fit (v15.2)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The key fields Analyse tracks stores for a track (types.ts), seeded by seedTracks. */
+export interface SeedKey {
+  chroma: number[];
+  chromaA4Hz: number;
+  keyConfidence: number;
+  musicKey: string;
+}
+
+/**
+ * Patch the stored metadata of the library's tracks at these `originalOrder` indexes, from /manifest.json as
+ * writeBandEnvelope does (so the app can't save over it): `crystal` sets harmonicFreq = closestSolfeggio (playTrack
+ * then uses it without decoding, and the gapless swap can run); `key` writes the four key fields with chromaVersion 1;
+ * `key: null` deletes the five; `key: 'empty'` deletes the four and keeps chromaVersion 1 alone (what Analyse tracks
+ * stores for a track with no pitch or too short: analysed, never retried). Throws when a record is missing. Reload into
+ * the app afterwards (page.goto('/'), acceptDisclaimer).
+ */
+export async function seedTracks(
+  page: Page,
+  entries: Array<{ index: number; crystal?: number; key?: SeedKey | null | 'empty' }>
+): Promise<void> {
+  await page.goto('/manifest.json');
+  await page.evaluate(async (entries) => {
+    const db: IDBDatabase = await new Promise((resolve, reject) => {
+      const r = indexedDB.open('aetheria-db');
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    const get = (store: IDBObjectStore, key: string): Promise<any> =>
+      new Promise((resolve, reject) => {
+        const r = store.get(key);
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+    const tx = db.transaction(['playlist-state', 'meta'], 'readwrite');
+    const state = await get(tx.objectStore('playlist-state'), 'current');
+    for (const e of entries) {
+      const id: string | undefined = state?.originalOrder?.[e.index];
+      const meta = id ? await get(tx.objectStore('meta'), id) : undefined;
+      if (!meta) throw new Error(`seedTracks: no saved track at index ${e.index} (import first and wait for the cache)`);
+      if (e.crystal !== undefined) {
+        meta.harmonicFreq = e.crystal;
+        meta.closestSolfeggio = e.crystal;
+      }
+      if (e.key === 'empty') {
+        for (const k of ['chroma', 'chromaA4Hz', 'keyConfidence', 'musicKey']) delete meta[k];
+        meta.chromaVersion = 1;
+      } else if (e.key) {
+        meta.chroma = [...e.key.chroma];
+        meta.chromaA4Hz = e.key.chromaA4Hz;
+        meta.keyConfidence = e.key.keyConfidence;
+        meta.musicKey = e.key.musicKey;
+        meta.chromaVersion = 1;
+      } else if (e.key === null) {
+        for (const k of ['chroma', 'chromaA4Hz', 'keyConfidence', 'musicKey', 'chromaVersion']) delete meta[k];
+      }
+      tx.objectStore('meta').put(meta);
+    }
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, entries);
+}
+
+/** The duck's state() (keyFit.ts KeyFitDuckState) through the dev hook, or null before the first v2 player. */
+export async function keyFitState(page: Page): Promise<any | null> {
+  await layersHook(page);
+  return page.evaluate(() => (window as any).__aetheriaLayers.keyFit());
+}
+export const keyFitSwitch = (page: Page) => page.getByRole('switch', { name: 'Key fit' });
+export const keyFitChip = (page: Page) => page.getByTestId('key-fit-chip');
+export const keyFitStatus = (page: Page) => page.getByTestId('key-fit-status');
+
+/**
+ * The layers' RMS on the master bus over the v2 host level, read in one evaluate (critique m6): the host follows the
+ * music's φ envelope, so a ratio of two readings is the duck's alone. The mean of `reads` reads `gapMs` apart.
+ * Needs instrumentAudio and a v2 player.
+ */
+export async function meanLayerRms(page: Page, reads = 6, gapMs = 50): Promise<number> {
+  let sum = 0;
+  for (let i = 0; i < reads; i++) {
+    if (i) await page.waitForTimeout(gapMs);
+    sum += await page.evaluate(() => {
+      const A = (window as any).__audio;
+      const analyser = A.edges.map(([, d]: any[]) => d).find((d: any) => d instanceof AnalyserNode) as AnalyserNode | undefined;
+      const host = (window as any).__aetheriaLayers?.state()?.host_level;
+      if (!analyser || !(host > 0)) return NaN;
+      const x = new Float32Array(analyser.fftSize);
+      analyser.getFloatTimeDomainData(x);
+      let s = 0;
+      for (let k = 0; k < x.length; k++) s += x[k] * x[k];
+      return Math.sqrt(s / x.length) / host;
+    });
+  }
+  return sum / reads;
 }

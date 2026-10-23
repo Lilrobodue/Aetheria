@@ -7,6 +7,12 @@
 // player: C1 clicks, C2 retune silence, C3 no overlap, C4 fade shapes, C5 per-ear levels, C6 binaural
 // separation, C7 the off-headphones pulse, C8 frequencies, C9 mono, C10 the drone duty, C11 hygiene, C12 the
 // vendored LayerGraph as a negative control (it must fail C1), C13 no swell (C13c: a pause right after a seek).
+// Key fit (v15.2): C14 the duck alone (utils/soundV2/keyFit.ts: a constant through it, so the render is its gain
+// curve, with its own hygiene record), C14b the duck on the layers (it multiplies the whole player render and changes
+// nothing else; with no duck the render is bit-identical to a duck never sent anything), C15 no swell when a duck rise
+// meets a fall (the critique's M2 scenarios: a host glide, a pause, leaving v2, a stop, a drone rest, and the review's
+// A2: a rise held to a glide's end where a rest begins), with the calls App makes for them, and C15c the review's A1: a
+// layer faded to off by the user with the switch inside the fade, in both orders.
 //
 // Two modes, both with the player's clock at the script's time and no tick. Virtual clock (any engine): every
 // call is made before rendering. Suspend (Chrome, Edge, Safari): the render pauses at the last quantum boundary
@@ -20,6 +26,7 @@ import { LayerPlayer } from '../utils/soundV2/layerPlayer.ts';
 import type { LayerGains, LayerPlayerOptions, LayerPlayerState } from '../utils/soundV2/layerPlayer.ts';
 import { plan, LayerGraph, LEVEL_TONE, LEVEL_BEAT, LEVEL_DRONE_SUB } from '../utils/soundV2/aetheria_sound_v2.ts';
 import type { Plan } from '../utils/soundV2/aetheria_sound_v2.ts';
+import { KeyFitDuck, riseHold, trackHold, hostGlideHold, laterHold, userFallEnd, gatesSilent } from '../utils/soundV2/keyFit.ts';
 
 // -------------------------------------------------------------- constants --
 
@@ -677,7 +684,8 @@ const message = (err: unknown): string => (err instanceof Error ? err.message : 
 
 interface Call {
   t: number;
-  run: (p: LayerPlayer, snaps: Map<string, LayerPlayerState>) => void;
+  /** k: the render's KeyFitDuck (Key fit's renders), else null. */
+  run: (p: LayerPlayer, snaps: Map<string, LayerPlayerState>, k: KeyFitDuck | null) => void;
   dispose?: boolean;
 }
 const call = (t: number, run: Call['run'], dispose = false): Call => ({ t, run, dispose });
@@ -939,6 +947,15 @@ interface Rendered {
   snaps: Map<string, LayerPlayerState>;
   lags: number[];
   ms: number;
+  /** Key fit's renders: the player played into a KeyFitDuck, and its host node was found connected to the duck. */
+  duck: KeyFitDuck | null;
+  hostFound: boolean;
+}
+/** Key fit (v15.2): a render may play the player into a KeyFitDuck (its clock the script's time; the script drives
+ *  it, or nothing does: a unity duck) and resume a drone duty (a rest near the start). */
+interface RenderOpts {
+  duck?: boolean;
+  resumeDuty?: LayerPlayerOptions['resumeDuty'];
 }
 
 function byTime(script: Call[]): Array<{ t: number; calls: Call[] }> {
@@ -953,7 +970,7 @@ function byTime(script: Call[]): Array<{ t: number; calls: Call[] }> {
 }
 
 /** One scripted session through a fresh player on a fresh OfflineAudioContext (clock = the script's time, no tick). */
-async function renderPlayer(channels: 1 | 2, sr: number, seconds: number, script: Call[], mode: Mode): Promise<Rendered> {
+async function renderPlayer(channels: 1 | 2, sr: number, seconds: number, script: Call[], mode: Mode, o: RenderOpts = {}): Promise<Rendered> {
   const ctx = new OfflineAudioContext(channels, Math.round(seconds * sr), sr);
   const r: Rec = { calls: [], valueReads: 0, cancelAndHold: 0, starts: 0, stopsEarly: 0, disposeStops: [], past: 0, connects: [] };
   const warnings: string[] = [], errors: string[] = [], lags: number[] = [];
@@ -963,21 +980,25 @@ async function renderPlayer(channels: 1 | 2, sr: number, seconds: number, script
   recVt = 0;
   recInDispose = false;
   try {
-    const player = LayerPlayer.for(ctx, ctx.destination, {
+    const duck = o.duck ? new KeyFitDuck(ctx, ctx.destination, { clock: () => vt, warn: (m: string) => warnings.push(m) }) : null;
+    const dest: AudioNode = duck ? duck.input : ctx.destination;
+    const player = LayerPlayer.for(ctx, dest, {
       clock: () => vt,
       timer: null,
       warn: (m: string) => warnings.push(m),
       onError: (err: unknown, where: string) => errors.push(`${where}: ${message(err)}`),
+      resumeDuty: o.resumeDuty ?? null,
     });
     const startsAtBuild = r.starts;
-    const hostNode = r.connects.find((c) => c.to === ctx.destination)?.from as GainNode | undefined;
+    // The player's host is the node connected to the destination it was given (the duck's input under Key fit, m9).
+    const hostNode = r.connects.find((c) => c.to === dest)?.from as GainNode | undefined;
     const runAt = (t: number, calls: Call[]): void => {
       vt = t;
       recVt = t;
       for (const c of calls) {
         recInDispose = c.dispose === true;
         try {
-          c.run(player, snaps);
+          c.run(player, snaps, duck);
         } catch (err) {
           errors.push(`script ${t}: ${message(err)}`);
         } finally {
@@ -1021,7 +1042,8 @@ async function renderPlayer(channels: 1 | 2, sr: number, seconds: number, script
     const ms = performance.now() - t0;
     rec = null;
     if (!player.disposed) player.dispose(); // a live player holds the context (outside the measurements)
-    return { buf, rec: r, startsAtBuild, host: hostNode ? hostNode.gain : null, warnings, errors, snaps, lags, ms };
+    if (duck) duck.dispose();
+    return { buf, rec: r, startsAtBuild, host: hostNode ? hostNode.gain : null, warnings, errors, snaps, lags, ms, duck, hostFound: !!hostNode };
   } finally {
     rec = null;
   }
@@ -1592,6 +1614,384 @@ async function c12(): Promise<Verdict> {
   };
 }
 
+// ------------------------------------------------------ Key fit (v15.2) --
+
+/** A step of the duck's script: setTarget(db, { tauS: tau, holdRiseUntil: hold }) at t. */
+interface DuckStep {
+  t: number;
+  db: number;
+  tau: number;
+  hold?: number;
+}
+/** C14's script (build spec §12.4): a track's −6 at τ 2, the switch off and on (τ 0.05), two retargets mid-glide, and a
+ *  rise held for a retune until 13.5 that then runs uninterrupted past its 10 τ point (33.5 s). Every time is a
+ *  sample frame at 48 kHz. */
+const DUCK_STEPS: readonly DuckStep[] = [
+  { t: 0.5, db: -6, tau: 2 }, { t: 6, db: 0, tau: 0.05 }, { t: 7, db: -6, tau: 0.05 }, { t: 8, db: -3, tau: 2 },
+  { t: 9, db: -5, tau: 2 }, { t: 12, db: 0, tau: 2, hold: 13.5 },
+];
+const G6 = 10 ** (-6 / 20);
+
+interface DuckSeg {
+  from: number;
+  until: number;
+  v0: number;
+  target: number | null; // null: holds v0
+  tau: number;
+}
+/** The designed duck, from the script alone (not from keyFit.ts): 1 until the first step; each glide is the exact
+ *  exponential from where the one before left the value; a rise with a hold holds until it. */
+function idealDuck(steps: readonly DuckStep[], end: number): { at(t: number): number; seg(t: number): DuckSeg; segs: DuckSeg[] } {
+  const segs: DuckSeg[] = [{ from: 0, until: steps.length ? steps[0].t : end, v0: 1, target: null, tau: 0 }];
+  const valueIn = (s: DuckSeg, t: number): number => (s.target === null ? s.v0 : s.target + (s.v0 - s.target) * Math.exp(-(t - s.from) / s.tau));
+  steps.forEach((st, i) => {
+    const until = i + 1 < steps.length ? steps[i + 1].t : end;
+    const prev = segs[segs.length - 1];
+    const v = valueIn(prev, st.t);
+    const g = 10 ** (st.db / 20);
+    const start = g > v + 1e-9 && st.hold !== undefined && st.hold > st.t ? Math.min(st.hold, st.t + 7) : st.t; // the duck caps a wait at 7 s
+    if (start > st.t) segs.push({ from: st.t, until: start, v0: v, target: null, tau: 0 });
+    segs.push({ from: start, until, v0: v, target: g, tau: st.tau });
+  });
+  const seg = (t: number): DuckSeg => {
+    let s = segs[0];
+    for (const x of segs) if (x.from <= t) s = x;
+    return s;
+  };
+  return { at: (t: number) => valueIn(seg(t), t), seg, segs };
+}
+
+/** C14's render: a ConstantSourceNode (1) through a KeyFitDuck into a mono destination, the duck's clock the script's
+ *  time, so the buffer is the duck's gain curve. Its own C11 record (critique m9), restored at the end. */
+async function renderDuck(seconds: number, steps: readonly DuckStep[], mode: Mode): Promise<{ buf: AudioBuffer; rec: Rec; notes: string[]; lags: number[]; ms: number }> {
+  const sr = SR, ctx = new OfflineAudioContext(1, Math.round(seconds * sr), sr);
+  const r: Rec = { calls: [], valueReads: 0, cancelAndHold: 0, starts: 0, stopsEarly: 0, disposeStops: [], past: 0, connects: [] };
+  const notes: string[] = [], lags: number[] = [];
+  let vt = 0;
+  rec = r;
+  recVt = 0;
+  recInDispose = false;
+  try {
+    const src = ctx.createConstantSource();
+    const duck = new KeyFitDuck(ctx, ctx.destination, { clock: () => vt, warn: (m: string) => notes.push(m) });
+    src.connect(duck.input);
+    src.start(0);
+    const runAt = (t: number): void => {
+      vt = t;
+      recVt = t;
+      for (const st of steps) {
+        if (st.t !== t) continue;
+        try {
+          duck.setTarget(st.db, { tauS: st.tau, holdRiseUntil: st.hold ?? null });
+        } catch (err) {
+          notes.push(`script ${t}: ${message(err)}`);
+        }
+      }
+    };
+    const times = [...new Set(steps.map((s) => s.t))].sort((a, b) => a - b);
+    const t0 = performance.now();
+    if (mode === 'virtual') {
+      for (const t of times) runAt(t);
+    } else {
+      // As renderPlayer: each call at the last quantum boundary before its time, a little ahead of the engine.
+      const Q = 128;
+      for (const t of times) {
+        const b = Math.ceil((t * sr) / Q - 1e-6) * Q - Q;
+        if (b <= 0) {
+          runAt(t);
+          continue;
+        }
+        ctx.suspend((b - Q / 2) / sr).then(() => {
+          if (Math.round(ctx.currentTime * sr) !== b) notes.push(`the suspend for ${t} s landed at ${ctx.currentTime} s`);
+          lags.push(ctx.currentTime - t);
+          runAt(t);
+          return ctx.resume();
+        }, (err: unknown) => notes.push(`suspend at ${b / sr} s: ${message(err)}`));
+      }
+    }
+    const buf = await ctx.startRendering();
+    rec = null;
+    duck.dispose();
+    return { buf, rec: r, notes, lags, ms: performance.now() - t0 };
+  } finally {
+    rec = null;
+  }
+}
+
+/** C14: the rendered gain follows the designed duck (within 1e-4 over each glide's first 3 τ, 1.5e-3 everywhere: the
+ *  float32 recurrence stalls short of a τ 2 target and snaps at 10 τ), never steps (each sample step ≤ 1.1 × the designed
+ *  slope + 1e-3), holds through the retune's wait, covers 63.2 % of its first glide in one τ, and its record is clean. */
+function c14(r: { buf: AudioBuffer; rec: Rec; notes: string[] }): Verdict {
+  const x = r.buf.getChannelData(0), sr = SR, n = x.length;
+  const ideal = idealDuck(DUCK_STEPS, n / sr);
+  const slope = (s: DuckSeg, v: number): number => (s.target === null ? 0 : Math.abs(s.target - v) * (1 - Math.exp(-1 / (s.tau * sr))));
+  let dev3 = 0, devAll = 0, devAt = 0, stepRatio = 0, stepAt = 0, holdDev = 0;
+  for (let k = 0; k < n; k++) {
+    const t = k / sr, s = ideal.seg(t), g = ideal.at(t), d = Math.abs(x[k] - g);
+    if (d > devAll) {
+      devAll = d;
+      devAt = t;
+    }
+    if (s.target !== null && t < s.from + 3 * s.tau) dev3 = Math.max(dev3, d);
+    if (k > 0) {
+      const tp = (k - 1) / sr;
+      const bound = 1.1 * Math.max(slope(ideal.seg(tp), ideal.at(tp)), slope(s, ideal.at(tp))) + 1e-3;
+      const ratio = Math.abs(x[k] - x[k - 1]) / bound;
+      if (ratio > stepRatio) {
+        stepRatio = ratio;
+        stepAt = t;
+      }
+    }
+  }
+  const at = (t: number): number => x[Math.round(t * sr)];
+  for (let t = 12; t < 13.5; t += 1 / sr) holdDev = Math.max(holdDev, Math.abs(at(t) - at(12)));
+  const rises = at(13.7) > at(13.5) + 1e-6;
+  const frac = (1 - at(2.5)) / (1 - G6);
+  const stall = 1 - at(33.49);
+  let snap = 0;
+  for (let t = 33.4; t < 33.6; t += 1 / sr) snap = Math.max(snap, Math.abs(at(t + 1 / sr) - at(t)));
+  const h = r.rec;
+  return {
+    measured: `|render − design| ≤ ${dev3.toExponential(2)} over each glide's first 3 τ, ${devAll.toExponential(2)} anywhere (at ${fmt(devAt)} s); `
+      + `worst step ${fmt(stepRatio)} × bound (at ${fmt(stepAt)} s); hold ±${holdDev.toExponential(1)} on 12–13.5 s, rising after: ${rises}; `
+      + `${fmt(frac * 100, 2)} % of the first glide at 1 τ; stall ${stall.toExponential(2)} short of 1 before 33.5 s, snap ${snap.toExponential(2)}; `
+      + `${h.cancelAndHold} cancelAndHold, ${h.valueReads} .value reads, ${h.past} past events, ${r.notes.length} warnings/errors${r.notes.length ? `: ${r.notes[0]}` : ''}`,
+    threshold: '≤ 1e-4, ≤ 1.5e-3; ≤ 1 × (1.1 × slope + 1e-3); ±1e-6, true; 63.2 ± 1 %; 0, 0, 0, 0',
+    pass: dev3 <= 1e-4 && devAll <= 1.5e-3 && stepRatio <= 1 && holdDev <= 1e-6 && rises && Math.abs(frac - 0.632) <= 0.01
+      && h.cancelAndHold === 0 && h.valueReads === 0 && h.past === 0 && r.notes.length === 0,
+  };
+}
+
+/** C14b's session: the full headphones voice at 528 Hz, host 1, gains 1, nothing else. */
+const LAYERS_ONLY: Call[] = [
+  call(0, (p) => p.setHostLevel(1)),
+  call(0, (p) => p.setLayerGains({ tone: 1, beat: 1, drone: 1 })),
+  call(0, (p) => p.play(P528, 'binaural', true)),
+];
+const DUCKED_LAYERS: Call[] = [
+  ...LAYERS_ONLY,
+  ...DUCK_STEPS.map((st) => call(st.t, (_p, _s, k) => { k?.setTarget(st.db, { tauS: st.tau, holdRiseUntil: st.hold ?? null }); })),
+];
+
+/** C14b: through a driven duck the render is the unity-duck render × the designed duck, sample by sample (it multiplies
+ *  tone, beat and drone alike and changes nothing else); the player plays into the duck; and with no duck at all the
+ *  render is bit-identical to the unity duck's (D15: Key fit off is v15.1's sound, critique m10). */
+function c14b(ducked: Rendered, unity: Rendered, none: Rendered): Verdict {
+  const sr = SR, ideal = idealDuck(DUCK_STEPS, 30);
+  let worst = 0, at = 0, peak = 0, differ = 0;
+  for (let ch = 0; ch < 2; ch++) {
+    const xd = ducked.buf.getChannelData(ch), xu = unity.buf.getChannelData(ch), xn = none.buf.getChannelData(ch);
+    let m = 0;
+    for (let k = 0; k < xu.length; k++) m = Math.max(m, Math.abs(xu[k]));
+    peak = Math.max(peak, m);
+    for (let k = 0; k < xu.length; k++) {
+      const e = Math.abs(xd[k] - ideal.at(k / sr) * xu[k]) / m;
+      if (e > worst) {
+        worst = e;
+        at = k / sr;
+      }
+      if (xn[k] !== xu[k]) differ++;
+    }
+  }
+  const routed = ducked.hostFound && unity.hostFound && none.hostFound;
+  return {
+    measured: `|ducked − design × unity| ≤ ${worst.toExponential(2)} × peak (at ${fmt(at)} s; peak ${fmt(peak, 4)}); the player's host found at the duck's input: `
+      + `${routed}; no duck vs a unity duck: ${differ} samples differ`,
+    threshold: '≤ 2e-3 × peak; true; 0 (bit-identical)',
+    pass: worst <= 2e-3 && routed && differ === 0 && peak > 0,
+  };
+}
+
+// C15: the calls App makes for the duck (App.tsx: the fit effect, the plan effect, setV2Gains, stopLayersNow, the level
+// tick), with App's two refs for it (a layer's fade to off, a track change) kept per render's duck.
+const appRefs = new WeakMap<KeyFitDuck, { userFall: number | null; trackAt: number | null }>();
+const refsOf = (k: KeyFitDuck): { userFall: number | null; trackAt: number | null } => {
+  let r = appRefs.get(k);
+  if (!r) {
+    r = { userFall: null, trackAt: null };
+    appRefs.set(k, r);
+  }
+  return r;
+};
+/** keyFitHold: the player's holds, a layer's fade to off, a track change the tick has not seen (no render here has one),
+ *  and `extra`, moved past a drone rest where the rise would start (riseHold). */
+const keyFitHold = (p: LayerPlayer, k: KeyFitDuck, ...extra: Array<number | null>): number | null => {
+  const r = refsOf(k);
+  return riseHold(p.state(), r.userFall, trackHold(k.state().t, r.trackAt, 0), ...extra);
+};
+/** The fit effect: the switch's τ on a flip; a rise waits (keyFitHold; for the switch also the host's glide window,
+ *  `glideLeftS` of it left); a fall while both gates are shut lands at once. */
+const fitSend = (db: number, flip: boolean, glideLeftS = 0) => (p: LayerPlayer, _s: Map<string, LayerPlayerState>, k: KeyFitDuck | null): void => {
+  if (!k) return;
+  const hold = keyFitHold(p, k, flip ? hostGlideHold(k.state().t, glideLeftS) : null);
+  k.setTarget(db, { tauS: flip ? 0.05 : 2, holdRiseUntil: hold, silent: gatesSilent(p.state()) });
+};
+/** The level tick seeing a seek or a track change: a duck rise in flight or waiting waits out the 2 s glide window; the
+ *  host glides over 1.5 s. */
+const detect = (level: number) => (p: LayerPlayer, _s: Map<string, LayerPlayerState>, k: KeyFitDuck | null): void => {
+  if (k) k.holdRise(keyFitHold(p, k, k.state().t + 2));
+  p.setHostLevel(level, { glideS: 1.5 });
+};
+/** setV2Gains: the sliders and the drone switch; a layer faded to off holds a duck rise in flight until the fade's end
+ *  (review A1). */
+const gainsTo = (g: Partial<LayerGains>) => (p: LayerPlayer, _s: Map<string, LayerPlayerState>, k: KeyFitDuck | null): void => {
+  const end = userFallEnd(p.state(), g);
+  p.setLayerGains(g);
+  if (!k || end === null) return;
+  const r = refsOf(k);
+  r.userFall = laterHold(r.userFall, end);
+  k.holdRise(keyFitHold(p, k));
+};
+/** A pause (the plan effect, the layers no longer wanted), and stopLayersNow (Music only, Emergency Stop: 0.1 s;
+ *  leaving v2: 0.25 s). */
+const pauseNow = (p: LayerPlayer, _s: Map<string, LayerPlayerState>, k: KeyFitDuck | null): void => {
+  k?.holdRise();
+  p.play(null);
+};
+const stopNow = (glideS: number) => (p: LayerPlayer, _s: Map<string, LayerPlayerState>, k: KeyFitDuck | null): void => {
+  k?.holdRise();
+  p.setHostLevel(0, { glideS });
+  p.play(null);
+};
+const reopen = (p: LayerPlayer): void => {
+  p.setHostLevel(0.8);
+  p.play(P528, 'binaural', true);
+};
+/** The swells render: the duck at −6 (the switch on), then each scenario with the switch turned off just before the
+ *  fall (and one τ 2 rise before a pause), each followed by a return to the open voice and −6. */
+const KEY_FIT_SWELLS: Call[] = [
+  call(0, (p) => p.setHostLevel(0.8)),
+  call(0, (p) => p.play(P528, 'binaural', true)),
+  call(0.1, fitSend(-6, true)),
+  // A: the switch off 30 ms before the level tick sees a same-crystal track change (the host's 1.5 s fall to 0).
+  call(10, fitSend(0, true)), call(10.03, detect(0)),
+  call(13, (p) => p.setHostLevel(0.8)), call(13, fitSend(-6, true)),
+  // B: the switch off 0.5 s into the host's fall: it waits for the glide window's end (18 s).
+  call(16, detect(0)), call(16.5, fitSend(0, true, 1.5)),
+  call(19, (p) => p.setHostLevel(0.8)), call(19, fitSend(-6, true)),
+  // C: the switch off 50 ms before a pause (tone and beat close over 0.8 s, the drone over 3 s).
+  call(22, fitSend(0, true)), call(22.05, pauseNow),
+  call(26, reopen), call(26, fitSend(-6, true)),
+  // D: the switch off 5 ms before leaving v2 (stopLayersNow(0.25)).
+  call(35.025, fitSend(0, true)), call(35.03, stopNow(0.25)),
+  call(37, reopen), call(37, fitSend(-6, true)),
+  // E: the switch off 5 ms before Music only or Emergency Stop (stopLayersNow(0.1)). Its 0.1 s fall is shorter than the
+  // envelope can resolve a swell in (keyFit.check.ts I4 measures it exactly); here it shows nothing turns back up.
+  call(47.025, fitSend(0, true)), call(47.03, stopNow(0.1)),
+  call(49, reopen), call(49, fitSend(-6, true)),
+  // F: a track's τ 2 rise 10 ms before a pause (the drone's 3 s close).
+  call(59.99, fitSend(0, false)), call(60, pauseNow),
+];
+/** Each scenario's closes (from the call that closes a layer to the end of that close). The host's falls close every
+ *  layer alike; the drone is read where it has a close of its own too (the pauses' 3 s). */
+interface KeyFitClose {
+  name: string;
+  at: number;
+  end: number;
+  layer: Layer;
+}
+const closesOf = (name: string, at: number, endTB: number, endDrone: number | null): KeyFitClose[] => [
+  { name, at, end: endTB, layer: 'tone' }, { name, at, end: endTB, layer: 'beat' },
+  ...(endDrone === null ? [] : [{ name, at, end: endDrone, layer: 'drone' as Layer }]),
+];
+const KEY_FIT_SWELL_CLOSES: readonly KeyFitClose[] = [
+  ...closesOf('A host fall', 10.03, 11.53, 11.53),
+  ...closesOf('B the switch in a host fall', 16, 17.5, 17.5),
+  ...closesOf('C pause', 22.05, 22.85, 25.05),
+  ...closesOf('D leaving v2', 35.03, 35.28, null),
+  ...closesOf('E Music only / Emergency Stop', 47.03, 47.13, null),
+  ...closesOf('F a τ 2 rise, pause', 60, 60.8, 63),
+];
+/** The drone-rest renders: 1188 s of drone time carried in, so the first rest starts at 12 s; a rise 50 ms before it,
+ *  by the switch or by a track (τ 2). */
+const restScript = (flip: boolean): Call[] => [
+  call(0, (p) => p.setHostLevel(0.8)),
+  call(0, (p) => p.play(P528, 'binaural', true)),
+  call(0.1, fitSend(-6, true)),
+  call(11.95, fitSend(0, flip)),
+];
+/** Review A2: the switch turned off inside a seek's host glide whose window ends 50 ms into the rest (12.05 s): held to
+ *  the window's end, the rise must then wait out the rest's close too (15 s). */
+const restGlideScript: Call[] = [
+  call(0, (p) => p.setHostLevel(0.8)),
+  call(0, (p) => p.play(P528, 'binaural', true)),
+  call(0.1, fitSend(-6, true)),
+  call(10.05, detect(0.8)),
+  call(10.1, fitSend(0, true, 1.95)),
+];
+const REST_DUTY = { on_s: 1200 - 12, quiet_s: 0, rest_ends_at: null, t: 0 };
+const REST_CLOSES: readonly KeyFitClose[] = [{ name: 'the rest', at: 12, end: 15, layer: 'drone' }];
+/** C15c (review A1): a layer faded to off by the user (the drone switch: 3 s; the tone slider to 0: 0.8 s) with the
+ *  switch turned off inside the fade, in both orders; each followed by a return to the open voice and −6. */
+const KEY_FIT_FADES: Call[] = [
+  call(0, (p) => p.setHostLevel(0.8)),
+  call(0, (p) => p.setLayerGains({ tone: 1, beat: 1, drone: 1 })),
+  call(0, (p) => p.play(P528, 'binaural', true)),
+  call(0.1, fitSend(-6, true)),
+  // A: the drone off, the switch off 0.1 s later: its rise waits for the drone's fade (13 s).
+  call(10, gainsTo({ drone: 0 })), call(10.1, fitSend(0, true)),
+  call(14, gainsTo({ drone: 1 })), call(14, fitSend(-6, true)),
+  // B: the switch off, the drone off 10 ms later: the rise in flight waits for the fade's end (26.01 s).
+  call(23, fitSend(0, true)), call(23.01, gainsTo({ drone: 0 })),
+  call(27, gainsTo({ drone: 1 })), call(27, fitSend(-6, true)),
+  // C: the tone slider to 0, the switch off 50 ms later (the tone's 0.8 s fade).
+  call(36, gainsTo({ tone: 0 })), call(36.05, fitSend(0, true)),
+  call(37, gainsTo({ tone: 1 })), call(37, fitSend(-6, true)),
+  // D: the switch off, the tone slider to 0 10 ms later.
+  call(41, fitSend(0, true)), call(41.01, gainsTo({ tone: 0 })),
+];
+/** Only the fading layer is read: the others rise with the duck once the fade is over. */
+const KEY_FIT_FADE_CLOSES: readonly KeyFitClose[] = [
+  { name: 'A the drone off, the switch 0.1 s later', at: 10, end: 13, layer: 'drone' },
+  { name: 'B the switch, the drone off 10 ms later', at: 23.01, end: 26.01, layer: 'drone' },
+  { name: 'C the tone to 0, the switch 50 ms later', at: 36, end: 36.8, layer: 'tone' },
+  { name: 'D the switch, the tone to 0 10 ms later', at: 41.01, end: 41.81, layer: 'tone' },
+];
+/**
+ * C15: C13's measure with the reference reading wholly after the call. The switch flips 5-50 ms before these calls, so a
+ * window centred on the call (C13's) would average the duck from before the flip into its reference. Here each closing
+ * layer's envelope, read in windows from the call on, never rises over its first such reading by more than +0.1 dB (or
+ * 1e-3 × steady); the worst per scenario.
+ */
+function c15(X: Float32Array[], d: Design, closes: readonly KeyFitClose[]): Verdict {
+  const per = new Map<string, number>();
+  let worst = -Infinity, where = '', ok = true, readings = 0;
+  const buf = new Float64Array(Math.round(0.25 * d.sr) + 1);
+  for (const cl of closes) {
+    const parts: Array<[Comp, 0 | 1]> = cl.layer === 'tone' ? [['tone', 0]] : cl.layer === 'beat' ? [['carrier', 0], ['partner', 1]] : [['drone', 0]];
+    for (const [c, ch] of parts) {
+      const W = c === 'drone' ? 0.25 : 0.02, step = c === 'drone' ? 0.025 : 0.005;
+      const t0 = cl.at + W / 2;
+      const e0 = envelope(X[ch], d, c, t0, W, buf);
+      const steady = steadyOf(d, c, ch, cl.at);
+      if (!(e0 > 0)) continue;
+      for (let k = 1; t0 + k * step <= cl.end + 1e-9; k++) {
+        const t = t0 + k * step, e = envelope(X[ch], d, c, t, W, buf), up = db(e / e0);
+        readings++;
+        per.set(cl.name, Math.max(per.get(cl.name) ?? -Infinity, up));
+        if (up > worst) {
+          worst = up;
+          where = `${c} at ${fmt(t)} s (${cl.name}, call ${cl.at})`;
+        }
+        if (up > 0.1 && e - e0 > 1e-3 * steady) ok = false;
+      }
+    }
+  }
+  const sign = (x: number): string => `${x >= 0 ? '+' : ''}${fmt(x)}`;
+  return {
+    measured: `max ${sign(worst)} dB (${where}; ${readings} readings): ${[...per].map(([n, v]) => `${n} ${sign(v)}`).join(', ')}`,
+    threshold: '≤ +0.1 dB (or 1e-3 × steady) over the first reading after the call',
+    pass: ok && readings > 0,
+  };
+}
+/** The Key fit renders' design: the 528 Hz voice from 0 at host 0.8 (C15 reads frequencies, AM and steady levels). */
+function keyFitDesign(seconds: number): Design {
+  const d = newDesign(SR, 2, seconds, ALL);
+  voice(d, 0.025, P528, 'binaural', true, 10);
+  d.host.step(0, 0.8);
+  return d;
+}
+
 // ---------------------------------------------------------------- the run --
 
 /** The designs must reproduce §8.4's expected column (and §2.3's plan facts) before anything is compared with them. */
@@ -1769,6 +2169,59 @@ async function runMode(mode: Mode): Promise<void> {
     row('C13c remainder', mode, () => c13([r.buf.getChannelData(0), r.buf.getChannelData(1)], remainderDesign(), REMAINDER_CLOSES));
     time('remainder', r.ms, t0);
   });
+  // Key fit (v15.2). C14's render has its own record and row (no player in it); the others are player renders and
+  // count in C11 like the rest.
+  await stage('the duck', ['C14 duck'], async () => {
+    const r = await renderDuck(36, DUCK_STEPS, mode);
+    const t0 = performance.now();
+    row('C14 duck', mode, () => c14(r));
+    time('duck', r.ms, t0);
+  });
+  if (mode === 'virtual') {
+    await stage('the duck on the layers', ['C14b duck on the layers'], async () => {
+      const ducked = await renderPlayer(2, SR, 30, DUCKED_LAYERS, mode, { duck: true });
+      const unity = await renderPlayer(2, SR, 30, LAYERS_ONLY, mode, { duck: true });
+      const none = await renderPlayer(2, SR, 30, LAYERS_ONLY, mode);
+      const t0 = performance.now();
+      for (const r of [ducked, unity, none]) addHygiene(h, r);
+      row('C14b duck on the layers', mode, () => c14b(ducked, unity, none));
+      time('duck on the layers', ducked.ms + unity.ms + none.ms, t0);
+    });
+  }
+  await stage('the Key fit swells', ['C15 key-fit swell'], async () => {
+    const r = await renderPlayer(2, SR, 64, KEY_FIT_SWELLS, mode, { duck: true });
+    const t0 = performance.now();
+    addHygiene(h, r);
+    row('C15 key-fit swell', mode, () => c15([r.buf.getChannelData(0), r.buf.getChannelData(1)], keyFitDesign(64), KEY_FIT_SWELL_CLOSES));
+    time('key-fit swell', r.ms, t0);
+  });
+  await stage('the Key fit drone rests', ['C15b key-fit rest'], async () => {
+    const parts: Array<[string, Rendered]> = [];
+    for (const flip of [true, false]) {
+      parts.push([flip ? 'the switch 50 ms before the rest' : 'a τ 2 rise 50 ms before the rest', await renderPlayer(2, SR, 16, restScript(flip), mode, { duck: true, resumeDuty: REST_DUTY })]);
+    }
+    parts.push(['the switch held to a host glide ending 50 ms into the rest', await renderPlayer(2, SR, 16, restGlideScript, mode, { duck: true, resumeDuty: REST_DUTY })]);
+    const t0 = performance.now();
+    for (const [, r] of parts) addHygiene(h, r);
+    row('C15b key-fit rest', mode, () => {
+      // C13's own reading, centred on the rest's start: the duck holds flat across it (the rise waits for the close), so
+      // nothing biases the reference, and a rise that ran on would read as a swell.
+      const vs = parts.map(([what, r]) => [what, c13([r.buf.getChannelData(0), r.buf.getChannelData(1)], keyFitDesign(16), REST_CLOSES)] as [string, Verdict]);
+      return {
+        measured: vs.map(([what, v]) => `${what}: ${v.measured}`).join('; '),
+        threshold: vs[0][1].threshold,
+        pass: vs.every(([, v]) => v.pass),
+      };
+    });
+    time('key-fit rest', parts.reduce((s, [, r]) => s + r.ms, 0), t0);
+  });
+  await stage('the Key fit user fades', ['C15c key-fit user fade'], async () => {
+    const r = await renderPlayer(2, SR, 43, KEY_FIT_FADES, mode, { duck: true });
+    const t0 = performance.now();
+    addHygiene(h, r);
+    row('C15c key-fit user fade', mode, () => c15([r.buf.getChannelData(0), r.buf.getChannelData(1)], keyFitDesign(43), KEY_FIT_FADE_CLOSES));
+    time('key-fit user fade', r.ms, t0);
+  });
   row('C11 all', mode, () => c11(h, main.feedAnchors, mode));
 }
 
@@ -1836,10 +2289,10 @@ function section(label: string, from: number, to: number): LivePlan {
     start(make, at) {
       const p = make();
       const script = mainScript(null), snaps = new Map<string, LayerPlayerState>();
-      for (const c of script) if (c.t < from && !c.dispose) c.run(p, snaps);
+      for (const c of script) if (c.t < from && !c.dispose) c.run(p, snaps, null);
       for (const c of script) {
         if (c.t >= from && c.t < to) at(c.t - from + lead, () => {
-          if (livePlayer) c.run(livePlayer, snaps);
+          if (livePlayer) c.run(livePlayer, snaps, null);
         });
       }
     },
@@ -1852,9 +2305,9 @@ function scripted(label: string, seconds: number, script: Call[]): LivePlan {
     start(make, at) {
       const p = make(), snaps = new Map<string, LayerPlayerState>();
       for (const c of script) {
-        if (c.t === 0) c.run(p, snaps);
+        if (c.t === 0) c.run(p, snaps, null);
         else at(c.t, () => {
-          if (livePlayer) c.run(livePlayer, snaps);
+          if (livePlayer) c.run(livePlayer, snaps, null);
         });
       }
     },

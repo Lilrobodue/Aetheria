@@ -23,6 +23,7 @@ import type { LayerPlayerOptions, LayerPlayerState } from './layerPlayer.ts';
 import { MAX_BOOST } from './layerSchedule.ts';
 import type { ParamTrack } from './layerSchedule.ts';
 import { plan, phiEnvelope, LayerGraph, LEVEL_TONE, LEVEL_BEAT, LEVEL_DRONE_SUB, GATE_OUT_S, DRONE_OUT_S } from './aetheria_sound_v2.ts';
+import { KeyFitDuck } from './keyFit.ts';
 import type { Plan } from './aetheria_sound_v2.ts';
 
 let passed = 0;
@@ -488,6 +489,9 @@ class Sim {
   nonFinite = 0;
   lateValueSets = 0;
   stopsOutsideDispose = 0;
+  /** This run's own worst A1 step (L ≤ 0) and A1-lag ratio (L > 0), for a run's summary line (Key fit's duck, m5). */
+  a1Worst = { v: 0, at: '' };
+  lagWorst = { r: 0, step: 0, bound: 0, at: '' };
   allowHold = false;
   mainThreadValue = false;
   explode = false;
@@ -705,6 +709,7 @@ class Sim {
         const d = Math.max(Math.abs(p.tl.valueAt(t) - preT.get(p)), Math.abs(p.tl.valueAt(tau) - preTau.get(p)),
           Math.abs(p.tl.valueAt((t + tau) / 2) - preMid.get(p)));
         worst.a1[this.cfg.engine] = Math.max(worst.a1[this.cfg.engine], d);
+        if (d > this.a1Worst.v) this.a1Worst = { v: d, at: `${role.name} at ${t}` };
         if (d >= 1e-3) this.fail('A1', `A1: ${role.name} steps ${d.toExponential(3)} at the call at ${t} (L ${L * 1000} ms)`);
       } else {
         // The engine is ahead: Blink renders the old curve to τ and then the moved anchor (a step of the old slope ×
@@ -721,6 +726,7 @@ class Sim {
           bound = Math.abs(sNew - sOld) * L + 1e-3;
         }
         worst.lag[this.cfg.engine] = Math.max(worst.lag[this.cfg.engine], step / bound);
+        if (step / bound > this.lagWorst.r) this.lagWorst = { r: step / bound, step, bound, at: `${role.name} at ${t}` };
         if (step > bound) this.fail('A1-lag', `A1 (L=${L * 1000} ms): ${role.name} steps ${step.toExponential(3)} at τ ${tau} (bound ${bound.toExponential(3)})`);
       }
     }
@@ -1943,6 +1949,66 @@ function apiRun(name: string, tickMs: number | null, sc0: Omit<Scenario, 'name'>
   if (k2 >= 0) reg2.splice(k2, 1);
 }
 
+// --------------------------------------------- Key fit (v15.2): the duck on the engines --
+// Critique m5: keyFit.check.ts F's scripted session (holdRise included) through a KeyFitDuck on E-blink and E-gecko at
+// every lag, held to the player's own A1 (L ≤ 0) and A1-lag (L > 0) bounds, A2 (E-blink's intermediate states) and A6's
+// hygiene. Its gain is always audible: no gate ever silences it. With L ≤ 0 the mirror is also compared with the engine
+// around every call (A3's tolerance: 1e-9, Gecko 1e-4 off its rounded event times).
+
+const DUCK_SCRIPT: Array<[number, (d: KeyFitDuck) => void]> = [
+  [1, (d) => d.setTarget(-6, { tauS: 2 })],
+  [8, (d) => d.setTarget(0, { tauS: 0.05 })], // the switch off
+  [9, (d) => d.setTarget(-6, { tauS: 0.05 })], // and on
+  [10, (d) => d.setTarget(-3, { tauS: 2 })], // a track
+  [11, (d) => d.setTarget(-5, { tauS: 2 })], // a retarget mid-glide
+  [14, (d) => d.setTarget(0, { tauS: 2, holdRiseUntil: 15.5 })], // a held rise (a retune's silence)
+  [20, (d) => d.setTarget(-6, { tauS: 2 })], // a fall
+  [24, (d) => d.setTarget(0, { tauS: 0.05 })], // the switch off ...
+  [24.03, (d) => { d.holdRise(); }], // ... and a pause 30 ms later (M2)
+  [25, (d) => d.setTarget(0, { tauS: 2 })], // the resume's send
+  [27, (d) => d.setTarget(-6, { tauS: 0.05 })],
+  [27.5, (d) => d.setTarget(0, { tauS: 0.05 })], // the switch off ...
+  [27.52, (d) => { d.holdRise(28.5); }], // ... and a seek: the rest of the rise waits out the host's glide
+  [29, (d) => d.setTarget(-2, { tauS: 2 })],
+  [29, (d) => d.setTarget(-4, { tauS: 2 })], // two commits in one clock reading
+];
+const duckWorst = { blink: { a1: 0, lag: 0, at: '' }, gecko: { a1: 0, lag: 0, at: '' } } as Record<string, { a1: number; lag: number; at: string }>;
+for (const engine of ['blink', 'gecko'] as Kind[]) {
+  for (const lag of [-0.02, 0, 0.01, 0.05, 0.3]) {
+    const label = `Key fit duck [${engine} L ${lag * 1000} ms]`;
+    const sim = new Sim({ engine, tickMs: null, lag }, label);
+    let duck: KeyFitDuck | null = null;
+    let mirror: ParamTrack | null = null, ep: EParam | null = null;
+    const steps: Array<[number, (s: Sim) => void]> = [[0.5, (s) => {
+      duck = new KeyFitDuck(s.ctx as unknown as BaseAudioContext, s.bus as unknown as AudioNode, { clock: () => s.clockT, warn: (m: string) => s.warnings.push(m) });
+      mirror = (duck as unknown as { track: ParamTrack }).track;
+      ep = (mirror as unknown as { param: EParam }).param;
+      s.roles.set(ep, { name: 'duck', gain: true, gate: 'none', maxSlope: Infinity, a4: null, fall: null, tr: mirror, gTB: ep, gD: ep });
+    }]];
+    for (const [t, fn] of DUCK_SCRIPT) steps.push([t, () => { if (duck) fn(duck); }]);
+    const probes: Array<[number, (s: Sim) => void]> = DUCK_SCRIPT.map(([t]) => [t + 0.4, (s: Sim) => {
+      if (s.cfg.lag > 0 || !mirror || !ep) return;
+      let d = 0, at = 0;
+      for (let x = t - 0.5; x <= t + 0.4; x += 0.001) {
+        if (engine === 'gecko' && ep.tl.near(x, 2 / SR)) continue;
+        const e = Math.abs(mirror.valueAt(x) - ep.tl.valueAt(x));
+        if (e > d) { d = e; at = x; }
+      }
+      s.expect(d <= (engine === 'gecko' ? 1e-4 : 1e-9), `the duck's mirror equals the engine around ${t} (Δ ${d.toExponential(2)} at ${at.toFixed(3)})`);
+    }]);
+    sim.run({ name: 'Key fit duck', end: 32, steps, probes });
+    for (const [k, m] of sim.fails) runFails.push(`${label}: ${k}: ${m}`);
+    check(sim.fails.size === 0, `${label}: A1, A1-lag, A2, A6 (${[...sim.fails.values()].slice(0, 2).join(' | ')})`);
+    check(duck !== null && (duck as KeyFitDuck).state().sends >= 12 && (duck as KeyFitDuck).state().held === 2, `${label}: the script ran (sends, held)`);
+    const w = duckWorst[engine];
+    w.a1 = Math.max(w.a1, sim.a1Worst.v);
+    if (sim.lagWorst.r > w.lag) {
+      w.lag = sim.lagWorst.r;
+      w.at = `L ${lag * 1000} ms, ${sim.lagWorst.at}: step ${sim.lagWorst.step.toExponential(3)}, bound ${sim.lagWorst.bound.toExponential(3)}`;
+    }
+  }
+}
+
 // ------------------------------------------------------- negative controls --
 
 /** The vendored LayerGraph on a sim (a negative control: it must fail as predicted). */
@@ -2039,6 +2105,8 @@ console.log(`  worst mirror − engine on the grids: ${fmt(worst.a3)}`);
 console.log(`  worst audible gain step at a call (L ≤ 0): ${fmt(worst.a1)}; worst lag step / bound (L > 0): `
   + `blink ${worst.lag.blink.toFixed(4)}, gecko ${worst.lag.gecko.toFixed(4)}`);
 console.log(`  worst E-blink intermediate state / bound: ${worst.a2.toFixed(3)}`);
+console.log(`  Key fit duck (m5): worst step at a call (L ≤ 0) blink ${duckWorst.blink.a1.toExponential(1)}, gecko ${duckWorst.gecko.a1.toExponential(1)}; `
+  + `worst lag step / bound (L > 0) blink ${duckWorst.blink.lag.toFixed(4)} (${duckWorst.blink.at}), gecko ${duckWorst.gecko.lag.toFixed(4)} (${duckWorst.gecko.at})`);
 const secs = (Date.now() - t0) / 1000;
 console.log(`  ${runs} runs (${SCENARIOS.length} scenarios × ${CONFIGS.length} engine/tick/lag configs) in ${secs.toFixed(1)} s`);
 console.log(`layerPlayer: ${passed} checks passed, ${failures.length} failed`);

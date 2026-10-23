@@ -89,6 +89,12 @@ import type { SoundLog, SoundLogFields, StorageLike } from './utils/soundV2/soun
 import { createDecodeContext, analyseKeyOf, needsKey } from './utils/soundV2/keyAnalysis';
 import { startPass, capsFor, countAnalysable, upcomingIds, passStartText, passEndText, passButtonText, passEtaMinutes, PASS_IDLE, DEFAULT_TUNING, ANALYSE_INFLIGHT_KEY } from './utils/library/analysePass';
 import type { PassHandle, PassProgress, PassTuning, PassSummary, PassPlan, StepRecord } from './utils/library/analysePass';
+// Key fit (v15.2): the duck on the v2 layers, from the playing track's key data. Static imports, so they are in the
+// offline precache.
+import { KeyFitDuck, keyFitFor, keyFitView as keyFitViewOf, keyFitLogFields, riseHold, trackHold, hostGlideHold, laterHold, userFallEnd, gatesSilent, parseKeyFit, KEY_FIT_STORAGE_KEY, DEFAULT_KEY_FIT, DUCK_TAU_S, DUCK_FLIP_TAU_S } from './utils/soundV2/keyFit';
+import type { KeyFit, KeyFitView } from './utils/soundV2/keyFit';
+import KeyFitRow from './components/layers/KeyFitRow';
+import KeyFitChip from './components/layers/KeyFitChip';
 import LayerSoundPanel from './components/layers/LayerSoundPanel';
 import OutputSheet from './components/layers/OutputSheet';
 import OutputQuickSwitch from './components/layers/OutputQuickSwitch';
@@ -116,6 +122,10 @@ import {
   BEAT_OFF_CAR_FALLBACK,
   V2_UNAVAILABLE_CAR_TONE,
   V2_UNAVAILABLE_CAR_RECORDING,
+  keyFitChipText,
+  keyFitChipTitle,
+  keyFitChipTone,
+  keyFitRowText,
 } from './components/layers/layerCopy';
 import type { LayerStatus } from './components/layers/layerCopy';
 
@@ -1595,6 +1605,15 @@ const App: React.FC = () => {
     catch { return null; }
   });
   const droneEnabled: boolean = droneChoice ?? DEFAULT_DRONE_ENABLED;
+  // Key fit (v15.2), v2 only: off until tapped on; saved only from the tap, so unset follows the release default.
+  const [keyFitChoice, setKeyFitChoice] = useState<boolean | null>(() => {
+    try { return parseKeyFit(typeof localStorage !== 'undefined' ? localStorage.getItem(KEY_FIT_STORAGE_KEY) : null); }
+    catch { return null; }
+  });
+  const keyFitOn: boolean = keyFitChoice ?? DEFAULT_KEY_FIT;
+  // Session only: the duck could not be made (ensureLayerPlayer), so the layers play without it and Key fit changes
+  // nothing: the chip, the card and the log say so (review B6). Set once, from that failure.
+  const [keyFitFailed, setKeyFitFailed] = useState(false);
   // Session only: v2 could not start or failed; classic plays (no layers at all for Car: v2CarFallback), and the
   // panel says so.
   const [v2Failed, setV2Failed] = useState(false);
@@ -1931,6 +1950,24 @@ const App: React.FC = () => {
   const planBand: Band = render === 'pulse' ? capBand(presetBand, 'alpha') : presetBand;
   const isGammaPlan = render === 'binaural' && planBand === 'gamma';
   const v2Wanted = v2Active && !musicOnly && layer.f > 0 && (isPlaying || isSolfeggioActive);
+  // Key fit (v15.2): the playing track's fit, from plain values (never the pinned currentTrack). Recomputed only when
+  // the track, its key data, the crystal or the output changes (keyFit.ts caches by content behind this).
+  const fitSong = currentSongIndex >= 0 ? playlist[currentSongIndex] : undefined;
+  const fitHasTrack = !!fitSong;
+  const fitChroma = fitSong?.chroma, fitA4 = fitSong?.chromaA4Hz, fitConf = fitSong?.keyConfidence, fitKeyName = fitSong?.musicKey;
+  // Analysed by this CHROMA_VERSION's Analyse tracks: a track it stored no key for (empty, too short) is never retried.
+  const fitAnalysed = fitHasTrack && !needsKey({ chromaVersion: fitSong?.chromaVersion });
+  const fitTrackId: string | null = fitSong ? fitSong.id : null;
+  const keyFit: KeyFit | null = useMemo(
+    () => (v2Active && fitHasTrack
+      ? keyFitFor({ chroma: fitChroma, chromaA4Hz: fitA4, keyConfidence: fitConf, musicKey: fitKeyName }, layer.f, planOutput, PITCH_SHIFT_FACTOR)
+      : null),
+    [v2Active, fitHasTrack, fitChroma, fitA4, fitConf, fitKeyName, layer.f, planOutput]
+  );
+  const keyFitView: KeyFitView = useMemo(
+    () => keyFitViewOf({ on: keyFitOn, fit: keyFit, hasTrack: fitHasTrack, musicPlaying: isPlaying, layersOn: v2Wanted, available: !keyFitFailed, analysed: fitAnalysed }),
+    [keyFitOn, keyFit, fitHasTrack, isPlaying, v2Wanted, keyFitFailed, fitAnalysed]
+  );
 
   // Session duration tracking
   useEffect(() => {
@@ -2065,6 +2102,13 @@ const App: React.FC = () => {
   const layerPlayerRef: { current: LayerPlayer | null } = useRef(null);
   const layerDisposeTimerRef: { current: number | null } = useRef(null);
   const layerDutyCarryRef: { current: { ctx: BaseAudioContext; duty: { on_s: number; quiet_s: number; rest_ends_at: number | null; t: number } } | null } = useRef(null);
+  // Key fit (v15.2): the duck the v2 player plays into (one per AudioContext, made with the first v2 player and kept
+  // across disposals; never in classic), the switch state at the last send, when the last layer faded to off ends
+  // (review A1) and when the playing track last changed (review A3), both on the duck's clock.
+  const keyFitDuckRef: { current: KeyFitDuck | null } = useRef(null);
+  const keyFitSentOnRef: { current: boolean | null } = useRef(null);
+  const keyFitUserFallRef: { current: number | null } = useRef(null);
+  const keyFitTrackAtRef: { current: number | null } = useRef(null);
 
   const solfeggioOscRef = useRef<OscillatorNode | null>(null);
   const solfeggioGainRef = useRef<GainNode | null>(null);
@@ -2588,6 +2632,8 @@ const App: React.FC = () => {
     if (layerDisposeTimerRef.current !== null) window.clearTimeout(layerDisposeTimerRef.current);
     try { layerPlayerRef.current?.dispose(); } catch {}
     layerPlayerRef.current = null;
+    try { keyFitDuckRef.current?.dispose(); } catch {}
+    keyFitDuckRef.current = null;
   }, []);
 
   // Cleanup on unmount
@@ -3345,8 +3391,18 @@ const App: React.FC = () => {
     const ctx = audioCtxRef.current, bus = masterBusRef.current;
     if (!ctx || !bus || ctx.state === 'closed') return null;
     const carry = layerDutyCarryRef.current;
+    // Key fit (v15.2): the layers play into the duck and the duck into the bus. One per context. If it can't be made,
+    // the layers play straight into the bus, as in v15.1, and Key fit has no effect this session.
+    let dest: AudioNode = bus;
+    const old = keyFitDuckRef.current;
+    if (old && old.ctx === ctx && !old.disposed) dest = old.input;
+    else {
+      if (old) { try { old.dispose(); } catch {} }
+      try { const nd = new KeyFitDuck(ctx, bus); keyFitDuckRef.current = nd; dest = nd.input; setKeyFitFailed(false); }
+      catch (err) { keyFitDuckRef.current = null; setKeyFitFailed(true); console.error('Key fit unavailable; the v2 layers play without it.', err); }
+    }
     try {
-      const np = LayerPlayer.for(ctx, bus, { onState: onLayerState, onError: onLayerError, resumeDuty: carry && carry.ctx === ctx ? carry.duty : null });
+      const np = LayerPlayer.for(ctx, dest, { onState: onLayerState, onError: onLayerError, resumeDuty: carry && carry.ctx === ctx ? carry.duty : null });
       layerPlayerRef.current = np;
       setLayerStatus(null);   // a new player: forget the last one's status (its own first transition follows)
       return np;
@@ -3389,8 +3445,29 @@ const App: React.FC = () => {
       setV2Failed(true);
     }
   }, []);
+  // Key fit (v15.2, critique M2): a fall is starting (a pause, a stop, leaving v2, a retune, a seek's host glide), so a
+  // duck rise in flight stops where it is: it must never run on through the fall (a swell). With resumeAt the rest of
+  // the rise waits until then; without, the next wanted send carries on from the held value. No React state.
+  const holdKeyFitRise = useCallback((resumeAt?: number | null) => {
+    const d = keyFitDuckRef.current;
+    if (!d || d.disposed) return;
+    try { d.holdRise(resumeAt ?? null); } catch {}
+  }, []);
+  // When a duck rise may start (keyFit.ts riseHold): the player's own holds (a retune's silence, a drone rest), a layer
+  // fading to off (review A1), a track change the level tick has not seen yet or the host glide it started for it
+  // (review A3) and `extra`, moved past a drone rest that start would run into (review A2). Null when nothing holds.
+  const keyFitHold = useCallback((...extra: Array<number | null>): number | null => {
+    const d = keyFitDuckRef.current;
+    const track = d && !d.disposed
+      ? trackHold(d.state().t, keyFitTrackAtRef.current, (v2LoopRef.current.glideUntil - performance.now()) / 1000)
+      : null;
+    return riseHold(layerPlayerRef.current?.state() ?? null, keyFitUserFallRef.current, track, ...extra);
+  }, []);
   // Stop-class actions (Emergency Stop, Music only on, Safety Mute, leaving v2): a fast host fall, then silence.
-  const stopLayersNow = useCallback((glideS: number) => callPlayer((p) => { p.setHostLevel(0, { glideS }); p.play(null); }), [callPlayer]);
+  const stopLayersNow = useCallback((glideS: number) => {
+    holdKeyFitRise();
+    callPlayer((p) => { p.setHostLevel(0, { glideS }); p.play(null); });
+  }, [callPlayer, holdKeyFitRise]);
   // A failed v2 is done for the session: dispose at once; classicLayerGain brings classic back.
   useEffect(() => {
     if (!v2Failed) return;
@@ -3419,6 +3496,11 @@ const App: React.FC = () => {
     setDroneChoice(next);
     try { localStorage.setItem(KEY_DRONE_ENABLED, String(next)); } catch {}
   }, [droneEnabled]);
+  const toggleKeyFit = useCallback(() => {
+    const next = !keyFitOn;
+    setKeyFitChoice(next);
+    try { localStorage.setItem(KEY_FIT_STORAGE_KEY, String(next)); } catch {}
+  }, [keyFitOn]);
   const toggleMusicOnly = useCallback(() => setMusicOnly((v: boolean) => !v), []);
 
   // Live inputs for the stable callbacks below (the level tick reads them 4×/s).
@@ -3440,6 +3522,18 @@ const App: React.FC = () => {
     return musicGainFactor(s.volume, { musicPlaying: s.isPlaying, mobile: IS_MOBILE_DEVICE, elementVolumeTakes: takes, duckCompensation: MOBILE_MUSIC_DUCK_COMPENSATION }) * MUSIC_OUTPUT_LEVEL * env;
   }, []);
   const v2Gains = () => ({ tone: sliderGain(solfeggioVolume, TONE_SLIDER_DEFAULT), beat: sliderGain(binauralVolume, BEAT_SLIDER_DEFAULT), drone: droneEnabled ? 1 : 0 });
+  // The sliders' gains into the player. Key fit (v15.2, review A1): a layer faded to off (the drone switch, a slider to
+  // 0) is a fall, so a duck rise in flight waits for the fade's end and the fit effect holds the next one until then.
+  const setV2Gains = (p: LayerPlayer): void => {
+    const g = v2Gains();
+    let end: number | null = null;
+    try { end = userFallEnd(p.state(), g); } catch {}
+    p.setLayerGains(g);
+    if (end !== null) {
+      keyFitUserFallRef.current = laterHold(keyFitUserFallRef.current, end);
+      try { holdKeyFitRise(keyFitHold()); } catch {}
+    }
+  };
 
   // The plan, in one task per change (the player batches nothing across tasks). planBand is read but only
   // isGammaPlan is a dependency: within delta…beta the carrier never moves, so band steps reach the player
@@ -3451,14 +3545,16 @@ const App: React.FC = () => {
     const musicOnlyOn = !prevMusicOnlyRef.current && musicOnly; prevMusicOnlyRef.current = musicOnly;
     if (!v2Active) { if (wasActive) { stopLayersNow(0.25); scheduleLayerDispose(); } return; }   // classic: no player calls (none at all once disposed, 3 s on)
     cancelLayerDispose();                                                   // back within 3 s: keep the player (S24)
-    if (!v2Wanted) { if (musicOnlyOn) stopLayersNow(0.1); else callPlayer((p) => p.play(null)); return; }  // pause = designed fades
+    if (!v2Wanted) { if (musicOnlyOn) stopLayersNow(0.1); else { holdKeyFitRise(); callPlayer((p) => p.play(null)); } return; }  // pause = designed fades
     if (!ensureLayerPlayer()) return;
     const p2 = v2Plan(layer.f, planOutput, render === 'binaural' ? 'binaural' : 'monaural', BANDS[planBand]);
-    callPlayer((p) => { p.setHostLevel(hostLevelNow()); p.setLayerGains(v2Gains()); p.play(p2, render, !toneOnly); });
-  }, [v2Active, v2Wanted, layer.f, planOutput, render, toneOnly, isGammaPlan, musicOnly, ensureLayerPlayer, callPlayer, stopLayersNow, hostLevelNow, scheduleLayerDispose, cancelLayerDispose]);
+    callPlayer((p) => { p.setHostLevel(hostLevelNow()); setV2Gains(p); p.play(p2, render, !toneOnly); });
+    // Key fit (v15.2, critique M2): a retune closes the gates, so a duck rise in flight waits for its silence.
+    try { const st = layerPlayerRef.current?.state() ?? null; if (st && st.phase === 'retuning') holdKeyFitRise(keyFitHold()); } catch {}
+  }, [v2Active, v2Wanted, layer.f, planOutput, render, toneOnly, isGammaPlan, musicOnly, ensureLayerPlayer, callPlayer, stopLayersNow, hostLevelNow, scheduleLayerDispose, cancelLayerDispose, holdKeyFitRise, keyFitHold]);
 
   // Slider gains and the beat (band steps glide, τ 3 s, in the player).
-  useEffect(() => { if (v2Active) callPlayer((p) => p.setLayerGains(v2Gains())); }, [v2Active, solfeggioVolume, binauralVolume, droneEnabled, callPlayer]);
+  useEffect(() => { if (v2Active) callPlayer((p) => setV2Gains(p)); }, [v2Active, solfeggioVolume, binauralVolume, droneEnabled, callPlayer]);
   useEffect(() => { if (v2Active) callPlayer((p) => p.setBeat(BANDS[planBand])); }, [v2Active, planBand, callPlayer]);
 
   // The host follows the music 4×/s while v2 is wanted. A seek or a track change (the scrubber, the lock screen,
@@ -3467,18 +3563,25 @@ const App: React.FC = () => {
   const v2LoopRef: { current: { pos: number; wall: number; src: string; glideUntil: number; phiKey: string } } = useRef({ pos: 0, wall: 0, src: '', glideUntil: 0, phiKey: '' });
   useEffect(() => {
     if (!v2Active || !v2Wanted) return;                                      // nothing wanted: the host is held, never resent
+    // Key fit (v15.2, critique M2, review A3): the host glides for the next 2 s, so a duck rise in flight or waiting (a
+    // switch's, or a new track's held for this tick to see the change) waits for that window's end.
+    const holdGlideRise = () => {
+      const d = keyFitDuckRef.current;
+      if (!d || d.disposed) return;
+      try { holdKeyFitRise(keyFitHold(d.state().t + 2)); } catch {}
+    };
     const tick = () => {
       const L = v2LoopRef.current, el = mainAudioRef.current, now = performance.now();
       if (el) {
         const pos = el.currentTime || 0, src = el.currentSrc || el.src || '';
         if (L.wall > 0) {
           const expected = L.pos + (el.paused ? 0 : ((now - L.wall) / 1000) * (el.playbackRate || 1));
-          if (src !== L.src || Math.abs(pos - expected) > 1) L.glideUntil = now + 2000;   // seek / track change
+          if (src !== L.src || Math.abs(pos - expected) > 1) { L.glideUntil = now + 2000; holdGlideRise(); }   // seek / track change
         }
         L.pos = pos; L.wall = now; L.src = src;
       }
       const s = v2InRef.current, phiKey = `${s.phiOn}|${s.isPlaying}`;
-      if (L.phiKey && phiKey !== L.phiKey) L.glideUntil = now + 2000;        // φ toggles, play after tone-only
+      if (L.phiKey && phiKey !== L.phiKey) { L.glideUntil = now + 2000; holdGlideRise(); }   // φ toggles, play after tone-only
       L.phiKey = phiKey;
       const level = hostLevelNow();
       callPlayer((p) => p.setHostLevel(level, now < L.glideUntil ? { glideS: 1.5 } : undefined));
@@ -3486,7 +3589,36 @@ const App: React.FC = () => {
     tick();
     const id = window.setInterval(tick, 250);
     return () => { window.clearInterval(id); v2LoopRef.current.wall = 0; };
-  }, [v2Active, v2Wanted, callPlayer, hostLevelNow]);
+  }, [v2Active, v2Wanted, callPlayer, hostLevelNow, holdKeyFitRise, keyFitHold]);
+
+  // Key fit (v15.2, review A3): when the playing track changes, the time on the duck's clock. The fit effect below (same
+  // commit, declared after) holds a rise for DUCK_TRACK_HOLD_S from it, so a new track's rise never starts before the
+  // level tick has seen the new source; the tick's glide hold then takes over.
+  useEffect(() => {
+    const d = keyFitDuckRef.current;
+    try { keyFitTrackAtRef.current = d && !d.disposed ? d.state().t : null; } catch { keyFitTrackAtRef.current = null; }
+  }, [fitTrackId]);
+
+  // Key fit (v15.2): retarget the duck when the applied duck changes (a track, its key data, the crystal, the output,
+  // tone alone, the switch). Never from a timer; nothing is sent while the layers aren't wanted, so they come back at
+  // the duck they left. A rise waits for a retune's silence, a resting drone's close or a drone rest about to start
+  // (keyFit.ts riseHoldFrom: the player's A8 rule, applied to the duck), a layer's fade to off and a new track the
+  // level tick has not seen yet (keyFitHold); the switch's rise also waits out a host glide (a seek or a track change:
+  // critique M2). A fall sent while the gates are both shut lands at once (review A4). The switch lands in ~0.15 s
+  // (τ 0.05 s); everything else glides, τ 2 s.
+  useEffect(() => {
+    if (!v2Active || !v2Wanted) return;
+    const duck = keyFitDuckRef.current;
+    if (!duck || duck.disposed) return;
+    const flip = keyFitSentOnRef.current !== null && keyFitSentOnRef.current !== keyFitOn;
+    let hold: number | null = null, silent = false;
+    try {
+      hold = keyFitHold(flip ? hostGlideHold(duck.state().t, (v2LoopRef.current.glideUntil - performance.now()) / 1000) : null);
+      silent = gatesSilent(layerPlayerRef.current?.state() ?? null);
+    } catch {}
+    duck.setTarget(keyFitView.appliedDb, { tauS: flip ? DUCK_FLIP_TAU_S : DUCK_TAU_S, holdRiseUntil: hold, silent });
+    keyFitSentOnRef.current = keyFitOn;
+  }, [v2Active, v2Wanted, keyFitOn, keyFitView.appliedDb, keyFitHold]);
 
   // I6: 2 s after v2 takes over (classic's bus is at −69.5 dB by then), stop classic's tone and beat nodes behind
   // it, so they don't run (and get automated by the φ loop) for the whole visit. Every reader of these refs is
@@ -3558,7 +3690,10 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!IS_DEV_BUILD) return;
     const w = window as unknown as { __aetheriaLayers?: unknown };
-    w.__aetheriaLayers = { state: () => layerPlayerRef.current?.state() ?? null, created: () => layerPlayerRef.current !== null, mobile: IS_MOBILE_DEVICE };
+    w.__aetheriaLayers = {
+      state: () => layerPlayerRef.current?.state() ?? null, created: () => layerPlayerRef.current !== null, mobile: IS_MOBILE_DEVICE,
+      keyFit: () => keyFitDuckRef.current?.state() ?? null, glideUntil: () => v2LoopRef.current.glideUntil,
+    };
     return () => { delete w.__aetheriaLayers; };
   }, []);
 
@@ -3612,6 +3747,7 @@ const App: React.FC = () => {
         beat_db: beatOn ? gainToDb(LEVEL_BEAT * g.beat) : null,
         drone_db: droneOn ? gainToDb(LEVEL_DRONE_SUB * g.drone) : null,
         drone_resting: !!st && st.resting, music_only: musicOnly, v2_failed: v2Failed,
+        ...keyFitLogFields(keyFitView),
       };
     }
     const mapped = applyLoShuPerfectMap(selectedSolfeggio), music = on && isPlaying;
@@ -3629,6 +3765,9 @@ const App: React.FC = () => {
       drone_resting: false, music_only: musicOnly, v2_failed: v2Failed,
     };
   };
+  // Key fit (v15.2): with it on, a change of the duck that applies is a change of what is heard (one entry); off, the
+  // fit fields ride along on other entries only.
+  const fitLogKey = keyFitOn ? `on|${keyFitView.appliedDb.toFixed(1)}` : 'off';
   useEffect(() => {
     const log = soundLogRef.current;
     if (!log) return;
@@ -3647,7 +3786,7 @@ const App: React.FC = () => {
     }
     if (!S.open || (v2Active && layersOnNow && !layerStatus)) return;   // v2: wait for the player's first transition
     if (log.note(soundLogEntry(), now)) saveSoundLogSoon();
-  }, [listeningNow, v2Active, v2Failed, musicOnly, layersOnNow, layerOutput, logRender, logF, droneEnabled, statusKey, statusResting, flushSoundLog, saveSoundLogSoon]);
+  }, [listeningNow, v2Active, v2Failed, musicOnly, layersOnNow, layerOutput, logRender, logF, droneEnabled, statusKey, statusResting, flushSoundLog, saveSoundLogSoon, fitLogKey]);
   // Band steps, retunes and drone rests are counted into the open session.
   const prevBandNameRef: { current: string } = useRef(selectedBinaural.name);
   useEffect(() => {
@@ -3735,6 +3874,12 @@ const App: React.FC = () => {
     () => bandChipText(v2Active || v2CarFallback, selectedBinaural.name, render, presetBand, planBand),
     [v2Active, v2CarFallback, selectedBinaural.name, render, presetBand, planBand]
   );
+  // Key fit (v15.2): the chip while on and the layers are wanted; the card's line always (v2).
+  const keyFitChipShown = v2Active && keyFitOn && v2Wanted;
+  const keyFitChipLabel = useMemo(() => keyFitChipText(keyFitView), [keyFitView]);
+  const keyFitChipHint = useMemo(() => keyFitChipTitle(keyFitView), [keyFitView]);
+  const keyFitChipLook = keyFitChipTone(keyFitView);
+  const keyFitRowLine = useMemo(() => keyFitRowText(keyFitView), [keyFitView]);
   // The v2 sliders' dB readouts. The beat slider follows the output (the car has no beat), not tone-only; under the Car
   // fallback (v15.0.1) it is v2's Car slider, off, and its title says why.
   const toneLevelText = useMemo(() => toneReadout(sliderGain(solfeggioVolume, TONE_SLIDER_DEFAULT)), [solfeggioVolume]);
@@ -7407,7 +7552,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -8739,6 +8884,8 @@ registerProcessor('wav-capture', WavCapture);
 
                    {/* Music only (v14.6, the same switch) and the layer sound A/B (v14.9). */}
                    <LayerSoundPanel variant="panel" {...layerPanelProps} />
+                   {/* Key fit (v15.2), v2 only. */}
+                   {v2Active && <KeyFitRow on={keyFitOn} status={keyFitRowLine} onToggle={toggleKeyFit} />}
 
                    {/* Phi Integration Panel */}
                    <div className="border border-purple-500/30 rounded-xl overflow-hidden bg-slate-900/50 shadow-[0_0_15px_rgba(147,51,234,0.1)]">
@@ -10335,7 +10482,9 @@ registerProcessor('wav-capture', WavCapture);
                             {playlist[currentSongIndex]?.name || "Aetheria Harmonic Player"}
                         </span>
                         
-                        <div className="flex items-center gap-2">
+                        {/* Key fit (v15.2, review B2): with its chip shown the chips wrap whole onto a second line on a
+                            phone (the chip never breaks mid-label); without it, the row is exactly v15.1's. */}
+                        <div className={keyFitChipShown ? 'flex flex-wrap justify-center items-center gap-x-2 gap-y-1' : 'flex items-center gap-2'}>
                          {(() => {
                            // Footer Hz pill — reflects Lo Shu Perfect mode by displaying
                            // the swapped GUT counterpart and tinting the pill emerald, so
@@ -10450,6 +10599,9 @@ registerProcessor('wav-capture', WavCapture);
                          </span>
                          {showLayerChrome && (
                            <LayersBadge text={layersBadgeLabel} tooltip={layersBadgeTooltip} onOpen={openLayerSwitch} />
+                         )}
+                         {keyFitChipShown && (
+                           <KeyFitChip text={keyFitChipLabel} title={keyFitChipHint} tone={keyFitChipLook} />
                          )}
                          {musicOnly && (
                            <span

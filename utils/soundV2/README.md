@@ -11,6 +11,7 @@ vendored package; the rest is the web app's own code around it.
 | `layerPlayer.ts` | The v2 layer player: one Web Audio graph per context, built once, driven only through ParamTracks |
 | `layerHost.ts` | What App needs around it: the persisted A/B choices, crystal resolution, output → render, sliders and dB, band hysteresis, the music level the layers follow |
 | `soundLog.ts` | The sound log (localStorage, budgeted), exported from Harmonic Control |
+| `keyFit.ts` | Key fit (v15.2): the fit of the canonical tone against the playing track's key data (v2's own `musicFit`), its cache and copy view, and `KeyFitDuck`, the gain the v2 layers play through |
 | `*.check.ts` | Node checks, run by `npm run check:sound` |
 
 ## The vendored package
@@ -49,7 +50,8 @@ Node, tsc and the pin check all accept):
 - What app and player code may import from `aetheria_sound_v2.ts`: `plan`, `toneOf`, `carrierOf`,
   `frequencyOf`, `BANDS`, `BAND_ORDER`, `bandForIntensity`, `phiEnvelope`, `SOLFEGGIO`,
   `PERFECT_GUT`, `HEART`, `HEAD`, the `LEVEL_*`, `MOD_DEPTH`, `GATE_*` and `DRONE_*` constants,
-  `VERSION`, and the types `Plan`, `Band`, `Output` (with `import type`). Not `PHI` / `INV_PHI` in
+  `VERSION`, `musicFit` and `DUCK_DB` (Key fit, v15.2: `keyFit.ts` only), and the types `Plan`, `Band`, `Output`,
+  `Fit` (with `import type`). Not `PHI` / `INV_PHI` in
   App (it has its own, from `phiIntegration`). Rollup tree-shakes the rest out of the bundle;
   `test_vectors.json` is never imported by app code.
 - **The vendored `LayerGraph` is not used**, and app and player code never import `LayerGraph`,
@@ -75,7 +77,19 @@ spec (E-blink applies each call on its own and re-times a task's past events to 
 E-gecko rounds times to frames and applies a task as one batch; E-ideal is exact), with ticks of 1 s,
 60 s and none, and the engine 20 ms behind to 300 ms ahead of the player's clock: about 2,000 runs in
 7 s. `--only=S13` runs the scenarios whose names start with S13; `--timing` prints each scenario's
-time. Its engines are models: no real browser runs them (the dev page does, in Chrome and Edge).
+time. Its engines are models: no real browser runs them (the dev page does, in Chrome and Edge). It also
+runs Key fit's duck through E-blink and E-gecko at every lag, held to the same A1 bounds.
+
+`keyFit.check.ts` (v15.2) checks Key fit: `keyFitFor` is `musicFit` bit for bit at the heard A4 (the
+track's own A4 × the app's 0.981818 retune) and the canonical tone of the plan output, with pinned
+literals on synthetic fixtures; no key data means no duck; the content-keyed cache; the view and the
+copy; the duck's automation on a fake engine (anchors and glides only, never −0, a rise held for a
+retune, `holdRise`, a fall in silence landing at once, unity always sent back exactly); its continuity
+under an evaluator of its own; and no swell where a duck rise meets a fall (the real player and duck
+driven the way App drives them: a host glide, a pause, a stop, leaving v2, a retune, a drone rest, a
+layer faded to off by the user in either order, a rest where a held rise starts, a track change measured
+from its commit), each scenario with a control that must swell, and no layer opening above the level it
+settles at when a fall is sent in silence.
 
 ## In the app
 
@@ -98,9 +112,22 @@ time. Its engines are models: no real browser runs them (the dev page does, in C
   on plan changes, `setBeat()` on band steps, `setLayerGains()` from the sliders, `setHostLevel()` from
   a 250 ms tick while layers are wanted. Leaving v2 fades the layers at once and disposes the player 3 s
   later; the next player resumes the drone duty.
+- **Key fit (v15.2, v2 only, off by default; `aetheria.keyFit.v1`, written only from its switch):** the
+  player plays into one `KeyFitDuck` per context, which lowers the tone, beat and drone together by 0 to
+  6 dB where the canonical tone would rub against the playing track's key data (none without key data, for
+  an unclear key, or for the tone alone), gliding with τ 2 s, or 0.05 s when the switch flips; the music
+  never passes through it, and classic never makes it. It is driven only by ParamTrack anchors and glides
+  and sends nothing while the layers aren't wanted. A duck rise waits for the falls App knows of: a
+  retune's silence, a resting drone's close, a drone rest about to start (checked again where a held rise
+  starts), a layer the user fades to off (the drone switch, a slider to 0), a track change until the level
+  tick has seen it, and for the switch a host glide in progress; a rise in flight stops when a pause, a
+  stop, leaving v2, a retune, a seek, a track change or a fade to off begins. A fall sent while both gates
+  are shut lands at once, so the layers never open above their ducked level. Not covered: a volume drag
+  or a slider lowered (not to 0) while a switch's rise is in flight, a level change rather than a close.
 - The UI lives in `components/layers/` (prop-driven, copy in `layerCopy.ts`, checked by
-  `layerHost.check.ts`). Dev builds expose `window.__aetheriaLayers` (`state()`, `created()`, `mobile`)
-  for the e2e suite; production builds strip it.
+  `layerHost.check.ts` and `keyFit.check.ts`). Dev builds expose `window.__aetheriaLayers` (`state()`,
+  `created()`, `mobile`, and since v15.2 `keyFit()`, the duck's state, and `glideUntil()`, the level
+  tick's host-glide window end in `performance.now()` ms) for the e2e suite; production builds strip it.
 
 ## Where v2 deliberately differs from the GDScript reference
 
@@ -137,9 +164,14 @@ drone duty against the designed curves, with Listen buttons for by-ear checks on
   '<scratch>/vite-cache', server: { port: 3201, strictPort: true } })` — and drive it with
   `chromium.launch({ channel: 'chrome' | 'msedge' })` from `e2e/node_modules/@playwright/test`. The
   e2e suite also runs it (Chrome and Edge, desktop only). Firefox is not installed on this PC.
-- **What it ends with:** `ALL PASS (37)` in Chrome and Edge (18 rows per mode, virtual clock and
-  suspend, plus the LayerGraph control), in about 18 s; an engine without
-  `OfflineAudioContext.suspend` (Firefox) runs the 18 virtual-clock rows only. C13c pauses right
+- **What it ends with:** `ALL PASS (46)` in Chrome and Edge (22 rows per mode, virtual clock and
+  suspend, plus C14b, which runs on the virtual clock only, and the LayerGraph control), in about 18 s;
+  an engine without `OfflineAudioContext.suspend` (Firefox) runs the 23 virtual-clock rows only. Key fit
+  (v15.2) adds C14 (the duck alone: its render is its gain curve), C14b (the duck on the layers, and the
+  same session with no duck bit-identical to a duck never sent anything), C15 / C15b (no swell where
+  a duck rise meets a host glide, a pause, leaving v2, a stop or a drone rest, including a rise held to
+  a glide's end that falls inside a rest) and C15c (a layer the user fades to off with the switch inside
+  the fade, in both orders). C13c pauses right
   after a seek's 1.5 s host jump, with App's resends left pending: the jump must stop there (a
   player that let it run on swelled the closing drone +3.4 dB in both browsers).
 - **What it found** (Chrome 155 and Edge 155): the renders follow the designed curves to within
@@ -149,3 +181,6 @@ drone duty against the designed curves, with Listen buttons for by-ear checks on
   ~24 s after each beat change the binaural beat is ~0.55 Hz off (no click: an oscillator's phase
   stays continuous). C8 checks the glide's τ over its first 3 s and reports the stall; C3 and C4
   take the two glided oscillators' phases from the render.
+- **What C14 found** (v15.2, Chrome 156 and Edge 155, both modes): Key fit's duck follows its designed
+  exponentials to within 3.1e-5 over each glide's first 3 τ; the same recurrence leaves a τ 2 s rise
+  7.15e-4 short of unity (0.006 dB) until 10 τ, where it snaps there (no click: 0.72 of C14's step bound).

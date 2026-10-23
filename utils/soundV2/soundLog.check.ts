@@ -295,6 +295,29 @@ check(SOUND_LOG_KEY === 'aetheria.soundSessions.v1' && SOUND_LOG_MAX_SESSIONS ==
     'exportJson() round-trips through JSON.parse');
 }
 
+{
+  // Key fit (v15.2): the nine fields ride on a v2 entry as typed fields; they round-trip through a flush and a new
+  // log's load unchanged (null fit_db and track_key included), and a change of the applied duck alone is an entry.
+  const fit = (duck: number, fitDb: number | null, key: string | null): Partial<SoundLogFields> => ({
+    key_fit: true, duck_db: duck, fit_db: fitDb, fit_rel: fitDb === null ? null : 0.887, fit_strength: fitDb === null ? null : 1,
+    fit_tone_hz: 528, fit_a4_hz: fitDb === null ? null : 432, track_key: key, key_confidence: fitDb === null ? null : 0.9,
+  });
+  const st = fakeStorage();
+  const log = createSoundLog(st);
+  log.load();
+  log.open(1);
+  const a = entry(0, fit(-6, -6, 'C#')), b = entry(0, fit(-3, -6, 'C#')), c = entry(0, { ...fit(0, null, null), key_fit: false });
+  check(log.note(a, 2) === true && log.note(b, 3) === true, 'Key fit: two entries that differ only in duck_db are two entries');
+  check(log.note(c, 4) === true && log.flush() === true, 'Key fit: an entry with fit_db and track_key null is noted and flushed');
+  const back = createSoundLog(st);
+  back.load();
+  const got = JSON.parse(back.exportJson()).sessions[0]?.entries ?? [];
+  const want = [a, b, c].map((e, i) => ({ at: i + 2, ...e }));
+  const keys = ['key_fit', 'duck_db', 'fit_db', 'fit_rel', 'fit_strength', 'fit_tone_hz', 'fit_a4_hz', 'track_key', 'key_confidence'];
+  check(got.length === 3 && got.every((e: Record<string, unknown>, i: number) => keys.every((k) => k in e && e[k] === (want[i] as Record<string, unknown>)[k])),
+    `Key fit: the nine fields round-trip through flush() and a new log's load() unchanged (${JSON.stringify(got.map((e: Record<string, unknown>) => [e.duck_db, e.fit_db, e.track_key]))})`);
+}
+
 console.log(`soundLog: ${passed} checks passed, ${failures.length} failed`);
 for (const f of failures.slice(0, 20)) console.log('  FAILED ' + f);
 process.exit(failures.length ? 1 : 0);

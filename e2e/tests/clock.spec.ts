@@ -1,6 +1,6 @@
 import { type Page } from '@playwright/test';
 import { test, expect, ON_DEVICE } from './fixtures';
-import { openApp, importTones, elapsedSeconds, seedLayers, layersState, LAYER_ENGINE_KEY } from './helpers';
+import { openApp, acceptDisclaimer, importTones, elapsedSeconds, seedLayers, layersState, expectCache, seedTracks, keyFitState, keyFitChip, LAYER_ENGINE_KEY } from './helpers';
 
 // v14.8: while music plays, App sets its transport time (the clock text, the
 // seek bar, the φ phase badge and the lock screen's position) four times a
@@ -86,17 +86,29 @@ const seconds = (text: string) => {
 // The heat guard runs once per engine (v15.0): Classic, chosen, and v2, the default a new profile plays, with its
 // output answered (Headphones) beforehand as a user's would be. v2's own work (its 250 ms host tick and the player's
 // tick) must set no React state, so it holds the same commit and draw budget. The φ gains are classic's: under v2
-// they are torn down 2 s after it takes over (its host level follows the φ envelope instead).
-async function playingKeepsUp(page: Page, engine: 'classic' | 'default'): Promise<void> {
-  const v2 = engine === 'default';
+// they are torn down 2 s after it takes over (its host level follows the φ envelope instead). v15.2 adds a third run,
+// v2 with Key fit on and a ducked track (the heat rule, build spec D16): the same budget, and the duck is sent
+// nothing at all while the track plays on (its request counter stays put across the six windows).
+async function playingKeepsUp(page: Page, engine: 'classic' | 'default' | 'keyfit'): Promise<void> {
+  const v2 = engine !== 'classic';
+  const keyFit = engine === 'keyfit';
   // The user's phone, where the renders were the heat (the canvas is CSS-px sized, so this is its load too).
   await page.setViewportSize({ width: 411, height: 752 });
   await recordTransport(page);
-  const dialogs = await openApp(page, { query: '?perf=1', engine });
-  if (v2) await seedLayers(page, { output: 'headphones' });
+  const dialogs = await openApp(page, { query: '?perf=1', engine: v2 ? 'default' : 'classic' });
+  if (v2) await seedLayers(page, keyFit ? { output: 'headphones', keyFit: true } : { output: 'headphones' });
   await importTones(page, 1, 120);
+  if (keyFit) {
+    // The track at 528 Hz with key data that rubs (one-hot C#, confidence 0.9: −6 dB), then back to the HUD page.
+    await expectCache(page, { blobs: 1, meta: 1, library: 1 });
+    await seedTracks(page, [{ index: 0, crystal: 528, key: { chroma: Array.from({ length: 12 }, (_, i) => (i === 1 ? 1 : 0)), chromaA4Hz: 440, keyConfidence: 0.9, musicKey: 'C#' } }]);
+    await page.goto('/?perf=1');
+    await acceptDisclaimer(page);
+  }
   await page.getByText('tone-01', { exact: true }).click();
   await expect.poll(() => elapsedSeconds(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+  if (keyFit) await expect(keyFitChip(page)).toHaveAttribute('aria-label', 'Key fit −6.0 dB', { timeout: 10_000 });
+  const requests0 = keyFit ? (await keyFitState(page)).requests : 0;
 
   // Six whole HUD windows of steady playing, from the one after the window under way.
   const from = (await hudCount(page)) + 1;
@@ -105,6 +117,7 @@ async function playingKeepsUp(page: Page, engine: 'classic' | 'default'): Promis
   const phi0 = await page.evaluate(() => (window as any).__t.phi as number);
   await expect.poll(() => hudCount(page), { timeout: 20_000 }).toBeGreaterThanOrEqual(from + 6);
   const t1 = await now(page);
+  const requests1 = keyFit ? (await keyFitState(page)).requests : 0;
   const T = await page.evaluate(() => (window as any).__t);
   const windows = (T.hud as string[]).slice(from, from + 6).map(parseHud);
   const span = (t1 - t0) / 1000;
@@ -113,8 +126,9 @@ async function playingKeepsUp(page: Page, engine: 'classic' | 'default'): Promis
   // The engine under test is the one playing: v2's player, never saved as a choice; or classic, with no player.
   test.info().annotations.push({
     type: 'hud',
-    description: `${engine}: commits/s ${windows.map((w) => w.commits).join(', ')}; draws/s ${windows.map((w) => w.draws).join(', ')}; rAF/s ${windows.map((w) => w.raf).join(', ')}; φ gain updates/s ${((T.phi - phi0) / span).toFixed(1)}`,
+    description: `${engine}: commits/s ${windows.map((w) => w.commits).join(', ')}; draws/s ${windows.map((w) => w.draws).join(', ')}; rAF/s ${windows.map((w) => w.raf).join(', ')}; φ gain updates/s ${((T.phi - phi0) / span).toFixed(1)}${keyFit ? `; Key fit requests ${requests0} → ${requests1}` : ''}`,
   });
+  if (keyFit) expect(requests1, 'requests to the duck while the track plays on (none: nothing it hears changes)').toBe(requests0);
   if (v2) {
     expect((await layersState(page))?.requested?.tone_hz ?? 0, 'the v2 layers play').toBeGreaterThan(0);
     expect(await page.evaluate((k) => localStorage.getItem(k), LAYER_ENGINE_KEY)).toBeNull();
@@ -176,9 +190,9 @@ async function playingKeepsUp(page: Page, engine: 'classic' | 'default'): Promis
   expect(dialogs).toEqual([]);
 }
 
-for (const engine of ['classic', 'default'] as const) {
-  const which = engine === 'default' ? 'v2, the default' : 'classic';
-  const keepUp = engine === 'default' ? 'the clock, the seek bar and the lock screen' : 'the clock, the seek bar, the lock screen and the φ gains';
+for (const engine of ['classic', 'default', 'keyfit'] as const) {
+  const which = engine === 'default' ? 'v2, the default' : engine === 'keyfit' ? 'v2 with Key fit on' : 'classic';
+  const keepUp = engine !== 'classic' ? 'the clock, the seek bar and the lock screen' : 'the clock, the seek bar, the lock screen and the φ gains';
   test(`playing (${which}), App commits a few times a second and the visualizer draws its 30 frames; ${keepUp} keep up @mobile`, async ({ page }) =>
     playingKeepsUp(page, engine));
 }

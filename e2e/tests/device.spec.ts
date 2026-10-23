@@ -1,5 +1,5 @@
 import { test, expect, ON_DEVICE } from './fixtures';
-import { openApp, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState } from './helpers';
+import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY } from './helpers';
 import { adb, mediaSession, chromeSessions } from './adb';
 
 // Checks only a real phone can make (npm run test:device). Android's own media
@@ -94,13 +94,27 @@ test('with the screen off, playback keeps advancing gaplessly and the lock-scree
   // Turns the screen off; on a phone with a secure lock it stays locked after
   // the test (unlock it by hand). Put any other device test before this one.
   // E2E_LAYER_ENGINE=v2 runs it with the v2 layers and checks they follow each
-  // gapless swap; unset, it is the classic test.
-  const V2 = process.env.E2E_LAYER_ENGINE === 'v2';
+  // gapless swap; unset, it is the classic test. E2E_KEY_FIT=1 (v15.2; implies v2) also gives every track key data
+  // and turns Key fit on, and checks the duck retargets with the screen off.
+  const KEY_FIT = process.env.E2E_KEY_FIT === '1';
+  const V2 = process.env.E2E_LAYER_ENGINE === 'v2' || KEY_FIT;
   const dialogs = await openApp(page);
   if (V2) await seedLayers(page, { engine: 'v2', output: 'headphones' });
   await importTones(page, 28, 4);
   // Auto-Distribute gives every track a crystal, which the gapless advance needs.
   await page.getByRole('button', { name: /Auto-Distribute Frequencies/ }).click();
+  if (KEY_FIT) {
+    // Once the debounced save has the crystals: every track gets key data that rubs (one-hot C# at confidence 0.9) and
+    // a crystal of its own, alternating 528 Hz (−6 dB) and 396 Hz (0 dB), so every advance changes the duck and the
+    // crystal whatever Auto-Distribute chose (review C2: 9 of its 27 crystals give 0 dB for both earlier seeds). Key fit
+    // on, and a reload.
+    await expect.poll(async () => (await metaRecords(page)).filter((m) => m.closestSolfeggio !== null).length, { timeout: 30_000 }).toBe(28);
+    const rub = { chroma: Array.from({ length: 12 }, (_, i) => (i === 1 ? 1 : 0)), chromaA4Hz: 440, keyConfidence: 0.9, musicKey: 'C#' };
+    await seedTracks(page, Array.from({ length: 28 }, (_, i) => ({ index: i, crystal: i % 2 ? 396 : 528, key: rub })));
+    await page.evaluate((k) => localStorage.setItem(k, 'true'), KEY_FIT_KEY);
+    await page.goto('/');
+    await acceptDisclaimer(page);
+  }
   await page.getByText('tone-01', { exact: true }).click();
   await expect(page.getByTestId('now-playing-title')).toHaveText('tone-01');
   await expect.poll(() => mediaSession(), { timeout: 15_000 }).toEqual({ state: 'playing', title: 'tone-01' });
@@ -115,6 +129,7 @@ test('with the screen off, playback keeps advancing gaplessly and the lock-scree
   };
   await readV2('tone-01');
   const pausesBefore = await pauseCount(page);
+  const requestsBefore = KEY_FIT ? (await keyFitState(page)).requests : 0;
 
   adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
   try {
@@ -130,5 +145,7 @@ test('with the screen off, playback keeps advancing gaplessly and the lock-scree
   expect(await pauseCount(page)).toBe(pausesBefore);
   // v2 followed the swaps with the screen off (4 s tracks keep it retuning).
   if (V2) expect([...crystals].length, `crystals seen: ${[...crystals].join(', ')}`).toBeGreaterThanOrEqual(2);
+  // Key fit: the duck was retargeted with the screen off, once at least for each of the three advances (−6 ↔ 0 dB).
+  if (KEY_FIT) expect((await keyFitState(page)).requests, 'requests to the duck across the three advances').toBeGreaterThanOrEqual(requestsBefore + 3);
   expect(dialogs).toEqual([]);
 });

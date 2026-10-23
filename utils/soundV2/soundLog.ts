@@ -10,7 +10,7 @@
 // write: nothing is written before load() has read what is there, and every
 // flush re-reads the store and merges by session id, so sessions another tab
 // wrote in between survive. Records it cannot read are dropped; fields it
-// does not know are kept (v14.10 adds fit_* / duck_db). A stored value that
+// does not know are kept (v15.2 adds key_fit, duck_db and fit_*). A stored value that
 // is not a list of sessions is replaced, so a new format takes a new key.
 //
 // Pure: the storage is injected (null = none) and times come from the caller.
@@ -47,6 +47,16 @@ export type SoundLogFields = {
   drone_resting: boolean;
   music_only: boolean;
   v2_failed: boolean;
+  // Key fit (v15.2), v2 entries only (keyFit.ts keyFitLogFields):
+  key_fit?: boolean; // the switch
+  duck_db?: number; // the duck applied (dB, ≤ 0; 0 when off, without data, or with no music)
+  fit_db?: number | null; // what Key fit gives on this track, crystal and output (null = no key data)
+  fit_rel?: number | null;
+  fit_strength?: number | null;
+  fit_tone_hz?: number;
+  fit_a4_hz?: number | null; // the A the notes are heard at
+  track_key?: string | null;
+  key_confidence?: number | null;
 };
 
 export interface SoundLogEntry extends SoundLogFields {

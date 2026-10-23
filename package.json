@@ -1,7 +1,7 @@
 {
-  "name": "v15.1-aetheria:-harmonic-resonance-player",
+  "name": "v15.2-aetheria:-harmonic-resonance-player",
   "private": true,
-  "version": "15.1.0",
+  "version": "15.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,7 +13,7 @@
     "check:critical": "node scripts/check-critical.mjs",
     "check:hex": "node utils/hexWander.smoke.ts",
     "check:spectrum": "node utils/hexSpectrum.smoke.ts",
-    "check:sound": "node utils/soundV2/check_vectors.ts && node utils/soundV2/layerSchedule.check.ts && node utils/soundV2/layerPlayer.check.ts && node utils/soundV2/layerHost.check.ts && node utils/soundV2/soundLog.check.ts",
+    "check:sound": "node utils/soundV2/check_vectors.ts && node utils/soundV2/layerSchedule.check.ts && node utils/soundV2/layerPlayer.check.ts && node utils/soundV2/layerHost.check.ts && node utils/soundV2/soundLog.check.ts && node utils/soundV2/keyFit.check.ts",
     "check:chroma": "node utils/soundV2/chroma.check.ts && node utils/soundV2/keyAnalysis.check.ts",
     "check:analyse": "node utils/library/analysePass.check.ts",
     "parity:chroma": "node tools/chroma-parity.ts"
