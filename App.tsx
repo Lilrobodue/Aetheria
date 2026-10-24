@@ -98,6 +98,10 @@ import KeyFitChip from './components/layers/KeyFitChip';
 import LayerSoundPanel from './components/layers/LayerSoundPanel';
 import OutputSheet from './components/layers/OutputSheet';
 import OutputQuickSwitch from './components/layers/OutputQuickSwitch';
+// v15.4 UI kit and isolation.
+import Dialog, { ReadoutActions } from './components/ui/Dialog';
+import Button from './components/ui/Button';
+import { ViewBoundary, PanelFallback, SafeTransport, VisualsStoppedPill, modalFallback, panelFallback } from './components/ErrorBoundary';
 import LayersBadge from './components/layers/LayersBadge';
 import DbReadout from './components/layers/DbReadout';
 import {
@@ -212,6 +216,8 @@ const MUSIC_ONLY_FADE_TAU_S = 0.25;
 // Dev builds only (npm run dev, the e2e server): tests read the v2 player's
 // state. Vite strips this in production.
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
+// Inputs no one types in (v15.4 Zen): a focused slider or button does not hold the hidden UI open.
+const ZEN_NON_TEXT_INPUTS = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
 // The v2 layer frequency while classic plays: nothing resolved, nothing planned.
 const NO_LAYER: CanonicalLayer = { f: 0, id: null, canonical: false };
 // Analyse tracks (v15.1) treats a phone as a phone even with "Desktop site" on, which hides it from
@@ -1253,7 +1259,7 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 {/* Header */}
                 <div className="p-6 bg-slate-950/50 border-b border-slate-800 flex justify-between items-center">
                     <h3 className="text-xl font-serif text-gold-400">Quick Guide</h3>
-                    <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors"><X size={24} /></button>
+                    <button onClick={onClose} aria-label="Close" className="text-slate-500 hover:text-white transition-colors"><X size={24} /></button>
                 </div>
 
                 {/* Content */}
@@ -1363,6 +1369,12 @@ const App: React.FC = () => {
   const [isZenMode, setIsZenMode] = useState(false);
   const [zenUiVisible, setZenUiVisible] = useState(true);
   const zenTimeoutRef = useRef<number | null>(null);
+  // v15.4: Zen's reveal (the effect's handler) for the root's tap and the "Show controls" button, and whether the UI
+  // shows now (taps while it shows keep it showing).
+  const zenRevealRef: { current: (() => void) | null } = useRef(null);
+  const zenShownRef: { current: boolean } = useRef(true);
+  // The UI layer Zen hides (its inert wrapper): a field focused inside it keeps the UI showing.
+  const zenLayerRef: { current: HTMLDivElement | null } = useRef(null);
 
   const [isRecording, setIsRecording] = useState(false);
   const [showRecordOptions, setShowRecordOptions] = useState(false);
@@ -1779,6 +1791,10 @@ const App: React.FC = () => {
     kind?: 'cache-tracks' | 'cache-state';
   };
   const [statusToast, setStatusToast] = useState<StatusToast | null>(null);
+  // v15.4: the readout dialog (Current Track Analysis, Library Diagnostics, and the long notices' Details) and the
+  // row Delete's confirmation, in the kit's Dialog instead of alert()/confirm().
+  const [infoDialog, setInfoDialog] = useState<{ title: string; body: string } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
   const statusToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stickyToastRef = useRef<StatusToast | null>(null);
   const showStatusToast = useCallback((
@@ -2627,6 +2643,15 @@ const App: React.FC = () => {
     deleteTracksFromCache([songId]);
   }, [playlist, currentSongIndex]);
 
+  // The row Delete's confirmation (v15.4): delete exactly as before, unless the track is no longer in the library
+  // (a Clear while the dialog was open). The cancel button takes the first focus, so a stray Enter keeps the track.
+  const deleteCancelRef: { current: HTMLButtonElement | null } = useRef(null);
+  const confirmPendingDelete = () => {
+    const target = pendingDelete;
+    setPendingDelete(null);
+    if (target && libraryRef.current.some((s) => s.id === target.id)) deleteSong(target.id);
+  };
+
   // Layers v2 (v14.9): dispose the layer player when App unmounts. Declared
   // above the pinned teardown so it runs first.
   useEffect(() => () => {
@@ -2719,20 +2744,44 @@ const App: React.FC = () => {
       return;
     }
 
+    // v15.4: never hide (and so make inert) the UI under a field someone is typing in: the field would lose its focus,
+    // and a phone its keyboard. Text-like inputs, textareas, selects and contenteditable, inside the UI.
+    const editingInUi = () => {
+      const active = document.activeElement as HTMLElement | null;
+      if (!active || !zenLayerRef.current?.contains(active)) return false;
+      if (active.isContentEditable || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement) return true;
+      return active instanceof HTMLInputElement && !ZEN_NON_TEXT_INPUTS.has(active.type);
+    };
+
     const handleMouseMove = () => {
       setZenUiVisible(true);
       if (zenTimeoutRef.current) clearTimeout(zenTimeoutRef.current);
       zenTimeoutRef.current = window.setTimeout(() => {
+        if (editingInUi()) { handleMouseMove(); return; }
         setZenUiVisible(false);
-      }, 3000); 
+      }, 3000);
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
+    // v15.4: a MOUSE moving reveals, as before. A touch never does through its compatibility mousemove: the hidden UI
+    // is inert, so a tap on it lands on the root, whose click reveals and does nothing else (until v15.3 the same tap
+    // also pressed the invisible control under the finger). Taps, keys and focus moves while the UI shows keep it
+    // showing for 3 s more (a keyboard or screen-reader user can reach the Zen toggle, at the end of the player bar).
+    const onPointerMove = (e: PointerEvent) => { if (e.pointerType === 'mouse') handleMouseMove(); };
+    const onShownActivity = () => { if (zenShownRef.current) handleMouseMove(); };
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerdown', onShownActivity, true);
+    window.addEventListener('keydown', onShownActivity, true);
+    document.addEventListener('focusin', onShownActivity);
+    zenRevealRef.current = handleMouseMove;
     // Initial trigger to show UI when entering mode
     handleMouseMove();
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerdown', onShownActivity, true);
+      window.removeEventListener('keydown', onShownActivity, true);
+      document.removeEventListener('focusin', onShownActivity);
+      zenRevealRef.current = null;
       if (zenTimeoutRef.current) clearTimeout(zenTimeoutRef.current);
     };
   }, [isZenMode]);
@@ -2744,7 +2793,14 @@ const App: React.FC = () => {
   const headerRef = useRef<HTMLElement | null>(null);
   const playerBarRef = useRef<HTMLDivElement | null>(null);
   const [uiInsets, setUiInsets] = useState({ top: 0, bottom: 0 });
+  // v15.4: bumped when the header or the transport region swaps between its JSX and its fallback, so the observer
+  // below watches the elements now on screen.
+  const [insetsEpoch, setInsetsEpoch] = useState(0);
+  const bumpInsets = useCallback(() => setInsetsEpoch((n: number) => n + 1), []);
   const uiHidden = isZenMode && !zenUiVisible;
+  useEffect(() => {
+    zenShownRef.current = !uiHidden;
+  }, [uiHidden]);
   useEffect(() => {
     const apply = (top: number, bottom: number) =>
       setUiInsets((prev: { top: number; bottom: number }) => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }));
@@ -2769,7 +2825,7 @@ const App: React.FC = () => {
       observer?.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [uiHidden]);
+  }, [uiHidden, insetsEpoch]);
 
   // Handle Shuffle State Logic
   useEffect(() => {
@@ -3238,7 +3294,8 @@ const App: React.FC = () => {
         case 'RESTORE_STATE':
           // Restore from checkpoint after crash
           const { state } = event.data;
-          if (state && state.currentSongIndex !== undefined) {
+          // v15.4: the checkpoint can lag the playing track (it is written every 30 s): never move the cursor mid-play.
+          if (state && state.currentSongIndex !== undefined && currentSongIndex < 0) {
             console.log('Restoring from checkpoint:', state);
             if (state.currentSongIndex >= 0 && state.currentSongIndex < playlist.length) {
               setCurrentSongIndex(state.currentSongIndex);
@@ -4681,7 +4738,7 @@ const App: React.FC = () => {
           setSearchTerm(''); // Clear search when creating filtered playlist
           playTrackRef.current(0, candidates);
       } else {
-          alert(`No songs found matching '${name}'. Try scanning your library first or add more variety.`);
+          showStatusToast(`No songs found matching '${name}'. Try scanning your library first or add more variety.`, { durationMs: 8000 });
       }
       if(window.innerWidth < 768) setShowSidebar(false);
   };
@@ -4729,7 +4786,7 @@ const App: React.FC = () => {
           playTrackRef.current(0, journeyPlaylist);
           if(window.innerWidth < 768) setShowSidebar(false);
       } else {
-          alert("Not enough analyzed songs. Try scanning library first.");
+          showStatusToast("Not enough analyzed songs. Try scanning library first.", { durationMs: 8000 });
       }
   };
 
@@ -4789,7 +4846,9 @@ const App: React.FC = () => {
           // Show diagnostic info for HEART frequencies
           const heartMatches = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 1206 && (s.closestSolfeggio || 0) <= 3150);
           const foundFreqs = [...new Set(heartMatches.map(s => s.closestSolfeggio).filter(f => f !== undefined) as number[])].sort((a, b) => a - b);
-          alert(`HEART Alignment: Found ${heartMatches.length} matching songs.\n\nHEART frequencies detected:\n${foundFreqs.map(f => `${f}Hz: ${originalPlaylist.filter(s => s.closestSolfeggio === f).length} songs`).join('\n')}\n\nTry scanning library first or use the test distribution mode.`);
+          // v15.4: one line. Its old list of "HEART frequencies detected" was always empty (every closestSolfeggio
+          // is one of the 27 crystals, so this branch runs only when no track holds a HEART one).
+          showStatusToast('HEART Alignment: no tracks have a HEART crystal (1206–3150 Hz) yet. Try scanning your library first, or use Auto-Distribute.', { durationMs: 8000 });
       }
   };
 
@@ -4848,7 +4907,8 @@ const App: React.FC = () => {
           // Show diagnostic info for HEAD frequencies
           const headMatches = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 3504);
           const foundFreqs = [...new Set(headMatches.map(s => s.closestSolfeggio).filter(f => f !== undefined) as number[])].sort((a, b) => a - b);
-          alert(`HEAD Alignment: Found ${headMatches.length} matching songs.\n\nHEAD frequencies detected:\n${foundFreqs.map(f => `${f}Hz: ${originalPlaylist.filter(s => s.closestSolfeggio === f).length} songs`).join('\n')}\n\nTry scanning library first or use the test distribution mode.`);
+          // v15.4: one line, as HEART's (its list of "HEAD frequencies detected" was always empty).
+          showStatusToast('HEAD Alignment: no tracks have a HEAD crystal (3504 Hz and up) yet. Try scanning your library first, or use Auto-Distribute.', { durationMs: 8000 });
       }
   };
 
@@ -5065,10 +5125,11 @@ const App: React.FC = () => {
           playTrackRef.current(0, walkPlaylist);
           if (window.innerWidth < 768) setShowSidebar(false);
       } else {
-          alert(
-              `Lo Shu · ${info.fullName}: no matching songs in your library yet.\n\n` +
+          showStatusToast(
+              (`Lo Shu · ${info.fullName}: no matching songs in your library yet.\n\n` +
               `This walk needs songs whose closest Solfeggio frequency matches positions in the 27-frequency Aetheria set. ` +
-              `Try running Deep Scan, or load tracks across the GUT/HEART/HEAD ranges.`
+              `Try running Deep Scan, or load tracks across the GUT/HEART/HEAD ranges.`).replace(/\n+/g, ' '),
+              { durationMs: 10000 }
           );
       }
   };
@@ -5172,7 +5233,7 @@ const App: React.FC = () => {
           
           if(window.innerWidth < 768) setShowSidebar(false);
       } else {
-          alert("No analyzed songs found. Please scan your library first.");
+          showStatusToast("No analyzed songs found. Please scan your library first.", { durationMs: 8000 });
       }
   };
 
@@ -5194,7 +5255,7 @@ const App: React.FC = () => {
           setSearchTerm(''); // Clear search when creating filtered playlist
           if(window.innerWidth < 768) setShowSidebar(false);
       } else {
-          alert(`No songs found for ${name}. Try scanning your library first or add more variety.`);
+          showStatusToast(`No songs found for ${name}. Try scanning your library first or add more variety.`, { durationMs: 8000 });
       }
   };
 
@@ -5235,7 +5296,13 @@ const App: React.FC = () => {
       setSearchTerm('');
       if(window.innerWidth < 768) setShowSidebar(false);
     } else {
-      alert(`No tracks with golden ratio alignment > 30% found.\n\nActual analysis results:\n${originalPlaylist.slice(0, 5).map(s => `• ${s.name}: ${s.fractalAnalysis ? (s.fractalAnalysis.goldenRatioAlignment * 100).toFixed(1) : 'No analysis'}%`).join('\n')}\n\nTry scanning your library with fractal analysis first.`);
+      // v15.4: a one-line toast; Details opens the whole explanation (its per-track list) in a dialog.
+      const details = `No tracks with golden ratio alignment > 30% found.\n\nActual analysis results:\n${originalPlaylist.slice(0, 5).map(s => `• ${s.name}: ${s.fractalAnalysis ? (s.fractalAnalysis.goldenRatioAlignment * 100).toFixed(1) : 'No analysis'}%`).join('\n')}\n\nTry scanning your library with fractal analysis first.`;
+      showStatusToast('No tracks with golden ratio alignment above 30% yet.', {
+        durationMs: 12000,
+        actionLabel: 'Details',
+        onAction: () => { dismissStatusToast(); setInfoDialog({ title: 'Golden Φ', body: details }); },
+      });
     }
   };
 
@@ -5366,11 +5433,17 @@ const App: React.FC = () => {
         return `${order.order} (${freq}Hz): ${count} tracks`;
       }).join('\n');
       
-      alert(`Unable to create 111 Pattern Solfeggio Sequence.\n\n` +
+      // v15.4: a one-line toast; Details opens the whole explanation (the per-order counts) in a dialog.
+      const details = `Unable to create 111 Pattern Solfeggio Sequence.\n\n` +
             `Requirements: At least one analyzed track from each order's first frequency:\n\n` +
             `${orderAvailability}\n\n` +
             `Total analyzed tracks: ${analyzedTracks}\n\n` +
-            `Try scanning your library with fractal analysis to enable this composition feature.`);
+            `Try scanning your library with fractal analysis to enable this composition feature.`;
+      showStatusToast('The 111 Sequence needs at least one scanned track for the first frequency of each order.', {
+        durationMs: 12000,
+        actionLabel: 'Details',
+        onAction: () => { dismissStatusToast(); setInfoDialog({ title: '111 Sequence', body: details }); },
+      });
     }
   };
 
@@ -5505,7 +5578,8 @@ const App: React.FC = () => {
       const analyzedTracks = originalPlaylist.filter(s => s.fractalAnalysis).length;
       const unanalyzedTracks = originalPlaylist.length - analyzedTracks;
 
-      alert(`No pure 2178Hz tracks found for SOURCE field filter.\n\n` +
+      // v15.4: a one-line toast; Details opens the whole explanation (the library's status) in a dialog.
+      const details = (`No pure 2178Hz tracks found for SOURCE field filter.\n\n` +
             `Current library status:\n` +
             `• Total tracks: ${originalPlaylist.length}\n` +
             `• Analyzed tracks: ${analyzedTracks}\n` +
@@ -5516,6 +5590,11 @@ const App: React.FC = () => {
             `2. Run "Deep Scan" to analyze harmonic frequencies\n` +
             `3. This filter requires exact 2178Hz frequency matches\n\n` +
             `Note: This filter only shows tracks that are harmonically centered on pure 2178Hz — HEART position 5, the centre of the Lo Shu cube.`);
+      showStatusToast('No scanned 2178 Hz tracks for the SOURCE filter yet.', {
+        durationMs: 12000,
+        actionLabel: 'Details',
+        onAction: () => { dismissStatusToast(); setInfoDialog({ title: '2178 Hz SOURCE filter', body: details }); },
+      });
     }
   };
 
@@ -5524,7 +5603,7 @@ const App: React.FC = () => {
     const currentSong = playlist[currentSongIndex];
     
     if (!currentSong) {
-      alert('No track currently selected for analysis.');
+      showStatusToast('No track currently selected for analysis.', { durationMs: 8000 });
       return;
     }
     
@@ -5600,7 +5679,8 @@ const App: React.FC = () => {
       analysisInfo += `2. Or wait for background analysis to complete\n`;
     }
     
-    alert(analysisInfo);
+    // v15.4: a readout to read and scroll, in a dialog that stays until closed (never a page-freezing alert).
+    setInfoDialog({ title: 'Current track analysis', body: analysisInfo });
   };
 
   // Diagnostic function to show fractal analysis status
@@ -5644,7 +5724,8 @@ const App: React.FC = () => {
       `${heartTracks === 0 ? '• No HEART frequencies - use Test Distribution for 27-track playlists\n' : ''}` +
       `${headTracks === 0 ? '• No HEAD frequencies - use Test Distribution for 27-track playlists\n' : ''}`;
       
-    alert(diagnosticMessage);
+    // v15.4: in the readout dialog, as Current Track Analysis.
+    setInfoDialog({ title: 'Library diagnostics', body: diagnosticMessage });
   };
 
   const generateUltimateAlignmentPlaylist = () => {
@@ -5724,7 +5805,7 @@ const App: React.FC = () => {
       playTrackRef.current(0, ultimatePlaylist);
       if(window.innerWidth < 768) setShowSidebar(false);
     } else {
-      alert("Not enough analyzed songs for Ultimate Alignment. Please scan your library first.");
+      showStatusToast("Not enough analyzed songs for Ultimate Alignment. Please scan your library first.", { durationMs: 8000 });
     }
   };
 
@@ -5745,7 +5826,7 @@ const App: React.FC = () => {
     );
 
     if (aetheriaTracks.length === 0) {
-      alert('No Aetheria Collection tracks found! Please import the "Music for Aetheria" folder first using the Import button above.');
+      showStatusToast('No Aetheria Collection tracks found! Please import the "Music for Aetheria" folder first using the Import button above.', { durationMs: 8000 });
       return;
     }
 
@@ -5802,7 +5883,7 @@ const App: React.FC = () => {
       playTrackRef.current(0, journeyPlaylist);
       if(window.innerWidth < 768) setShowSidebar(false);
     } else {
-      alert('No analyzed Aetheria tracks found. Please scan your library first.');
+      showStatusToast('No analyzed Aetheria tracks found. Please scan your library first.', { durationMs: 8000 });
     }
   };
 
@@ -5946,7 +6027,7 @@ const App: React.FC = () => {
       
       if(window.innerWidth < 768) setShowSidebar(false);
     } else {
-      alert('No Aetheria Collection tracks found in your library. Import the "Music for Aetheria" folder first.');
+      showStatusToast('No Aetheria Collection tracks found in your library. Import the "Music for Aetheria" folder first.', { durationMs: 8000 });
     }
   };
 
@@ -7042,7 +7123,7 @@ registerProcessor('wav-capture', WavCapture);
                   warnIfRecordingSilent();
               })
               .catch((e) => {
-                  alert("WAV recording failed to start.");
+                  showStatusToast("WAV recording failed to start.", { durationMs: 8000 });
                   console.error(e);
               });
           return;
@@ -7098,7 +7179,7 @@ registerProcessor('wav-capture', WavCapture);
           setIsRecording(true);
           setShowRecordOptions(false);
       } catch (e) {
-          alert("Recording failed to start. Your browser might not support this format.");
+          showStatusToast("Recording failed to start. Your browser might not support this format.", { durationMs: 8000 });
           console.error(e);
       }
   };
@@ -7269,7 +7350,20 @@ registerProcessor('wav-capture', WavCapture);
   });
 
   return (
-    <div className={`relative min-h-screen bg-black text-slate-200 font-sans overflow-hidden ${isFullScreen ? 'h-screen' : ''}`}>
+    <div
+      onClick={uiHidden ? (e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) zenRevealRef.current?.(); } : undefined}
+      className={`relative min-h-screen bg-black text-slate-200 font-sans overflow-hidden ${isFullScreen ? 'h-screen' : ''}`}
+    >
+      {/* Zen Mode, UI hidden (v15.4): the hidden UI is inert, so this is what a keyboard or a screen reader finds. */}
+      {uiHidden && (
+        <button
+          type="button"
+          onClick={() => zenRevealRef.current?.()}
+          className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-toast focus:px-4 focus:min-h-touch focus:rounded-control focus:bg-surface-panel focus:text-ink"
+        >
+          Show controls
+        </button>
+      )}
       
       {/* Disclaimer Modal. Its wording is versioned: change DISCLAIMER_VERSION
           (above App) with any wording change, or it won't show again. */}
@@ -7362,8 +7456,26 @@ registerProcessor('wav-capture', WavCapture);
       )}
 
           {/* Tutorial Modal */}
-          {showTutorial && <TutorialModal onClose={closeTutorial} />}
+          {/* v15.4 isolation: each region of the layout renders under its own error boundary (components/
+              ErrorBoundary.tsx), its JSX deferred into `render` so every expression in it runs under that boundary
+              (App's own inline JSX would be evaluated above it). A crash shows the region's fallback; the music,
+              owned by App's refs, plays on. The disclaimer has none: it is a gate, and the root covers it. */}
+          <ViewBoundary
+            name="tutorial"
+            fallback={modalFallback(showTutorial, closeTutorial, 'fixed inset-0 z-tutorial flex items-center justify-center p-4')}
+            render={() => showTutorial && <TutorialModal onClose={closeTutorial} />}
+          />
           
+          <ViewBoundary
+            name="notices"
+            fallback={(api) => (
+              <>
+                <div role="status" aria-live="polite" aria-atomic="false" />
+                {panelFallback('fixed bottom-40 left-1/2 -translate-x-1/2 z-toast w-[calc(100%-2rem)] max-w-md', 'Notices hit a problem.')(api)}
+              </>
+            )}
+            render={() => (
+          <>
           {/* Offline Indicator */}
           <OfflineIndicator showWhenOnline={true} />
 
@@ -7392,7 +7504,7 @@ registerProcessor('wav-capture', WavCapture);
           >
               {updateReady && (
                 <div aria-atomic="true" className="flex items-center gap-3 bg-slate-900/95 border border-gold-500/40 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-lg">
-                  <span className="flex-1 leading-snug">A new version of Aetheria is ready.</span>
+                  <span className="flex-1 leading-snug">{(isPlaying || isSolfeggioActive) ? 'A new version of Aetheria is ready. Reloading stops the music.' : 'A new version of Aetheria is ready.'}</span>
                   <button
                     onClick={flushAndReload}
                     className="shrink-0 min-h-[44px] px-3 rounded-lg bg-gold-500 hover:bg-gold-400 text-black text-xs font-bold transition-colors"
@@ -7468,6 +7580,35 @@ registerProcessor('wav-capture', WavCapture);
               )}
           </div>
 
+          {/* v15.4: the readouts (and the long notices' Details), and the row Delete's confirmation. Modal, in a
+              portal on <body>; #root is inert while one is open (components/ui/overlayStack.ts). */}
+          <Dialog
+            open={!!infoDialog}
+            title={infoDialog?.title ?? ''}
+            preformatted
+            onClose={() => setInfoDialog(null)}
+            actions={<ReadoutActions body={infoDialog?.body ?? ''} onClose={() => setInfoDialog(null)} />}
+            data-testid="readout-dialog"
+          >
+            {infoDialog?.body}
+          </Dialog>
+          <Dialog
+            open={!!pendingDelete}
+            role="alertdialog"
+            title="Delete this track?"
+            onClose={() => setPendingDelete(null)}
+            initialFocusRef={deleteCancelRef}
+            data-testid="delete-dialog"
+            actions={
+              <>
+                <Button variant="secondary" buttonRef={deleteCancelRef} onClick={() => setPendingDelete(null)}>Cancel</Button>
+                <Button variant="danger" onClick={confirmPendingDelete}>Delete</Button>
+              </>
+            }
+          >
+            {`"${pendingDelete?.name ?? ''}" will be removed from your library, and the copy stored on this device deleted. The original file is not touched.`}
+          </Dialog>
+
           {/* v2's output question (v14.9): a non-blocking sheet, v2 only, between the header and the player bar
               (uiInsets, as the Spectrum lens), so the transport stays usable while it is open (v15.0). */}
           <OutputSheet open={showOutputSheet} insets={uiInsets} onChoose={chooseLayerOutput} onLater={outputSheetLater} />
@@ -7491,6 +7632,7 @@ registerProcessor('wav-capture', WavCapture);
                   </div>
                   <button
                     onClick={() => setAnalysisNotification(null)}
+                    aria-label="Dismiss"
                     className="text-blue-300 hover:text-white ml-auto"
                   >
                     <X size={16} />
@@ -7523,8 +7665,17 @@ registerProcessor('wav-capture', WavCapture);
               </button>
             </div>
           )}
+          </>
+            )}
+          />
 
       <div className="absolute inset-0 z-0 pointer-events-none">
+        <ViewBoundary
+          name="visualizer"
+          fallback={(api) => (
+            <VisualsStoppedPill onRetry={api.retry} onClose={api.dismiss} buttonRef={api.buttonRef} switchedOff={api.switchedOff} />
+          )}
+          render={() => (
         <Visualizer
             analyser={analyserNode}
             primaryColor={getCurrentChakraColor()}
@@ -7539,21 +7690,30 @@ registerProcessor('wav-capture', WavCapture);
             audioElementRef={mainAudioRef}
             uiInsets={uiInsets}
         />
+          )}
+        />
       </div>
 
       <div 
+        inert={uiHidden}
+        ref={zenLayerRef}
         className={`relative z-10 flex flex-col h-screen transition-opacity duration-1000 ${(!isZenMode || zenUiVisible) ? 'opacity-100' : 'opacity-0'} ${isZenMode ? '' : 'bg-black/20'}`}
       >
         
+        <ViewBoundary
+          name="header"
+          onReset={bumpInsets}
+          fallback={panelFallback(null, 'The top bar hit a problem.', 'bar')}
+          render={() => (
         <header ref={headerRef} className="flex justify-between items-center p-3 md:p-4 border-b border-slate-800/50 bg-black/80 backdrop-blur-md z-30 shadow-lg safe-area-top shrink-0">
           <div className="flex items-center gap-2">
-             <button onClick={() => setShowSidebar(!showSidebar)} className="text-gold-500 mr-2 p-1 hover:bg-slate-800 rounded">
+             <button onClick={() => setShowSidebar(!showSidebar)} aria-label="Library" className="text-gold-500 mr-2 p-1 hover:bg-slate-800 rounded">
                <Menu />
              </button>
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.4</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -7568,6 +7728,7 @@ registerProcessor('wav-capture', WavCapture);
              ) : (
                  <button 
                     onClick={() => setShowRecordOptions(true)} 
+                    aria-label="Record"
                     className="p-1.5 sm:p-2 text-slate-400 border-slate-800 bg-slate-900/50 hover:text-red-400 hover:border-red-500/50 transition-colors rounded-full border"
                  >
                     <Circle size={20} />
@@ -7606,17 +7767,22 @@ registerProcessor('wav-capture', WavCapture);
             >
                 <Shield size={20} />
             </button>
-            <button onClick={() => setShowTutorial(true)} className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><CircleHelp size={20} /></button>
-            <button onClick={() => setIsFullScreen(!isFullScreen)} className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800 hidden sm:block">
+            <button onClick={() => setShowTutorial(true)} aria-label="Quick guide" className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800"><CircleHelp size={20} /></button>
+            <button onClick={() => setIsFullScreen(!isFullScreen)} aria-label={isFullScreen ? 'Show library' : 'Hide library'} className="p-1.5 sm:p-2 hover:text-gold-400 transition-colors bg-slate-900/50 rounded-full border border-slate-800 hidden sm:block">
               {isFullScreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
             </button>
           </div>
         </header>
+          )}
+        />
 
         <main className="flex-1 flex overflow-hidden relative">
           
           {/* Recording Options Modal */}
-          {showRecordOptions && (
+          <ViewBoundary
+            name="record"
+            fallback={modalFallback(showRecordOptions, () => setShowRecordOptions(false), 'fixed inset-0 z-modal flex items-center justify-center p-4')}
+            render={() => showRecordOptions && (
               <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowRecordOptions(false)}>
                   <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-md w-full shadow-2xl max-h-[calc(100vh-120px)] overflow-y-auto my-auto" onClick={e => e.stopPropagation()}>
                       <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Circle className="text-red-500" size={20}/> Start Recording</h3>
@@ -7640,9 +7806,13 @@ registerProcessor('wav-capture', WavCapture);
                   </div>
               </div>
           )}
+          />
           
           {/* Info Modal */}
-          {showInfo && (
+          <ViewBoundary
+            name="guidebook"
+            fallback={modalFallback(showInfo, () => setShowInfo(false), 'fixed inset-0 z-notice flex items-center justify-center p-4')}
+            render={() => showInfo && (
               <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowInfo(false)}>
                   <div className="bg-slate-950 border border-gold-500/20 rounded-2xl max-w-4xl w-full shadow-2xl max-h-[calc(100vh-120px)] flex flex-col my-auto" onClick={e => e.stopPropagation()}>
                       
@@ -7685,7 +7855,7 @@ registerProcessor('wav-capture', WavCapture);
                                       Technical
                                   </button>
                               </div>
-                              <button onClick={() => setShowInfo(false)} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors">
+                              <button onClick={() => setShowInfo(false)} aria-label="Close" className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors">
                                   <X size={24} />
                               </button>
                           </div>
@@ -8316,7 +8486,17 @@ registerProcessor('wav-capture', WavCapture);
                   </div>
               </div>
           )}
+          />
 
+          <ViewBoundary
+            name="library"
+            // A reloaded list starts at the top: recompute the rows it draws (its range was the old scroll's).
+            onReset={recomputeSongListRange}
+            fallback={panelFallback(
+              `absolute inset-y-0 left-0 w-[85%] sm:w-80 md:relative z-[60] p-4 transition-transform duration-300 ${showSidebar ? 'translate-x-0' : '-translate-x-full'} ${isFullScreen ? 'md:-ml-80' : ''}`,
+              'Your library list hit a problem. Your tracks and their stored audio are safe.'
+            )}
+            render={() => (
           <aside
             ref={sidebarScrollRef}
             onScroll={recomputeSongListRange}
@@ -8406,6 +8586,7 @@ registerProcessor('wav-capture', WavCapture);
                    {searchTerm && (
                        <button
                            onClick={() => setSearchTerm('')}
+                           aria-label="Clear search"
                            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-500 hover:text-white"
                        >
                            <X size={14} />
@@ -8834,12 +9015,12 @@ registerProcessor('wav-capture', WavCapture);
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (window.confirm(`Delete "${song.name}" from library?`)) {
-                          deleteSong(song.id);
-                        }
+                        // v15.4: the app's own confirmation (decision 1), never a page-freezing confirm().
+                        setPendingDelete({ id: song.id, name: song.name });
                       }}
                       className="opacity-0 group-hover:opacity-100 p-1 text-red-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-all"
                       title="Delete song"
+                      aria-label="Delete track"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -8875,12 +9056,17 @@ registerProcessor('wav-capture', WavCapture);
               </div>
             )}
           </aside>
+            )}
+          />
 
-          {showSettings && (
+          <ViewBoundary
+            name="harmonic"
+            fallback={modalFallback(showSettings, () => setShowSettings(false), 'absolute inset-y-0 right-0 z-header w-full md:w-96 p-4')}
+            render={() => showSettings && (
             <div className="absolute inset-y-0 right-0 z-30 w-full md:w-96 bg-black/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shadow-2xl transform transition-transform animate-in slide-in-from-right duration-300">
                 <div className="flex justify-between items-start p-6 border-b border-slate-800">
                   <h3 className="text-gold-500 font-serif text-xl">Harmonic Control</h3>
-                  <button onClick={() => { setShowSettings(false); }} className="p-2 hover:bg-slate-800 rounded-full"><X className="text-slate-500 hover:text-white" /></button>
+                  <button onClick={() => { setShowSettings(false); }} aria-label="Close" className="p-2 hover:bg-slate-800 rounded-full"><X className="text-slate-500 hover:text-white" /></button>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar pb-32">
@@ -8924,6 +9110,9 @@ registerProcessor('wav-capture', WavCapture);
                                       </div>
                                       <button 
                                           onClick={() => setPhiTimingEnabled(!phiTimingEnabled)}
+                                          role="switch"
+                                          aria-checked={phiTimingEnabled}
+                                          aria-label="Track Timing: Phi-proportioned"
                                           className={`w-8 h-4 rounded-full relative transition-colors ${phiTimingEnabled ? 'bg-purple-500' : 'bg-slate-700'}`}
                                       >
                                           <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${phiTimingEnabled ? 'translate-x-4' : 'translate-x-0'}`}></div>
@@ -8979,6 +9168,7 @@ registerProcessor('wav-capture', WavCapture);
                                     <input 
                                         type="range" min="0.1" max="3" step="0.1"
                                         value={vizSettings.speed}
+                                        aria-label="Simulation speed"
                                         onChange={(e) => setVizSettings({...vizSettings, speed: parseFloat(e.target.value)})}
                                         className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none touch-none"
                                     />
@@ -8992,6 +9182,7 @@ registerProcessor('wav-capture', WavCapture);
                                     <input 
                                         type="range" min="0.5" max="8.0" step="0.5"
                                         value={vizSettings.particleBaseSize}
+                                        aria-label="Particle size"
                                         onChange={(e) => setVizSettings({...vizSettings, particleBaseSize: parseFloat(e.target.value)})}
                                         className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none touch-none"
                                     />
@@ -9005,6 +9196,7 @@ registerProcessor('wav-capture', WavCapture);
                                     <input 
                                         type="range" min="0.1" max="2" step="0.1"
                                         value={vizSettings.sensitivity}
+                                        aria-label="Audio reactivity"
                                         onChange={(e) => setVizSettings({...vizSettings, sensitivity: parseFloat(e.target.value)})}
                                         className="w-full accent-gold-500 h-1.5 bg-slate-700 rounded-lg appearance-none touch-none"
                                     />
@@ -9047,6 +9239,7 @@ registerProcessor('wav-capture', WavCapture);
                                     <div className="text-[10px] text-slate-400 mb-1 uppercase tracking-widest">Hex Visual Mode</div>
                                     <select 
                                         value={vizSettings.hexVisualMode}
+                                        aria-label="Hex visual mode"
                                         onChange={(e) => setVizSettings({...vizSettings, hexVisualMode: e.target.value as any})}
                                         className="w-full bg-slate-900 text-xs border border-slate-700 rounded px-2 py-1 text-slate-300"
                                     >
@@ -9118,6 +9311,9 @@ registerProcessor('wav-capture', WavCapture);
                                         <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider flex items-center gap-2"><Droplets size={12}/> Hydro-Acoustics</span>
                                         <button 
                                             onClick={() => setVizSettings({...vizSettings, showWaterRipples: !vizSettings.showWaterRipples})}
+                                            role="switch"
+                                            aria-checked={vizSettings.showWaterRipples}
+                                            aria-label="Hydro-Acoustics"
                                             className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.showWaterRipples ? 'bg-blue-500' : 'bg-slate-700'}`}
                                         >
                                             <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.showWaterRipples ? 'translate-x-4' : 'translate-x-0'}`}></div>
@@ -9132,6 +9328,7 @@ registerProcessor('wav-capture', WavCapture);
                                             <input 
                                                 type="range" min="0" max="100" step="1"
                                                 value={vizSettings.hydroIntensity}
+                                                aria-label="Ripple intensity"
                                                 onChange={(e) => setVizSettings({...vizSettings, hydroIntensity: parseFloat(e.target.value)})}
                                                 className="w-full accent-blue-500 h-1.5 bg-slate-700 rounded-lg appearance-none touch-none"
                                             />
@@ -9143,6 +9340,9 @@ registerProcessor('wav-capture', WavCapture);
                                     <span className="text-[10px] text-gold-400 font-bold uppercase tracking-wider flex items-center gap-2"><Flower2 size={12}/> Tree of Life</span>
                                     <button
                                         onClick={() => setVizSettings({...vizSettings, showTreeOfLife: !vizSettings.showTreeOfLife})}
+                                        role="switch"
+                                        aria-checked={vizSettings.showTreeOfLife}
+                                        aria-label="Tree of Life"
                                         className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.showTreeOfLife ? 'bg-gold-500' : 'bg-slate-700'}`}
                                     >
                                         <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.showTreeOfLife ? 'translate-x-4' : 'translate-x-0'}`}></div>
@@ -9154,6 +9354,9 @@ registerProcessor('wav-capture', WavCapture);
                                         <span className="text-[10px] text-emerald-300 font-bold uppercase tracking-wider flex items-center gap-2"><Box size={12}/> Lo Shu Cube</span>
                                         <button
                                             onClick={() => setVizSettings({...vizSettings, showLoShuCube: !vizSettings.showLoShuCube})}
+                                            role="switch"
+                                            aria-checked={vizSettings.showLoShuCube}
+                                            aria-label="Lo Shu Cube"
                                             className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.showLoShuCube ? 'bg-emerald-500' : 'bg-slate-700'}`}
                                         >
                                             <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.showLoShuCube ? 'translate-x-4' : 'translate-x-0'}`}></div>
@@ -9172,6 +9375,9 @@ registerProcessor('wav-capture', WavCapture);
                                                 <span className="text-[10px] text-emerald-300/80 uppercase tracking-wider flex items-center gap-2"><RotateCw size={10}/> Auto-Rotate</span>
                                                 <button
                                                     onClick={() => setVizSettings({...vizSettings, loShuCubeAutoRotate: !vizSettings.loShuCubeAutoRotate})}
+                                                    role="switch"
+                                                    aria-checked={vizSettings.loShuCubeAutoRotate}
+                                                    aria-label="Auto-Rotate"
                                                     className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.loShuCubeAutoRotate ? 'bg-emerald-500' : 'bg-slate-700'}`}
                                                     title={vizSettings.loShuCubeAutoRotate ? 'Stop turntable rotation' : 'Resume turntable rotation'}
                                                 >
@@ -9188,6 +9394,7 @@ registerProcessor('wav-capture', WavCapture);
                                                     min={0}
                                                     max={360}
                                                     step={1}
+                                                    aria-label="Lo Shu cube position"
                                                     value={vizSettings.loShuCubeRotation}
                                                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setVizSettings({...vizSettings, loShuCubeRotation: parseFloat(e.target.value)})}
                                                     className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
@@ -9221,6 +9428,9 @@ registerProcessor('wav-capture', WavCapture);
                                                             </div>
                                                             <button
                                                                 onClick={() => setVizSettings({ ...vizSettings, [key]: !on })}
+                                                                role="switch"
+                                                                aria-checked={on}
+                                                                aria-label={label}
                                                                 className={`w-8 h-4 rounded-full relative transition-colors ${on ? 'bg-emerald-500' : 'bg-slate-700'}`}
                                                                 title={on ? `Hide the ${label} walk path overlay` : `Show the ${label} walk path overlay`}
                                                             >
@@ -9239,6 +9449,9 @@ registerProcessor('wav-capture', WavCapture);
                                         <span className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">Show Sacred Geometry</span>
                                         <button 
                                             onClick={() => setVizSettings({...vizSettings, morphEnabled: !vizSettings.morphEnabled})}
+                                            role="switch"
+                                            aria-checked={vizSettings.morphEnabled}
+                                            aria-label="Show Sacred Geometry"
                                             className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.morphEnabled ? 'bg-gold-500' : 'bg-slate-700'}`}
                                         >
                                             <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.morphEnabled ? 'translate-x-4' : 'translate-x-0'}`}></div>
@@ -9512,6 +9725,7 @@ registerProcessor('wav-capture', WavCapture);
                         type="range" 
                         min="0" max="1" step="0.01" 
                         value={solfeggioVolume}
+                        aria-label="Layer intensity"
                         onChange={(e) => chooseToneLevel('classic', parseFloat(e.target.value))}
                         className="w-full accent-gold-500 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer touch-none"
                       />
@@ -9564,6 +9778,7 @@ registerProcessor('wav-capture', WavCapture);
                       <label className="text-xs uppercase tracking-widest text-slate-500 mb-2 block font-bold">Experience Level</label>
                       <select
                         value={userExperienceLevel}
+                        aria-label="Experience level"
                         onChange={(e) => setUserExperienceLevel(e.target.value as any)}
                         className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white text-sm"
                       >
@@ -9731,9 +9946,13 @@ registerProcessor('wav-capture', WavCapture);
                 </div>
             </div>
           )}
+          />
           
           {/* Advanced Frequency Selector Modal */}
-          {showFrequencySelector && (
+          <ViewBoundary
+            name="frequency-lab"
+            fallback={modalFallback(showFrequencySelector, () => setShowFrequencySelector(false), 'fixed inset-0 z-dialog flex items-center justify-center p-4')}
+            render={() => showFrequencySelector && (
             <div 
               className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
               onClick={() => setShowFrequencySelector(false)}
@@ -9746,6 +9965,7 @@ registerProcessor('wav-capture', WavCapture);
                   <h2 className="text-xl font-bold text-gold-400">Advanced Frequency Laboratory</h2>
                   <button
                     onClick={() => setShowFrequencySelector(false)}
+                    aria-label="Close"
                     className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-700 rounded"
                   >
                     <X size={24} />
@@ -10004,9 +10224,13 @@ registerProcessor('wav-capture', WavCapture);
               </div>
             </div>
           )}
+          />
           
           {/* Safety Protocols Panel */}
-          {showSafetyProtocols && (
+          <ViewBoundary
+            name="safety"
+            fallback={modalFallback(showSafetyProtocols, () => setShowSafetyProtocols(false), 'fixed inset-0 z-scrim flex items-center justify-center p-4 pb-32')}
+            render={() => showSafetyProtocols && (
             <div 
               className="fixed inset-0 z-40 flex items-center justify-center p-4 pb-32 pointer-events-none"
               onClick={() => setShowSafetyProtocols(false)}
@@ -10055,6 +10279,7 @@ registerProcessor('wav-capture', WavCapture);
                       </div>
                       <select
                         value={userExperienceLevel}
+                        aria-label="Your level"
                         onChange={(e) => setUserExperienceLevel(e.target.value as any)}
                         className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white text-xs"
                       >
@@ -10170,8 +10395,29 @@ registerProcessor('wav-capture', WavCapture);
               </div>
             </div>
           )}
+          />
 
 
+          <ViewBoundary
+            name="links"
+            fallback={(api) => (
+              <div className="fixed right-0 top-1/2 -translate-y-1/2 z-[55] w-full max-w-sm p-4 pointer-events-none">
+                <PanelFallback
+                  className="pointer-events-auto"
+                  switchedOff={api.switchedOff}
+                  copyDetails={api.copyDetails}
+                  buttonRef={api.buttonRef}
+                  onRetry={api.retry}
+                  onClose={() => {
+                    setShowLinks(false);
+                    if (api.switchedOff) api.dismiss();
+                    else api.retry();
+                  }}
+                />
+              </div>
+            )}
+            render={() => (
+          <>
           {/* Links & Resources Pull-out Tab */}
           <button
             onClick={() => setShowLinks(!showLinks)}
@@ -10443,8 +10689,29 @@ registerProcessor('wav-capture', WavCapture);
               </div>
             </div>
           </div>
+          </>
+            )}
+          />
 
           {/* NEW FOOTER - SNAPPED TO BOTTOM */}
+          <ViewBoundary
+            name="transport"
+            onReset={bumpInsets}
+            fallback={(api) => (
+              <SafeTransport
+                isPlaying={isPlaying}
+                onPrev={handlePrev}
+                onPlayPause={handlePlayPause}
+                onNext={handleNext}
+                onRetry={api.retry}
+                barRef={playerBarRef}
+                buttonRef={api.buttonRef}
+                switchedOff={api.switchedOff}
+                zenMode={isZenMode}
+                onLeaveZen={() => setIsZenMode(false)}
+              />
+            )}
+            render={() => (
           <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none flex justify-center">
              <div ref={playerBarRef} data-testid="player-bar" className="pointer-events-auto w-full bg-black/90 backdrop-blur-xl border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] transition-all duration-300 group">
                 
@@ -10921,6 +11188,8 @@ registerProcessor('wav-capture', WavCapture);
                 </div>
              </div>
           </div>
+            )}
+          />
         </main>
       </div>
     </div>

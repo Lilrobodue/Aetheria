@@ -32,6 +32,14 @@ import { DEVICE, TEST_PORT, TEST_ORIGIN } from './tests/adb';
 const ANDROID_UA =
   'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36';
 
+// On a device the tests share Chrome's one profile, and its one CDP context, with the user's own tabs. Playwright's
+// failure artifacts look at whatever is in that context: its error-context page snapshot takes context.pages()[0]
+// once the test's tab is closed (on the phone, one of the user's tabs), and failure screenshots take every page. So
+// on a device none is taken: this variable switches the page snapshot off (each worker loads this file too, so it is
+// set there), screenshots, traces and videos are off below, and tests/fixtures.ts refuses to start a device test if
+// any of them is on (a --trace or --screenshot flag would override the config).
+if (DEVICE) process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1';
+
 export default defineConfig({
   testDir: './tests',
   timeout: 120_000,
@@ -43,6 +51,7 @@ export default defineConfig({
     channel: 'chrome',
     serviceWorkers: 'block',
     launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },
+    ...(DEVICE ? { screenshot: 'off' as const, trace: 'off' as const, video: 'off' as const } : {}),
   },
   // real-library.spec.ts runs only when asked for (E2E_REAL_LIBRARY=1 on a
   // device run, --project=android-real): it drives YOUR library in YOUR tab.

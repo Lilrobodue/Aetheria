@@ -13,6 +13,7 @@ import {
   stubStorageFull,
   controlStateSaves,
   toneWav,
+  confirmDelete,
 } from './helpers';
 
 // Tests tagged @mobile also run under an Android user agent (see the config),
@@ -113,7 +114,7 @@ test('the library survives walks, imports, Auto-Distribute and Deep Scan (v14.5 
 });
 
 test('deleting a track removes its stored audio and keeps the current track playing on', async ({ page }) => {
-  await openApp(page, { acceptDialogs: true }); // the row's Delete asks to confirm
+  await openApp(page); // the row Delete asks in an in-app dialog (confirmDelete)
   await importTones(page, 3, 30);
   await expectCache(page, { blobs: 3, library: 3 });
   await page.getByText('tone-03', { exact: true }).click();
@@ -122,6 +123,7 @@ test('deleting a track removes its stored audio and keeps the current track play
 
   // Delete a track before the current one: the current track stays current.
   await rowOf(page, 'tone-01').getByTitle('Delete song').click();
+  await confirmDelete(page);
   await expect(page.getByText('tone-01', { exact: true })).toHaveCount(0);
   await expect(title).toHaveText('tone-03');
   await expectCache(page, { blobs: 2, library: 2, meta: 2 });
@@ -134,7 +136,7 @@ test('deleting a track removes its stored audio and keeps the current track play
 });
 
 test('an emptied list still saves the library, and a reload restores it', async ({ page }) => {
-  await openApp(page, { acceptDialogs: true });
+  await openApp(page);
   await importTones(page, 28, 30);
   await page.getByRole('button', { name: /Auto-Distribute Frequencies/ }).click();
   await expectCache(page, { blobs: 28, library: 28, playOrder: 28 });
@@ -144,7 +146,10 @@ test('an emptied list still saves the library, and a reload restores it', async 
   await expect.poll(async () => (await cacheCounts(page)).playOrder, { timeout: 15_000 }).toBeLessThan(28);
   const mix = (await cacheCounts(page)).playOrder;
   const rows = page.locator('div.group').filter({ has: page.getByTitle('Delete song') });
-  for (let i = 0; i < mix; i++) await rows.first().getByTitle('Delete song').click();
+  for (let i = 0; i < mix; i++) {
+    await rows.first().getByTitle('Delete song').click();
+    await confirmDelete(page);
+  }
   await expect(page.getByText('This list is empty')).toBeVisible();
   await expectCache(page, { blobs: 28 - mix, library: 28 - mix, playOrder: 0 });
 
@@ -227,7 +232,7 @@ test("'Not now' hides the Recover banner but Clear still counts those tracks", a
 
 test('a storage warning is withdrawn once a later save stores those tracks', async ({ page }) => {
   await stubStorageFull(page);
-  await openApp(page, { acceptDialogs: true }); // the row Delete asks to confirm
+  await openApp(page); // the row Delete asks in an in-app dialog (confirmDelete)
   await importTones(page, 3, 30);
   const warning = page.getByText(/^3 tracks could not be saved for offline use/);
   await expect(warning).toBeVisible();
@@ -237,13 +242,14 @@ test('a storage warning is withdrawn once a later save stores those tracks', asy
   // the other two: the warning is no longer true and goes.
   await page.evaluate(() => ((window as any).__storageFull = false));
   await rowOf(page, 'tone-01').getByTitle('Delete song').click();
+  await confirmDelete(page);
   await expectCache(page, { blobs: 2 });
   await expect(warning).toHaveCount(0);
 });
 
 test('Reload for an update waits when the library could not be saved', async ({ page }) => {
   await stubStorageFull(page);
-  await openApp(page, { acceptDialogs: true }); // the row Delete asks to confirm
+  await openApp(page); // the row Delete asks in an in-app dialog (confirmDelete)
   await importTones(page, 3, 30);
   await expect(page.getByText(/^3 tracks could not be saved for offline use/)).toBeVisible();
   await page.evaluate(() => {
@@ -261,6 +267,7 @@ test('Reload for an update waits when the library could not be saved', async ({ 
   // true, so it goes (the update banner stays for the real reload).
   await page.evaluate(() => ((window as any).__storageFull = false));
   await rowOf(page, 'tone-01').getByTitle('Delete song').click();
+  await confirmDelete(page);
   await expectCache(page, { blobs: 2 });
   await expect(held).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Reload', exact: true })).toBeVisible();

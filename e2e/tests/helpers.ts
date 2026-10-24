@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { ON_DEVICE } from './fixtures';
+import { ON_DEVICE, watchNativeDialogs } from './fixtures';
 
 /** A short mono 16-bit PCM sine WAV (8 kHz), small enough to import dozens. */
 export function toneWav(seconds: number, freq: number): Buffer {
@@ -28,10 +28,11 @@ export function toneWav(seconds: number, freq: number): Buffer {
 
 /**
  * Open the app past the first-run tutorial and the launch disclaimer.
- * Returns the messages of every alert/confirm/prompt the page raises: tests
- * assert it stays empty, because a blocking dialog freezes playback on a locked
- * phone (Playwright would otherwise auto-dismiss them unseen). With
- * `acceptDialogs` (the row Delete confirm) dialogs are accepted, not recorded.
+ * Returns the messages of every alert/confirm/prompt the page raises (the
+ * fixture's native-dialog guard records and dismisses them, and fails the test
+ * at its end on any): tests assert it stays empty, because a blocking dialog
+ * freezes playback on a locked phone. Since v15.4 the app raises none; the row
+ * Delete asks in an in-app dialog (confirmDelete).
  * Also counts HTMLMediaElement.pause() calls in window.__pauseCount: the
  * gapless advance never pauses, the playTrack fallback does.
  *
@@ -44,17 +45,9 @@ export function toneWav(seconds: number, freq: number): Buffer {
  */
 export async function openApp(
   page: Page,
-  opts: { acceptDialogs?: boolean; query?: string; engine?: 'classic' | 'v2' | 'default' } = {}
+  opts: { query?: string; engine?: 'classic' | 'v2' | 'default' } = {}
 ): Promise<string[]> {
-  const dialogs: string[] = [];
-  page.on('dialog', async (d) => {
-    if (opts.acceptDialogs) {
-      await d.accept();
-    } else {
-      dialogs.push(`${d.type()}: ${d.message()}`);
-      await d.dismiss();
-    }
-  });
+  const dialogs = watchNativeDialogs(page);
   const engine = opts.engine === 'default' ? null : (opts.engine ?? 'classic');
   await page.addInitScript(
     ({ engine, key }) => {
@@ -1030,4 +1023,64 @@ export async function meanLayerRms(page: Page, reads = 6, gapMs = 50): Promise<n
     });
   }
   return sum / reads;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// UI kit and isolation (v15.4)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The row Delete's confirmation (an in-app alertdialog since v15.4): press its Delete. */
+export async function confirmDelete(page: Page): Promise<void> {
+  await page
+    .getByRole('alertdialog', { name: 'Delete this track?' })
+    .getByRole('button', { name: 'Delete', exact: true })
+    .click();
+}
+
+/** The regions the crash drills can break (components/ErrorBoundary.tsx ViewName), and 'root' (a sibling of App). */
+export type CrashView =
+  | 'visualizer' | 'header' | 'library' | 'harmonic' | 'guidebook' | 'frequency-lab'
+  | 'safety' | 'record' | 'tutorial' | 'links' | 'notices' | 'transport' | 'root';
+
+/**
+ * Make a region throw on its next render, through the app's dev hook window.__aetheriaCrash (ErrorBoundary.tsx; dev
+ * builds only, so the test server has it and production does not). A page without it fails here rather than letting
+ * a drill pass on "nothing happened".
+ */
+export async function crash(page: Page, view: CrashView): Promise<void> {
+  await page
+    .waitForFunction(() => typeof (window as any).__aetheriaCrash === 'function', null, { timeout: 5_000 })
+    .catch(() => {
+      throw new Error('window.__aetheriaCrash is missing: the crash drills need the dev server (it is stripped from builds)');
+    });
+  await page.evaluate((v) => (window as any).__aetheriaCrash(v), view);
+}
+
+/**
+ * A finger tap at page coordinates: Playwright's touchscreen locally (the context needs hasTouch); on a device, real
+ * CDP touch events, because the phone's own context has no hasTouch.
+ */
+export async function tapAt(page: Page, x: number, y: number): Promise<void> {
+  if (!ON_DEVICE) {
+    await page.touchscreen.tap(x, y);
+    return;
+  }
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
+}
+
+/** The Zen-hidden UI layer: the header's parent (App's UI wrapper). Not by role: while hidden it is inert, so it is
+ *  out of the accessibility tree. */
+export const zenLayer = (page: Page) => page.locator('header').locator('xpath=..');
+
+/** Turn Zen Mode on and wait until the UI has faded out (3 s after the last mouse move). */
+export async function hideZen(page: Page): Promise<void> {
+  const toggle = page.getByTitle('Zen Mode (Hide UI)', { exact: true });
+  if (await toggle.isVisible().catch(() => false)) await toggle.click();
+  await expect(zenLayer(page), 'Zen Mode hides the UI').toHaveClass(/opacity-0/, { timeout: 15_000 });
 }

@@ -835,15 +835,19 @@ test('the lens fits between the header and the player bar, and fills the screen 
   expect({ w: shown[0].w, h: shown[0].h }, 'the canvas is the phone viewport').toEqual({ w: PHONE.width, h: PHONE.height });
   expect(await panelEdges(page), 'the panels held still while recording').toEqual(edges);
 
-  // Zen Mode: the UI fades out 3 s after the last mouse move, and the lens eases out to the full screen.
-  const ui = page.getByRole('banner').locator('xpath=..');
+  // Zen Mode: the UI fades out 3 s after the last mouse move, and the lens eases out to the full screen. Not by role:
+  // the hidden UI is inert (v15.4), so it is out of the accessibility tree.
+  const ui = page.locator('header').locator('xpath=..');
   await page.getByTitle('Zen Mode (Hide UI)', { exact: true }).click();
   await expect(ui, 'Zen Mode hides the UI').toHaveClass(/opacity-0/, { timeout: 15_000 });
   await recordFor(page, 2000, 15);
   const zen = await recordFor(page, 6000, 60);
 
   // The UI back (and the pointer off the player bar, whose hover makes its seek strip taller): the
-  // lens eases back in between the panels; its caps hang, then fall.
+  // lens eases back in between the panels; its caps hang, then fall. The hidden UI is inert (v15.4): a mouse move
+  // brings it back first, then Show UI can be clicked.
+  await page.mouse.move(PHONE.width / 2, PHONE.height / 2);
+  await expect(ui).not.toHaveAttribute('inert');
   await page.getByTitle('Show UI', { exact: true }).click();
   await expect(ui).not.toHaveClass(/opacity-0/);
   await page.mouse.move(PHONE.width / 2, PHONE.height / 2);

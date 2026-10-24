@@ -1,7 +1,7 @@
 {
-  "name": "v15.3-aetheria:-harmonic-resonance-player",
+  "name": "v15.4-aetheria:-harmonic-resonance-player",
   "private": true,
-  "version": "15.3.0",
+  "version": "15.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,7 @@
     "deploy": "npm run build",
     "check:playlists": "node utils/library/listOps.check.ts",
     "check:critical": "node scripts/check-critical.mjs",
+    "check:dialogs": "node scripts/check-dialogs.mjs",
     "check:hex": "node utils/hexWander.smoke.ts",
     "check:spectrum": "node utils/hexSpectrum.smoke.ts",
     "check:sound": "node utils/soundV2/check_vectors.ts && node utils/soundV2/layerSchedule.check.ts && node utils/soundV2/layerPlayer.check.ts && node utils/soundV2/layerHost.check.ts && node utils/soundV2/soundLog.check.ts && node utils/soundV2/keyFit.check.ts",

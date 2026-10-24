@@ -137,7 +137,6 @@ async function closeAll(page: Page): Promise<void> {
 async function walk(page: Page, context: BrowserContext, vp: Viewport): Promise<void> {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  page.on('dialog', (d) => d.dismiss().catch(() => {}));
   page.setDefaultTimeout(15_000);
   await page.addInitScript(() => {
     // Seeded Math.random (mulberry32): the tones' detected-frequency guesses and the shuffles repeat run to run.
@@ -319,6 +318,14 @@ async function walk(page: Page, context: BrowserContext, vp: Viewport): Promise<
   await page.waitForTimeout(3000);
   await closeAll(page);
   await shot('restored');
+  // On the phone the reload reopens the library drawer, which covers the player bar's left 85 %: a forced click at
+  // the Zen button's spot pressed the drawer's Flow State instead (an alert until v15.3, a toast since v15.4, in the
+  // zen shot). Close the drawer first, so the click reaches Zen in both builds.
+  const drawer = await page.locator('aside').boundingBox();
+  if (vp === 'phone' && drawer && drawer.x + drawer.width > 50) {
+    await page.getByRole('banner').getByRole('button').first().click();
+    await page.waitForTimeout(500);
+  }
   await page.getByTitle('Zen Mode (Hide UI)', { exact: true }).click({ force: true });
   await page.waitForTimeout(4000);
   await shot('zen');

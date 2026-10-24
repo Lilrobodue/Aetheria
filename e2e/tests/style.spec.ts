@@ -2,7 +2,7 @@ import { type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from './fixtures';
-import { importTones, openApp, openHarmonicControl, openSafety } from './helpers';
+import { crash, hideZen, importTones, openApp, openHarmonicControl, openSafety } from './helpers';
 
 // v15.3 "style foundation": the app's CSS is the bundled main-*.css alone. Until v15.2.1 index.html also ran the
 // Tailwind Play CDN, which regenerated the same rules in the page and hid any class the build had missed; it is gone
@@ -169,6 +169,44 @@ test.describe('style foundation (v15.3)', () => {
     await page.getByTitle('Links & Resources').click();
     await page.waitForTimeout(400);
     await collectClasses(page, 'links panel', seen);
+    await page.getByTitle('Links & Resources').click();
+
+    // v15.4's kit and fallbacks: a readout dialog, the delete confirmation, a panel's fallback, the basic transport,
+    // the visuals pill, Zen's "Show controls", and last the root fallback (then a reload).
+    await page.locator('aside').getByRole('button', { name: /^Library\s*Diagnostics/ }).click();
+    const readout = page.getByRole('dialog', { name: 'Library diagnostics', exact: true });
+    await readout.waitFor();
+    await collectClasses(page, 'readout dialog', seen);
+    await readout.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.locator('div.group').filter({ has: page.getByText('tone-01', { exact: true }) }).getByTitle('Delete song').click();
+    const confirm = page.getByRole('alertdialog', { name: 'Delete this track?' });
+    await confirm.waitFor();
+    await collectClasses(page, 'delete dialog', seen);
+    await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await openHarmonicControl(page);
+    await crash(page, 'harmonic');
+    const panelFallback = page.getByRole('alert').filter({ hasText: /hit a problem/ });
+    await panelFallback.waitFor();
+    await collectClasses(page, 'panel fallback', seen);
+    await panelFallback.getByRole('button', { name: 'Close', exact: true }).click();
+    await crash(page, 'transport');
+    await page.getByTestId('safe-transport').waitFor();
+    await collectClasses(page, 'safe transport', seen);
+    await page.getByTestId('safe-transport').getByRole('button', { name: 'Reload controls', exact: true }).click();
+    await crash(page, 'visualizer');
+    await page.getByRole('button', { name: /Restart visuals/ }).waitFor();
+    await collectClasses(page, 'visuals pill', seen);
+    await page.getByRole('button', { name: /Restart visuals/ }).click();
+    await hideZen(page);
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Show controls', exact: true })).toBeFocused();
+    await collectClasses(page, 'zen, show controls focused', seen);
+    await page.keyboard.press('Enter');
+    await crash(page, 'root');
+    await page.getByRole('alert').filter({ hasText: 'Aetheria stopped after a problem.' }).waitFor();
+    await collectClasses(page, 'root fallback', seen);
+    await page.reload();
+    await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
 
     const styled = await stylesheetClasses(page);
     const unstyled = [...seen]

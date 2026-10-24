@@ -274,8 +274,11 @@ test('A plain reload mid-pass keeps what was flushed, and a new run resumes', as
   await openApp(page);
   await importTones(page, 27, 3);
   await expectCache(page, { blobs: 27 });
-  // flushMs 5000 lets each debounced 2 s save land between flushes (1500 would starve it).
-  await analyseTune(page, { flushMs: 5000, duty: 0.05 });
+  // flushMs 5000 lets each debounced 2 s save land between flushes (1500 would starve it). Duty 0.01 keeps the pass
+  // running across several flushes: at 0.05 it outlasted the first flush only while the dev build's App render was a
+  // ~140 ms long task per progress update (v15.3); v15.4's per-region renders made the dev pass ~3× faster, and it
+  // finished all 27 before the first flush (production is unchanged, ~0.85 s for this pass either way).
+  await analyseTune(page, { flushMs: 5000, duty: 0.01 });
   await analyseButton(page).click();
   const K = await settledKeyed(page, async () => (await analyseRuns(page)) === 0 && (await cacheCounts(page)).keyed >= 3, 90_000);
   expect(K).toBeGreaterThanOrEqual(3);
@@ -366,8 +369,10 @@ test('Gapless advances keep working while the pass runs, and no step starts or e
   const mobile = await analyseMobile(page);
   // A low duty keeps the queue running into tone-01's last 20 s (phone) / 10 s (desktop), so the margins are
   // actually exercised (the 3 s tones are only milliseconds of work each); not so low that the pass sleeps through
-  // that window between two gates.
-  await analyseTune(page, { duty: 0.05 });
+  // that window between two gates. Desktop 0.02: at 0.05 the queue reached that window only while the dev build's
+  // App render was a ~140 ms long task per progress update (v15.3); v15.4's per-region renders made the dev pass ~3×
+  // faster (production is unchanged).
+  await analyseTune(page, { duty: mobile ? 0.05 : 0.02 });
   await analyseButton(page).click();
   await expect(title).toHaveText('tone-02', { timeout: 40_000 });
   await expect(title).toHaveText('tone-03', { timeout: 40_000 });

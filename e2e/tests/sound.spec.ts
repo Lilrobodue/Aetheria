@@ -16,6 +16,7 @@ import {
   openSafety,
   countConsole,
   rowOf,
+  confirmDelete,
 } from './helpers';
 
 // v14.6 sound Phase 0, measured on the app's own Web Audio graph (see
@@ -119,7 +120,7 @@ test('Emergency Stop pauses the music and silences every layer @mobile', async (
 test('deleting the playing track stops and unloads it; Play starts the list again', async ({ page }) => {
   await instrumentAudio(page);
   const errors = countConsole(page, 'Audio element error:');
-  await openApp(page, { acceptDialogs: true }); // the row Delete asks to confirm
+  await openApp(page); // the row Delete asks in an in-app dialog (confirmDelete)
   await importTones(page, 3, 30);
   await page.getByText('tone-02', { exact: true }).click();
   await expect.poll(() => elapsedSeconds(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
@@ -127,6 +128,7 @@ test('deleting the playing track stops and unloads it; Play starts the list agai
   const oldSrc = (await layerState(page)).music!.src!;
 
   await rowOf(page, 'tone-02').getByTitle('Delete song').click();
+  await confirmDelete(page);
   await expect(page.getByTestId('now-playing-title')).toHaveText('Aetheria Harmonic Player');
   await expect.poll(async () => (await layerState(page)).music?.paused).toBe(true);
   const s = await layerState(page);
@@ -147,7 +149,7 @@ test('deleting the playing track stops and unloads it; Play starts the list agai
 
 test('deleting the highlighted track while the music is paused leaves a tone-only session playing', async ({ page }) => {
   await instrumentAudio(page);
-  await openApp(page, { acceptDialogs: true }); // the row Delete asks to confirm
+  await openApp(page); // the row Delete asks in an in-app dialog (confirmDelete)
   await importTones(page, 3, 30);
   await page.getByText('tone-02', { exact: true }).click();
   await expect.poll(() => elapsedSeconds(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
@@ -155,6 +157,7 @@ test('deleting the highlighted track while the music is paused leaves a tone-onl
   await pickFrequency(page); // a tone over the paused track
   await expect.poll(async () => (await layerState(page)).toneSounding).toBe(true);
   await rowOf(page, 'tone-02').getByTitle('Delete song').click();
+  await confirmDelete(page);
   await expect(page.getByText('tone-02', { exact: true })).toHaveCount(0);
   // The deleted track is unloaded, but nothing that was sounding stopped.
   expect((await layerState(page)).music?.src).toBeNull();

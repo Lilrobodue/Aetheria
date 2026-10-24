@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { RootErrorBoundary, RootCrashProbe } from './components/ErrorBoundary';
 import './src/index.css';
 import { register as registerSW, NetworkStatus } from './src/serviceWorker';
 import { startPerfHud } from './utils/perfHud';
@@ -16,7 +17,11 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <RootErrorBoundary>
+      {/* DEV only: lets the root drill crash a sibling of App (the root boundary then replaces App, as App's own crash would) */}
+      <RootCrashProbe />
+      <App />
+    </RootErrorBoundary>
   </React.StrictMode>
 );
 

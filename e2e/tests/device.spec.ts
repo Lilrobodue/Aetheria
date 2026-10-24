@@ -1,10 +1,11 @@
 import { test, expect, ON_DEVICE } from './fixtures';
-import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY } from './helpers';
+import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY, crash } from './helpers';
 import { adb, mediaSession, chromeSessions } from './adb';
 
 // Checks only a real phone can make (npm run test:device). Android's own media
 // session — what the lock screen, the notification and the car show — is read
-// with `adb shell dumpsys media_session`. The screen-off test must stay LAST.
+// with `adb shell dumpsys media_session`. The screen-off tests must stay LAST
+// (v15.4: the panel-crash one after the lock-screen one, the root crash last).
 test.skip(!ON_DEVICE, 'needs an Android device (npm run test:device)');
 
 // Android sends the media keys to a card that is PLAYING, so a card left over
@@ -147,5 +148,83 @@ test('with the screen off, playback keeps advancing gaplessly and the lock-scree
   if (V2) expect([...crystals].length, `crystals seen: ${[...crystals].join(', ')}`).toBeGreaterThanOrEqual(2);
   // Key fit: the duck was retargeted with the screen off, once at least for each of the three advances (−6 ↔ 0 dB).
   if (KEY_FIT) expect((await keyFitState(page)).requests, 'requests to the duck across the three advances').toBeGreaterThanOrEqual(requestsBefore + 3);
+  expect(dialogs).toEqual([]);
+});
+
+test('a panel crash with the screen off keeps the card and the gapless advance @device', async ({ page }) => {
+  // v15.4 isolation on the phone: the library list and the transport crash (the dev hook) with the screen off; the
+  // lock-screen card stays PLAYING and keeps following the gapless advance, and both panels come back afterwards.
+  const dialogs = await openApp(page);
+  await importTones(page, 28, 4);
+  await page.getByRole('button', { name: /Auto-Distribute Frequencies/ }).click();
+  await page.getByText('tone-01', { exact: true }).click();
+  await expect(page.getByTestId('now-playing-title')).toHaveText('tone-01');
+  await expect.poll(() => mediaSession(), { timeout: 15_000 }).toEqual({ state: 'playing', title: 'tone-01' });
+  const pausesBefore = await pauseCount(page);
+
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  try {
+    await crash(page, 'library');
+    await crash(page, 'transport');
+    const titles: string[] = [];
+    await expect
+      .poll(
+        () => {
+          const s = mediaSession();
+          if (s && s.state === 'playing' && !titles.includes(s.title)) titles.push(s.title);
+          return titles.filter((t) => t !== 'tone-01').length;
+        },
+        { timeout: 30_000, intervals: [500], message: 'two gapless advances on the PLAYING card' }
+      )
+      .toBeGreaterThanOrEqual(2);
+    expect(mediaSession()?.state, 'the card still says playing').toBe('playing');
+    // The library card's Reload panel button as it is now, to tell after the wake whether it was replaced meanwhile.
+    await page.evaluate(() => {
+      const b = Array.from(document.querySelectorAll('[role="alert"] button')).find((x) => x.textContent === 'Reload panel');
+      (window as any).__e2eReloadPanel = b ?? null;
+    });
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
+  // Screen on: both fallbacks show, and Reload panel / Reload controls bring both back. The library's card by its
+  // own words: SafeTransport carries an sr-only alert ("The player bar hit a problem…") that /hit a problem/ also matches.
+  const library = page.getByRole('alert').filter({ hasText: /library list hit a problem/ });
+  await expect(library).toBeVisible();
+  await expect(page.getByTestId('safe-transport')).toBeVisible();
+  await expect(page.getByTestId('safe-transport').getByRole('alert')).toHaveText(/player bar hit a problem/);
+  const reloadPanel = await page.evaluate(() => {
+    const before = (window as any).__e2eReloadPanel as Element | null;
+    const now = Array.from(document.querySelectorAll('[role="alert"] button')).find((x) => x.textContent === 'Reload panel') ?? null;
+    return { seenBefore: !!before, sameNode: !!before && before === now, beforeStillConnected: !!before?.isConnected };
+  });
+  console.log('[device a] the Reload panel button across the screen-off:', JSON.stringify(reloadPanel));
+  test.info().annotations.push({ type: 'Reload panel button across the screen-off', description: JSON.stringify(reloadPanel) });
+  // DOM clicks, not locator.click(): after the wake the secure keyguard stays up for the phone's lock delay (5 s on
+  // the Note 20), and Chrome draws no frames behind it. Playwright's click waits for the element to hold still over
+  // animation frames, so it would wait for ever (it did: 120 s). A real tap on Reload panel on a phone is covered by
+  // isolation.spec's crash drills (@mobile). No wait for an unlock here.
+  await library.getByRole('button', { name: 'Reload panel', exact: true }).evaluate((b) => (b as HTMLElement).click());
+  await page.getByTestId('safe-transport').getByRole('button', { name: 'Reload controls', exact: true }).evaluate((b) => (b as HTMLElement).click());
+  // Both back, read from the DOM (no frames needed): the cards gone, the list and the player bar there again.
+  await expect(library).toHaveCount(0);
+  await expect(page.getByTestId('safe-transport')).toHaveCount(0);
+  await expect(page.locator('aside').getByText(/^tone-\d\d$/).first()).toBeAttached();
+  await expect(page.getByTestId('player-bar')).toBeAttached();
+  await expect(page.getByTestId('now-playing-title')).toHaveText(/^tone-\d\d$/);
+  expect(dialogs).toEqual([]);
+});
+
+test('a root crash releases the card @device', async ({ page }) => {
+  // Keep this one last: it ends with the app stopped (the fixture's teardown then runs as usual).
+  const dialogs = await openApp(page);
+  await importTones(page, 1, 30);
+  await page.getByText('tone-01', { exact: true }).click();
+  await expect.poll(() => mediaSession(), { timeout: 15_000 }).toEqual({ state: 'playing', title: 'tone-01' });
+  await crash(page, 'root');
+  await expect(page.getByRole('alert').filter({ hasText: 'Aetheria stopped after a problem.' })).toBeVisible();
+  await expect
+    .poll(() => mediaSession()?.state ?? 'none', { timeout: 3_000, intervals: [250], message: 'the card no longer says PLAYING' })
+    .not.toBe('playing');
   expect(dialogs).toEqual([]);
 });
