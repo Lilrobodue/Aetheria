@@ -2,6 +2,70 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens as CSS variables (v15.3), for code that styles outside Tailwind classes: canvas drawing,
+   inline styles, the offline page. The same values as tailwind.config.js; e2e/tests/style.spec.ts checks
+   that the two agree. Additive: nothing reads them yet. */
+@layer base {
+  :root {
+    --ae-gold-50: #fffbeb;
+    --ae-gold-100: #fef3c7;
+    --ae-gold-200: #fde68a;
+    --ae-gold-300: #fcd34d;
+    --ae-gold-400: #fbbf24;
+    --ae-gold-500: #f59e0b;
+    --ae-gold-600: #d97706;
+    --ae-gold-700: #b45309;
+    --ae-gold-800: #92400e;
+    --ae-gold-900: #78350f;
+    --ae-gold-950: #451a03;
+
+    --ae-surface-base: #000000;
+    --ae-surface-deep: #020617;
+    --ae-surface-panel: #0f172a;
+    --ae-surface-raised: #1e293b;
+    --ae-surface-control: #334155;
+
+    --ae-ink: #e2e8f0;
+    --ae-ink-strong: #ffffff;
+    --ae-ink-soft: #cbd5e1;
+    --ae-ink-muted: #94a3b8;
+    --ae-ink-faint: #64748b;
+    --ae-ink-accent: #fbbf24;
+
+    --ae-line: #1e293b;
+    --ae-line-strong: #334155;
+    --ae-line-accent: #f59e0b;
+
+    --ae-regime-gut: #fbbf24;
+    --ae-regime-perfect: #34d399;
+    --ae-regime-heart: #4ade80;
+    --ae-regime-head: #60a5fa;
+    --ae-regime-source: #4ade80;
+
+    --ae-status-ok: #22c55e;
+    --ae-status-warn: #eab308;
+    --ae-status-alert: #f97316;
+    --ae-status-error: #ef4444;
+    --ae-status-info: #60a5fa;
+
+    --ae-touch: 2.75rem;
+    --ae-row: 4rem;
+    --ae-tabbar: 3.5rem;
+    --ae-mini: 4rem;
+    --ae-transport: 5.5rem;
+
+    --ae-radius-control: 0.5rem;
+    --ae-radius-card: 0.75rem;
+    --ae-radius-sheet: 1rem;
+
+    --ae-dur-fast: 150ms;
+    --ae-dur-base: 300ms;
+    --ae-dur-slow: 500ms;
+    --ae-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+    --ae-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  }
+}
+
 /* Custom Scrollbar for Playlist */
 ::-webkit-scrollbar {
   width: 8px;

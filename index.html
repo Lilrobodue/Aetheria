@@ -23,43 +23,6 @@
     <!-- iOS Icons -->
     <link rel="apple-touch-icon" sizes="192x192" href="/images/icon-192x192.png" />
     <link rel="apple-touch-icon" sizes="512x512" href="/images/icon-512x512.png" />
-    <script>
-      // Suppress the warning about cdn.tailwindcss.com not being production-grade.
-      // In this environment, we do not have a build step, so the CDN is necessary.
-      const originalWarn = console.warn;
-      console.warn = (...args) => {
-        if (args[0] && typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com')) return;
-        originalWarn.apply(console, args);
-      };
-    </script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              gold: {
-                400: '#fbbf24',
-                500: '#f59e0b',
-                600: '#d97706',
-              },
-              deep: {
-                900: '#0f172a',
-                950: '#020617',
-              }
-            },
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-              serif: ['Merriweather', 'serif'],
-            },
-            animation: {
-              'spin-slow': 'spin 20s linear infinite',
-              'pulse-slow': 'pulse 8s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-            }
-          },
-        },
-      }
-    </script>
     <style>
       /* Custom Scrollbar for Playlist */
       ::-webkit-scrollbar {
@@ -80,18 +43,6 @@
         color: #e2e8f0;
       }
     </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/client": "https://aistudiocdn.com/react-dom@^19.2.0/client",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react-dom": "https://aistudiocdn.com/react-dom@^19.2.0",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0"
-  }
-}
-</script>
 </head>
   <body>
     <div id="root">

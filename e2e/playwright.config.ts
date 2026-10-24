@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
 import { DEVICE, TEST_PORT, TEST_ORIGIN } from './tests/adb';
 
 // Aetheria's browser smoke tests (v14.5+).
@@ -45,7 +46,29 @@ export default defineConfig({
   },
   // real-library.spec.ts runs only when asked for (E2E_REAL_LIBRARY=1 on a
   // device run, --project=android-real): it drives YOUR library in YOUR tab.
-  testIgnore: process.env.E2E_REAL_LIBRARY ? undefined : /real-library\.spec\.ts/,
+  // parity.spec.ts (v15.3) too (E2E_PARITY=1): it compares a production build
+  // served by serve-dist.mjs with screenshots of the previous release. Matched
+  // by its whole file name, so chroma-parity.spec.ts is not caught by it.
+  testIgnore: [
+    ...(process.env.E2E_REAL_LIBRARY ? [] : [/real-library\.spec\.ts/]),
+    ...(process.env.E2E_PARITY ? [] : [/[\\/]parity\.spec\.ts$/]),
+  ],
+  // The parity baselines: machine- and Chrome-specific, never committed (.gitignore).
+  snapshotPathTemplate: '{testDir}/../parity-baseline/{arg}{ext}',
+  expect: {
+    toHaveScreenshot: {
+      animations: 'disabled',
+      caret: 'hide',
+      scale: 'css',
+      maxDiffPixels: 0,
+      // Playwright's default (0.2) is blind to a 20%-alpha dark fill on the near-black UI: the Auto-Distribute
+      // button's old bg-gold-900/20, put back, passed at 0.2 (measured: its pixels sit at 0.06). 0.02 still
+      // ignores the one-level rounding the build's minifier gives semi-transparent colours (#f59e0b4d = 0.302 for
+      // /30; at most 0.004), which v15.2.1 hid under the Tailwind CDN's unminified copies of the same rules.
+      threshold: 0.02,
+      stylePath: fileURLToPath(new URL('./tests/parity.css', import.meta.url)),
+    },
+  },
   projects: DEVICE
     ? [
         { name: 'android', grepInvert: /@device|@real/ },

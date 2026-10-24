@@ -17,7 +17,7 @@ type Config = {
 
 // Precache the exact set of assets this page loaded, so the app works fully
 // offline on the next visit. For a no-build app the runtime module graph
-// (every imported .tsx/.ts plus the CDN modules) can't be listed by hand, so we
+// (every imported module) can't be listed by hand, so we
 // read it back from the Performance API and hand it to the active service
 // worker to cache. Best-effort and safe to call repeatedly.
 function precacheLoadedAssets(): void {
@@ -30,9 +30,9 @@ function precacheLoadedAssets(): void {
 
       const sameOrigin = window.location.origin;
       // Cross-origin hosts whose assets are part of the app (not user data).
+      // (Since v15.3 the build bundles the libraries and the CSS, and sw.js
+      // caches same-origin URLs only, so these font hosts are never stored.)
       const cdnOrigins = [
-        'https://aistudiocdn.com',
-        'https://cdn.tailwindcss.com',
         'https://fonts.googleapis.com',
         'https://fonts.gstatic.com',
       ];

@@ -3,3 +3,4 @@ playwright-report/
 blob-report/
 # Soak results hold the titles of the library they ran on (a real one, usually).
 soak-results/
+parity-baseline/

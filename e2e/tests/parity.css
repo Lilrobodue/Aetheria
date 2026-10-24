@@ -1,0 +1,4 @@
+/* Applied to every parity screenshot (playwright.config.ts expect.toHaveScreenshot.stylePath): hides what moves
+   on its own, so two builds of the same UI shoot the same pixels. */
+canvas { visibility: hidden !important; }                       /* the visualizer animates */
+[data-testid="transport-time"], [data-testid="seek-progress"] { visibility: hidden !important; } /* playback position */

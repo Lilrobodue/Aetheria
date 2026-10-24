@@ -7553,7 +7553,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.2.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -8435,6 +8435,8 @@ registerProcessor('wav-capture', WavCapture);
                </div>
 
                {/* Smart Harmonic Distribution - Single Reliable Method */}
+               {/* v15.3: no gold fill. Its gold 900 and 800 background classes rendered nothing until the full gold scale
+                   (tailwind.config.js) arrived, and the button stays exactly as it always looked (the user's decision). */}
                <button
                 aria-disabled={isScanning}
                 title={isScanning ? 'Unavailable while Deep Scan runs' : undefined}
@@ -8525,7 +8527,7 @@ registerProcessor('wav-capture', WavCapture);
                     );
                   }
                 }}
-                className={`mb-3 w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg font-medium tracking-wide transition-all bg-gold-900/20 border border-gold-500/30 ${isScanning ? 'opacity-40 cursor-not-allowed' : 'active:scale-95 hover:bg-gold-800/30 hover:border-gold-500/50'}`}
+                className={`mb-3 w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg font-medium tracking-wide transition-all border border-gold-500/30 ${isScanning ? 'opacity-40 cursor-not-allowed' : 'active:scale-95 hover:border-gold-500/50'}`}
                >
                  <Target size={14} className="text-gold-400" />
                  <span className="text-gold-400 font-bold">Auto-Distribute Frequencies</span>
@@ -8924,7 +8926,7 @@ registerProcessor('wav-capture', WavCapture);
                                           onClick={() => setPhiTimingEnabled(!phiTimingEnabled)}
                                           className={`w-8 h-4 rounded-full relative transition-colors ${phiTimingEnabled ? 'bg-purple-500' : 'bg-slate-700'}`}
                                       >
-                                          <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${phiTimingEnabled ? 'left-4.5' : 'left-0.5'}`}></div>
+                                          <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${phiTimingEnabled ? 'translate-x-4' : 'translate-x-0'}`}></div>
                                       </button>
                                   </div>
                                   {v2Active && (
@@ -9118,7 +9120,7 @@ registerProcessor('wav-capture', WavCapture);
                                             onClick={() => setVizSettings({...vizSettings, showWaterRipples: !vizSettings.showWaterRipples})}
                                             className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.showWaterRipples ? 'bg-blue-500' : 'bg-slate-700'}`}
                                         >
-                                            <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.showWaterRipples ? 'left-4.5' : 'left-0.5'}`}></div>
+                                            <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.showWaterRipples ? 'translate-x-4' : 'translate-x-0'}`}></div>
                                         </button>
                                     </div>
                                     {vizSettings.showWaterRipples && (
@@ -9143,7 +9145,7 @@ registerProcessor('wav-capture', WavCapture);
                                         onClick={() => setVizSettings({...vizSettings, showTreeOfLife: !vizSettings.showTreeOfLife})}
                                         className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.showTreeOfLife ? 'bg-gold-500' : 'bg-slate-700'}`}
                                     >
-                                        <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.showTreeOfLife ? 'left-4.5' : 'left-0.5'}`}></div>
+                                        <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.showTreeOfLife ? 'translate-x-4' : 'translate-x-0'}`}></div>
                                     </button>
                                 </div>
 
@@ -9154,7 +9156,7 @@ registerProcessor('wav-capture', WavCapture);
                                             onClick={() => setVizSettings({...vizSettings, showLoShuCube: !vizSettings.showLoShuCube})}
                                             className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.showLoShuCube ? 'bg-emerald-500' : 'bg-slate-700'}`}
                                         >
-                                            <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.showLoShuCube ? 'left-4.5' : 'left-0.5'}`}></div>
+                                            <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.showLoShuCube ? 'translate-x-4' : 'translate-x-0'}`}></div>
                                         </button>
                                     </div>
                                     <p className="text-[9px] text-slate-500 mt-1">
@@ -9173,7 +9175,7 @@ registerProcessor('wav-capture', WavCapture);
                                                     className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.loShuCubeAutoRotate ? 'bg-emerald-500' : 'bg-slate-700'}`}
                                                     title={vizSettings.loShuCubeAutoRotate ? 'Stop turntable rotation' : 'Resume turntable rotation'}
                                                 >
-                                                    <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.loShuCubeAutoRotate ? 'left-4.5' : 'left-0.5'}`}></div>
+                                                    <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.loShuCubeAutoRotate ? 'translate-x-4' : 'translate-x-0'}`}></div>
                                                 </button>
                                             </div>
                                             <div className={`transition-opacity ${vizSettings.loShuCubeAutoRotate ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
@@ -9222,7 +9224,7 @@ registerProcessor('wav-capture', WavCapture);
                                                                 className={`w-8 h-4 rounded-full relative transition-colors ${on ? 'bg-emerald-500' : 'bg-slate-700'}`}
                                                                 title={on ? `Hide the ${label} walk path overlay` : `Show the ${label} walk path overlay`}
                                                             >
-                                                                <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${on ? 'left-4.5' : 'left-0.5'}`}></div>
+                                                                <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${on ? 'translate-x-4' : 'translate-x-0'}`}></div>
                                                             </button>
                                                         </div>
                                                     );
@@ -9239,7 +9241,7 @@ registerProcessor('wav-capture', WavCapture);
                                             onClick={() => setVizSettings({...vizSettings, morphEnabled: !vizSettings.morphEnabled})}
                                             className={`w-8 h-4 rounded-full relative transition-colors ${vizSettings.morphEnabled ? 'bg-gold-500' : 'bg-slate-700'}`}
                                         >
-                                            <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.morphEnabled ? 'left-4.5' : 'left-0.5'}`}></div>
+                                            <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${vizSettings.morphEnabled ? 'translate-x-4' : 'translate-x-0'}`}></div>
                                         </button>
                                     </div>
                                     <p className="text-[9px] text-slate-500">

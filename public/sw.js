@@ -1,4 +1,4 @@
-const CACHE_NAME = 'aetheria-v15.2.1-offline';
+const CACHE_NAME = 'aetheria-v15.3-offline';
 const OFFLINE_URL = '/';
 
 // Files to cache for offline support
@@ -13,36 +13,37 @@ const STATIC_CACHE_URLS = [
   '/images/icon-512x512.png'
 ];
 
-// External CDN resources to cache
-const CDN_CACHE_URLS = [
-  'https://cdn.tailwindcss.com',
-  'https://aistudiocdn.com/react@^19.2.0',
-  'https://aistudiocdn.com/react-dom@^19.2.0/client',
-  'https://aistudiocdn.com/lucide-react@^0.554.0'
-];
+// External CDN resources to cache. None since v15.3: the build bundles React,
+// lucide and the CSS, so the page loads nothing from a CDN.
+const CDN_CACHE_URLS = [];
 
 // Cache a single URL, choosing the correct fetch mode by origin.
 //
-// Same-origin assets and the ES-module CDN (aistudiocdn) MUST use a normal CORS
-// fetch so the cached response can satisfy module imports. Other cross-origin
-// assets — notably cdn.tailwindcss.com, which is loaded as a classic <script>
-// and sends no Access-Control-Allow-Origin header — are blocked by a default
-// (cors) fetch ("No 'Access-Control-Allow-Origin' header is present"). We fetch
-// those with mode:'no-cors', yielding an opaque response that caches fine and
-// replays for the classic no-cors request. Returns true if something was cached.
-async function cacheUrl(cache, rawUrl) {
+// Same-origin assets MUST use a normal CORS fetch so the cached response can
+// satisfy module imports. Other cross-origin assets loaded as classic scripts
+// or stylesheets usually send no Access-Control-Allow-Origin header, so a
+// default (cors) fetch is blocked ("No 'Access-Control-Allow-Origin' header is
+// present"). We fetch those with mode:'no-cors', yielding an opaque response
+// that caches fine and replays for the classic no-cors request. Returns true if
+// something was cached.
+//
+// `cacheMode` is the HTTP-cache mode for same-origin fetches. GitHub Pages
+// serves everything with max-age=600, so a default fetch made within ten
+// minutes of a visit can be answered from the browser's HTTP cache with the
+// PREVIOUS deploy's copy, and we would store that stale copy. 'reload' always
+// goes to the network; 'no-cache' revalidates with the server (an ETag 304
+// when nothing changed). Neither ever stores a stale copy.
+async function cacheUrl(cache, rawUrl, cacheMode = 'reload') {
   let parsed;
   try {
     parsed = new URL(rawUrl, self.location.origin);
   } catch {
     return false;
   }
-  const needsCors =
-    parsed.origin === self.location.origin ||
-    parsed.origin === 'https://aistudiocdn.com';
+  const needsCors = parsed.origin === self.location.origin;
   try {
     const request = needsCors
-      ? new Request(rawUrl)
+      ? new Request(rawUrl, { cache: cacheMode })
       : new Request(rawUrl, { mode: 'no-cors' });
     const response = await fetch(request);
     // CORS / same-origin responses must be ok; opaque (no-cors) responses
@@ -70,9 +71,27 @@ self.addEventListener('install', (event) => {
         // doesn't exist at this deploy's web root) rejects the whole install
         // with "Failed to fetch" and leaves the cache empty. Per-URL
         // try/catch lets the install succeed with whatever is reachable and
-        // just logs the rest.
+        // just logs the rest. 'reload' fetches from the network, never the
+        // HTTP cache: a relaunch soon after a deploy still has the old shell
+        // there, and it must not become this version's offline '/'.
         for (const url of [...STATIC_CACHE_URLS, ...CDN_CACHE_URLS]) {
-          const cached = await cacheUrl(cache, url);
+          const cached = await cacheUrl(cache, url, 'reload');
+          if (!cached) console.warn(`[SW] Skipped caching ${url}`);
+        }
+
+        // The shell just stored under '/' must boot offline on its own, so
+        // also cache the build assets it names (hashed /assets/ files). A
+        // relaunch soon after a deploy shows the OLD page, whose CACHE_URLS
+        // message never names the new assets: without this, going offline
+        // before the next online launch stalls at "Initializing Aetheria...".
+        const shell = await cache.match('/');
+        const shellHtml = shell ? await shell.text() : '';
+        const shellAssets = new Set();
+        for (const m of shellHtml.matchAll(/\b(?:src|href)="(\/assets\/[^"?#]+)"/g)) {
+          shellAssets.add(m[1]);
+        }
+        for (const url of shellAssets) {
+          const cached = await cacheUrl(cache, url, 'no-cache');
           if (!cached) console.warn(`[SW] Skipped caching ${url}`);
         }
 
@@ -144,8 +163,19 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       (async () => {
         try {
-          // Try to fetch from network first
-          const networkResponse = await fetch(request);
+          // Try to fetch from network first. cache:'no-cache' revalidates with
+          // the server (a cheap ETag 304 when nothing changed) instead of
+          // taking the HTTP cache's copy, which Pages' max-age=600 keeps for
+          // ten minutes after a deploy. Fetched by URL, not by re-making the
+          // navigate-mode Request with an init (older browsers throw on that).
+          // redirect:'manual' is the navigation's own mode: a redirect goes
+          // back to the browser to follow, as fetch(request) did; a followed
+          // redirect handed to a navigation is a network error.
+          const networkResponse = await fetch(request.url, {
+            cache: 'no-cache',
+            credentials: 'same-origin',
+            redirect: 'manual'
+          });
           // Keep the offline shell fresh: stash the latest index.html under
           // '/' so an offline navigation always gets the current shell.
           if (networkResponse && networkResponse.ok) {
@@ -210,9 +240,9 @@ self.addEventListener('fetch', (event) => {
   // Same-origin app source (HTML / TS / JS / CSS) changes on every deploy, so
   // serve it NETWORK-FIRST: always try the network and only fall back to cache
   // when offline. This is what makes a fresh deploy show up on the first reload
-  // instead of the second. Version-pinned CDN libraries (react, lucide,
-  // tailwind) and static media (images, manifest, fonts) stay CACHE-FIRST for
-  // speed — they don't change between deploys.
+  // instead of the second. Cross-origin resources and static media (images,
+  // manifest, fonts) stay CACHE-FIRST for speed — they don't change between
+  // deploys.
   const isSameOrigin = url.origin === self.location.origin;
   const isAppSource = isSameOrigin && /\.(html|tsx?|jsx?|mjs|css)$/i.test(url.pathname);
 
@@ -236,7 +266,7 @@ self.addEventListener('fetch', (event) => {
         }
       }
 
-      // --- CACHE-FIRST: CDN libraries, images, manifest, fonts, etc. ---
+      // --- CACHE-FIRST: images, manifest, fonts, etc. ---
       try {
         const cachedResponse = await cache.match(request);
         if (cachedResponse) {
@@ -343,7 +373,7 @@ self.addEventListener('message', (event) => {
   }
 
   // Offline precache: the page sends the full list of resource URLs it
-  // actually loaded (the whole module graph + CDN deps, gathered from the
+  // actually loaded (the whole module graph, gathered from the
   // Performance API). We fetch and cache any not already stored. This is what
   // makes the app TRULY work offline for a no-build app — we can't enumerate
   // every .tsx/.ts module by hand, so we let a successful online visit tell us
@@ -353,11 +383,24 @@ self.addEventListener('message', (event) => {
       const cache = await caches.open(CACHE_NAME);
       let added = 0;
       await Promise.all(event.data.urls.map(async (rawUrl) => {
+        // Same-origin only. Since v15.3 the app loads nothing from another
+        // origin, so a cross-origin URL here can only come from an older page
+        // posting to this newer worker (v15.2.1 sends its Tailwind CDN
+        // script), and it must not land in this version's cache.
+        let origin;
+        try {
+          origin = new URL(rawUrl, self.location.origin).origin;
+        } catch {
+          return;
+        }
+        if (origin !== self.location.origin) return;
         const existing = await cache.match(rawUrl);
         if (existing) return;
-        // cacheUrl picks cors vs no-cors by origin, so cross-origin classic
-        // scripts (e.g. Tailwind) cache as opaque instead of CORS-failing.
-        if (await cacheUrl(cache, rawUrl)) added++;
+        // Revalidated ('no-cache'): the page just loaded these, so an
+        // unchanged file costs a 304, while a file a newer deploy replaced or
+        // removed is never stored from the HTTP cache (an old page can post
+        // its URLs to this newer worker).
+        if (await cacheUrl(cache, rawUrl, 'no-cache')) added++;
       }));
       const total = event.data.urls.length;
       console.log(`[SW] Offline precache: cached ${added} new of ${total} requested`);
