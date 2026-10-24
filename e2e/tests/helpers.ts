@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { ON_DEVICE, watchNativeDialogs } from './fixtures';
+import { ON_DEVICE, test, watchNativeDialogs } from './fixtures';
 
 /** A short mono 16-bit PCM sine WAV (8 kHz), small enough to import dozens. */
 export function toneWav(seconds: number, freq: number): Buffer {
@@ -1040,7 +1040,10 @@ export async function confirmDelete(page: Page): Promise<void> {
 /** The regions the crash drills can break (components/ErrorBoundary.tsx ViewName), and 'root' (a sibling of App). */
 export type CrashView =
   | 'visualizer' | 'header' | 'library' | 'harmonic' | 'guidebook' | 'frequency-lab'
-  | 'safety' | 'record' | 'tutorial' | 'links' | 'notices' | 'transport' | 'root';
+  | 'safety' | 'record' | 'tutorial' | 'links' | 'notices' | 'transport' | 'root'
+  // v15.5, the new layout (beta).
+  | 'shell' | 'now-playing' | 'mini-player' | 'desktop-transport' | 'tab-library' | 'tab-mixes' | 'tab-layers'
+  | 'more' | 'sheet-sound' | 'sheet-crystal' | 'sheet-walks' | 'menu';
 
 /**
  * Make a region throw on its next render, through the app's dev hook window.__aetheriaCrash (ErrorBoundary.tsx; dev
@@ -1083,4 +1086,182 @@ export async function hideZen(page: Page): Promise<void> {
   const toggle = page.getByTitle('Zen Mode (Hide UI)', { exact: true });
   if (await toggle.isVisible().catch(() => false)) await toggle.click();
   await expect(zenLayer(page), 'Zen Mode hides the UI').toHaveClass(/opacity-0/, { timeout: 15_000 });
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The new layout (v15.5, opt-in beta)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The saved layout choice ('new' / 'classic'; unset = classic). The app writes it only from a tap or ?layout=. */
+export const LAYOUT_KEY = 'aetheria.layout.v1';
+/** A phone, as the probes and the mockups measured it. */
+export const PHONE_VIEWPORT = { width: 411, height: 752 };
+
+/** The new layout's root (the phone or the desktop shell). */
+export const newShell = (page: Page) => page.getByTestId('new-shell');
+
+export async function layoutPref(page: Page): Promise<string | null> {
+  return page.evaluate((k) => localStorage.getItem(k), LAYOUT_KEY);
+}
+
+/**
+ * Into the new layout from classic (openApp first: the library's import lives in classic), as a user does: Harmonic
+ * Control › Try the new layout. The music keeps playing through it.
+ */
+export async function optInNewLayout(page: Page): Promise<void> {
+  await openHarmonicControl(page);
+  await page.getByTestId('try-new-layout').click();
+  await newShell(page).waitFor();
+}
+
+/**
+ * Open the app straight into the new layout (a returning beta user): `via: 'seed'` stores the choice before the first
+ * load, 'query' loads /?layout=new (which saves it). Seeds the engine as openApp does, skips the tutorial, counts
+ * pause() calls, and accepts the disclaimer (shared by both layouts). Returns the native-dialog list.
+ */
+export async function openNewLayout(
+  page: Page,
+  opts: { via?: 'seed' | 'query'; engine?: 'classic' | 'v2' | 'default'; output?: 'headphones' | 'speakers' | 'phone' | 'car' } = {}
+): Promise<string[]> {
+  const dialogs = watchNativeDialogs(page);
+  const engine = opts.engine === 'default' ? null : (opts.engine ?? 'classic');
+  await page.addInitScript(
+    ({ engine, output, keys, seedLayout }) => {
+      try {
+        if (sessionStorage.getItem('__e2eNewSeeded') === null) {
+          sessionStorage.setItem('__e2eNewSeeded', '1');
+          if (engine && localStorage.getItem(keys.engine) === null) localStorage.setItem(keys.engine, engine);
+          if (output && localStorage.getItem(keys.output) === null) localStorage.setItem(keys.output, output);
+          if (seedLayout) localStorage.setItem(keys.layout, 'new');
+        }
+      } catch {}
+      localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
+      const w = window as any;
+      w.__pauseCount = 0;
+      const original = HTMLMediaElement.prototype.pause;
+      HTMLMediaElement.prototype.pause = function (this: HTMLMediaElement) {
+        w.__pauseCount++;
+        return original.call(this);
+      };
+    },
+    { engine, output: opts.output ?? null, keys: { engine: LAYER_ENGINE_KEY, output: LAYER_OUTPUT_KEY, layout: LAYOUT_KEY }, seedLayout: opts.via !== 'query' }
+  );
+  await page.goto(opts.via === 'query' ? '/?layout=new' : '/');
+  await acceptDisclaimerNew(page);
+  return dialogs;
+}
+
+/** The disclaimer over the new layout: accept it if it shows (wait for the shell first). */
+export async function acceptDisclaimerNew(page: Page): Promise<void> {
+  await newShell(page).waitFor();
+  const accept = page.getByRole('button', { name: /I understand, let me begin/ });
+  if (await accept.isVisible().catch(() => false)) await accept.click();
+}
+
+/** A tab of the phone shell (or a section of the desktop nav). */
+export async function tab(page: Page, name: 'now' | 'library' | 'mixes' | 'layers' | 'more'): Promise<void> {
+  const button = page.getByTestId(`tab-${name}-button`).or(page.getByTestId(`nav-${name}`));
+  await button.click();
+}
+
+/** The open sheet (modal on the phone, the panel on the desktop) by its title. */
+export const sheet = (page: Page, title: string) =>
+  page.getByRole('dialog', { name: title, exact: true }).or(page.getByRole('region', { name: title, exact: true }));
+
+/** The target's box once it has held still across two animation frames (it is re-measured until two agree). */
+async function stableBox(page: Page, target: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
+  const same = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) =>
+    Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
+  let prev = await target.boundingBox();
+  for (let i = 0; i < 40; i++) {
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const now = await target.boundingBox();
+    if (prev && now && same(prev, now)) return now;
+    prev = now;
+  }
+  throw new Error('tapCount: the target never held still for two frames');
+}
+
+/**
+ * Counts the taps an action takes (spec §3.11: Crystal 2, Output 2, Walk 2). `tap` is a finger tap at the element's
+ * centre (tapAt: Playwright's touchscreen here, real CDP touches on a device); `click` a pointer click.
+ */
+export function tapCount(page: Page) {
+  let n = 0;
+  return {
+    get count() {
+      return n;
+    },
+    reset() {
+      n = 0;
+    },
+    /**
+     * A finger tap at the target's centre, measured once its box has held still for two animation frames (a sheet
+     * that just opened, a list that just scrolled). Records, as a test annotation, which element the page says lies
+     * under that point. The tap's effect may land later than this returns: on a phone the click comes from Chrome's
+     * gesture detector after the touch, so read its outcome with a retrying assertion (expect.poll, toHaveText …).
+     */
+    async tap(target: Locator, label = `tap ${n + 1}`): Promise<void> {
+      await target.scrollIntoViewIfNeeded();
+      const box = await stableBox(page, target);
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      const hit = await page.evaluate(({ x, y }) => {
+        const el = document.elementFromPoint(x, y) as HTMLElement | null;
+        if (!el) return 'nothing';
+        const named = el.closest('button, a, [role="slider"], [role="switch"]') as HTMLElement | null;
+        const who = named ?? el;
+        return `${who.tagName.toLowerCase()} "${(who.getAttribute('aria-label') || who.textContent || '').trim().slice(0, 40)}"`;
+      }, { x, y });
+      test.info().annotations.push({ type: `tap at (${Math.round(x)}, ${Math.round(y)}): ${label}`, description: `elementFromPoint → ${hit}` });
+      await tapAt(page, x, y);
+      n++;
+    },
+    async click(target: Locator): Promise<void> {
+      await target.click();
+      n++;
+    },
+  };
+}
+
+/**
+ * Record the perf HUD's one-second lines in window.__hud (call before the first load; it switches the HUD on). The
+ * HUD's `draws N/s` is what the Visualizer actually rendered (after its 30 fps gate).
+ */
+export async function recordHudDraws(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    localStorage.setItem('aetheria.perfhud.v1', '1');
+    const w = window as any;
+    w.__hud = [] as { at: number; draws: number }[];
+    const attach = () => {
+      const hud = document.querySelector('[data-testid="perf-hud"]');
+      if (!hud) return false;
+      new MutationObserver(() => {
+        const m = /draws ([\d.]+)\/s/.exec(hud.textContent ?? '');
+        if (m) w.__hud.push({ at: performance.now(), draws: Number(m[1]) });
+      }).observe(hud, { childList: true, characterData: true, subtree: true });
+      return true;
+    };
+    const watch = new MutationObserver(() => {
+      if (attach()) watch.disconnect();
+    });
+    watch.observe(document, { childList: true, subtree: true });
+  });
+}
+
+/** The HUD's draws per second in the `n` one-second windows that END after now (waits for them). */
+export async function drawsPerSecond(page: Page, n = 2): Promise<number[]> {
+  const t0 = await page.evaluate(() => performance.now());
+  await page.waitForFunction(({ t0, n }) => ((window as any).__hud ?? []).filter((h: any) => h.at > t0).length >= n, { t0, n }, { timeout: 15_000, polling: 200 });
+  return page.evaluate(({ t0, n }) => ((window as any).__hud as any[]).filter((h) => h.at > t0).slice(0, n).map((h) => h.draws), { t0, n });
+}
+
+/** The new layout's render counts (dev builds: window.__aetheriaRenders), and a reset. */
+export async function renders(page: Page): Promise<Record<string, number>> {
+  return page.evaluate(() => ({ ...((window as any).__aetheriaRenders ?? {}) }));
+}
+export async function resetRenders(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as any).__aetheriaRenders = {};
+  });
 }

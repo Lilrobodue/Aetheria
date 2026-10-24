@@ -29,6 +29,8 @@ import { importTones, openHarmonicControl, openSafety } from './helpers';
 //   - the switch tracks that are ON (their knob moved right). OFF switches are compared.
 // The Auto-Distribute Frequencies button is NOT masked: it must look exactly as in v15.2.1. Every shot asserts that
 // no mask touches it.
+// v15.5 adds one allowed difference: Harmonic Control's "Try the new layout" pill (placeOptInMask). Classic is
+// otherwise unchanged by the new layout, its branch, the heat guard's wrapper and the peek.
 
 const VIEWPORTS = {
   desktop: { width: 1280, height: 800 },
@@ -64,9 +66,38 @@ async function placeGoldTextMasks(page: Page): Promise<void> {
   }, GOLD_TEXT);
 }
 
+/**
+ * v15.5 (decision 3, option A): Harmonic Control's header gains the "Try the new layout" pill, between the title and
+ * Close. The one allowed difference of v15.5: masked as the gap between the title and Close, as tall as Close (the
+ * pill is the same height and sits in that gap; the title and Close keep their places, so the box is the same in
+ * both builds, which a mask on the pill alone could not be: the previous release has no pill to mask). The title,
+ * Close and the rest of the header are compared. A transparent fixed overlay, re-placed before every shot.
+ */
+async function placeOptInMask(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    document.querySelectorAll('[data-parity-optin-mask]').forEach((n) => n.remove());
+    const title = Array.from(document.querySelectorAll('h3')).find((e) => e.textContent?.trim() === 'Harmonic Control');
+    const row = title?.parentElement;
+    const closes = row ? Array.from(row.querySelectorAll('button[aria-label="Close"]')) : [];
+    const close = closes[closes.length - 1];
+    if (!title || !close) return;
+    const t = title.getBoundingClientRect();
+    const c = close.getBoundingClientRect();
+    if (c.left - t.right < 4) return;
+    const m = document.createElement('div');
+    m.setAttribute('data-parity-optin-mask', '');
+    m.style.cssText =
+      `position:fixed;left:${t.right + 1}px;top:${c.top - 2}px;width:${c.left - t.right - 2}px;height:${c.height + 4}px;` +
+      'margin:0;padding:0;border:0;background:transparent;pointer-events:none;z-index:2147483647';
+    document.body.appendChild(m);
+  });
+}
+
 /** The allowed differences, as locators (resolved at each shot). */
 function allowedDifferences(page: Page): Locator[] {
   return [
+    // v15.5's opt-in pill (see placeOptInMask).
+    page.locator('[data-parity-optin-mask]'),
     // Gold text tints (see placeGoldTextMasks).
     page.locator('[data-parity-mask]'),
     // Gold fills: the SOURCE panel (a div) and the two gradients. The one BUTTON that carried bg-gold-900/20 in
@@ -179,9 +210,10 @@ async function walk(page: Page, context: BrowserContext, vp: Viewport): Promise<
     });
     const name = `${vp}-${state}`;
     await placeGoldTextMasks(page);
+    await placeOptInMask(page);
     if (await autoDistributeUnmasked(page, masks, name)) unmaskedSeen.push(state);
     await expect.soft(page, `${name} matches the baseline`).toHaveScreenshot(`${name}.png`, { mask: masks });
-    await page.evaluate(() => document.querySelectorAll('[data-parity-mask]').forEach((n) => n.remove()));
+    await page.evaluate(() => document.querySelectorAll('[data-parity-mask],[data-parity-optin-mask]').forEach((n) => n.remove()));
     const out = path.join(SHOTS_DIR, label, `${name}.png`);
     fs.mkdirSync(path.dirname(out), { recursive: true });
     await page.screenshot({ path: out, animations: 'disabled', caret: 'hide', scale: 'css', style: HIDE_CSS });

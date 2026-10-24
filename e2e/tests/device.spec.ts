@@ -1,11 +1,12 @@
 import { test, expect, ON_DEVICE } from './fixtures';
-import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY, crash } from './helpers';
+import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY, crash, optInNewLayout, layoutPref, tapAt, PHONE_VIEWPORT } from './helpers';
 import { adb, mediaSession, chromeSessions } from './adb';
 
 // Checks only a real phone can make (npm run test:device). Android's own media
 // session — what the lock screen, the notification and the car show — is read
 // with `adb shell dumpsys media_session`. The screen-off tests must stay LAST
-// (v15.4: the panel-crash one after the lock-screen one, the root crash last).
+// (v15.4: the panel-crash one after the lock-screen one, the root crash last;
+// v15.5: the new layout's one before the lock-screen one).
 test.skip(!ON_DEVICE, 'needs an Android device (npm run test:device)');
 
 // Android sends the media keys to a card that is PLAYING, so a card left over
@@ -88,6 +89,62 @@ test('v2: a car or lock-screen Next on the last track pauses the music and the v
     .poll(async () => (await layerState(page)).music?.paused, { timeout: 10_000, message: 'Pause pauses it' })
     .toBe(true);
   await expect.poll(async () => (await layersState(page)).requested, { message: 'and the v2 layers' }).toBeNull();
+  expect(dialogs).toEqual([]);
+});
+
+test('the new layout keeps the lock-screen card across three gapless advances with the screen off @device', async ({ page }) => {
+  // v15.5 (spec §5.7): the screen-off advance of the test below, played from the new layout's Now Playing (opt-in
+  // beta). Turns the screen off; on a phone with a secure lock it stays locked after the test (unlock it by hand).
+  const dialogs = await openApp(page);
+  await importTones(page, 28, 4);
+  // Auto-Distribute gives every track a crystal, which the gapless advance needs.
+  await page.getByRole('button', { name: /Auto-Distribute Frequencies/ }).click();
+  // The phone shell (the fixture sizes the tab as a desktop; this tab only, it is closed after the test), then the
+  // opt-in a user taps: Harmonic Control › Try the new layout.
+  await page.setViewportSize(PHONE_VIEWPORT);
+  await optInNewLayout(page);
+  await expect(page.getByTestId('view-now')).toBeVisible();
+  expect(await layoutPref(page), 'the new layout is the saved choice').toBe('new');
+  // Play from Now Playing, with a finger (nothing loaded yet: Play starts the play order at its first track).
+  const play = await page.getByTestId('np-play').boundingBox();
+  expect(play, "Now Playing's Play button").toBeTruthy();
+  await tapAt(page, play!.x + play!.width / 2, play!.y + play!.height / 2);
+  await expect.poll(() => mediaSession()?.state, { timeout: 15_000 }).toBe('playing');
+  const first = mediaSession()!.title;
+  await expect(page.getByTestId('np-title')).toHaveText(first);
+  const pausesBefore = await pauseCount(page);
+
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  const titles: string[] = [];
+  try {
+    await expect
+      .poll(
+        () => {
+          const s = mediaSession();
+          if (s && s.state === 'playing' && s.title !== first && !titles.includes(s.title)) titles.push(s.title);
+          return titles.length;
+        },
+        { timeout: 45_000, intervals: [500], message: 'three gapless advances on the PLAYING card, its title following' }
+      )
+      .toBeGreaterThanOrEqual(3);
+    expect(mediaSession()?.state, 'the card still says playing').toBe('playing');
+    expect(chromeSessions().filter((s) => s.state === 'playing').length, 'one PLAYING Chrome card: none stranded').toBe(1);
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  test.info().annotations.push({ type: 'card titles with the screen off', description: [first, ...titles].join(' → ') });
+  // After the wake, DOM reads only: the secure keyguard stays up for the phone's lock delay and Chrome draws no frames
+  // behind it, so a locator click or tap would wait for ever (v15.4's panel-crash test). No wait for an unlock.
+  // The gapless swap never pauses the element; the playTrack fallback (which drops the card on a locked phone) does.
+  expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
+  await expect(page.getByTestId('new-shell'), 'still the new layout').toBeAttached();
+  await expect(page.getByTestId('view-now')).toBeAttached();
+  await expect
+    .poll(async () => ((await page.getByTestId('np-title').textContent()) ?? '') === (mediaSession()?.title ?? '-'), {
+      timeout: 10_000,
+      message: "Now Playing's title is the card's",
+    })
+    .toBe(true);
   expect(dialogs).toEqual([]);
 });
 

@@ -10,6 +10,7 @@ import {
   openApp,
   openHarmonicControl,
   openSafety,
+  optInNewLayout,
   pauseCount,
   zenLayer,
   type CrashView,
@@ -360,6 +361,24 @@ test('3. a root crash stops the app, releases the lock-screen card and reloads o
   await acceptDisclaimer(page);
   await expect(page.getByText(/Restored 3 tracks/)).toBeVisible({ timeout: 15_000 });
   expect(await page.evaluate(() => (window as any).__samePage === undefined), 'a new page').toBe(true);
+  expect(dialogs).toEqual([]);
+});
+
+test('3b. in the new layout too (v15.5), a root crash stops the app and releases the lock-screen card', async ({ page }) => {
+  test.setTimeout(90_000);
+  await instrumentAudio(page);
+  const dialogs = await openApp(page);
+  await playing(page);
+  await closeSafety(page);
+  await optInNewLayout(page);
+  await expect(page.getByTestId('view-now').or(page.getByTestId('side-nav'))).toBeVisible();
+  await crash(page, 'root');
+  const fallback = page.getByRole('alert').filter({ hasText: 'Aetheria stopped after a problem.' });
+  await expect(fallback).toBeVisible();
+  await expect(page.getByTestId('new-shell')).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => ({ state: navigator.mediaSession.playbackState, metadata: navigator.mediaSession.metadata })))
+    .toEqual({ state: 'none', metadata: null });
   expect(dialogs).toEqual([]);
 });
 

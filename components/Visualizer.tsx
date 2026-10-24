@@ -907,6 +907,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
         });
     }
     particlesRef.current = newParticles;
+    prevFreqRef.current = 0; // v15.5: the fresh particles take the crystal's shape again (the morph effect below re-applies it)
 
     // Initialize Hex Grid - Reduced for better performance. The lattice
     // constants and formulas live in utils/hexWander (moved verbatim), so the

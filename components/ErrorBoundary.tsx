@@ -30,7 +30,7 @@ import { waitForBlobSaves } from '../utils/playlistCache';
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 /** The version the error log records. Bump it with the header badge (App.tsx); isolation.spec checks the two agree. */
-export const APP_VERSION = 'v15.4';
+export const APP_VERSION = 'v15.5';
 
 export type ViewName =
   | 'visualizer'
@@ -44,7 +44,20 @@ export type ViewName =
   | 'tutorial'
   | 'links'
   | 'notices'
-  | 'transport';
+  | 'transport'
+  // v15.5, the new layout (beta): its own regions, each with its own strikes.
+  | 'shell'
+  | 'now-playing'
+  | 'mini-player'
+  | 'desktop-transport'
+  | 'tab-library'
+  | 'tab-mixes'
+  | 'tab-layers'
+  | 'more'
+  | 'sheet-sound'
+  | 'sheet-crystal'
+  | 'sheet-walks'
+  | 'menu';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The error log
@@ -254,24 +267,36 @@ interface SafeTransportProps {
   /** Zen Mode is on: the real player bar held its only toggle, so the fallback offers the way out. */
   zenMode?: boolean;
   onLeaveZen?: () => void;
+  /** v15.5 (the new layout): in its region's own slot, in the page's flow, instead of fixed over the page's bottom. */
+  slot?: boolean;
+  /** v15.5: what the hidden alert names (default "The player bar"). */
+  what?: string;
+  /** v15.5: inside a fallback card that already says it and offers Reload panel: no alert, no Reload controls. */
+  quiet?: boolean;
 }
 
 /** The player bar's fallback: the basic controls, under the same names as the real transport's. */
-export const SafeTransport = ({ isPlaying, onPrev, onPlayPause, onNext, onRetry, barRef, buttonRef, switchedOff, zenMode, onLeaveZen }: SafeTransportProps) => (
+export const SafeTransport = ({ isPlaying, onPrev, onPlayPause, onNext, onRetry, barRef, buttonRef, switchedOff, zenMode, onLeaveZen, slot, what, quiet }: SafeTransportProps) => (
   <div
     ref={barRef}
     data-testid="safe-transport"
-    className="fixed bottom-0 inset-x-0 z-popover bg-surface-deep border-t border-line flex flex-wrap items-center justify-center gap-3 p-2"
+    className={
+      slot
+        ? 'w-full bg-surface-deep border-t border-line flex flex-wrap items-center justify-center gap-3 p-2'
+        : 'fixed bottom-0 inset-x-0 z-popover bg-surface-deep border-t border-line flex flex-wrap items-center justify-center gap-3 p-2'
+    }
   >
-    <p role="alert" className="sr-only">
-      {switchedOff
-        ? 'The player bar is switched off until you restart the app. The music keeps playing.'
-        : 'The player bar hit a problem. The music keeps playing.'}
-    </p>
+    {!quiet && (
+      <p role="alert" className="sr-only">
+        {switchedOff
+          ? `${what ?? 'The player bar'} is switched off until you restart the app. The music keeps playing.`
+          : `${what ?? 'The player bar'} hit a problem. The music keeps playing.`}
+      </p>
+    )}
     <IconButton label="Previous track" icon={<SkipBack size={18} />} onClick={onPrev} />
     <IconButton label={isPlaying ? 'Pause' : 'Play'} icon={isPlaying ? <Pause size={20} /> : <Play size={20} />} onClick={onPlayPause} buttonRef={buttonRef} />
     <IconButton label="Next track" icon={<SkipForward size={18} />} onClick={onNext} />
-    {!switchedOff && (
+    {!switchedOff && !quiet && (
       <Button variant="secondary" onClick={onRetry}>
         Reload controls
       </Button>
@@ -283,6 +308,50 @@ export const SafeTransport = ({ isPlaying, onPrev, onPlayPause, onNext, onRetry,
     )}
   </div>
 );
+
+interface ShellFallbackOptions {
+  /** Saves 'classic' and shows it (the way out of a broken new layout). */
+  useClassic: () => void;
+  isPlaying: boolean;
+  onPrev: () => void;
+  onPlayPause: () => void;
+  onNext: () => void;
+}
+
+/**
+ * v15.5: the new layout's own fallback (the `shell` region, around the whole new layout): full screen, with
+ * "Use the classic layout" first, Reload panel (until three strikes switch it off) and Copy details, and the basic
+ * transport under it, so the music can always be controlled.
+ */
+export function shellFallback(api: FallbackApi, o: ShellFallbackOptions) {
+  return (
+    <div data-testid="shell-fallback" className="fixed inset-0 z-10 bg-surface-deep text-ink flex flex-col">
+      <div className="flex-1 min-h-0 flex items-center justify-center p-6">
+        <div role="alert" className="w-full max-w-md bg-surface-panel border border-line-strong rounded-card p-4 text-sm text-ink">
+          <p className="leading-snug">
+            {api.switchedOff
+              ? 'The new layout is switched off until you restart the app. The music keeps playing.'
+              : 'The new layout hit a problem. The music keeps playing.'}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button variant="primary" buttonRef={api.buttonRef} onClick={o.useClassic}>
+              Use the classic layout
+            </Button>
+            {!api.switchedOff && (
+              <Button variant="secondary" onClick={api.retry}>
+                Reload panel
+              </Button>
+            )}
+            <Button variant="ghost" onClick={api.copyDetails}>
+              Copy details
+            </Button>
+          </div>
+        </div>
+      </div>
+      <SafeTransport slot quiet isPlaying={o.isPlaying} onPrev={o.onPrev} onPlayPause={o.onPlayPause} onNext={o.onNext} onRetry={api.retry} />
+    </div>
+  );
+}
 
 interface VisualsStoppedPillProps {
   onRetry: () => void;

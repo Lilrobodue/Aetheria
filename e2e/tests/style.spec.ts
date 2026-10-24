@@ -283,6 +283,139 @@ test.describe('style foundation (v15.3)', () => {
     expect(await knobOffset(tree), 'Tree of Life, off again').toBe(2);
   });
 
+  test('e. the new layout (v15.5): every class on screen has a rule; no blur and no endless animation over the canvas', async ({ page }) => {
+    // I13 for the new shell: no backdrop-filter and no infinite animation (classic's six blurs and two endless
+    // animations restyle and re-filter the page every frame, spec §2.5), and every class from a complete literal.
+    test.setTimeout(240_000);
+    const seen = new Map<string, string>();
+    const effects = new Set<string>();
+    const census = async (state: string) => {
+      await page.waitForTimeout(250);
+      await collectClasses(page, state, seen);
+      const found = await page.evaluate(() => {
+        const roots = Array.from(document.querySelectorAll('[data-testid="new-shell"], [data-testid="shell-fallback"], [role="dialog"], [data-testid="peek-pill"]'));
+        const out: string[] = [];
+        for (const root of roots) {
+          for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+            const cs = getComputedStyle(el);
+            const tag = `${el.tagName.toLowerCase()}.${(el.getAttribute('class') || '').split(/\s+/).slice(0, 3).join('.')}`;
+            if (cs.backdropFilter && cs.backdropFilter !== 'none') out.push(`backdrop-filter ${cs.backdropFilter} on ${tag}`);
+            if (cs.animationName && cs.animationName !== 'none' && /infinite/.test(cs.animationIterationCount)) out.push(`infinite animation ${cs.animationName} on ${tag}`);
+          }
+        }
+        return out;
+      });
+      for (const f of found) effects.add(`${f} (${state})`);
+    };
+    const playRow = page.getByRole('group', { name: 'Output' });
+    await page.setViewportSize({ width: 411, height: 752 });
+    await openApp(page, { engine: 'v2' });
+    await page.evaluate(() => localStorage.setItem('aetheria.layerOutput.v1', 'headphones'));
+    await page.reload();
+    await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
+    await importTones(page, 3, 60);
+    await page.getByText('tone-01', { exact: true }).first().click();
+    await page.getByRole('button', { name: 'Pause', exact: true }).first().waitFor({ timeout: 20_000 });
+    const close = page.getByRole('button', { name: 'Close Safety Panel' });
+    if (await close.isVisible().catch(() => false)) await close.evaluate((b) => (b as HTMLButtonElement).click());
+    await openHarmonicControl(page);
+    await page.getByTestId('try-new-layout').click();
+    await page.getByTestId('new-shell').waitFor();
+    await census('new layout, now playing');
+
+    // Each sheet, the menu.
+    for (const [open, title] of [['chip-crystal', 'Crystal'], ['np-output', 'Sound'], ['np-walks', 'Walks']] as const) {
+      await page.getByTestId(open).click();
+      await page.getByRole('dialog', { name: title, exact: true }).waitFor();
+      await census(`sheet ${title}`);
+      await page.keyboard.press('Escape');
+    }
+    await page.getByTestId('np-menu-button').click();
+    await page.getByTestId('menu-body').waitFor();
+    await census('menu');
+    await page.keyboard.press('Escape');
+
+    // Tone only: paused, then a crystal.
+    await page.getByTestId('np-play').click();
+    await page.getByRole('button', { name: 'Play', exact: true }).first().waitFor();
+    await page.getByTestId('chip-crystal').click();
+    await page.getByTestId('crystal-528').click();
+    await page.getByTestId('tone-only-banner').waitFor();
+    await census('tone only');
+    await page.getByTestId('tone-only-banner').getByRole('button', { name: 'Stop', exact: true }).click();
+    await page.getByTestId('np-play').click();
+    await page.getByRole('button', { name: 'Pause', exact: true }).first().waitFor();
+
+    // The mini-player on each stub, and the fallbacks.
+    for (const t of ['library', 'mixes', 'layers', 'more'] as const) {
+      await page.getByTestId(`tab-${t}-button`).click();
+      await census(`stub ${t} + mini-player`);
+    }
+    await crash(page, 'more');
+    await page.getByRole('alert').filter({ hasText: /hit a problem/ }).waitFor();
+    await census('tab fallback');
+    await page.getByRole('button', { name: 'Reload panel', exact: true }).click();
+    await crash(page, 'mini-player');
+    await page.getByTestId('safe-transport').waitFor();
+    await census('mini-player fallback');
+    await page.getByRole('button', { name: 'Reload controls', exact: true }).click();
+    await page.getByTestId('tab-library-button').click();
+    await page.getByRole('button', { name: 'Open the classic library', exact: true }).click();
+    await page.getByTestId('peek-pill').waitFor();
+    await census('peek');
+    await page.getByTestId('peek-pill').click();
+    await page.getByTestId('tab-now-button').click();
+    await crash(page, 'now-playing');
+    await page.getByRole('alert').filter({ hasText: /hit a problem/ }).waitFor();
+    await census('now playing fallback');
+    await page.getByRole('button', { name: 'Reload panel', exact: true }).click();
+    await page.getByTestId('chip-crystal').click();
+    await crash(page, 'sheet-crystal');
+    await page.getByRole('alert').filter({ hasText: /hit a problem/ }).waitFor();
+    await census('sheet fallback');
+    await page.keyboard.press('Escape');
+
+    // Car.
+    await page.getByTestId('np-output').click();
+    await playRow.getByRole('button', { name: 'Car', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await page.getByTestId('view-car').waitFor();
+    await census('car');
+    await page.getByRole('button', { name: 'Change output', exact: true }).click();
+    await playRow.getByRole('button', { name: 'Headphones', exact: true }).click();
+    await page.keyboard.press('Escape');
+
+    // A landscape phone, then the desktop shell with its panel (a sheet, a stub), then the shell's own fallback.
+    await page.setViewportSize({ width: 882, height: 411 });
+    await page.getByTestId('view-now').waitFor();
+    await census('landscape');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.getByTestId('side-nav').waitFor();
+    await census('desktop');
+    await page.getByTestId('desktop-crystal').click();
+    await page.getByRole('region', { name: 'Crystal', exact: true }).waitFor();
+    await census('desktop, crystal panel');
+    await page.getByTestId('nav-library').click();
+    await page.getByTestId('tab-library').waitFor();
+    await census('desktop, library panel');
+    await crash(page, 'desktop-transport');
+    await page.getByTestId('safe-transport').waitFor();
+    await census('desktop transport fallback');
+    await page.getByRole('button', { name: 'Reload controls', exact: true }).click();
+    await crash(page, 'shell');
+    await page.getByTestId('shell-fallback').waitFor();
+    await census('shell fallback');
+
+    const styled = await stylesheetClasses(page);
+    const unstyled = [...seen]
+      .filter(([t]) => !styled.has(t) && !LUCIDE.test(t) && !INERT.has(t))
+      .map(([t, state]) => `${t} (${state})`)
+      .sort();
+    expect(seen.size, 'the walk saw the new layout').toBeGreaterThan(150);
+    expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
+    expect([...effects], 'backdrop-filter or an endless animation in the new layout').toEqual([]);
+  });
+
   test('d. the --ae-* CSS variables equal the tailwind.config.js tokens', async ({ page }) => {
     // The config is ESM (the root package is "type": "module"); imported through a data: URL so the test runner's
     // own loader never transforms it.

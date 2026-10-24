@@ -132,6 +132,15 @@ import {
   keyFitRowText,
 } from './components/layers/layerCopy';
 import type { LayerStatus } from './components/layers/layerCopy';
+// v15.5: the new layout (beta), opt-in. React's Activity (the heat guard) is imported ONLY in VisualsPause.tsx: here
+// `Activity` is lucide's icon.
+import ShellProviders from './components/shell/ShellProviders';
+import AppShell from './components/shell/AppShell';
+import VisualsPause from './components/shell/VisualsPause';
+import PeekPill from './components/shell/PeekPill';
+import { useMediaQuery } from './components/shell/useMediaQuery';
+import { LAYOUT_KEY, parseLayoutPref, sourceLine, walkSegment } from './components/shell/shellModel';
+import type { LayoutPref, ShellTab, ShellSheet, PeekPanel } from './components/shell/shellModel';
 
 // --- Helpers ---
 
@@ -1383,6 +1392,48 @@ const App: React.FC = () => {
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
   
   const [currTime, setCurrTime] = useState(0);
+  // v15.5: the new layout (beta), opt-in (Harmonic Control's "Try the new layout"); classic is the default. Read once,
+  // synchronously, in this initialiser, so the first frame is already the right layout (no flash of classic). A missing
+  // or invalid value means classic. Written only by a tap (setLayout, below) or by ?layout= (the effect below).
+  const [layout, setLayoutState] = useState<LayoutPref>(() => {
+    try {
+      return parseLayoutPref(
+        typeof localStorage !== 'undefined' ? localStorage.getItem(LAYOUT_KEY) : null,
+        new URLSearchParams(window.location.search).get('layout')
+      );
+    } catch {
+      return 'classic';
+    }
+  });
+  // The new layout's tab and open sheet (memory only: a reload opens Now Playing), and a stub's "peek" into classic
+  // (decision 4: classic shows with `layout` still 'new', and a pill comes back).
+  const [shellTab, setShellTab] = useState<ShellTab>('now');
+  const [shellSheet, setShellSheet] = useState<ShellSheet | null>(null);
+  const [sheetFocus, setSheetFocus] = useState<'output' | null>(null);
+  const [classicPeek, setClassicPeek] = useState<PeekPanel | null>(null);
+  // The desktop shell from 1024 × 600 (a laptop, a landscape iPad); anything smaller gets the phone shell.
+  const desktopShell = useMediaQuery('(min-width: 1024px) and (min-height: 600px)');
+  // ?layout=new / ?layout=classic set the choice and save it (for tests, and an escape hatch on a desktop). Then the
+  // param leaves the address, so a reload follows the saved choice (a later Back to classic, say), not a stale URL.
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      const q = url.searchParams.get('layout');
+      if (q === null) return;
+      if (q === 'new' || q === 'classic') localStorage.setItem(LAYOUT_KEY, q);
+      url.searchParams.delete('layout');
+      window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    } catch {}
+  }, []);
+  // "Open the classic mixes": the library panel opens at its mix buttons.
+  useEffect(() => {
+    if (classicPeek !== 'mixes') return;
+    const id = window.requestAnimationFrame(() => {
+      const first = Array.from(document.querySelectorAll('aside button')).find((b) => /GUT Alignment/.test(b.textContent || ''));
+      if (first instanceof HTMLElement) first.scrollIntoView({ block: 'start' });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [classicPeek]);
   const [currDuration, setCurrDuration] = useState(0);
 
   const [isUploading, setIsUploading] = useState(false);
@@ -2804,7 +2855,8 @@ const App: React.FC = () => {
   useEffect(() => {
     const apply = (top: number, bottom: number) =>
       setUiInsets((prev: { top: number; bottom: number }) => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }));
-    if (uiHidden) {
+    // (v15.5: Zen's hidden UI is classic's; the new layout's panels always cover what they cover.)
+    if (uiHidden && !(layout === 'new' && !classicPeek)) {
       apply(0, 0);
       return;
     }
@@ -2825,7 +2877,9 @@ const App: React.FC = () => {
       observer?.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [uiHidden, insetsEpoch]);
+    // v15.5: the new layout's top bar and bottom stack take these refs (Now Playing's panel, or the mini-player and
+    // the tab bar, or the desktop transport), so a switch, a tab change or the Car screen re-measures.
+  }, [uiHidden, insetsEpoch, layout, classicPeek, desktopShell, shellTab, layerOutput]);
 
   // Handle Shuffle State Logic
   useEffect(() => {
@@ -6928,7 +6982,7 @@ const App: React.FC = () => {
     setSelectedSolfeggio(applyLoShuPerfectMap(rawFreq));
     setIsSolfeggioActive(true);
     if (musicOnly) {
-      showStatusToast('Music only is on, so the tone is silent. Turn it off in Harmonic Control.');
+      showStatusToast(`Music only is on, so the tone is silent. Turn it off in ${layout === 'new' && !classicPeek ? 'the Sound sheet' : 'Harmonic Control'}.`);
     } else if (v2CarFallback) {
       showStatusToast(V2_UNAVAILABLE_CAR_TONE);
     }
@@ -7349,6 +7403,255 @@ registerProcessor('wav-capture', WavCapture);
     },
   });
 
+  // ---------------------------------------------------------------------------------------------------------------
+  // v15.5: the new layout (beta). After the pinned useMediaSession call, never inside it. App stays the only owner of
+  // state: the new views read these slices (components/shell/contexts.ts), each memoised on its own values, so the
+  // 4 Hz clock re-renders only the time readers; every handler goes through one stable actions object. Nothing here
+  // reaches the media element, the anchor, the AudioContext or the media session except through the pinned handlers.
+  // ---------------------------------------------------------------------------------------------------------------
+  const shellOn = layout === 'new' && !classicPeek;
+  // Zen is classic's: the new layout never runs it. A Zen turned on during a peek ends as the new layout comes back.
+  useEffect(() => {
+    if (shellOn && isZenMode) setIsZenMode(false);
+  }, [shellOn, isZenMode]);
+  // The phone shell's Car screen (Output = Car); the desktop has none (its layers chip says Car).
+  const carLayout = layout === 'new' && !desktopShell && layerOutput === 'car';
+  // The heat guard: a solid screen of the phone shell (a tab other than Now Playing, or the Car screen) covers the
+  // visualizer, so it stops drawing (VisualsPause). Never in classic or the desktop shell, never while recording (a
+  // video recording captures the canvas).
+  const visualsPaused = shellOn && !desktopShell && (shellTab !== 'now' || carLayout) && !isRecording;
+  // Where the shared notices (the status toasts, the update and recovery banners, the restore toast) sit in the new
+  // layout, clear of every control: under Now Playing's top bar or the Car header (the top of the screen there is
+  // the visualizer or text), above the mini-player and the tab bar on the other tabs, and on the desktop at the right,
+  // above the transport and beside the panel. Classic keeps its own places, byte for byte.
+  const shellNoticeStyle = desktopShell
+    ? { bottom: uiInsets.bottom + 16 }
+    : shellTab === 'now'
+      ? { top: uiInsets.top + 8 }
+      : { bottom: uiInsets.bottom + 8 };
+
+  /** The layout switch: saved from a tap only. The music, the visualizer and the lock-screen card carry over. */
+  const setLayout = (next: LayoutPref) => {
+    try {
+      localStorage.setItem(LAYOUT_KEY, next);
+    } catch {}
+    setLayoutState(next);
+    setClassicPeek(null);
+    setShellTab('now');
+    setShellSheet(null);
+    setSheetFocus(null);
+    if (next === 'new') {
+      // Zen is classic's in v15.5, and these popovers' portals belong to the classic transport. Harmonic Control
+      // (where the opt-in sits) closes; the other classic panels stay as they are for a return.
+      setIsZenMode(false);
+      setLayerSwitchOpen(false);
+      setShowLoShuWalkMenu(false);
+      setShowSettings(false);
+    }
+  };
+  /** A stub's "Open the classic …": classic at the right place, with "Back to the new layout"; the choice stays new. */
+  const peekClassic = (panel: PeekPanel) => {
+    setShellSheet(null);
+    setSheetFocus(null);
+    if (panel === 'sound') setShowSettings(true);
+    else setShowSidebar(true);
+    setClassicPeek(panel);
+  };
+  // The new seek: handleSeek's body, from a fraction of the track or a step in seconds (element time).
+  const seekTo = (fraction: number) => {
+    const el = mainAudioRef.current;
+    if (!el) return;
+    const d = currDuration > 0 ? currDuration : Number.isFinite(el.duration) ? el.duration : 0;
+    if (!(d > 0)) return;
+    const t = Math.min(1, Math.max(0, fraction)) * d;
+    el.currentTime = t;
+    setCurrTime(t);
+  };
+  const seekBy = (delta: number) => {
+    const el = mainAudioRef.current;
+    if (!el) return;
+    const d = currDuration > 0 ? currDuration : Number.isFinite(el.duration) ? el.duration : 0;
+    if (!(d > 0)) return;
+    const t = Math.min(d, Math.max(0, el.currentTime + delta));
+    el.currentTime = t;
+    setCurrTime(t);
+  };
+
+  // The contexts' values. The O(n) ones (the library's total and order) only while the new layout shows.
+  // Optional lookups: this runs in App's own render, above every boundary, so a walk mode the table doesn't know (a
+  // restored state from another version) must not throw here, in either layout.
+  const shellWalkName = loShuWalkMode ? (LO_SHU_WALK_INFO[loShuWalkMode]?.shortName ?? null) : null;
+  const shellWalkFullName = loShuWalkMode ? (LO_SHU_WALK_INFO[loShuWalkMode]?.fullName ?? null) : null;
+  const playOrderIsLibrary = useMemo(
+    () => (shellOn ? sameIdOrder(playlist, originalPlaylist) : true),
+    [shellOn, playlist, originalPlaylist]
+  );
+  const libraryTotalSeconds = useMemo(
+    () => (shellOn ? originalPlaylist.reduce((sum: number, s: Song) => sum + (s.duration || 0), 0) : 0),
+    [shellOn, originalPlaylist]
+  );
+  const shellSource = sourceLine(
+    shellWalkName,
+    playOrderIsLibrary,
+    currentSongIndex,
+    playlist.length,
+    walkSegment(loShuWalkMode, loShuWalkSegments, currentSongIndex),
+    loShuWalkMode ? loShuWalkPhases?.[currentSongIndex] || null : null
+  );
+  const shellSourceShort =
+    currentSongIndex >= 0
+      ? `${shellWalkName ?? (playOrderIsLibrary ? 'Library' : 'Play order')} ${currentSongIndex + 1}/${playlist.length}`
+      : `${playlist.length} tracks`;
+  const shellPlayer = useMemo(
+    () => ({
+      isPlaying,
+      hasTrack: nowPlayingId !== undefined,
+      trackId: nowPlayingId ?? null,
+      title: nowPlayingName ?? '',
+      index: currentSongIndex,
+      count: playlist.length,
+      shuffle: isShuffle,
+      loop: isLoop,
+      toneOnly,
+      isRecording,
+      source: shellSource,
+      sourceShort: shellSourceShort,
+    }),
+    [isPlaying, nowPlayingId, nowPlayingName, currentSongIndex, playlist.length, isShuffle, isLoop, toneOnly, isRecording, shellSource, shellSourceShort]
+  );
+  // The crystal the layers actually play: under v2 its plan's frequency (canonicalLayerHz follows Perfect GUT as it
+  // is now, whatever mapping selectedSolfeggio was stored with); classic plays applyLoShuPerfectMap(selectedSolfeggio).
+  const shellCrystalHz = v2Active && layer.f > 0 ? layer.f : applyLoShuPerfectMap(selectedSolfeggio);
+  const shellTrackRawHz = nowPlayingCrystal || null;
+  const shellTrackHz = shellTrackRawHz ? applyLoShuPerfectMap(shellTrackRawHz) : null;
+  const shellBeatText = v2Active || v2CarFallback ? bandChipLabel : selectedBinaural.name;
+  const shellPhi = enablePhiMode && phiTimingEnabled;
+  const shellSound = useMemo(
+    () => ({
+      crystalHz: shellCrystalHz,
+      trackHz: shellTrackHz,
+      trackRawHz: shellTrackRawHz,
+      perfectGut: loShuPerfectGUT,
+      engine: layerEngine,
+      v2Active,
+      v2Failed,
+      v2CarFallback,
+      output: layerOutput,
+      outputEffective,
+      layersShown: showLayerChrome,
+      layersText: layersBadgeLabel,
+      layersTip: layersBadgeTooltip,
+      beatText: shellBeatText,
+      keyFitShown: keyFitChipShown,
+      keyFitText: keyFitChipLabel,
+      keyFitHint: keyFitChipHint,
+      keyFitLook: keyFitChipLook,
+      keyFitOn,
+      keyFitRowLine,
+      musicOnly,
+      layerPanelProps,
+      phi: shellPhi,
+    }),
+    [shellCrystalHz, shellTrackHz, shellTrackRawHz, loShuPerfectGUT, layerEngine, v2Active, v2Failed, v2CarFallback, layerOutput, outputEffective, showLayerChrome, layersBadgeLabel, layersBadgeTooltip, shellBeatText, keyFitChipShown, keyFitChipLabel, keyFitChipHint, keyFitChipLook, keyFitOn, keyFitRowLine, musicOnly, layerPanelProps, shellPhi]
+  );
+  const shellLevels = useMemo(
+    () => ({ volume, toneLevel: solfeggioVolume, beatLevel: binauralVolume, toneText: toneLevelText, beatText: beatLevelText, outputRender, v2Active, v2CarFallback }),
+    [volume, solfeggioVolume, binauralVolume, toneLevelText, beatLevelText, outputRender, v2Active, v2CarFallback]
+  );
+  const shellLibrary = useMemo(
+    () => ({ count: originalPlaylist.length, totalSeconds: libraryTotalSeconds, playOrderIsLibrary, playOrderCount: playlist.length, isScanning }),
+    [originalPlaylist.length, libraryTotalSeconds, playOrderIsLibrary, playlist.length, isScanning]
+  );
+  const shellWalk = useMemo(
+    () => ({ mode: loShuWalkMode, name: shellWalkName, fullName: shellWalkFullName, index: currentSongIndex, count: playlist.length }),
+    [loShuWalkMode, shellWalkName, shellWalkFullName, currentSongIndex, playlist.length]
+  );
+  const shellTime = useMemo(() => ({ t: currTime, d: currDuration }), [currTime, currDuration]);
+  const shellValue = useMemo(
+    () => ({ tab: shellTab, sheet: shellSheet, sheetFocus, peek: classicPeek, car: carLayout, phoneShell: !desktopShell, headerRef, barRef: playerBarRef }),
+    [shellTab, shellSheet, sheetFocus, classicPeek, carLayout, desktopShell]
+  );
+  // The stable actions: App's latest functions, refreshed after every commit; references, never re-implementations
+  // (the pinned handlers stay the only path to the music).
+  const shellActionsRef: { current: any } = useRef(null);
+  useLayoutEffect(() => {
+    shellActionsRef.current = {
+      handlePlayPause,
+      handleNext,
+      handlePrev,
+      pausePlayback,
+      stopLayersNow,
+      selectFrequency,
+      generateLoShuWalk,
+      clearLoShuWalkMode,
+      chooseLayerOutput,
+      toggleMusicOnly,
+      toggleKeyFit,
+      chooseToneLevel,
+      showCurrentTrackAnalysis,
+      stopRecording,
+      setLayout,
+      peekClassic,
+      seekTo,
+      seekBy,
+      trackRawHz: shellTrackRawHz,
+      v2Active,
+    };
+  });
+  const shellActions = useMemo(() => {
+    const A = () => shellActionsRef.current;
+    return {
+      playPause: () => A().handlePlayPause(),
+      next: () => A().handleNext(),
+      prev: () => A().handlePrev(),
+      seekTo: (f: number) => A().seekTo(f),
+      seekBy: (s: number) => A().seekBy(s),
+      toggleShuffle: () => setIsShuffle((v: boolean) => !v),
+      toggleRepeat: () => setIsLoop((v: boolean) => !v),
+      selectCrystal: (raw: number) => A().selectFrequency(raw),
+      backToTrackCrystal: () => {
+        const raw = A().trackRawHz;
+        if (raw) A().selectFrequency(raw);
+      },
+      setPerfectGut: (on: boolean) => setLoShuPerfectGUT(on),
+      startWalk: (mode: LoShuWalkMode) => A().generateLoShuWalk(mode),
+      clearWalk: () => A().clearLoShuWalkMode(),
+      chooseOutput: (o: LayerOutput) => A().chooseLayerOutput(o),
+      toggleMusicOnly: () => A().toggleMusicOnly(),
+      toggleKeyFit: () => A().toggleKeyFit(),
+      setVolume: (v: number) => setVolume(v),
+      setToneLevel: (v: number) => A().chooseToneLevel(A().v2Active ? 'v2' : 'classic', v),
+      setBeatLevel: (v: number) => setBinauralVolume(v),
+      // Emergency Stop's body: under v2 the layers fall in 0.1 s, then the music, the anchor and the tone stop.
+      stopAll: () => {
+        A().stopLayersNow(0.1);
+        A().pausePlayback();
+      },
+      // The menu closes first, so the readout Dialog never sits on a Sheet.
+      trackInfo: () => {
+        setShellSheet(null);
+        setSheetFocus(null);
+        A().showCurrentTrackAnalysis();
+      },
+      stopRecording: () => A().stopRecording(),
+      setTab: (t: ShellTab) => {
+        setShellTab(t);
+        setShellSheet(null);
+        setSheetFocus(null);
+      },
+      openSheet: (s: ShellSheet, focus?: 'output' | null) => {
+        setSheetFocus(focus ?? null);
+        setShellSheet(s);
+      },
+      closeSheet: () => {
+        setShellSheet(null);
+        setSheetFocus(null);
+      },
+      setLayout: (l: LayoutPref) => A().setLayout(l),
+      peekClassic: (p: PeekPanel) => A().peekClassic(p),
+    };
+  }, []);
+
   return (
     <div
       onClick={uiHidden ? (e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) zenRevealRef.current?.(); } : undefined}
@@ -7481,7 +7784,16 @@ registerProcessor('wav-capture', WavCapture);
 
           {/* Restore toast — brief confirmation that the cached library is back. */}
           {isRestoring && restoredCount > 0 && (
-            <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-900/90 border border-emerald-500/30 text-emerald-200 text-xs px-4 py-2 rounded-full backdrop-blur shadow-lg">
+            <div
+              className={
+                !shellOn
+                  ? "fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-900/90 border border-emerald-500/30 text-emerald-200 text-xs px-4 py-2 rounded-full backdrop-blur shadow-lg"
+                  : desktopShell
+                    ? 'fixed right-4 z-50 bg-emerald-900/90 border border-emerald-500/30 text-emerald-200 text-xs px-4 py-2 rounded-full shadow-lg'
+                    : 'fixed left-1/2 -translate-x-1/2 z-50 bg-emerald-900/90 border border-emerald-500/30 text-emerald-200 text-xs px-4 py-2 rounded-full shadow-lg'
+              }
+              style={shellOn ? shellNoticeStyle : undefined}
+            >
               ✓ Restored {restoredCount} tracks from cache
             </div>
           )}
@@ -7500,7 +7812,15 @@ registerProcessor('wav-capture', WavCapture);
             role="status"
             aria-live="polite"
             aria-atomic="false"
-            className="fixed bottom-40 left-1/2 -translate-x-1/2 z-[70] w-[calc(100%-2rem)] max-w-md flex flex-col gap-2"
+            className={
+              !shellOn
+                ? "fixed bottom-40 left-1/2 -translate-x-1/2 z-[70] w-[calc(100%-2rem)] max-w-md flex flex-col gap-2"
+                : desktopShell
+                  ? 'fixed right-4 z-[70] w-[calc(100%-2rem)] max-w-md flex flex-col gap-2'
+                  : 'fixed left-1/2 -translate-x-1/2 z-[70] w-[calc(100%-2rem)] max-w-md flex flex-col gap-2'
+            }
+            style={shellOn ? shellNoticeStyle : undefined}
+            data-testid={shellOn ? 'notices' : undefined}
           >
               {updateReady && (
                 <div aria-atomic="true" className="flex items-center gap-3 bg-slate-900/95 border border-gold-500/40 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-lg">
@@ -7615,8 +7935,8 @@ registerProcessor('wav-capture', WavCapture);
 
           {/* Analysis Notification */}
           {analysisNotification && (
-            <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[100] max-w-lg">
-              <div className="bg-blue-900/90 border border-blue-500 text-blue-100 p-4 rounded-lg shadow-lg backdrop-blur-md">
+            <div className={shellOn && desktopShell ? 'fixed top-4 right-4 z-[100] max-w-lg' : "fixed top-20 left-1/2 transform -translate-x-1/2 z-[100] max-w-lg"}>
+              <div className={shellOn ? 'bg-blue-900/90 border border-blue-500 text-blue-100 p-4 rounded-lg shadow-lg' : "bg-blue-900/90 border border-blue-500 text-blue-100 p-4 rounded-lg shadow-lg backdrop-blur-md"}>
                 <div className="flex items-start gap-3">
                   <Activity className={`w-5 h-5 text-blue-400 mt-0.5 ${isScanning ? 'animate-pulse' : ''}`} />
                   <div className="flex-1">
@@ -7646,12 +7966,12 @@ registerProcessor('wav-capture', WavCapture);
               The whole banner is the dismiss target (mobile-friendly), not just
               a small corner X. */}
           {offlineReadyNotice && (
-            <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[101] w-[90%] max-w-lg px-2">
+            <div className={shellOn && desktopShell ? 'fixed top-4 right-4 z-[101] w-[90%] max-w-lg px-2' : "fixed top-20 left-1/2 transform -translate-x-1/2 z-[101] w-[90%] max-w-lg px-2"}>
               <button
                 type="button"
                 aria-label="Dismiss offline-ready notice"
                 onClick={() => setOfflineReadyNotice(null)}
-                className="w-full text-left bg-emerald-900/90 border border-emerald-500 text-emerald-100 p-4 rounded-lg shadow-lg backdrop-blur-md active:scale-[0.99] transition-transform"
+                className={shellOn ? 'w-full text-left bg-emerald-900/90 border border-emerald-500 text-emerald-100 p-4 rounded-lg shadow-lg active:scale-[0.99] transition-transform' : "w-full text-left bg-emerald-900/90 border border-emerald-500 text-emerald-100 p-4 rounded-lg shadow-lg backdrop-blur-md active:scale-[0.99] transition-transform"}
               >
                 <div className="flex items-start gap-3">
                   <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 flex-shrink-0" />
@@ -7670,6 +7990,9 @@ registerProcessor('wav-capture', WavCapture);
           />
 
       <div className="absolute inset-0 z-0 pointer-events-none">
+        {/* v15.5's heat guard, in both layouts so the Visualizer's place in the tree (and so the Visualizer) never
+            changes: paused only while a solid screen of the new layout's phone shell covers it. */}
+        <VisualsPause paused={visualsPaused}>
         <ViewBoundary
           name="visualizer"
           fallback={(api) => (
@@ -7692,9 +8015,27 @@ registerProcessor('wav-capture', WavCapture);
         />
           )}
         />
+        </VisualsPause>
       </div>
 
-      <div 
+      {/* v15.5: the layout branch. The new layout (opt-in beta) or, by default and during a stub's peek, the classic UI
+          below, byte for byte. Only this subtree swaps: the Visualizer above, the shared regions and every audio ref
+          stay, so a switch never pauses the music or remounts the canvas. */}
+      {shellOn ? (
+        <ShellProviders
+          actions={shellActions}
+          shell={shellValue}
+          player={shellPlayer}
+          sound={shellSound}
+          levels={shellLevels}
+          library={shellLibrary}
+          walk={shellWalk}
+          time={shellTime}
+        >
+          <AppShell />
+        </ShellProviders>
+      ) : (
+      <div
         inert={uiHidden}
         ref={zenLayerRef}
         className={`relative z-10 flex flex-col h-screen transition-opacity duration-1000 ${(!isZenMode || zenUiVisible) ? 'opacity-100' : 'opacity-0'} ${isZenMode ? '' : 'bg-black/20'}`}
@@ -7713,7 +8054,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.4</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.5</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -9066,7 +9407,20 @@ registerProcessor('wav-capture', WavCapture);
             <div className="absolute inset-y-0 right-0 z-30 w-full md:w-96 bg-black/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shadow-2xl transform transition-transform animate-in slide-in-from-right duration-300">
                 <div className="flex justify-between items-start p-6 border-b border-slate-800">
                   <h3 className="text-gold-500 font-serif text-xl">Harmonic Control</h3>
+                  {/* v15.5: the new layout's opt-in (decision 3, option A): a 40 px pill beside Close (a 44 px target
+                      through its ::after box); the header row keeps its 89 px. "New layout" under 380 px wide. */}
+                  <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setLayout('new')}
+                    data-testid="try-new-layout"
+                    className="relative h-10 px-3 rounded-pill border border-gold-500/40 bg-gold-500/10 hover:bg-gold-500/20 text-xs font-semibold text-gold-300 whitespace-nowrap transition-colors after:absolute after:-inset-y-0.5 after:inset-x-0 after:content-[''] focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+                  >
+                    <span className="hidden min-[380px]:inline">Try the new layout</span>
+                    <span className="min-[380px]:hidden">New layout</span>
+                  </button>
                   <button onClick={() => { setShowSettings(false); }} aria-label="Close" className="p-2 hover:bg-slate-800 rounded-full"><X className="text-slate-500 hover:text-white" /></button>
+                  </div>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar pb-32">
@@ -11192,6 +11546,8 @@ registerProcessor('wav-capture', WavCapture);
           />
         </main>
       </div>
+      )}
+      {classicPeek && <PeekPill onBack={() => setClassicPeek(null)} bottom={uiInsets.bottom} />}
     </div>
   );
 };
