@@ -30,7 +30,7 @@ import { waitForBlobSaves } from '../utils/playlistCache';
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 /** The version the error log records. Bump it with the header badge (App.tsx); isolation.spec checks the two agree. */
-export const APP_VERSION = 'v15.5';
+export const APP_VERSION = 'v15.6';
 
 export type ViewName =
   | 'visualizer'
@@ -57,7 +57,13 @@ export type ViewName =
   | 'sheet-sound'
   | 'sheet-crystal'
   | 'sheet-walks'
-  | 'menu';
+  | 'menu'
+  // v15.6, the Layers tab: one region per section, so a crash in one card leaves the others (and the music).
+  | 'layers-sound'
+  | 'layers-crystal'
+  | 'layers-levels'
+  | 'layers-beat'
+  | 'layers-advanced';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The error log

@@ -141,6 +141,10 @@ import PeekPill from './components/shell/PeekPill';
 import { useMediaQuery } from './components/shell/useMediaQuery';
 import { LAYOUT_KEY, parseLayoutPref, sourceLine, walkSegment } from './components/shell/shellModel';
 import type { LayoutPref, ShellTab, ShellSheet, PeekPanel } from './components/shell/shellModel';
+import { zenActive } from './components/shell/zenModel';
+import { useShellZen } from './components/shell/useShellZen';
+import { CRYSTAL_FILTER_KEY, parseCrystalFilter, toneLoweredText } from './components/shell/layers/layersModel';
+import type { LayersSection } from './components/shell/layers/layersModel';
 
 // --- Helpers ---
 
@@ -1413,6 +1417,25 @@ const App: React.FC = () => {
   const [classicPeek, setClassicPeek] = useState<PeekPanel | null>(null);
   // The desktop shell from 1024 × 600 (a laptop, a landscape iPad); anything smaller gets the phone shell.
   const desktopShell = useMediaQuery('(min-width: 1024px) and (min-height: 600px)');
+  // v15.6: Zen in the new layout, its own switch (classic's Zen is isZenMode, untouched). Never saved (decision 2): each
+  // launch starts with the controls showing. useShellZen (before the insets effect) owns whether they show now.
+  const [shellZen, setShellZen] = useState(false);
+  // The shell's root (Zen: a field being typed in keeps it shown), where the Layers tab was left, the notices' slot
+  // while Zen hides the bars, and whether the new layout shows, for callbacks (the high-frequency check).
+  const shellRootRef: { current: HTMLDivElement | null } = useRef(null);
+  const layersScrollRef: { current: { top: number; jump: LayersSection | null } } = useRef({ top: 0, jump: null });
+  const noticeInsetsRef: { current: { top: number; bottom: number } } = useRef({ top: 0, bottom: 0 });
+  const shellOnRef: { current: boolean } = useRef(false);
+  // v15.6: the Layers tab's optional experience filter on the crystals (plan decision 11): off unless the user turns it
+  // on; saved from its switch (and Show all) only, never from an effect.
+  const [crystalFilter, setCrystalFilter] = useState<boolean>(() => {
+    try { return parseCrystalFilter(typeof localStorage !== 'undefined' ? localStorage.getItem(CRYSTAL_FILTER_KEY) : null); }
+    catch { return false; }
+  });
+  const chooseCrystalFilter = useCallback((on: boolean) => {
+    setCrystalFilter(on);
+    try { localStorage.setItem(CRYSTAL_FILTER_KEY, String(on)); } catch {}
+  }, []);
   // ?layout=new / ?layout=classic set the choice and save it (for tests, and an escape hatch on a desktop). Then the
   // param leaves the address, so a reload follows the saved choice (a later Back to classic, say), not a stale URL.
   useEffect(() => {
@@ -1690,6 +1713,30 @@ const App: React.FC = () => {
   // sliders save it.
   const solfeggioVolume = v2Active ? toneLevelV2 : toneLevelClassic;
   const setSolfeggioVolume = v2Active ? setToneLevelV2 : setToneLevelClassic;
+  // v15.6 (the user's decision): the high-crystal check's tone lowering is for the track it was made on, in both
+  // layouts. Remembered: the engine, the level in effect then, the lowered level, and the track (the music element's
+  // source: playTrack sets it before the decode the check runs on, while React still shows the previous track). At the
+  // next track, by any route, the level comes back if it is still the lowered one; a slider move or Undo since is the
+  // user's choice and stays. Never across engines. Session only: nothing is saved (the sliders alone save).
+  const toneLoweringRef: { current: { engine: LayerEngine; before: number; after: number; src: string } | null } = useRef(null);
+  // The levels in effect now, for the check, which resumes after an await (its Undo restores the level the user had
+  // when the tone was lowered, not one its callback closed over).
+  const toneLevelsRef: { current: { engine: LayerEngine; v2: number; classic: number } } = useRef({ engine: 'v2', v2: toneLevelV2, classic: toneLevelClassic });
+  toneLevelsRef.current = { engine: v2Active ? 'v2' : 'classic', v2: toneLevelV2, classic: toneLevelClassic };
+  /** A track change (or a new track's own check): a lowering made on another track ends, its level back if untouched
+   *  since. Returns the tone level in effect afterwards for the engine playing. */
+  const settleToneLowering = useCallback((src: string): number => {
+    const t = toneLevelsRef.current;
+    const m = toneLoweringRef.current;
+    if (m && m.src !== src) {
+      toneLoweringRef.current = null;
+      if (m.engine === t.engine && t[m.engine] === m.after) {
+        (m.engine === 'v2' ? setToneLevelV2 : setToneLevelClassic)(m.before);
+        t[m.engine] = m.before;
+      }
+    }
+    return t[t.engine];
+  }, []);
   // The two tone sliders' handler: the slider's own engine's level, saved under
   // that engine's key. The only writer of those keys (a user's move, never an
   // effect), so a device that never moves a slider follows the release defaults.
@@ -2105,13 +2152,39 @@ const App: React.FC = () => {
 
       // Update safety state based on analysis
       const safetyAssessment = assessFrequencySafety(heardFreq);
+      // v15.6: this check runs on a track that has just started (playTrack set its source before the decode): a lowering
+      // made on another track ends first, so this one is judged from the level the user had.
+      const toneSrc = mainAudioRef.current?.src ?? '';
+      const levelNow = settleToneLowering(toneSrc);
       if (heardFreq > 963) {
         setSubtleResonanceMode(true);
-        setShowSafetyProtocols(true);
-        
-        // Auto-adjust volume for high frequencies
-        if (safetyAssessment.volume < solfeggioVolume) {
-          setSolfeggioVolume(safetyAssessment.volume);
+        // v15.6: classic's Safety panel opens by itself in classic only. The new layout shows neutral comfort lines
+        // where the controls are instead, and never sets classic's panel state (it leaked into a later peek).
+        if (!shellOnRef.current) setShowSafetyProtocols(true);
+
+        // Auto-adjust volume for high frequencies. v15.6: from the level in effect now (the slider may have moved during
+        // the analysis), for this track only (toneLoweringRef: it comes back at the next track), in both layouts.
+        if (safetyAssessment.volume < levelNow) {
+          const engine = toneLevelsRef.current.engine;
+          const setLevel = engine === 'v2' ? setToneLevelV2 : setToneLevelClassic;
+          const before = levelNow;
+          const after = safetyAssessment.volume;
+          setLevel(after);
+          const lowering = { engine, before, after, src: toneSrc };
+          toneLoweringRef.current = lowering;
+          // v15.6: announced in the new layout, with Undo. The words name no frequency: the trigger is an unreliable
+          // reading. Nothing is saved, by the lowering, its Undo or the restore.
+          if (shellOnRef.current) {
+            showStatusToast(toneLoweredText(engine === 'v2', before, after), {
+              actionLabel: 'Undo',
+              onAction: () => {
+                setLevel(before);
+                if (toneLoweringRef.current === lowering) toneLoweringRef.current = null;
+                dismissStatusToast();
+              },
+              durationMs: 10000,
+            });
+          }
         }
       } else {
         setSubtleResonanceMode(false);
@@ -2128,8 +2201,9 @@ const App: React.FC = () => {
       // Fallback to original detection method — same boundary conversion applies.
       return toHeardHz(await detectDominantFrequency(buffer));
     }
-    // setSolfeggioVolume follows the playing engine (v15.0), so a flip renews this too.
-  }, [solfeggioVolume, setSolfeggioVolume]);
+    // v15.6: the tone level and the engine are read when the check ends (toneLevelsRef, settleToneLowering), not
+    // closed over: an engine flip or a slider move during the analysis counts.
+  }, [settleToneLowering, showStatusToast, dismissStatusToast]);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
@@ -2848,6 +2922,23 @@ const App: React.FC = () => {
   // below watches the elements now on screen.
   const [insetsEpoch, setInsetsEpoch] = useState(0);
   const bumpInsets = useCallback(() => setInsetsEpoch((n: number) => n + 1), []);
+  // v2's output question (its effect is with the other v2 code, below). Declared here since v15.6: the new layout's
+  // Zen, just below, stays dormant while it shows.
+  const [showOutputSheet, setShowOutputSheet] = useState(false);
+  // v15.6: Zen in the new layout (components/shell/zenModel.ts, useShellZen.ts). It hides the shell only on the phone's
+  // Now Playing (never the Car screen) and the desktop with no panel open; never in classic, whose Zen is above.
+  const shellZenState = useShellZen({
+    active: zenActive({
+      on: shellZen,
+      shellOn: layout === 'new' && !classicPeek,
+      tab: shellTab,
+      sheet: shellSheet,
+      car: layout === 'new' && !desktopShell && layerOutput === 'car',
+      outputQuestion: showOutputSheet,
+    }),
+    rootRef: shellRootRef,
+  });
+  const shellZenHidden = shellZenState.hidden;
   const uiHidden = isZenMode && !zenUiVisible;
   useEffect(() => {
     zenShownRef.current = !uiHidden;
@@ -2855,8 +2946,9 @@ const App: React.FC = () => {
   useEffect(() => {
     const apply = (top: number, bottom: number) =>
       setUiInsets((prev: { top: number; bottom: number }) => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }));
-    // (v15.5: Zen's hidden UI is classic's; the new layout's panels always cover what they cover.)
-    if (uiHidden && !(layout === 'new' && !classicPeek)) {
+    // (v15.5: classic's Zen hides classic's UI only. v15.6: the new layout's own Zen hides its bars, which then cover
+    // nothing; in classic shellZenHidden is always false.)
+    if ((uiHidden && !(layout === 'new' && !classicPeek)) || shellZenHidden) {
       apply(0, 0);
       return;
     }
@@ -2879,7 +2971,7 @@ const App: React.FC = () => {
     };
     // v15.5: the new layout's top bar and bottom stack take these refs (Now Playing's panel, or the mini-player and
     // the tab bar, or the desktop transport), so a switch, a tab change or the Car screen re-measures.
-  }, [uiHidden, insetsEpoch, layout, classicPeek, desktopShell, shellTab, layerOutput]);
+  }, [uiHidden, insetsEpoch, layout, classicPeek, desktopShell, shellTab, layerOutput, shellZenHidden]);
 
   // Handle Shuffle State Logic
   useEffect(() => {
@@ -3782,7 +3874,7 @@ const App: React.FC = () => {
   // (page load). "Ask me again" asks the same way (now if the layers are wanted, else when they next are: under
   // Music only, not before it is off), but the output in effect stays until the answer, across restarts: it keeps
   // the saved answer and saves the question, so "Ask me later" (or a restart) leaves both for the next session.
-  const [showOutputSheet, setShowOutputSheet] = useState(false);
+  // (showOutputSheet is declared above, before the new layout's Zen, since v15.6.)
   const outputSheetLaterRef: { current: boolean } = useRef(false);
   useEffect(() => {
     if (!v2Active || (layerOutput !== null && !outputAskedAgain)) { setShowOutputSheet(false); return; }
@@ -7414,8 +7506,22 @@ registerProcessor('wav-capture', WavCapture);
   useEffect(() => {
     if (shellOn && isZenMode) setIsZenMode(false);
   }, [shellOn, isZenMode]);
+  // v15.6: callbacks that run outside a render (the high-frequency check) read the layout through this.
+  useEffect(() => {
+    shellOnRef.current = shellOn;
+  }, [shellOn]);
+  // v15.6: whenever the current track changes, by any route (Next, Previous, a gapless advance on a locked phone, a
+  // tap in the list, a walk step), a tone lowering made on another track ends, its level back if untouched since
+  // (settleToneLowering). It only reads the music element's source; the playback path is not touched.
+  useEffect(() => {
+    settleToneLowering(mainAudioRef.current?.src ?? '');
+  }, [nowPlayingId, settleToneLowering]);
   // The phone shell's Car screen (Output = Car); the desktop has none (its layers chip says Car).
   const carLayout = layout === 'new' && !desktopShell && layerOutput === 'car';
+  // v15.6: the Car screen is never Zen: choosing Car ends the new layout's Zen (as v15.5's effect above ends classic's).
+  useEffect(() => {
+    if (carLayout && shellZen) setShellZen(false);
+  }, [carLayout, shellZen]);
   // The heat guard: a solid screen of the phone shell (a tab other than Now Playing, or the Car screen) covers the
   // visualizer, so it stops drawing (VisualsPause). Never in classic or the desktop shell, never while recording (a
   // video recording captures the canvas).
@@ -7424,11 +7530,17 @@ registerProcessor('wav-capture', WavCapture);
   // layout, clear of every control: under Now Playing's top bar or the Car header (the top of the screen there is
   // the visualizer or text), above the mini-player and the tab bar on the other tabs, and on the desktop at the right,
   // above the transport and beside the panel. Classic keeps its own places, byte for byte.
+  // v15.6: while Zen hides the bars (uiInsets 0/0 then), and until the first measure after the reveal (one more commit
+  // at 0/0), a notice stays in the slot it had while they showed. Shown, the new layout's bars always cover something
+  // (the top bar or Now Playing, the tab bar, the transport), so 0/0 there only means "not measured yet".
+  const insetsUnmeasured = uiInsets.top === 0 && uiInsets.bottom === 0;
+  if (!shellZenHidden && !insetsUnmeasured) noticeInsetsRef.current = uiInsets;
+  const noticeInsets = shellZenHidden || insetsUnmeasured ? noticeInsetsRef.current : uiInsets;
   const shellNoticeStyle = desktopShell
-    ? { bottom: uiInsets.bottom + 16 }
+    ? { bottom: noticeInsets.bottom + 16 }
     : shellTab === 'now'
-      ? { top: uiInsets.top + 8 }
-      : { bottom: uiInsets.bottom + 8 };
+      ? { top: noticeInsets.top + 8 }
+      : { bottom: noticeInsets.bottom + 8 };
 
   /** The layout switch: saved from a tap only. The music, the visualizer and the lock-screen card carry over. */
   const setLayout = (next: LayoutPref) => {
@@ -7440,6 +7552,8 @@ registerProcessor('wav-capture', WavCapture);
     setShellTab('now');
     setShellSheet(null);
     setSheetFocus(null);
+    // v15.6: the new layout's Zen ends with any switch (Back to classic, the shell fallback's Use the classic layout).
+    setShellZen(false);
     if (next === 'new') {
       // Zen is classic's in v15.5, and these popovers' portals belong to the classic transport. Harmonic Control
       // (where the opt-in sits) closes; the other classic panels stay as they are for a return.
@@ -7453,6 +7567,7 @@ registerProcessor('wav-capture', WavCapture);
   const peekClassic = (panel: PeekPanel) => {
     setShellSheet(null);
     setSheetFocus(null);
+    setShellZen(false); // v15.6: a peek ends the new layout's Zen (classic's own Zen is classic's).
     if (panel === 'sound') setShowSettings(true);
     else setShowSidebar(true);
     setClassicPeek(panel);
@@ -7558,6 +7673,37 @@ registerProcessor('wav-capture', WavCapture);
     () => ({ volume, toneLevel: solfeggioVolume, beatLevel: binauralVolume, toneText: toneLevelText, beatText: beatLevelText, outputRender, v2Active, v2CarFallback }),
     [volume, solfeggioVolume, binauralVolume, toneLevelText, beatLevelText, outputRender, v2Active, v2CarFallback]
   );
+  // v15.6, the Layers tab's slow settings (TuningContext). What the layers play for the crystal: v2's tone is its plan's
+  // (toneOf, the player's own fold for the output), classic's its solfeggioHz; none while the layers are off.
+  const shellLayersOff = musicOnly || v2CarFallback;
+  const shellHeardHz = shellLayersOff
+    ? null
+    : v2Active
+      ? (layer.f > 0 ? toneOf(layer.f, planOutput) : null)
+      : solfeggioHz(applyLoShuPerfectMap(selectedSolfeggio));
+  // The band the beat delivers now, for the Beat card's "now", by the Beat chip's own logic: v2's `render` is 'off'
+  // under Car and while the tone plays alone, its pulse plays planBand (capped at Alpha); classic's beat plays only with
+  // the music, so not while the tone plays alone either.
+  const shellNowBandId: Band | null = shellLayersOff || toneOnly ? null : v2Active ? (render === 'off' ? null : planBand) : presetBand;
+  const shellNowBand = shellNowBandId ? `${shellNowBandId.charAt(0).toUpperCase()}${shellNowBandId.slice(1)}` : null;
+  const shellTrackPeakS = currDuration > 0 ? currDuration * INV_PHI : null;
+  const shellTuning = useMemo(
+    () => ({
+      adaptive: isAdaptiveBinaural,
+      presetName: selectedBinaural.name,
+      nowBand: shellNowBand,
+      render: outputRender,
+      v2Beat: v2Active || v2CarFallback,
+      phiMode: enablePhiMode,
+      phiTiming: phiTimingEnabled,
+      level: userExperienceLevel,
+      crystalFilter,
+      trackPeakS: shellTrackPeakS,
+      heardHz: shellHeardHz,
+      canExportLog: soundLogOn,
+    }),
+    [isAdaptiveBinaural, selectedBinaural.name, shellNowBand, outputRender, v2Active, v2CarFallback, enablePhiMode, phiTimingEnabled, userExperienceLevel, crystalFilter, shellTrackPeakS, shellHeardHz, soundLogOn]
+  );
   const shellLibrary = useMemo(
     () => ({ count: originalPlaylist.length, totalSeconds: libraryTotalSeconds, playOrderIsLibrary, playOrderCount: playlist.length, isScanning }),
     [originalPlaylist.length, libraryTotalSeconds, playOrderIsLibrary, playlist.length, isScanning]
@@ -7568,8 +7714,20 @@ registerProcessor('wav-capture', WavCapture);
   );
   const shellTime = useMemo(() => ({ t: currTime, d: currDuration }), [currTime, currDuration]);
   const shellValue = useMemo(
-    () => ({ tab: shellTab, sheet: shellSheet, sheetFocus, peek: classicPeek, car: carLayout, phoneShell: !desktopShell, headerRef, barRef: playerBarRef }),
-    [shellTab, shellSheet, sheetFocus, classicPeek, carLayout, desktopShell]
+    () => ({
+      tab: shellTab,
+      sheet: shellSheet,
+      sheetFocus,
+      peek: classicPeek,
+      car: carLayout,
+      phoneShell: !desktopShell,
+      headerRef,
+      barRef: playerBarRef,
+      zen: { on: shellZen, hidden: shellZenHidden },
+      rootRef: shellRootRef,
+      layersScrollRef,
+    }),
+    [shellTab, shellSheet, sheetFocus, classicPeek, carLayout, desktopShell, shellZen, shellZenHidden]
   );
   // The stable actions: App's latest functions, refreshed after every commit; references, never re-implementations
   // (the pinned handlers stay the only path to the music).
@@ -7596,6 +7754,8 @@ registerProcessor('wav-capture', WavCapture);
       seekBy,
       trackRawHz: shellTrackRawHz,
       v2Active,
+      chooseCrystalFilter,
+      revealZen: shellZenState.reveal,
     };
   });
   const shellActions = useMemo(() => {
@@ -7649,6 +7809,28 @@ registerProcessor('wav-capture', WavCapture);
       },
       setLayout: (l: LayoutPref) => A().setLayout(l),
       peekClassic: (p: PeekPanel) => A().peekClassic(p),
+      // v15.6, the Layers tab: App's own setters.
+      setAdaptive: (on: boolean) => setIsAdaptiveBinaural(on),
+      // Classic's band row: the preset, and Adaptive off.
+      choosePreset: (name: string) => {
+        const preset = BINAURAL_PRESETS.find((p) => p.name === name);
+        if (!preset) return;
+        setSelectedBinaural(preset);
+        setIsAdaptiveBinaural(false);
+      },
+      setPhiMode: (on: boolean) => setEnablePhiMode(on),
+      setPhiTiming: (on: boolean) => setPhiTimingEnabled(on),
+      setExperienceLevel: (l: 'beginner' | 'intermediate' | 'advanced' | 'expert') => setUserExperienceLevel(l),
+      setCrystalFilter: (on: boolean) => A().chooseCrystalFilter(on),
+      openLayers: (section?: LayersSection) => {
+        layersScrollRef.current = { top: 0, jump: section ?? 'sound' };
+        setShellTab('layers');
+        setShellSheet(null);
+        setSheetFocus(null);
+      },
+      // v15.6, Zen in the new layout.
+      setZen: (on: boolean) => setShellZen(on),
+      revealZen: () => A().revealZen(),
     };
   }, []);
 
@@ -8028,6 +8210,7 @@ registerProcessor('wav-capture', WavCapture);
           player={shellPlayer}
           sound={shellSound}
           levels={shellLevels}
+          tuning={shellTuning}
           library={shellLibrary}
           walk={shellWalk}
           time={shellTime}
@@ -8054,7 +8237,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.5</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.6</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

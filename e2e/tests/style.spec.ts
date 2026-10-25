@@ -351,6 +351,49 @@ test.describe('style foundation (v15.3)', () => {
       await page.getByTestId(`tab-${t}-button`).click();
       await census(`stub ${t} + mini-player`);
     }
+
+    // v15.6: the Layers tab at each section, the crystal filter on (the tab and the Crystal sheet), the bands under Car,
+    // the classic engine's look, and Zen (on and revealed, the menu's row, hidden).
+    await page.getByTestId('tab-layers-button').click();
+    for (const s of ['crystal', 'levels', 'beat', 'advanced'] as const) {
+      await page.getByTestId(`layers-jump-${s}`).click();
+      await census(`layers ${s}`);
+    }
+    const filterSwitch = page.getByRole('switch', { name: 'Filter the crystals by experience level' });
+    await filterSwitch.click();
+    await page.getByTestId('layers-jump-crystal').click();
+    await page.getByTestId('crystal-filter-note').waitFor();
+    await census('layers crystal, filtered');
+    await page.getByTestId('layers-jump-sound').click();
+    await page.getByTestId('layers-output').getByRole('button', { name: 'Car', exact: true }).click();
+    await page.getByTestId('layers-jump-beat').click();
+    await census('layers beat, Car');
+    await page.getByTestId('layers-jump-sound').click();
+    await page.getByTestId('layers-output').getByRole('button', { name: 'Headphones', exact: true }).click();
+    await page.getByTestId('layers-engine').getByRole('button', { name: 'Classic', exact: true }).click();
+    await census('layers, classic engine');
+    await page.getByTestId('layers-engine').getByRole('button', { name: 'v2', exact: true }).click();
+    await page.getByTestId('tab-now-button').click();
+    await page.getByTestId('chip-crystal').click();
+    await page.getByRole('dialog', { name: 'Crystal', exact: true }).waitFor();
+    await census('sheet Crystal, filtered');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('tab-layers-button').click();
+    await page.getByTestId('layers-jump-advanced').click();
+    await filterSwitch.click();
+    await page.getByTestId('tab-now-button').click();
+    await page.getByTestId('zen-button').click();
+    await census('zen on, revealed');
+    await page.getByTestId('np-menu-button').click();
+    await page.getByTestId('menu-body').waitFor();
+    await census('menu, zen on');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.querySelector('[data-testid="new-shell"]')?.hasAttribute('inert'), null, { timeout: 10_000 });
+    await census('zen hidden');
+    await page.mouse.move(200, 300);
+    await page.mouse.move(210, 310);
+    await page.getByTestId('zen-button').click();
+    await page.getByTestId('tab-more-button').click();
     await crash(page, 'more');
     await page.getByRole('alert').filter({ hasText: /hit a problem/ }).waitFor();
     await census('tab fallback');
@@ -398,6 +441,9 @@ test.describe('style foundation (v15.3)', () => {
     await page.getByTestId('nav-library').click();
     await page.getByTestId('tab-library').waitFor();
     await census('desktop, library panel');
+    await page.getByTestId('nav-layers').click();
+    await page.getByTestId('tab-layers').waitFor();
+    await census('desktop, layers panel');
     await crash(page, 'desktop-transport');
     await page.getByTestId('safe-transport').waitFor();
     await census('desktop transport fallback');

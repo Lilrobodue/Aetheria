@@ -1043,7 +1043,9 @@ export type CrashView =
   | 'safety' | 'record' | 'tutorial' | 'links' | 'notices' | 'transport' | 'root'
   // v15.5, the new layout (beta).
   | 'shell' | 'now-playing' | 'mini-player' | 'desktop-transport' | 'tab-library' | 'tab-mixes' | 'tab-layers'
-  | 'more' | 'sheet-sound' | 'sheet-crystal' | 'sheet-walks' | 'menu';
+  | 'more' | 'sheet-sound' | 'sheet-crystal' | 'sheet-walks' | 'menu'
+  // v15.6, the Layers tab's five sections.
+  | 'layers-sound' | 'layers-crystal' | 'layers-levels' | 'layers-beat' | 'layers-advanced';
 
 /**
  * Make a region throw on its next render, through the app's dev hook window.__aetheriaCrash (ErrorBoundary.tsx; dev
@@ -1059,20 +1061,37 @@ export async function crash(page: Page, view: CrashView): Promise<void> {
   await page.evaluate((v) => (window as any).__aetheriaCrash(v), view);
 }
 
+/** On a device, when each page's last tapAt was sent (see tapAt). */
+const lastDeviceTap = new WeakMap<Page, number>();
+/** Past Android's double-tap window (300 ms), with room for the trip to the phone. */
+const DEVICE_TAP_GAP_MS = 400;
+
 /**
  * A finger tap at page coordinates: Playwright's touchscreen locally (the context needs hasTouch); on a device, real
  * CDP touch events, because the phone's own context has no hasTouch.
+ *
+ * On a device (v15.6): CDP touches go through Chrome's touch emulator, whose gesture detector takes the platform's
+ * double-tap setting (on, on Android: 300 ms, 100 dp) and has it on for the page until the page's frame metadata next
+ * changes. So each tap's click waits out the window (it lands after this returns), and a second tap inside it, near the
+ * first, is a double tap: neither gives a click. A real finger on the app is not affected (its mobile viewport turns
+ * double tap off for the phone's own gestures). Taps are spaced past the window; `spaced: false` sends at once (only to
+ * show the effect).
  */
-export async function tapAt(page: Page, x: number, y: number): Promise<void> {
+export async function tapAt(page: Page, x: number, y: number, o: { spaced?: boolean } = {}): Promise<void> {
   if (!ON_DEVICE) {
     await page.touchscreen.tap(x, y);
     return;
+  }
+  if (o.spaced !== false) {
+    const since = Date.now() - (lastDeviceTap.get(page) ?? 0);
+    if (since < DEVICE_TAP_GAP_MS) await page.waitForTimeout(DEVICE_TAP_GAP_MS - since);
   }
   const cdp = await page.context().newCDPSession(page);
   try {
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   } finally {
+    lastDeviceTap.set(page, Date.now());
     await cdp.detach().catch(() => {});
   }
 }
@@ -1265,3 +1284,85 @@ export async function resetRenders(page: Page): Promise<void> {
     (window as any).__aetheriaRenders = {};
   });
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// The Layers tab and Zen in the new layout (v15.6)
+// ---------------------------------------------------------------------------------------------------------------
+
+export type LayersSectionName = 'sound' | 'crystal' | 'levels' | 'beat' | 'advanced';
+
+/** A card of the Layers tab (its region's content; `layers-<name>-fallback` while it has crashed). */
+export const layersSection = (page: Page, name: LayersSectionName) => page.getByTestId(`layers-${name}`);
+
+/** The eye button that turns the new layout's Zen on and off (Now Playing's top bar; the desktop transport's). */
+export const zenToggle = (page: Page) =>
+  page.getByTestId('zen-button').or(page.getByTestId('zen-button-desktop')).or(page.getByTestId('zen-button-landscape'));
+
+/** Whether Zen hides the new layout now: its root is inert and transparent (read from the DOM: inert is out of the
+ *  accessibility tree). */
+export async function shellHidden(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const root = document.querySelector('[data-testid="new-shell"]');
+    return !!root && root.hasAttribute('inert') && root.classList.contains('opacity-0');
+  });
+}
+
+/** Wait until Zen has hidden the new layout (3 s after the last activity, then the fade). */
+export async function expectShellHidden(page: Page, message = 'Zen hides the controls', timeout = 6_000): Promise<void> {
+  await expect.poll(() => shellHidden(page), { message, timeout, intervals: [100] }).toBe(true);
+}
+
+/** On a device the fixture sizes the page as a desktop: the phone shell needs a phone's viewport. */
+export async function phoneSize(page: Page): Promise<void> {
+  if (ON_DEVICE) await page.setViewportSize(PHONE_VIEWPORT);
+}
+
+/** Close the Safety panel when it opened by itself (an unanalysed track does that in classic). A DOM click: on a
+ *  411 × 752 phone its Close sits under classic's player bar. */
+export async function closeSafetyPanel(page: Page): Promise<void> {
+  const close = page.getByRole('button', { name: 'Close Safety Panel' });
+  if (await close.isVisible().catch(() => false)) await close.evaluate((b) => (b as HTMLButtonElement).click());
+}
+
+/**
+ * Classic first (the import lives there): v2 with an output answered (Headphones by default) or classic, `count`
+ * tones, optionally Auto-Distributed, tone-01 playing (unless `play` is false); then the opt-in into the new layout.
+ * layout.spec's playingInNewLayout, shared. Returns the native-dialog list.
+ */
+export async function playInNewLayout(
+  page: Page,
+  o: {
+    count?: number;
+    seconds?: number;
+    engine?: 'v2' | 'classic';
+    output?: 'headphones' | 'speakers' | 'phone' | 'car';
+    autoDistribute?: boolean;
+    play?: boolean;
+    optIn?: boolean;
+  } = {}
+): Promise<string[]> {
+  const engine = o.engine ?? 'v2';
+  const dialogs = await openApp(page, { engine });
+  if (engine === 'v2') await seedLayers(page, { engine: 'v2', output: o.output ?? 'headphones' });
+  else if (o.output) await seedLayers(page, { engine: 'classic', output: o.output });
+  await importTones(page, o.count ?? 3, o.seconds ?? 60);
+  if (o.autoDistribute) await page.getByRole('button', { name: /Auto-Distribute Frequencies/ }).click();
+  if (o.play !== false) {
+    await page.getByText('tone-01', { exact: true }).first().click();
+    await expect.poll(async () => (await layerState(page)).music?.time ?? 0, { timeout: 20_000 }).toBeGreaterThan(1);
+    await closeSafetyPanel(page);
+  } else {
+    await page.getByText('tone-01', { exact: true }).first().waitFor({ timeout: 20_000 });
+  }
+  if (o.optIn !== false) await optInNewLayout(page);
+  return dialogs;
+}
+
+/** Open the Layers tab (the phone's tab bar, or the desktop's nav) and wait for it. */
+export async function openLayersTab(page: Page): Promise<void> {
+  await tab(page, 'layers');
+  await page.getByTestId('tab-layers').waitFor();
+}
+
+/** A jump chip of the Layers tab. */
+export const layersJump = (page: Page, name: LayersSectionName) => page.getByTestId(`layers-jump-${name}`);

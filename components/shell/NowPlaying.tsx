@@ -18,6 +18,7 @@ import TimeText from './TimeText';
 import ToneOnlyBanner from './ToneOnlyBanner';
 import { outputIcon } from './outputIcon';
 import { OUTPUT_LABELS } from '../layers/layerCopy';
+import ZenButton from './ZenButton';
 
 const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400';
 
@@ -43,8 +44,9 @@ const NowPlaying = () => {
             <p data-testid="np-source" className="min-w-0 text-label uppercase tracking-widest text-ink-muted">
               {p.source}
             </p>
-            {/* The top bar hides on a landscape phone: its ⋯ moves here. */}
-            <span className="hidden [@media(max-height:500px)]:block -mt-3 -mr-2 shrink-0">
+            {/* The top bar hides on a landscape phone: its ⋯ moves here (v15.6: and the Zen button, beside it). */}
+            <span className="hidden [@media(max-height:500px)]:flex -mt-3 -mr-2 shrink-0">
+              <ZenButton data-testid="zen-button-landscape" />
               <button
                 type="button"
                 aria-label="More options"

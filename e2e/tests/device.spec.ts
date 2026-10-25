@@ -1,12 +1,12 @@
 import { test, expect, ON_DEVICE } from './fixtures';
-import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY, crash, optInNewLayout, layoutPref, tapAt, PHONE_VIEWPORT } from './helpers';
+import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY, crash, optInNewLayout, layoutPref, tapAt, shellHidden, PHONE_VIEWPORT } from './helpers';
 import { adb, mediaSession, chromeSessions } from './adb';
 
 // Checks only a real phone can make (npm run test:device). Android's own media
 // session — what the lock screen, the notification and the car show — is read
 // with `adb shell dumpsys media_session`. The screen-off tests must stay LAST
 // (v15.4: the panel-crash one after the lock-screen one, the root crash last;
-// v15.5: the new layout's one before the lock-screen one).
+// v15.5: the new layout's one before the lock-screen one; v15.6: the new layout in Zen after it).
 test.skip(!ON_DEVICE, 'needs an Android device (npm run test:device)');
 
 // Android sends the media keys to a card that is PLAYING, so a card left over
@@ -139,6 +139,63 @@ test('the new layout keeps the lock-screen card across three gapless advances wi
   expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
   await expect(page.getByTestId('new-shell'), 'still the new layout').toBeAttached();
   await expect(page.getByTestId('view-now')).toBeAttached();
+  await expect
+    .poll(async () => ((await page.getByTestId('np-title').textContent()) ?? '') === (mediaSession()?.title ?? '-'), {
+      timeout: 10_000,
+      message: "Now Playing's title is the card's",
+    })
+    .toBe(true);
+  expect(dialogs).toEqual([]);
+});
+
+test('in Zen, the new layout keeps the lock-screen card across three gapless advances with the screen off @device', async ({ page }) => {
+  // v15.6 (spec §5.9 step 3): the test above with the new layout's Zen on and hidden before the screen goes off (the
+  // shell inert and transparent: nothing of it may touch the card or the advance). Turns the screen off; a phone with a
+  // secure lock stays locked after the test (unlock it by hand).
+  const dialogs = await openApp(page);
+  await importTones(page, 28, 4);
+  await page.getByRole('button', { name: /Auto-Distribute Frequencies/ }).click();
+  await page.setViewportSize(PHONE_VIEWPORT);
+  await optInNewLayout(page);
+  await expect(page.getByTestId('view-now')).toBeVisible();
+  const play = await page.getByTestId('np-play').boundingBox();
+  expect(play, "Now Playing's Play button").toBeTruthy();
+  await tapAt(page, play!.x + play!.width / 2, play!.y + play!.height / 2);
+  await expect.poll(() => mediaSession()?.state, { timeout: 15_000 }).toBe('playing');
+  // Zen on with a finger, then hidden (3 s later): polled, as the tap's click lands after tapAt returns.
+  const eye = await page.getByTestId('zen-button').boundingBox();
+  expect(eye, 'the Zen button').toBeTruthy();
+  await tapAt(page, eye!.x + eye!.width / 2, eye!.y + eye!.height / 2);
+  await expect(page.getByTestId('zen-button')).toHaveAttribute('aria-pressed', 'true', { timeout: 5_000 });
+  await expect
+    .poll(() => shellHidden(page), { timeout: 10_000, message: 'Zen hides the controls before the screen goes off' })
+    .toBe(true);
+  const first = mediaSession()!.title;
+  const pausesBefore = await pauseCount(page);
+
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  const titles: string[] = [];
+  try {
+    await expect
+      .poll(
+        () => {
+          const s = mediaSession();
+          if (s && s.state === 'playing' && s.title !== first && !titles.includes(s.title)) titles.push(s.title);
+          return titles.length;
+        },
+        { timeout: 45_000, intervals: [500], message: 'three gapless advances on the PLAYING card, its title following' }
+      )
+      .toBeGreaterThanOrEqual(3);
+    expect(mediaSession()?.state, 'the card still says playing').toBe('playing');
+    expect(chromeSessions().filter((s) => s.state === 'playing').length, 'one PLAYING Chrome card: none stranded').toBe(1);
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  test.info().annotations.push({ type: 'card titles with the screen off, in Zen', description: [first, ...titles].join(' → ') });
+  // After the wake, DOM reads only (the keyguard: no frames, no taps).
+  expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
+  await expect(page.getByTestId('new-shell'), 'still the new layout').toBeAttached();
+  expect(await shellHidden(page), 'still in Zen, hidden: nothing revealed it').toBe(true);
   await expect
     .poll(async () => ((await page.getByTestId('np-title').textContent()) ?? '') === (mediaSession()?.title ?? '-'), {
       timeout: 10_000,

@@ -4,8 +4,11 @@
 // the 88 px transport. The panel shows the open sheet (Sound, Crystal, Walks: non-modal, so the transport stays
 // usable) or the active section's stub; on Now Playing with no sheet it is closed and the visualizer fills the space.
 // Escape closes it. The ⋯ menu is a modal sheet. The heat guard never pauses the visualizer here.
+// v15.6: Layers shows the Layers tab in the panel (inPanel); Zen hides this root (nav and transport) with the panel
+// closed, as on the phone: inert and transparent, a mouse move brings it back.
 
 import React, { useEffect, useRef } from 'react';
+import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
 import { ViewBoundary } from '../ErrorBoundary';
 import { overlayDepth } from '../ui/overlayStack';
 import { useActions, useShell } from './contexts';
@@ -15,12 +18,14 @@ import DesktopTransport from './DesktopTransport';
 import SheetHost from './SheetHost';
 import TabStub from './tabs/TabStub';
 import MoreStub from './tabs/MoreStub';
+import LayersTab from './layers/LayersTab';
 import { TabCrash, TransportCrash } from './fallbacks';
 import { focusViewHeading } from './PhoneShell';
 
 const DesktopShell = () => {
   countRender('DesktopShell');
-  const { tab, sheet } = useShell();
+  const { tab, sheet, zen, rootRef } = useShell();
+  const reduced = usePrefersReducedMotion();
   const actions = useActions();
   const panelSheet = sheet && sheet !== 'menu' ? sheet : null;
   const stubOpen = !panelSheet && tab !== 'now';
@@ -45,7 +50,19 @@ const DesktopShell = () => {
   }, [tab]);
 
   return (
-    <div data-testid="new-shell" data-shell="desktop" className="fixed inset-0 z-10 pointer-events-none text-ink font-sans">
+    <div
+      ref={rootRef}
+      inert={zen.hidden}
+      data-testid="new-shell"
+      data-shell="desktop"
+      className={
+        !zen.hidden
+          ? 'fixed inset-0 z-10 pointer-events-none text-ink font-sans'
+          : reduced
+            ? 'fixed inset-0 z-10 pointer-events-none text-ink font-sans opacity-0'
+            : 'fixed inset-0 z-10 pointer-events-none text-ink font-sans opacity-0 transition-opacity duration-slow'
+      }
+    >
       <SideNav />
       {panelSheet || stubOpen ? (
         <div data-testid="desktop-panel" className="absolute left-[72px] top-0 bottom-transport w-[420px] pointer-events-auto">
@@ -66,7 +83,7 @@ const DesktopShell = () => {
               <ViewBoundary
                 name="tab-layers"
                 fallback={(api) => (tab === 'layers' ? <TabCrash api={api} inPanel /> : null)}
-                render={() => tab === 'layers' && <TabStub tab="layers" inPanel />}
+                render={() => tab === 'layers' && <LayersTab inPanel />}
               />
               <ViewBoundary
                 name="more"

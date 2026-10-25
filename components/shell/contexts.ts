@@ -7,12 +7,15 @@
 // MiniProgress, the Car's time and the desktop transport's seek) follow it; every other view is React.memo and reads
 // contexts that did not change.
 //
+// v15.6 adds TuningContext (the Layers tab's slow settings), Zen's state on ShellValue and the tab's actions.
+//
 // Each reader throws a clear error without its provider; the ViewBoundary around the view then catches it.
 // No @types/react here: React is `any` to tsc, so these interfaces document the values rather than enforce them.
 
 import { createContext, useContext } from 'react';
 import type { LayerEngine, LayerOutput, BeatRender } from '../../utils/soundV2/layerHost';
 import type { ShellSheet, ShellTab, PeekPanel, LayoutPref } from './shellModel';
+import type { LayersSection } from './layers/layersModel';
 
 /** The transport's state. Changes on play/pause, a track change, shuffle/repeat, a new play order. */
 export interface PlayerValue {
@@ -79,6 +82,38 @@ export interface LevelsValue {
   v2CarFallback: boolean;
 }
 
+/**
+ * v15.6, the Layers tab's slow settings: the beat preset and Adaptive, φ, the experience filter, and what the layers
+ * actually play for the crystal. Kept out of SoundContext so the Now Playing chips never re-render for these. It
+ * changes on a band step (Adaptive: at most one per 3 s tick) or a setting; never on the 4 Hz clock.
+ */
+export interface TuningValue {
+  /** isAdaptiveBinaural. */
+  adaptive: boolean;
+  /** selectedBinaural.name ('Delta' … 'Gamma'). */
+  presetName: string;
+  /** The band the beat delivers now ('Alpha'; v2's pulse may cap it), or null with no beat (Car, the layers off). */
+  nowBand: string | null;
+  /** The output's render (renderForOutput: Car is 'off'). */
+  render: BeatRender;
+  /** The beat is v2's (v2 plays, or v2's Car fallback). */
+  v2Beat: boolean;
+  /** enablePhiMode, phiTimingEnabled. */
+  phiMode: boolean;
+  phiTiming: boolean;
+  /** userExperienceLevel (shared with classic). */
+  level: 'beginner' | 'intermediate' | 'advanced' | 'expert';
+  /** The optional experience filter on the crystals (aetheria.crystalFilter.v1). */
+  crystalFilter: boolean;
+  /** The track's φ peak in seconds (currDuration × 0.618), or null without a length: per track, never per tick. */
+  trackPeakS: number | null;
+  /** What the layers play for the crystal: v2's tone (the player's last status, else its plan), classic's
+   *  solfeggioHz; null while the layers are off (Music only, v2's Car fallback). */
+  heardHz: number | null;
+  /** The sound log has an engine to log (Export sound log shows). */
+  canExportLog: boolean;
+}
+
 /** The library at a glance (an import, a delete or a scan changes it). */
 export interface LibrarySummaryValue {
   count: number;
@@ -115,6 +150,12 @@ export interface ShellValue {
   phoneShell: boolean;
   headerRef: { current: HTMLElement | null };
   barRef: { current: HTMLDivElement | null };
+  /** v15.6: Zen in the new layout. `on`: the switch; `hidden`: the controls are hidden now (the shell is inert). */
+  zen: { on: boolean; hidden: boolean };
+  /** v15.6: the shell's root (PhoneShell or DesktopShell), for Zen's "a field being typed in keeps it shown". */
+  rootRef: { current: HTMLDivElement | null };
+  /** v15.6: where the Layers tab was left (its content's scrollTop), and a section to open at instead. */
+  layersScrollRef: { current: { top: number; jump: LayersSection | null } };
 }
 
 /** One object for the app's lifetime: every member calls App's latest function (no view re-renders for a handler). */
@@ -148,6 +189,21 @@ export interface ShellActions {
   closeSheet: () => void;
   setLayout: (l: LayoutPref) => void;
   peekClassic: (panel: PeekPanel) => void;
+  // v15.6, the Layers tab (references to App's existing setters; the Sound section uses layerPanelProps' handlers).
+  setAdaptive: (on: boolean) => void;
+  /** A band picked by hand: the preset, and Adaptive off (classic's row click). */
+  choosePreset: (name: string) => void;
+  setPhiMode: (on: boolean) => void;
+  setPhiTiming: (on: boolean) => void;
+  setExperienceLevel: (l: 'beginner' | 'intermediate' | 'advanced' | 'expert') => void;
+  /** The experience filter's switch (and Show all): saved, from the tap only. */
+  setCrystalFilter: (on: boolean) => void;
+  /** The Layers tab, opened at a section (default Sound). */
+  openLayers: (section?: LayersSection) => void;
+  // v15.6, Zen in the new layout.
+  setZen: (on: boolean) => void;
+  /** Bring the hidden controls back (the reveal surface's click, "Show controls"). */
+  revealZen: () => void;
 }
 
 export const PlayerContext = createContext(null);
@@ -158,6 +214,7 @@ export const WalkContext = createContext(null);
 export const TimeContext = createContext(null);
 export const ActionsContext = createContext(null);
 export const ShellContext = createContext(null);
+export const TuningContext = createContext(null);
 
 function read<T>(ctx: unknown, name: string): T {
   const v = useContext(ctx);
@@ -173,3 +230,4 @@ export const useWalk = (): WalkValue => read<WalkValue>(WalkContext, 'WalkContex
 export const useTime = (): TimeValue => read<TimeValue>(TimeContext, 'TimeContext');
 export const useActions = (): ShellActions => read<ShellActions>(ActionsContext, 'ActionsContext');
 export const useShell = (): ShellValue => read<ShellValue>(ShellContext, 'ShellContext');
+export const useTuning = (): TuningValue => read<TuningValue>(TuningContext, 'TuningContext');

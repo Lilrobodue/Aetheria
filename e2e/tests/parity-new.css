@@ -1,0 +1,4 @@
+/* v15.6, E2E_PARITY=new (tests/parity.spec.ts): with parity.css, hides what moves on its own in the new layout, the
+   time readers (the seek bar, the time text, the mini-player progress, the Car time, the desktop transport's times). */
+[data-testid="np-seek"], [data-testid="np-time"], [data-testid="mini-progress"], [data-testid="car-time"] { visibility: hidden !important; }
+div:has(> [data-testid="desktop-time-elapsed"]) { visibility: hidden !important; }

@@ -1,4 +1,4 @@
-// components/shell/ShellProviders.tsx (v15.5, the new layout beta)
+// components/shell/ShellProviders.tsx (v15.5, the new layout beta; v15.6 adds the tuning context)
 //
 // Nests the new layout's context providers around it. It re-renders with App (four times a second while playing);
 // its children do not: App hands it one memo'd <AppShell /> with no props, and each view reads only the contexts it
@@ -12,6 +12,7 @@ import {
   PlayerContext,
   SoundContext,
   LevelsContext,
+  TuningContext,
   LibrarySummaryContext,
   WalkContext,
   TimeContext,
@@ -22,6 +23,7 @@ import type {
   PlayerValue,
   SoundValue,
   LevelsValue,
+  TuningValue,
   LibrarySummaryValue,
   WalkValue,
   TimeValue,
@@ -33,23 +35,26 @@ interface ShellProvidersProps {
   player: PlayerValue;
   sound: SoundValue;
   levels: LevelsValue;
+  tuning: TuningValue;
   library: LibrarySummaryValue;
   walk: WalkValue;
   time: TimeValue;
   children: ReactNode;
 }
 
-const ShellProviders = ({ actions, shell, player, sound, levels, library, walk, time, children }: ShellProvidersProps) => (
+const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library, walk, time, children }: ShellProvidersProps) => (
   <ActionsContext.Provider value={actions}>
     <ShellContext.Provider value={shell}>
       <PlayerContext.Provider value={player}>
         <SoundContext.Provider value={sound}>
           <LevelsContext.Provider value={levels}>
-            <LibrarySummaryContext.Provider value={library}>
-              <WalkContext.Provider value={walk}>
-                <TimeContext.Provider value={time}>{children}</TimeContext.Provider>
-              </WalkContext.Provider>
-            </LibrarySummaryContext.Provider>
+            <TuningContext.Provider value={tuning}>
+              <LibrarySummaryContext.Provider value={library}>
+                <WalkContext.Provider value={walk}>
+                  <TimeContext.Provider value={time}>{children}</TimeContext.Provider>
+                </WalkContext.Provider>
+              </LibrarySummaryContext.Provider>
+            </TuningContext.Provider>
           </LevelsContext.Provider>
         </SoundContext.Provider>
       </PlayerContext.Provider>

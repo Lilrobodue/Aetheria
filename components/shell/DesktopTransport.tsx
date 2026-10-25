@@ -3,7 +3,7 @@
 // The desktop shell's 88 px transport (mockup desktop-shell), in three columns: the crystal tile (it opens the Crystal
 // panel), the title and the chips (24 px, one line, clipped: display only); shuffle, previous, Play 48, next, repeat
 // over the seek bar with its φ ticks and both times; Output, Walks, the master volume and ⋯. The desktop has no Car
-// screen: its layers chip says "Layers v2 · Car (tone only)".
+// screen: its layers chip says "Layers v2 · Car (tone only)". v15.6: the Zen button sits left of ⋯ (decision 1, option A).
 
 import React from 'react';
 import { Ellipsis, Music2, Pause, Play, Repeat, Route, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, Waves } from 'lucide-react';
@@ -12,6 +12,7 @@ import { countRender } from './devRenders';
 import SeekBar from './SeekBar';
 import { outputIcon } from './outputIcon';
 import RecButton from './RecButton';
+import ZenButton from './ZenButton';
 import { REGIME_DOT, regimeName, regimeOf } from './shellModel';
 
 const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400';
@@ -162,6 +163,7 @@ const DesktopTransport = () => {
           Walks
         </button>
         <DesktopVolume />
+        <ZenButton data-testid="zen-button-desktop" />
         <button
           type="button"
           aria-label="More options"

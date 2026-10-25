@@ -6,8 +6,11 @@
 // only while shown (its condition is inside the region's `render`, so the region itself stays mounted and keeps its
 // strikes). The Spectrum lens's bottom inset is measured from Now Playing's panel, else from this bottom stack.
 // A tab change moves the focus to the new view's heading.
+// v15.6: the Layers tab replaces its stub (still the tab-layers region), and Zen hides this root: inert and transparent
+// (a 500 ms fade out, none under reduced motion; the reveal is instant). Its ref is the shell root Zen watches.
 
 import React, { useEffect, useRef } from 'react';
+import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
 import { ViewBoundary } from '../ErrorBoundary';
 import { useShell } from './contexts';
 import { countRender } from './devRenders';
@@ -18,6 +21,7 @@ import CarNowPlaying from './CarNowPlaying';
 import MiniPlayer from './MiniPlayer';
 import TabStub from './tabs/TabStub';
 import MoreStub from './tabs/MoreStub';
+import LayersTab from './layers/LayersTab';
 import SheetHost from './SheetHost';
 import { NowPlayingCrash, TabCrash, TransportCrash } from './fallbacks';
 
@@ -28,7 +32,8 @@ export function focusViewHeading(): void {
 
 const PhoneShell = () => {
   countRender('PhoneShell');
-  const { tab, car, sheet, barRef } = useShell();
+  const { tab, car, sheet, barRef, zen, rootRef } = useShell();
+  const reduced = usePrefersReducedMotion();
   const now = tab === 'now';
   const nowPanel = now && !car;
 
@@ -40,7 +45,19 @@ const PhoneShell = () => {
   }, [tab]);
 
   return (
-    <div data-testid="new-shell" data-shell="phone" className="fixed inset-0 z-10 flex flex-col pointer-events-none text-ink font-sans">
+    <div
+      ref={rootRef}
+      inert={zen.hidden}
+      data-testid="new-shell"
+      data-shell="phone"
+      className={
+        !zen.hidden
+          ? 'fixed inset-0 z-10 flex flex-col pointer-events-none text-ink font-sans'
+          : reduced
+            ? 'fixed inset-0 z-10 flex flex-col pointer-events-none text-ink font-sans opacity-0'
+            : 'fixed inset-0 z-10 flex flex-col pointer-events-none text-ink font-sans opacity-0 transition-opacity duration-slow'
+      }
+    >
       {nowPanel ? <TopBar /> : null}
       <div className="relative flex-1 min-h-0 flex flex-col">
         <ViewBoundary
@@ -61,7 +78,7 @@ const PhoneShell = () => {
         <ViewBoundary
           name="tab-layers"
           fallback={(api) => (tab === 'layers' ? <TabCrash api={api} inPanel={false} /> : null)}
-          render={() => tab === 'layers' && <TabStub tab="layers" />}
+          render={() => tab === 'layers' && <LayersTab />}
         />
         <ViewBoundary
           name="more"

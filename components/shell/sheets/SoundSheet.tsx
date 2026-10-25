@@ -1,77 +1,42 @@
-// components/shell/sheets/SoundSheet.tsx (v15.5, the new layout beta)
+// components/shell/sheets/SoundSheet.tsx (v15.5, the new layout beta; v15.6 restyled, decision 3 option A)
 //
-// The Sound sheet: the layer-sound panel exactly as classic's transport popover shows it (LayerSoundPanel: Music only,
-// the v2 / classic A/B, Output, the drone, Ask me again), Key fit (v2), and the three levels. Its subtitle is the
-// layers chip's text ("Layers v2 · Car (tone only)"). Opened from Output (or the Car screen's Change output), it
-// starts at its Output group, so that tap count never depends on the screen's height. The levels read their own
-// context, so a slider drag never re-renders the chips.
+// The Sound sheet, the quick way to change the sound without leaving the visuals (sheets never pause them; the
+// Layers tab does): a row into the Layers tab ("Every sound setting is in the Layers tab", at its Sound section), then
+// the Layers tab's own Sound controls (without Export) and its Levels (the three sliders, the comfort line, Key fit),
+// in the Quiet look (mockup sheet-sound-phone). Its subtitle is the layers chip's text ("Layers v2 · Car (tone only)").
+// Opened from Output (or the Car screen's Change output), it starts at its Output group, so that tap count never
+// depends on the screen's height. The levels read their own context, so a slider drag never re-renders the chips.
 
 import React, { useEffect, useRef } from 'react';
+import { ChevronRight, Layers } from 'lucide-react';
 import Sheet from '../../ui/Sheet';
-import SliderWithReadout from '../../ui/SliderWithReadout';
-import LayerSoundPanel from '../../layers/LayerSoundPanel';
-import KeyFitRow from '../../layers/KeyFitRow';
-import { TONE_LEVEL_LABEL, BEAT_LEVEL_LABEL } from '../../layers/layerCopy';
-import { V2_TONE_SLIDER_MAX, V2_TONE_SLIDER_STEP, V2_BEAT_SLIDER_MAX } from '../../../utils/soundV2/layerHost';
 import { ViewBoundary } from '../../ErrorBoundary';
-import { useActions, useLevels, useShell, useSound } from '../contexts';
+import { useActions, useShell, useSound } from '../contexts';
 import { countRender } from '../devRenders';
 import { sheetFallback } from './sheetFallback';
-
-const pct = (x: number) => `${Math.round(x * 100)} %`;
-
-const Levels = () => {
-  countRender('SoundLevels');
-  const l = useLevels();
-  const actions = useActions();
-  const v2Beat = l.v2Active || l.v2CarFallback;
-  return (
-    <section aria-label="Levels" className="space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-widest text-ink-soft">Levels</h3>
-      <SliderWithReadout label="Volume" min={0} max={1} step={0.01} value={l.volume} readout={pct(l.volume)} onChange={actions.setVolume} data-testid="level-volume" />
-      {l.v2Active ? (
-        <SliderWithReadout
-          label={TONE_LEVEL_LABEL}
-          min={0}
-          max={V2_TONE_SLIDER_MAX}
-          step={V2_TONE_SLIDER_STEP}
-          value={Math.min(l.toneLevel, V2_TONE_SLIDER_MAX)}
-          readout={l.toneText}
-          onChange={actions.setToneLevel}
-          data-testid="level-tone"
-        />
-      ) : (
-        <SliderWithReadout label={TONE_LEVEL_LABEL} min={0} max={1} step={0.01} value={l.toneLevel} readout={pct(l.toneLevel)} onChange={actions.setToneLevel} data-testid="level-tone" />
-      )}
-      {v2Beat ? (
-        <SliderWithReadout
-          label={BEAT_LEVEL_LABEL}
-          min={0}
-          max={V2_BEAT_SLIDER_MAX}
-          step={0.001}
-          value={Math.min(l.beatLevel, V2_BEAT_SLIDER_MAX)}
-          readout={l.beatText}
-          onChange={actions.setBeatLevel}
-          disabled={l.outputRender === 'off' || l.v2CarFallback}
-          disabledNote="Car output plays no beat."
-          data-testid="level-beat"
-        />
-      ) : (
-        <SliderWithReadout label={BEAT_LEVEL_LABEL} min={0} max={0.2} step={0.001} value={l.beatLevel} readout={pct(l.beatLevel / 0.2)} onChange={actions.setBeatLevel} data-testid="level-beat" />
-      )}
-    </section>
-  );
-};
+import { SoundControls } from '../layers/SoundSection';
+import { LevelsBody } from '../layers/LevelsSection';
 
 const SoundBody = () => {
   countRender('SoundBody');
-  const s = useSound();
   const actions = useActions();
   return (
-    <div data-testid="sound-body" className="px-4 pb-4 space-y-4">
-      <LayerSoundPanel variant="popover" {...s.layerPanelProps} />
-      {s.v2Active ? <KeyFitRow on={s.keyFitOn} status={s.keyFitRowLine} onToggle={actions.toggleKeyFit} /> : null}
-      <Levels />
+    <div data-testid="sound-body" className="px-4 pb-4 space-y-3">
+      <button
+        type="button"
+        data-testid="sound-to-layers"
+        onClick={() => actions.openLayers('sound')}
+        className="w-full min-h-touch px-3 rounded-control border border-line bg-surface-deep flex items-center justify-between gap-2 text-sm text-ink-soft hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+      >
+        <span className="flex items-center gap-2 text-left">
+          <Layers size={16} className="shrink-0 text-ink-muted" aria-hidden="true" />
+          Every sound setting is in the Layers tab
+        </span>
+        <ChevronRight size={16} className="shrink-0 text-ink-muted" aria-hidden="true" />
+      </button>
+      <SoundControls withExport={false} />
+      <div className="border-t border-line" />
+      <LevelsBody />
     </div>
   );
 };

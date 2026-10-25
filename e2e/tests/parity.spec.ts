@@ -30,7 +30,9 @@ import { importTones, openHarmonicControl, openSafety } from './helpers';
 // The Auto-Distribute Frequencies button is NOT masked: it must look exactly as in v15.2.1. Every shot asserts that
 // no mask touches it.
 // v15.5 adds one allowed difference: Harmonic Control's "Try the new layout" pill (placeOptInMask). Classic is
-// otherwise unchanged by the new layout, its branch, the heat guard's wrapper and the peek.
+// otherwise unchanged by the new layout, its branch, the heat guard's wrapper and the peek. v15.6 adds no mask.
+//
+// v15.6: E2E_PARITY=new runs the new layout's screens instead (walkNew, below): the same procedure, other rules.
 
 const VIEWPORTS = {
   desktop: { width: 1280, height: 800 },
@@ -367,8 +369,183 @@ async function walk(page: Page, context: BrowserContext, vp: Viewport): Promise<
   expect.soft(errors, 'page errors').toEqual([]);
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// v15.6: E2E_PARITY=new, the new layout's screens against the previous release (spec §5.6). The same procedure, with
+// parity-new.css (the time readers hidden too). Compared at 0 px: the Car screen, the mini-player over Library, the
+// Library and Mixes stubs, the Walks sheet; Now Playing (portrait and landscape, and with the tone-only banner) with one
+// mask, the Zen button's box (decision 1 A; nothing else moves: the button grows the top bar's right cluster into
+// empty space); the Crystal sheet clipped above its HEAD section (the 111 chip and the comfort line come after the
+// grid, the HEAD line is gone); on the desktop the same with the transport masked (the Zen button narrows its left
+// column: reviewed). Shot for review only, unasserted: the ⋯ menu, the Sound sheet, More, Layers, the desktop
+// transport. The shell's crash fallback needs the dev hook: not in a production build.
+// ---------------------------------------------------------------------------------------------------------------
+
+const HIDE_NEW_CSS = fs.readFileSync(fileURLToPath(new URL('./parity-new.css', import.meta.url)), 'utf8');
+const NEW_STYLES = [fileURLToPath(new URL('./parity.css', import.meta.url)), fileURLToPath(new URL('./parity-new.css', import.meta.url))];
+
+/** A transparent fixed overlay over the 44 × 44 box left of a ⋯ button (where v15.6's Zen button sits), in both builds. */
+async function placeZenMask(page: Page, menu: Locator): Promise<void> {
+  await page.evaluate(() => document.querySelectorAll('[data-parity-zen-mask]').forEach((n) => n.remove()));
+  if ((await menu.count()) === 0 || !(await menu.first().isVisible())) return;
+  const b = (await menu.first().boundingBox())!;
+  await page.evaluate((b) => {
+    const m = document.createElement('div');
+    m.setAttribute('data-parity-zen-mask', '');
+    m.style.cssText =
+      `position:fixed;left:${b.x - 45}px;top:${b.y - 1}px;width:46px;height:${b.height + 2}px;` +
+      'margin:0;padding:0;border:0;background:transparent;pointer-events:none;z-index:2147483647';
+    document.body.appendChild(m);
+  }, b);
+}
+
+async function walkNew(page: Page, vp: Viewport): Promise<void> {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.setDefaultTimeout(15_000);
+  await page.addInitScript(() => {
+    let a = 0x9e3779b9;
+    Math.random = () => {
+      a |= 0;
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    if (!localStorage.getItem('__paritySeeded')) {
+      localStorage.setItem('__paritySeeded', '1');
+      localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
+      localStorage.setItem('aetheria.layerEngine.v1', 'v2');
+      localStorage.setItem('aetheria.layerOutput.v1', 'headphones');
+    }
+  });
+  let label = process.env.E2E_PARITY_LABEL || '';
+  const compared: string[] = [];
+  const shot = async (state: string, o: { compare: boolean; zenMask?: Locator; masks?: Locator[]; clip?: { x: number; y: number; width: number; height: number } }) => {
+    await page.waitForTimeout(700);
+    const name = `new-${vp}-${state}`;
+    if (o.zenMask) await placeZenMask(page, o.zenMask);
+    const masks = [...(o.masks ?? []), page.locator('[data-parity-zen-mask]')];
+    if (o.compare) {
+      compared.push(state);
+      await expect.soft(page, `${name} matches the baseline`).toHaveScreenshot(`${name}.png`, { mask: masks, stylePath: NEW_STYLES, clip: o.clip });
+    }
+    await page.evaluate(() => document.querySelectorAll('[data-parity-zen-mask]').forEach((n) => n.remove()));
+    const out = path.join(SHOTS_DIR, label, `${name}.png`);
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    await page.screenshot({ path: out, animations: 'disabled', caret: 'hide', scale: 'css', style: HIDE_CSS + HIDE_NEW_CSS });
+  };
+
+  // Classic: the import and a play; then the opt-in (the user's own path into the beta).
+  await page.goto('/');
+  await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
+  const accept = page.getByRole('button', { name: /I understand, let me begin/ });
+  if (await accept.isVisible().catch(() => false)) await accept.click();
+  label = label || ((await page.locator('header h1 > span').first().textContent().catch(() => '')) || 'build').trim();
+  await importTones(page, 3, 60);
+  await page.getByText('tone-01', { exact: true }).first().click();
+  await page.getByRole('button', { name: 'Pause', exact: true }).first().waitFor({ timeout: 20_000 });
+  await closeAll(page);
+  await openHarmonicControl(page);
+  await page.getByTestId('try-new-layout').click();
+  await page.getByTestId('new-shell').waitFor();
+  const transport = page.getByTestId('desktop-transport');
+
+  if (vp === 'phone') {
+    const menu = page.getByTestId('np-menu-button');
+    // Paused, so nothing but the hidden time readers moves.
+    await page.getByTestId('np-play').click();
+    await page.getByRole('button', { name: 'Play', exact: true }).first().waitFor();
+    await shot('now-playing', { compare: true, zenMask: menu });
+    await page.setViewportSize({ width: 882, height: 411 });
+    await page.getByTestId('view-now').waitFor();
+    await shot('now-playing-landscape', { compare: true, zenMask: page.getByTestId('view-now').getByRole('button', { name: 'More options' }) });
+    await page.setViewportSize(VIEWPORTS.phone);
+    await menu.click();
+    await page.getByTestId('menu-body').waitFor();
+    await shot('menu', { compare: false });
+    await page.keyboard.press('Escape');
+    await page.getByTestId('chip-crystal').click();
+    await page.getByRole('dialog', { name: 'Crystal', exact: true }).waitFor();
+    const headTop = await page.locator('section[aria-label^="HEAD "]').evaluate((el) => el.getBoundingClientRect().top);
+    // The sheets leave the top bar showing through their scrim: the Zen button's box is masked there too.
+    await shot('sheet-crystal-above-head', { compare: true, zenMask: menu, clip: { x: 0, y: 0, width: VIEWPORTS.phone.width, height: Math.min(VIEWPORTS.phone.height, Math.floor(headTop)) } });
+    await page.keyboard.press('Escape');
+    await page.getByTestId('np-output').click();
+    await page.getByRole('dialog', { name: 'Sound', exact: true }).waitFor();
+    await shot('sheet-sound', { compare: false });
+    await page.keyboard.press('Escape');
+    await page.getByTestId('np-walks').click();
+    await page.getByRole('dialog', { name: 'Walks', exact: true }).waitFor();
+    await shot('sheet-walks', { compare: true, zenMask: menu });
+    await page.keyboard.press('Escape');
+    for (const t of ['library', 'mixes'] as const) {
+      await page.getByTestId(`tab-${t}-button`).click();
+      await page.getByTestId(`tab-${t}`).waitFor();
+      await shot(`tab-${t}`, { compare: true });
+    }
+    for (const t of ['layers', 'more'] as const) {
+      await page.getByTestId(`tab-${t}-button`).click();
+      await shot(`tab-${t}`, { compare: false });
+    }
+    await page.getByTestId('tab-now-button').click();
+    // Tone only: a crystal while paused.
+    await page.getByTestId('chip-crystal').click();
+    await page.getByTestId('crystal-528').click();
+    await page.getByTestId('tone-only-banner').waitFor();
+    await shot('tone-only', { compare: true, zenMask: menu });
+    await page.getByTestId('tone-only-banner').getByRole('button', { name: 'Stop', exact: true }).click();
+    // Car.
+    await page.getByTestId('np-output').click();
+    await page.getByRole('group', { name: 'Output' }).getByRole('button', { name: 'Car', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await page.getByTestId('view-car').waitFor();
+    await shot('car', { compare: true });
+  } else {
+    await page.getByTestId('desktop-play').click();
+    await page.getByRole('button', { name: 'Play', exact: true }).first().waitFor();
+    await shot('now-playing', { compare: true, masks: [transport] });
+    await shot('transport', { compare: false });
+    await page.getByTestId('desktop-crystal').click();
+    await page.getByRole('region', { name: 'Crystal', exact: true }).waitFor();
+    const headTop = await page.locator('section[aria-label^="HEAD "]').evaluate((el) => el.getBoundingClientRect().top);
+    await shot('panel-crystal-above-head', { compare: true, masks: [transport], clip: { x: 0, y: 0, width: VIEWPORTS.desktop.width, height: Math.min(VIEWPORTS.desktop.height, Math.floor(headTop)) } });
+    await page.keyboard.press('Escape');
+    await page.getByTestId('desktop-walks').click();
+    await page.getByRole('region', { name: 'Walks', exact: true }).waitFor();
+    await shot('panel-walks', { compare: true, masks: [transport] });
+    await page.keyboard.press('Escape');
+    for (const t of ['library', 'mixes'] as const) {
+      await page.getByTestId(`nav-${t}`).click();
+      await page.getByTestId(`tab-${t}`).waitFor();
+      await shot(`panel-${t}`, { compare: true, masks: [transport] });
+    }
+    await page.getByTestId('nav-layers').click();
+    await shot('panel-layers', { compare: false });
+    await page.keyboard.press('Escape');
+  }
+  test.info().annotations.push({ type: 'compared', description: compared.join(', ') });
+  fs.writeFileSync(path.join(SHOTS_DIR, label, `new-${vp}-summary.json`), JSON.stringify({ label, vp, compared, pageErrors: errors }, null, 1));
+  expect.soft(errors, 'page errors').toEqual([]);
+}
+
+test.describe('new-layout screenshot parity with the previous release', () => {
+  test.skip(ON_DEVICE, 'a desktop comparison of two production builds');
+  test.skip(process.env.E2E_PARITY !== 'new', 'E2E_PARITY=new');
+
+  for (const vp of Object.keys(VIEWPORTS) as Viewport[]) {
+    test.describe(vp, () => {
+      test.use({ viewport: VIEWPORTS[vp] });
+      test(`${vp}: the new layout's unchanged screens match the baseline`, async ({ page }) => {
+        test.setTimeout(240_000);
+        await walkNew(page, vp);
+      });
+    });
+  }
+});
+
 test.describe('screenshot parity with the previous release', () => {
   test.skip(ON_DEVICE, 'a desktop comparison of two production builds');
+  test.skip(process.env.E2E_PARITY === 'new', 'classic parity: E2E_PARITY=1');
 
   for (const vp of Object.keys(VIEWPORTS) as Viewport[]) {
     test.describe(vp, () => {

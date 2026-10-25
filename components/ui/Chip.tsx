@@ -22,6 +22,11 @@ interface ChipProps {
   onClick?: () => void;
   title?: string;
   buttonRef?: { current: HTMLButtonElement | null };
+  /**
+   * v15.6, the Layers tab's jump row: a chip that marks where you are. Given (true or false), the button takes the jump
+   * look instead of `tone`: raised and semibold while current (aria-current="true", never gold), quiet otherwise.
+   */
+  current?: boolean;
   'data-testid'?: string;
 }
 
@@ -37,7 +42,12 @@ const TONES: Record<ChipTone, string> = {
 const BUTTON =
   "after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400";
 
-const Chip = ({ label, children, icon, dotClass, tone = 'plain', onClick, title, buttonRef, 'data-testid': testId }: ChipProps) => {
+const JUMP_CURRENT =
+  "relative inline-flex items-center gap-1.5 h-8 px-3 rounded-pill whitespace-nowrap border text-xs border-ink-muted bg-surface-raised text-ink-strong font-semibold after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400";
+const JUMP =
+  "relative inline-flex items-center gap-1.5 h-8 px-3 rounded-pill whitespace-nowrap border text-xs border-line-strong bg-surface-panel text-ink-soft after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400";
+
+const Chip = ({ label, children, icon, dotClass, tone = 'plain', onClick, title, buttonRef, current, 'data-testid': testId }: ChipProps) => {
   const inner = (
     <>
       {dotClass ? <span aria-hidden="true" className={`w-2 h-2 rounded-pill shrink-0 ${dotClass}`} /> : icon ?? null}
@@ -57,9 +67,10 @@ const Chip = ({ label, children, icon, dotClass, tone = 'plain', onClick, title,
       ref={buttonRef}
       onClick={onClick}
       aria-label={label}
+      aria-current={current ? 'true' : undefined}
       title={title}
       data-testid={testId}
-      className={`${BASE} ${TONES[tone]} ${BUTTON}`}
+      className={current === undefined ? `${BASE} ${TONES[tone]} ${BUTTON}` : current ? JUMP_CURRENT : JUMP}
     >
       {inner}
     </button>

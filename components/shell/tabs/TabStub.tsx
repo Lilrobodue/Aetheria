@@ -1,14 +1,14 @@
 // components/shell/tabs/TabStub.tsx (v15.5, the new layout beta)
 //
-// Library, Mixes and Layers until their own releases (decision 4, mockup mini-player-library): an honest note that
-// the new one comes in a later beta, and one primary button that "peeks" into the classic layout at the right place
-// (Open the classic library / mixes / sound controls), with a floating "Back to the new layout"; the saved choice stays
-// new. Library also shows its summary (tracks, total length, where the play order comes from); Layers offers the
-// Sound and Crystal sheets, Mixes the Walks sheet. Solid (bg-surface-deep): the heat guard pauses the visualizer
-// behind it on the phone.
+// Library and Mixes until their own releases (decision 4, mockup mini-player-library): an honest note that the new
+// one comes in a later beta, and one primary button that "peeks" into the classic layout at the right place (Open the
+// classic library / mixes), with a floating "Back to the new layout"; the saved choice stays new. Library also shows
+// its summary (tracks, total length, where the play order comes from); Mixes offers the Walks sheet. Solid
+// (bg-surface-deep): the heat guard pauses the visualizer behind it on the phone. (Layers was a stub too until v15.6:
+// components/shell/layers/LayersTab.tsx.)
 
 import React from 'react';
-import { Gem, Route, Sliders, Sparkles, X } from 'lucide-react';
+import { Route, Sparkles, X } from 'lucide-react';
 import Badge from '../../ui/Badge';
 import Button from '../../ui/Button';
 import IconButton from '../../ui/IconButton';
@@ -17,7 +17,7 @@ import { countRender } from '../devRenders';
 import { formatTotal } from '../shellModel';
 import type { PeekPanel } from '../shellModel';
 
-export type StubTab = 'library' | 'mixes' | 'layers';
+export type StubTab = 'library' | 'mixes';
 
 const COPY: Record<StubTab, { title: string; soon: string; body: string; open: string; peek: PeekPanel }> = {
   library: {
@@ -33,13 +33,6 @@ const COPY: Record<StubTab, { title: string; soon: string; body: string; open: s
     body: 'Journeys, alignments and the other mixes are in the classic library panel for now. The music keeps playing when you switch.',
     open: 'Open the classic mixes',
     peek: 'mixes',
-  },
-  layers: {
-    title: 'Layers',
-    soon: 'The new Layers page is coming in a later beta',
-    body: 'Harmonic Control in the classic layout has every sound control for now. The music keeps playing when you switch.',
-    open: 'Open the classic sound controls',
-    peek: 'sound',
   },
 };
 
@@ -116,18 +109,6 @@ const TabStub = ({ tab, inPanel = false }: TabStubProps) => {
             {c.open}
           </Button>
         </div>
-        {tab === 'layers' ? (
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="secondary" onClick={() => actions.openSheet('sound')} className="flex items-center justify-center gap-2">
-              <Sliders size={16} className="text-ink-muted" aria-hidden="true" />
-              Sound
-            </Button>
-            <Button variant="secondary" onClick={() => actions.openSheet('crystal')} className="flex items-center justify-center gap-2">
-              <Gem size={16} className="text-ink-muted" aria-hidden="true" />
-              Crystal
-            </Button>
-          </div>
-        ) : null}
         {tab === 'mixes' ? (
           <Button variant="secondary" onClick={() => actions.openSheet('walks')} className="w-full flex items-center justify-center gap-2">
             <Route size={16} className="text-ink-muted" aria-hidden="true" />

@@ -319,6 +319,12 @@ const DRILLS: Drill[] = [
   { view: 'sheet-crystal', open: openSheetFrom('chip-crystal'), present: (p) => p.getByTestId('crystal-body') },
   { view: 'sheet-walks', open: openSheetFrom('np-walks'), present: (p) => p.getByTestId('walks-body') },
   { view: 'menu', open: openSheetFrom('np-menu-button'), present: (p) => p.getByTestId('menu-body') },
+  // v15.6: the Layers tab's five section regions.
+  { view: 'layers-sound', open: (p) => tab(p, 'layers'), present: (p) => p.getByTestId('layers-sound') },
+  { view: 'layers-crystal', open: (p) => tab(p, 'layers'), present: (p) => p.getByTestId('layers-crystal') },
+  { view: 'layers-levels', open: (p) => tab(p, 'layers'), present: (p) => p.getByTestId('layers-levels') },
+  { view: 'layers-beat', open: (p) => tab(p, 'layers'), present: (p) => p.getByTestId('layers-beat') },
+  { view: 'layers-advanced', open: (p) => tab(p, 'layers'), present: (p) => p.getByTestId('layers-advanced') },
 ];
 
 const fallbackOf = (page: Page, view: Drill['view']): Locator =>
@@ -636,6 +642,19 @@ test.describe('phone, accessibility', () => {
         await page.keyboard.press('Escape');
         await tab(page, 'library');
         await expect(page.getByTestId('mini-player')).toBeVisible();
+      }],
+      // v15.6: the Layers tab (each section on screen in turn).
+      ['the Layers tab', async () => {
+        await tab(page, 'layers');
+        await expect(page.getByTestId('tab-layers')).toBeVisible();
+      }],
+      ['the Layers tab, Beat', async () => {
+        await page.getByTestId('layers-jump-beat').click();
+        await expect(page.getByTestId('layers-jump-beat')).toHaveAttribute('aria-current', 'true');
+      }],
+      ['the Layers tab, Advanced', async () => {
+        await page.getByTestId('layers-jump-advanced').click();
+        await expect(page.getByTestId('layers-jump-advanced')).toHaveAttribute('aria-current', 'true');
       }],
       ['Car', async () => {
         await tab(page, 'now');
@@ -1059,9 +1078,15 @@ test.describe('small phone, review fixes', () => {
     ];
     for (const size of sizes) {
       await page.setViewportSize(size);
-      for (const [stub, open] of [['library', 'Open the classic library'], ['layers', 'Open the classic sound controls']] as const) {
+      // v15.6: Layers is no stub any more: its peek is Advanced › Visualizer settings › Open (Harmonic Control).
+      for (const stub of ['library', 'layers'] as const) {
         await tab(page, stub);
-        await page.getByRole('button', { name: open, exact: true }).click();
+        if (stub === 'library') {
+          await page.getByRole('button', { name: 'Open the classic library', exact: true }).click();
+        } else {
+          await page.getByTestId('layers-jump-advanced').click();
+          await page.getByTestId('layers-open-visualizer').click();
+        }
         const pill = page.getByTestId('peek-pill');
         await expect(pill).toBeVisible();
         await page.waitForTimeout(400); // the insets follow classic's player bar

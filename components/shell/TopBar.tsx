@@ -3,6 +3,7 @@
 // Now Playing's top bar on the phone: AETHERIA, Beta, REC while a recording runs (a tap stops it), and ⋯ (the menu). A gradient scrim
 // over the visualizer, never a blur (I13: no backdrop-filter over the canvas). The Spectrum lens's top inset is
 // measured from it (headerRef). Hidden on a landscape phone, where Now Playing carries its own ⋯.
+// v15.6: the Zen button (the eye) sits left of ⋯ (decision 1, option A).
 
 import React from 'react';
 import { Ellipsis } from 'lucide-react';
@@ -10,6 +11,7 @@ import Badge from '../ui/Badge';
 import { useActions, useShell } from './contexts';
 import { countRender } from './devRenders';
 import RecButton from './RecButton';
+import ZenButton from './ZenButton';
 
 const TopBar = () => {
   countRender('TopBar');
@@ -26,16 +28,19 @@ const TopBar = () => {
         <Badge>Beta</Badge>
         <RecButton />
       </div>
-      <button
-        type="button"
-        aria-label="More options"
-        aria-haspopup="dialog"
-        data-testid="np-menu-button"
-        onClick={() => actions.openSheet('menu')}
-        className="w-touch h-touch flex items-center justify-center rounded-control text-ink-soft hover:text-ink-strong transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
-      >
-        <Ellipsis size={22} />
-      </button>
+      <div className="flex items-center">
+        <ZenButton data-testid="zen-button" />
+        <button
+          type="button"
+          aria-label="More options"
+          aria-haspopup="dialog"
+          data-testid="np-menu-button"
+          onClick={() => actions.openSheet('menu')}
+          className="w-touch h-touch flex items-center justify-center rounded-control text-ink-soft hover:text-ink-strong transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+        >
+          <Ellipsis size={22} />
+        </button>
+      </div>
     </header>
   );
 };
