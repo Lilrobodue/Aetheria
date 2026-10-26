@@ -259,8 +259,10 @@ export interface ShellActions {
   assignCrystals: () => void;
   /** Analyse tracks' button (Start, or Stop while it runs). */
   analyse: () => void;
-  /** Deep Scan, and its cancel. */
+  /** Deep Scan (the tracks with no crystal; decision 6), and its cancel. */
   scan: () => void;
+  /** v15.8: Deep Scan with the assigned tracks too (the health card's explicit "Also scan"). */
+  scanAssigned: () => void;
   stopScan: () => void;
   /** The import handler (classic's, unchanged). */
   importFiles: (event: any) => void;

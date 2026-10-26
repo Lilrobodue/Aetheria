@@ -233,7 +233,7 @@ const AccessibleGuidebook: React.FC = () => {
             <><strong className="text-gold-200">Open the Aetheria 432Hz Player</strong> at aetheria432.com</>,
             <><strong className="text-gold-200">Add your music</strong> — import songs or folders from your device</>,
             <><strong className="text-gold-200">Click "Deep Scan"</strong> — wait for your music to be processed</>,
-            <><strong className="text-gold-200">Click "Auto-Distribute Frequencies"</strong> — the player analyzes your music and assigns each song to its closest Aetheria frequency</>,
+            <><strong className="text-gold-200">Click "Auto-Distribute Frequencies"</strong> — songs Deep Scan measured keep their frequency, and every other song is given one of the 27 Aetheria frequencies</>,
             <><strong className="text-gold-200">Pick a listening mode</strong> — try "Full Alignment" to hear your library played across all 27 frequencies in order, or choose just the GUT, HEART, HEAD range, or all regimes by selecting the Ultimate all orders playlist.</>,
             <><strong className="text-gold-200">Press play and enjoy your music</strong></>
           ].map((content, i) => (

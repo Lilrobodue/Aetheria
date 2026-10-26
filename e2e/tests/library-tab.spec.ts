@@ -1,5 +1,6 @@
 import { type Locator, type Page } from '@playwright/test';
 import { test, expect, ON_DEVICE } from './fixtures';
+import { planAssign, assignConfirmText, assignNeedsConfirm } from '../../utils/mix/distribution.ts';
 import {
   addFiles,
   cacheCounts,
@@ -196,6 +197,20 @@ const summary = (page: Page) => page.getByTestId('library-summary');
 const healthLine = (page: Page, id: string) => page.getByTestId(`health-${id}-line`);
 const healthAction = (page: Page, id: string) => page.getByTestId(`health-${id}-action`);
 const nextOnNowPlaying = (page: Page) => page.getByTestId('view-now').getByRole('button', { name: 'Next track', exact: true });
+
+/** v15.8: the plan Assign will make for the library as seeded (seedLibraryRecords stores a crystal as harmonicFreq =
+ *  closestSolfeggio with deviation 3, an assigned crystal; the ids are random per run, so the plan is computed). */
+async function seededPlan(page: Page) {
+  const s = await libraryState(page);
+  if (s.origins.some((o) => o !== 'assigned' && o !== 'none')) throw new Error('seededPlan: only for seeded (assigned) crystals');
+  const lib = s.libraryIds.map((id, i) => ({
+    id, name: s.libraryNames[i], duration: s.libraryDurations[i] ?? undefined,
+    ...(s.crystals[i] ? { closestSolfeggio: s.crystals[i] as number, ...(s.scanned[i] ? { harmonicFreq: s.crystals[i] as number } : {}), harmonicDeviation: 3 } : {}),
+  }));
+  const log = console.log;
+  console.log = () => {};
+  try { return planAssign(lib); } finally { console.log = log; }
+}
 
 // On the phone the page fixture sets the desktop runs' size (fixtures.ts), and test.use's viewport doesn't reach a
 // CDP-connected page: each describe's own size is applied here instead, as phoneSize does in the other specs.
@@ -774,7 +789,7 @@ test.describe('phone, the row menu', () => {
     const today = await page.evaluate(() => { const d = new Date(); return `${d.getDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()]} ${d.getFullYear()}`; });
     expect(await rows()).toEqual([
       ['Length', '0:40'],
-      ['Crystal', '528 Hz · GUTAssigned by Auto-Distribute. An assigned crystal, not a measured pitch.'],
+      ['Crystal', '528 Hz · GUTAssigned, not scanned yet. An assigned crystal, not a measured pitch.'],
       ['Key', 'A minor · confidence 0.62From Analyse tracks'],
       ['Visual sync', 'From Analyse tracks'],
       ['File', 'tone-0003.wav · 625 KB'],
@@ -784,7 +799,7 @@ test.describe('phone, the row menu', () => {
     await info.getByRole('button', { name: 'Copy', exact: true }).click();
     await expect(info.getByRole('button', { name: 'Copied', exact: true })).toBeVisible();
     expect(await page.evaluate(() => (window as any).__copied)).toBe(
-      ['tone-0003', 'Length: 0:40', 'Crystal: 528 Hz · GUT (Assigned by Auto-Distribute. An assigned crystal, not a measured pitch.)', 'Key: A minor · confidence 0.62 (From Analyse tracks)', 'Visual sync: From Analyse tracks', 'File: tone-0003.wav · 625 KB', `Added: ${today}`].join('\n')
+      ['tone-0003', 'Length: 0:40', 'Crystal: 528 Hz · GUT (Assigned, not scanned yet. An assigned crystal, not a measured pitch.)', 'Key: A minor · confidence 0.62 (From Analyse tracks)', 'Visual sync: From Analyse tracks', 'File: tone-0003.wav · 625 KB', `Added: ${today}`].join('\n')
     );
     await info.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(info).toHaveCount(0);
@@ -865,17 +880,21 @@ test.describe('phone, the health card', () => {
     expect(dialogs).toEqual([]);
   });
 
-  test('17b. Crystals with some already assigned: the confirmation names the count; Cancel keeps every crystal; Assign gives the rest one', async ({ page }) => {
+  test('17b. Crystals with some already assigned: the confirmation gives the plan’s counts (v15.8); Cancel keeps every crystal; Assign gives the rest one', async ({ page }) => {
     test.setTimeout(150_000);
     const dialogs = await openSeededNewLayout(page, 30, { crystals: 'some' });
     await openLibraryTab(page);
     const before = (await libraryState(page)).crystals;
     const have = before.filter((c) => c !== null).length;
     await expect(healthLine(page, 'crystals')).toHaveText(`${30 - have} of 30 tracks have none`);
+    // The seeded crystals are assigned ones (not a scan): Assign places them anew once, so it asks first.
+    const plan = await seededPlan(page);
+    expect(assignNeedsConfirm(plan), 'assigned crystals move: it asks').toBe(true);
     await healthAction(page, 'crystals').click();
-    const ask = page.getByRole('alertdialog', { name: 'Assign crystals to all 30 tracks?' });
+    const ask = page.getByRole('alertdialog', { name: 'Assign crystals?' });
     await expect(ask).toBeVisible();
-    await expect(ask).toContainText(`Auto-Distribute gives every track one of the 27 crystals. ${have} tracks already have one, and theirs may change. Scan results and keys are kept.`);
+    await expect(ask.getByTestId('dialog-body')).toHaveText(assignConfirmText(plan).body);
+    await expect(ask).toContainText(`${30 - have} tracks without one get a crystal.`);
     await expect(ask.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
     await ask.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.waitForTimeout(500);
@@ -907,7 +926,7 @@ test.describe('phone, the health card', () => {
     expect(dialogs).toEqual([]);
   });
 
-  test('17d. Deep Scan: the count is scanLibrary’s queue (no harmonicFreq); Scan starts it, Analyse waits, Stop cancels it', async ({ page }) => {
+  test('17d. Deep Scan: the count is scanLibrary’s queue (v15.8: no measurement or no crystal); the assigned ones are offered apart; Scan starts it, Analyse waits, Stop cancels it', async ({ page }) => {
     test.setTimeout(150_000);
     // Two tracks with a crystal but never scanned (no harmonicFreq): the Scan count is scanLibrary's queue, not "no crystal".
     const dialogs = await openSeededNewLayout(page, 30, { crystals: 'some', patch: [{ index: 0, unscanned: true }, { index: 1, unscanned: true }] });
@@ -915,9 +934,10 @@ test.describe('phone, the health card', () => {
     const unscanned = (await libraryState(page)).scanned.filter((x) => !x).length;
     expect(unscanned).toBe(11);
     await expect(healthLine(page, 'crystals'), 'nine without a crystal').toHaveText('9 of 30 tracks have none');
-    // The 19 seeded crystals carry a harmonicFreq without a scan (as Auto-Distribute leaves it): Deep Scan skips them.
-    await expect(healthLine(page, 'scan')).toHaveText(`Optional · ${unscanned} to scan · about 27 min`);
-    await expect(page.getByTestId('health-scan')).toContainText('19 more have Auto-Distribute’s crystal, which Deep Scan skips.');
+    // v15.8 (decision 6): Scan measures the 9 with no crystal and the 2 with a crystal but no harmonicFreq (v15.7's
+    // scope); the 19 assigned ones (a crystal and its harmonicFreq, never measured) are a separate, explicit choice.
+    await expect(healthLine(page, 'scan')).toHaveText(`Optional · ${unscanned} unscanned · about 27 min`);
+    await expect(healthLine(page, 'scan-assigned')).toHaveText('Also scan the 19 assigned tracks (about 47 min)');
     await healthAction(page, 'scan').click();
     await expect(healthLine(page, 'scan')).toHaveText(/^Scanning · \d+ %$/, { timeout: 15_000 });
     await expect(page.getByText('Deep Analysis In Progress'), 'not classic’s box (v15.7: the card says it)').toHaveCount(0);
@@ -925,7 +945,7 @@ test.describe('phone, the health card', () => {
     await expect(healthAction(page, 'analyse')).toHaveAttribute('aria-disabled', 'true');
     await expect(page.getByTestId('health-analyse')).toContainText('Unavailable while Deep Scan runs');
     await healthAction(page, 'scan').click();
-    await expect(healthLine(page, 'scan')).toHaveText(/^Optional · \d+ to scan · /, { timeout: 30_000 });
+    await expect(healthLine(page, 'scan')).toHaveText(/^Optional · \d+ unscanned · /, { timeout: 30_000 });
     expect(dialogs).toEqual([]);
   });
 });
@@ -1629,7 +1649,7 @@ test.describe('phone, notices', () => {
 test.describe('phone, after Assign', () => {
   test.use({ viewport: PHONE_VIEWPORT });
 
-  test('28. after Assign (no Deep Scan) the card doesn’t say every track is scanned, and Track info says Auto-Distribute; a scanned track says Deep Scan, then "after a Deep Scan"', async ({ page }) => {
+  test('28. after Assign (no Deep Scan) every track has a crystal, Deep Scan still offers the assigned ones, and a scanned track keeps its crystal; Track info says which is which (v15.8)', async ({ page }) => {
     test.setTimeout(150_000);
     const dialogs = await openSeededNewLayout(page, 30, { crystals: 'none', patch: [{ index: 2, crystal: 528, scanned: true }] });
     await openLibraryTab(page);
@@ -1645,16 +1665,21 @@ test.describe('phone, after Assign', () => {
     };
     await expect(healthLine(page, 'scan')).toHaveText(/^Optional · 29 unscanned · /);
     expect(await crystalNote('tone-0003'), 'the scanned track, before').toContain('From Deep Scan. An assigned crystal, not a measured pitch.');
+    const before = await libraryState(page);
     await healthAction(page, 'crystals').click();
-    await page.getByRole('alertdialog', { name: 'Assign crystals to all 30 tracks?' }).getByRole('button', { name: 'Assign', exact: true }).click();
+    await expect(page.getByTestId('assign-dialog'), 'no question: no crystal a track has would change').toHaveCount(0);
     await expect(healthLine(page, 'crystals')).toHaveText('All 30 tracks have one');
-    expect((await libraryState(page)).scanned.every(Boolean), 'Auto-Distribute gave every track a harmonicFreq (its placeholder)').toBe(true);
+    const after = await libraryState(page);
+    expect(after.crystals[2], 'the scanned track keeps Deep Scan’s crystal').toBe(before.crystals[2]);
+    expect(after.scanned.every(Boolean), 'every track playback-ready (an assigned crystal’s harmonicFreq is the crystal)').toBe(true);
+    expect([after.origins[2], after.origins.filter((o) => o === 'assigned').length], 'one scan, 29 assigned').toEqual(['scan', 29]);
     await expect(healthLine(page, 'scan'), 'not "All 30 tracks scanned"').toHaveText('1 of 30 scanned');
-    await expect(page.getByTestId('health-scan')).toContainText('Deep Scan skips the 29 with Auto-Distribute’s crystal');
-    await expect(healthAction(page, 'scan'), 'no Scan button (it would do nothing)').toHaveCount(0);
+    await expect(healthAction(page, 'scan'), 'nothing left in Scan’s default scope').toHaveCount(0);
+    await expect(healthLine(page, 'scan-assigned'), 'Deep Scan can still measure them, explicitly').toHaveText('Also scan the 29 assigned tracks (about 1 h 12 min)');
+    await expect(healthAction(page, 'scan-assigned')).toHaveText('Scan');
     const assigned = await crystalNote('tone-0005');
-    expect(assigned, 'an assigned track').toContain('Assigned by Auto-Distribute. An assigned crystal, not a measured pitch.');
-    expect(await crystalNote('tone-0003'), 'the scanned track, reassigned').toContain('Assigned by Auto-Distribute after a Deep Scan. An assigned crystal, not a measured pitch.');
+    expect(assigned, 'an assigned track').toContain('Assigned, not scanned yet. An assigned crystal, not a measured pitch.');
+    expect(await crystalNote('tone-0003'), 'the scanned track, kept').toContain('From Deep Scan. An assigned crystal, not a measured pitch.');
     expect(dialogs).toEqual([]);
   });
 });
@@ -1870,9 +1895,10 @@ test.describe('phone, an Undo chain', () => {
     await expectPlaying(page, 'tone-0005');
     await expect(undoToast(page)).toBeVisible();
     // Assign: the play order keeps its ids (a patch), and Auto-Distribute's summary takes the toast's place.
+    const plan = await seededPlan(page);
     await healthAction(page, 'crystals').click();
-    await page.getByRole('alertdialog', { name: 'Assign crystals to all 30 tracks?' }).getByRole('button', { name: 'Assign', exact: true }).click();
-    await expect(page.getByTestId('notices')).toContainText('Harmonic Distribution Complete');
+    if (assignNeedsConfirm(plan)) await page.getByRole('alertdialog', { name: 'Assign crystals?' }).getByRole('button', { name: 'Assign', exact: true }).click();
+    await expect(page.getByTestId('notices')).toContainText('Crystals assigned:');
     await expect(undoToast(page)).toHaveCount(0);
     await tapRow(page, 'tone-0007');
     await expectPlaying(page, 'tone-0007');

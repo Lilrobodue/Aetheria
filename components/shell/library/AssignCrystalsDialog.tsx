@@ -1,24 +1,25 @@
-// components/shell/library/AssignCrystalsDialog.tsx (v15.7, the Library tab, stage B)
+// components/shell/library/AssignCrystalsDialog.tsx (v15.7, the Library tab, stage B; v15.8 the new Assign)
 //
-// The health card's Assign asks first whenever a track already has a crystal: Auto-Distribute gives EVERY library
-// track one of the 27 (spec §2.6), so a Deep Scan's choices may change. A kit Dialog (alertdialog): Cancel takes the
-// first focus, Assign runs the existing autoDistribute. New-layout UI only; classic's button is unchanged.
+// The health card's Assign asks first only when crystals tracks already have would change (v15.8: Deep Scan's crystals
+// stay; one an older Auto-Distribute replaced is put back, and assigned crystals may move once). The words come from the
+// plan the tap computed (utils/mix/distribution.ts planAssign). A kit Dialog (alertdialog): Cancel takes the first focus,
+// Assign runs the existing autoDistribute. New-layout UI only; classic's button is unchanged.
 
 import React, { useRef } from 'react';
 import Dialog from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import { assignConfirmText } from './libraryModel';
+import type { AssignPlan } from '../../../utils/mix/distribution';
 
 interface AssignCrystalsDialogProps {
-  total: number;
-  withCrystal: number;
+  plan: AssignPlan;
   onCancel: () => void;
   onAssign: () => void;
 }
 
-const AssignCrystalsDialog = ({ total, withCrystal, onCancel, onAssign }: AssignCrystalsDialogProps) => {
+const AssignCrystalsDialog = ({ plan, onCancel, onAssign }: AssignCrystalsDialogProps) => {
   const cancelRef: { current: HTMLButtonElement | null } = useRef(null);
-  const words = assignConfirmText(total, withCrystal);
+  const words = assignConfirmText(plan);
   return (
     <Dialog
       open

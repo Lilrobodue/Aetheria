@@ -1,7 +1,7 @@
 {
-  "name": "v15.7-aetheria:-harmonic-resonance-player",
+  "name": "v15.8-aetheria:-harmonic-resonance-player",
   "private": true,
-  "version": "15.7.0",
+  "version": "15.8.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -19,6 +19,7 @@
     "check:analyse": "node utils/library/analysePass.check.ts",
     "check:shell": "node components/shell/shellModel.check.ts && node components/shell/zenModel.check.ts && node components/shell/layers/layersModel.check.ts && node components/shell/layers/soundModel.check.ts && node components/shell/library/libraryModel.check.ts",
     "check:writers": "node scripts/check-library-writers.mjs",
+    "check:mix": "node utils/mix/mix.check.ts && node utils/mix/distribution.check.ts && node scripts/check-mix-golden.mjs",
     "parity:chroma": "node tools/chroma-parity.ts"
   },
   "dependencies": {

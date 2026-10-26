@@ -1404,6 +1404,8 @@ export interface LibraryState {
   walk: string | null;
   segments: number[] | null;
   phases: string[] | null;
+  /** v15.8: the walk's position in LO_SHU_WALKS[walk] for each play-order entry (null: no walk). */
+  steps: number[] | null;
   libraryIds: string[];
   libraryNames: string[];
   playing: boolean;
@@ -1411,7 +1413,10 @@ export interface LibraryState {
   src: string | null;
   undo: number | null;
   crystals: Array<number | null>;
+  /** Each library track has a harmonicFreq (v15.8: playback-ready: Deep Scan's measurement, or Assign's crystal). */
   scanned: boolean[];
+  /** v15.8: where each library track's crystal comes from (utils/mix/distribution.ts crystalOrigin). */
+  origins: Array<'scan' | 'scan-replaced' | 'scan-failed' | 'assigned' | 'none'>;
   /** Each play-order entry's / library track's length (null: not read yet). */
   durations: Array<number | null>;
   libraryDurations: Array<number | null>;

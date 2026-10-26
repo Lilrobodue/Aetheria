@@ -1,5 +1,5 @@
 
-import { SolfeggioFreq, BinauralPreset } from './types';
+import type { SolfeggioFreq, BinauralPreset } from './types';
 
 export const SOLFEGGIO_INFO = [
   // Traditional/Original Solfeggio Scale (First through Third Order) - GUT REGIME

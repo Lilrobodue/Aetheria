@@ -33,6 +33,9 @@ export interface Song {
   keyConfidence?: number;    // Krumhansl-Kessler correlation, 3 dp (under ~0.45 is what noise gives)
   chromaVersion?: number;    // the CHROMA_VERSION it was analysed with; set also when no pitch was found
   analysisFailedV?: number;  // the CHROMA_VERSION at which Analyse tracks gave up on it (3 failed reads, or the app closed on it)
+  // v15.8: who placed closestSolfeggio: Deep Scan ('scan') or Assign crystals ('assigned', not a scan: Deep Scan's queue
+  // keeps it). Absent on tracks from before v15.8: utils/mix/distribution.ts crystalOrigin derives it.
+  crystalSource?: 'scan' | 'assigned';
 }
 
 /** Per-band energy over time, sampled at `fps` frames/sec. Each array holds

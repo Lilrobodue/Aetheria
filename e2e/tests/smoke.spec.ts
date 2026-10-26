@@ -101,7 +101,9 @@ test('the library survives walks, imports, Auto-Distribute and Deep Scan (v14.5 
   await toastSeen;
 
   // Deep Scan with the walk showing analyses the two unscanned LIBRARY tracks
-  // (they are not in the walk) and stores their results by id.
+  // (they are not in the walk) and stores their results by id. (v15.8: and
+  // stops; the 40 assigned tracks are only scanned when asked, from the new
+  // layout's health card.)
   await expectCache(page, { analysed: 40 });
   await page.getByRole('button', { name: /^Deep Scan/ }).click();
   await expectCache(page, { analysed: 42, blobs: 42, library: 42, playOrder: 27 }, 90_000);

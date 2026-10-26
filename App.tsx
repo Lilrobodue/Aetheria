@@ -38,6 +38,11 @@ import {
   refreshById,
 } from './utils/library/listOps';
 import { countCommit, reportPassWork } from './utils/perfHud';
+// v15.8: the mix recipes (pure; selection copied verbatim from here) and the crystal data they share.
+import { gutAlignment, heartAlignment, headAlignment, fullAlignment, crystalSetMix, goldenRatioMix, sequence111, sourceField, ultimateAlignment, loShuWalk, walkStepAt } from './utils/mix/recipes';
+import type { MixInput, MixResult } from './utils/mix/recipes';
+import { planAssign, assignDoneText, assignNothingText, deepScanQueue, crystalOrigin } from './utils/mix/distribution';
+import { getHarmonicSolfeggio } from './utils/crystalData';
 import {
   analyzeFractalFrequencies,
   assessFrequencySafety,
@@ -665,127 +670,7 @@ const analyzeExtendedOctaveRanges = (frequencyData: Float32Array, binSize: numbe
   return detections.sort((a, b) => b.score - a.score);
 };
 
-
-const getHarmonicSolfeggio = (detectedFreq: number): number => {
-    if (detectedFreq <= 0) return 396; 
-
-    // Define the 3-regime frequency sets for prioritized matching
-    const gutFrequencies = [174, 285, 396, 417, 528, 639, 741, 852, 963];
-    const heartFrequencies = [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150]; // HEART regime with 243 steady progression
-    const headFrequencies = [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336]; // HEAD regime with 354 steady progression
-
-    let bestMatch = 396;
-    let minScore = Infinity;
-
-    console.log(`Analyzing frequency: ${detectedFreq.toFixed(1)}Hz for solfeggio matching`);
-
-    // Enhanced harmonic matching with extended octave range checking
-    SOLFEGGIO_INFO.forEach(s => {
-        const sFreq = s.freq;
-        
-        // Determine tolerance and harmonic checking strategy based on regime
-        let tolerance = 50; // Default for GUT
-        let useExtendedHarmonics = false;
-        
-        if (headFrequencies.includes(sFreq)) {
-            tolerance = 400; // Very wide tolerance for HEAD frequencies
-            useExtendedHarmonics = false; // Direct matching only for high frequencies
-        } else if (heartFrequencies.includes(sFreq)) {
-            tolerance = 200; // Wide tolerance for HEART frequencies  
-            useExtendedHarmonics = true; // Limited harmonic checking
-        } else if (gutFrequencies.includes(sFreq)) {
-            tolerance = 50; // Tighter tolerance for GUT frequencies
-            useExtendedHarmonics = true; // Full harmonic analysis
-        }
-        
-        // Direct frequency matching
-        const directDiff = Math.abs(detectedFreq - sFreq);
-        if (directDiff <= tolerance && directDiff < minScore) {
-            minScore = directDiff;
-            bestMatch = sFreq;
-            console.log(`Direct match found: ${detectedFreq.toFixed(1)}Hz ≈ ${sFreq}Hz (diff: ${directDiff.toFixed(1)}Hz)`);
-        }
-
-        // Extended harmonic matching with comprehensive octave checking
-        if (useExtendedHarmonics && minScore > 10) { // Only if no close direct match
-            const harmonicCandidates: number[] = [];
-            
-            // Traditional octave relationships (powers of 2)
-            for (let octave = -4; octave <= 6; octave++) {
-                if (octave !== 0) {
-                    const octaveFreq = sFreq * Math.pow(2, octave);
-                    if (octaveFreq >= 10 && octaveFreq <= 25000) {
-                        harmonicCandidates.push(octaveFreq);
-                    }
-                }
-            }
-            
-            // Integer harmonic series (for GUT frequencies only)
-            if (gutFrequencies.includes(sFreq)) {
-                // Fundamental and its harmonics
-                for (let harmonic = 1; harmonic <= 12; harmonic++) {
-                    harmonicCandidates.push(sFreq * harmonic);
-                }
-                
-                // Sub-harmonics (fundamental divided by integers)
-                for (let divisor = 2; divisor <= 8; divisor++) {
-                    const subharmonic = sFreq / divisor;
-                    if (subharmonic >= 10) {
-                        harmonicCandidates.push(subharmonic);
-                    }
-                }
-                
-                // Perfect fifth (3:2 ratio) and perfect fourth (4:3 ratio)
-                harmonicCandidates.push(sFreq * 1.5); // Perfect fifth up
-                harmonicCandidates.push(sFreq / 1.5); // Perfect fifth down
-                harmonicCandidates.push(sFreq * 4/3); // Perfect fourth up
-                harmonicCandidates.push(sFreq * 3/4); // Perfect fourth down
-            }
-            
-            // Check all harmonic candidates
-            harmonicCandidates.forEach(candidate => {
-                const harmonicDiff = Math.abs(detectedFreq - candidate);
-                if (harmonicDiff < minScore) {
-                    minScore = harmonicDiff;
-                    bestMatch = sFreq;
-                    console.log(`Harmonic match found: ${detectedFreq.toFixed(1)}Hz ≈ ${candidate.toFixed(1)}Hz (${sFreq}Hz harmonic, diff: ${harmonicDiff.toFixed(1)}Hz)`);
-                }
-            });
-        }
-    });
-
-    // Special case: If detected frequency is very high and no match found, try to find the fundamental
-    if (minScore > 100 && detectedFreq > 1000) {
-        console.log(`High frequency detected (${detectedFreq.toFixed(1)}Hz), searching for fundamental...`);
-        
-        // Try to find the fundamental by dividing by common harmonic ratios
-        const possibleFundamentals = [
-            detectedFreq / 2,   // Octave down
-            detectedFreq / 3,   // Third harmonic
-            detectedFreq / 4,   // Fourth harmonic (two octaves down)
-            detectedFreq / 5,   // Fifth harmonic
-            detectedFreq / 6,   // Sixth harmonic
-            detectedFreq / 8,   // Eighth harmonic (three octaves down)
-            detectedFreq * 2/3, // Perfect fifth down
-            detectedFreq * 3/4, // Perfect fourth down
-        ];
-        
-        for (const fundamental of possibleFundamentals) {
-            if (fundamental >= 50 && fundamental <= 1000) {
-                const recursiveMatch = getHarmonicSolfeggio(fundamental);
-                // Check if this fundamental gives us a better match
-                const fundamentalDiff = Math.abs(fundamental - recursiveMatch);
-                if (fundamentalDiff < minScore * 0.5) { // Significantly better match
-                    console.log(`Found fundamental: ${detectedFreq.toFixed(1)}Hz → ${fundamental.toFixed(1)}Hz → ${recursiveMatch}Hz`);
-                    return recursiveMatch;
-                }
-            }
-        }
-    }
-
-    console.log(`Final solfeggio match: ${detectedFreq.toFixed(1)}Hz → ${bestMatch}Hz (deviation: ${minScore.toFixed(1)}Hz)`);
-    return bestMatch;
-};
+// v15.8: getHarmonicSolfeggio moved VERBATIM to utils/crystalData.ts (imported above, same name).
 
 // Enhanced analysis reporting function
 const getFrequencyAnalysisReport = (detectedFreq: number, solfeggioMatch: number, deviation: number): string => {
@@ -899,256 +784,6 @@ const getRegimeStatistics = (analyzedSongs: Song[]): string => {
         .join('\n');
 };
 
-// Enhanced function to distribute songs evenly across frequencies using harmonic octave analysis
-const distributeUsingHarmonicOctaves = (songs: Song[], targetFrequencies: number[]): Song[] => {
-    // Step 1: Analyze all songs and calculate their harmonic compatibility with each frequency
-    const songAnalysis = songs.map((song, index) => {
-        let detectedFreq: number;
-        
-        // If song already has harmonic frequency from previous analysis, use it
-        if (song.harmonicFreq) {
-            detectedFreq = song.harmonicFreq;
-        } else {
-            // Enhanced heuristic analysis based on song characteristics
-            const fileName = song.name.toLowerCase();
-            const duration = song.duration || 180; // Default 3 minutes if unknown
-            
-            // Advanced frequency estimation based on multiple factors
-            if (fileName.includes('bass') || fileName.includes('low') || fileName.includes('sub')) {
-                detectedFreq = 60 + Math.random() * 140; // 60-200Hz range (bass fundamentals)
-            } else if (fileName.includes('vocal') || fileName.includes('voice') || fileName.includes('sing')) {
-                detectedFreq = 220 + Math.random() * 660; // 220-880Hz range (vocal fundamentals)
-            } else if (fileName.includes('guitar') || fileName.includes('string')) {
-                detectedFreq = 82 + Math.random() * 350; // 82-432Hz range (guitar fundamentals)
-            } else if (fileName.includes('piano') || fileName.includes('key')) {
-                detectedFreq = 131 + Math.random() * 400; // 131-531Hz range (piano middle range)
-            } else if (fileName.includes('drum') || fileName.includes('kick') || fileName.includes('snare')) {
-                detectedFreq = 50 + Math.random() * 200; // 50-250Hz range (drum fundamentals)
-            } else if (fileName.includes('lead') || fileName.includes('melody')) {
-                detectedFreq = 262 + Math.random() * 700; // 262-962Hz range (melodic content)
-            } else if (fileName.includes('pad') || fileName.includes('atmosphere') || fileName.includes('ambient')) {
-                detectedFreq = 100 + Math.random() * 600; // 100-700Hz range (atmospheric content)
-            } else if (fileName.includes('high') || fileName.includes('treble') || fileName.includes('cymbal') || fileName.includes('hi-hat')) {
-                detectedFreq = 1000 + Math.random() * 4000; // 1000-5000Hz range (high frequency content)
-            } else {
-                // General musical content - bias toward common musical frequencies
-                const musicalFrequencies = [110, 146.83, 196, 220, 261.63, 293.66, 329.63, 369.99, 440, 523.25, 587.33, 659.25, 783.99];
-                const baseFreq = musicalFrequencies[Math.floor(Math.random() * musicalFrequencies.length)];
-                detectedFreq = baseFreq * (0.9 + Math.random() * 0.2); // ±10% variation
-            }
-            
-            // Apply duration-based modulation
-            if (duration > 300) detectedFreq *= 0.8; // Longer tracks → lower frequencies
-            else if (duration < 120) detectedFreq *= 1.2; // Short tracks → higher frequencies
-        }
-        
-        // Calculate harmonic compatibility score for each target frequency
-        const bestMatch = getHarmonicSolfeggio(detectedFreq);
-        const compatibilityScores: { [key: number]: number } = {};
-        
-        for (const freq of targetFrequencies) {
-            let harmonicScore = Math.abs(bestMatch - freq);
-            
-            // Check for octave relationships (powers of 2) - strong preference
-            for (let octave = -3; octave <= 3; octave++) {
-                if (octave !== 0) {
-                    const octaveFreq = freq * Math.pow(2, octave);
-                    const octaveScore = Math.abs(bestMatch - octaveFreq);
-                    if (octaveScore < harmonicScore) {
-                        harmonicScore = octaveScore * 0.5; // Very strong preference for octaves
-                    }
-                }
-            }
-            
-            // Check for perfect fifth relationships (3:2 ratio)
-            const fifthUp = Math.abs(bestMatch - (freq * 1.5));
-            const fifthDown = Math.abs(bestMatch - (freq / 1.5));
-            if (fifthUp < harmonicScore) harmonicScore = fifthUp * 0.7;
-            if (fifthDown < harmonicScore) harmonicScore = fifthDown * 0.7;
-            
-            // Check for perfect fourth relationships (4:3 ratio)
-            const fourthUp = Math.abs(bestMatch - (freq * 4/3));
-            const fourthDown = Math.abs(bestMatch - (freq * 3/4));
-            if (fourthUp < harmonicScore) harmonicScore = fourthUp * 0.8;
-            if (fourthDown < harmonicScore) harmonicScore = fourthDown * 0.8;
-            
-            // Lower score = better compatibility
-            compatibilityScores[freq] = harmonicScore;
-        }
-        
-        return {
-            song,
-            detectedFreq,
-            bestMatch,
-            compatibilityScores,
-            originalIndex: index
-        };
-    });
-    
-    // Step 2: Multi-pass distribution that guarantees a CAB ride at 81+ songs.
-    //
-    // Each "pass" walks all 27 target frequencies and, for each one, picks the
-    // single best remaining unassigned song. Run up to 3 passes so libraries
-    // of 81+ end up with exactly 3 distinct songs per frequency (the count
-    // the Combined Walk and other CAB-style journeys need to give three
-    // unique tracks per cube position). Smaller libraries fill as far as
-    // they can — 27-song libraries get 1 song per freq, 54-song libraries
-    // get 2, etc.  Anything left over after pass 3 spills to whichever
-    // frequency it best matches harmonically (no cap), so very large
-    // libraries don't lose tracks.
-    const assignments: Array<{song: Song, frequency: number, detectedFreq: number, deviation: number}> = [];
-    const SONGS_PER_FREQ_TARGET = 3;
-    const unassigned = new Set<number>(songAnalysis.map((_, i) => i));
-
-    for (let pass = 0; pass < SONGS_PER_FREQ_TARGET; pass++) {
-        if (unassigned.size === 0) break;
-        for (const freq of targetFrequencies) {
-            if (unassigned.size === 0) break;
-            // Find the best remaining unassigned song for this frequency.
-            let bestIdx = -1;
-            let bestScore = Infinity;
-            for (const idx of unassigned) {
-                const score = songAnalysis[idx].compatibilityScores[freq];
-                if (score < bestScore) {
-                    bestScore = score;
-                    bestIdx = idx;
-                }
-            }
-            if (bestIdx === -1) continue;
-            const songData = songAnalysis[bestIdx];
-            assignments.push({
-                song: songData.song,
-                frequency: freq,
-                detectedFreq: songData.detectedFreq,
-                deviation: bestScore,
-            });
-            unassigned.delete(bestIdx);
-            if (pass === 0) {
-                console.log(`🎯 Pass 1 coverage: "${songData.song.name}" → ${freq}Hz`);
-            } else {
-                console.log(`🎵 Pass ${pass + 1}: "${songData.song.name}" → ${freq}Hz (CAB pick)`);
-            }
-        }
-    }
-
-    // Balanced spillover: anything beyond 81 (the 3-per-freq CAB pool)
-    // gets routed to the frequency with the *lowest current count*, ties
-    // broken by the song's compatibility score for that freq. Previously
-    // each spillover song went to its single globally-best-match freq,
-    // which dumped almost everything onto GUT/HEART — most music
-    // fundamentals sit in 80–1000 Hz and naturally score best against
-    // those regimes via direct or +1-octave matches. That left HEAD
-    // (3504–6336 Hz) permanently stuck at 27 (the pass 1–3 count) even
-    // for libraries with hundreds of tracks. Balancing by count instead
-    // spreads spillover roughly evenly across all 27 freqs (~1/3 to each
-    // regime), so HEAD frequencies are populated for browsing/filters
-    // even when no song is a strong octave-down match to them.
-    const counts: Record<number, number> = {};
-    targetFrequencies.forEach(f => counts[f] = 0);
-    assignments.forEach(a => counts[a.frequency]++);
-
-    for (const idx of unassigned) {
-        const songData = songAnalysis[idx];
-        // Find the minimum count across all freqs.
-        let minCount = Infinity;
-        for (const freq of targetFrequencies) {
-            if (counts[freq] < minCount) minCount = counts[freq];
-        }
-        // Among freqs at min count, route this song to the one it best
-        // matches. Tie-break by score keeps assignments as harmonically
-        // sensible as possible while still respecting the count balance.
-        let bestFreq = targetFrequencies[0];
-        let bestScore = Infinity;
-        for (const freq of targetFrequencies) {
-            if (counts[freq] !== minCount) continue;
-            const score = songData.compatibilityScores[freq];
-            if (score < bestScore) {
-                bestScore = score;
-                bestFreq = freq;
-            }
-        }
-        assignments.push({
-            song: songData.song,
-            frequency: bestFreq,
-            detectedFreq: songData.detectedFreq,
-            deviation: bestScore,
-        });
-        counts[bestFreq]++;
-        console.log(`⚖️ Balanced fill: "${songData.song.name}" → ${bestFreq}Hz (count ${counts[bestFreq]})`);
-    }
-    unassigned.clear();
-    
-    // Step 3: Create the final result array maintaining original order
-    const result = songs.map(song => {
-        const assignment = assignments.find(a => a.song.id === song.id);
-        if (assignment) {
-            return {
-                ...song,
-                harmonicFreq: assignment.detectedFreq,
-                closestSolfeggio: assignment.frequency,
-                harmonicDeviation: assignment.deviation
-            };
-        }
-        
-        // Fallback (shouldn't happen)
-        return {
-            ...song,
-            harmonicFreq: 440,
-            closestSolfeggio: 528,
-            harmonicDeviation: 88
-        };
-    });
-    
-    return result;
-};
-
-// Consolidated harmonic distribution function with detailed logging
-const distributeUsingHarmonicOctavesMaster = (songs: Song[], targetFrequencies: number[]): Song[] => {
-    const result = distributeUsingHarmonicOctaves(songs, targetFrequencies);
-    
-    // Log distribution summary
-    const distribution: { [key: number]: number } = {};
-    targetFrequencies.forEach(freq => distribution[freq] = 0);
-    
-    result.forEach(song => {
-        const freq = song.closestSolfeggio;
-        if (freq) {
-            distribution[freq] = (distribution[freq] || 0) + 1;
-        }
-    });
-    
-    console.log('=== HARMONIC DISTRIBUTION SUMMARY ===');
-    const gutCount = targetFrequencies.slice(0, 9).reduce((sum, freq) => sum + (distribution[freq] || 0), 0);
-    const heartCount = targetFrequencies.slice(9, 18).reduce((sum, freq) => sum + (distribution[freq] || 0), 0);
-    const headCount = targetFrequencies.slice(18, 27).reduce((sum, freq) => sum + (distribution[freq] || 0), 0);
-    
-    console.log(`GUT Regime (174-963Hz): ${gutCount} songs`);
-    console.log(`HEART Regime (1206-3150Hz): ${heartCount} songs`);
-    console.log(`HEAD Regime (3504-6336Hz): ${headCount} songs`);
-    console.log(`Total distributed: ${result.length} songs across ${targetFrequencies.length} frequencies`);
-    
-    // Show specific frequency assignments for verification
-    console.log('Frequency assignments:');
-    targetFrequencies.forEach(freq => {
-        if (distribution[freq] > 0) {
-            const assignedSongs = result.filter(s => s.closestSolfeggio === freq);
-            console.log(`  ${freq}Hz: ${assignedSongs.map(s => s.name).join(', ')}`);
-        } else if (freq === 4566) {
-            console.warn(`🚨 4566 Hz has NO assignments! This is the missing frequency.`);
-        }
-    });
-    
-    // Additional debug for missing frequencies
-    const missingFrequencies = targetFrequencies.filter(freq => distribution[freq] === 0);
-    if (missingFrequencies.length > 0) {
-        console.warn(`⚠️ MISSING FREQUENCIES:`, missingFrequencies);
-    }
-    
-    console.log('✅ Songs distributed by harmonic affinity - consistent results guaranteed!');
-    
-    return result;
-};
-
 // LRU-weighted shuffle. Sort indices by [lastPlayed ASC, random tiebreaker]
 // so never-played songs come first (in random order among themselves), then
 // the longest-not-heard songs, and so on. Same call twice with the same
@@ -1224,7 +859,7 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             content: (
                 <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
                     <li className="flex gap-2">🔍 <strong className="text-gold-200">Deep Scan:</strong> Click this in the sidebar. The engine analyzes each song's frequency content.</li>
-                    <li className="flex gap-2">🎯 <strong className="text-gold-200">Auto-Distribute Frequencies:</strong> Assigns every song to its closest Aetheria frequency across the GUT, HEART, and HEAD ranges.</li>
+                    <li className="flex gap-2">🎯 <strong className="text-gold-200">Auto-Distribute Frequencies:</strong> Keeps the frequencies Deep Scan found and gives every other song one of the 27 across the GUT, HEART, and HEAD ranges, empty ones first.</li>
                     <li className="flex gap-2">⏳ <strong className="text-gold-200">One-time:</strong> Once assigned, your library is ready for any listening mode.</li>
                 </ul>
             )
@@ -1352,7 +987,7 @@ interface PlayOrderSnapshot {
   cursor: number;
   shuffled: number[];
   shufflePos: number;
-  walk: { mode: LoShuWalkMode; segments: number[] | null; phases: string[] | null } | null;
+  walk: { mode: LoShuWalkMode; segments: number[] | null; phases: string[] | null; steps: number[] | null } | null;
   trackId: string | null;
   position: number;
   wasPlaying: boolean;
@@ -1846,6 +1481,9 @@ const App: React.FC = () => {
   // positions with no special phase. Null when the active walk has no
   // phase tokens to display.
   const [loShuWalkPhases, setLoShuWalkPhases] = useState<string[] | null>(null);
+  // v15.8: parallel to the walk's play order: the position in LO_SHU_WALKS[mode] each entry fills (a crystal with no
+  // track is skipped), so the cube's step follows the track, not the cursor. Null: the cursor (no walk, or an older one).
+  const [loShuWalkSteps, setLoShuWalkSteps] = useState<number[] | null>(null);
   // Local UI state — controls whether the toolbar walk popover is open.
   const [showLoShuWalkMenu, setShowLoShuWalkMenu] = useState(false);
 
@@ -1861,6 +1499,7 @@ const App: React.FC = () => {
       setLoShuWalkMode(null);
       setLoShuWalkSegments(null);
       setLoShuWalkPhases(null);
+      setLoShuWalkSteps(null);
     }
   }, [playlist, loShuWalkMode]);
   const [useChakraOrder, setUseChakraOrder] = useState(false);
@@ -4473,7 +4112,7 @@ const App: React.FC = () => {
   // inside its current track; a second run must wait for this one to exit.
   const scanLoopActiveRef = useRef(false);
 
-  const scanLibrary = async () => {
+  const scanLibrary = async (opts?: { includeAssigned?: boolean }) => {
     if (scanLoopActiveRef.current) {
       showStatusToast('The previous scan is still finishing. Try again in a moment.');
       return;
@@ -4491,11 +4130,18 @@ const App: React.FC = () => {
     // BY ID, so imports and deletes made during a long scan survive as well.
     const libraryAtStart = dedupeById(libraryRef.current);
     if (!libraryAtStart.length || !audioCtxRef.current) return;
-    const queueIds = libraryAtStart.filter(s => !s.harmonicFreq).map(s => s.id);
+    // v15.8 (decision 6): the tracks never measured and with no assigned crystal (v15.7's scope); the scan stops after
+    // them. The health card's explicit "Also scan the N assigned tracks" adds the assigned ones after them (classic's
+    // button passes its click event, never { includeAssigned: true }).
+    const includeAssigned = opts?.includeAssigned === true;
+    const queueIds = deepScanQueue(libraryAtStart, { assigned: includeAssigned }).map(s => s.id);
     const total = queueIds.length;
     if (total === 0) {
+      const assignedLeft = deepScanQueue(libraryAtStart, { assigned: true }).length;
       setAnalysisNotification(
-        `Every track in your library is already scanned (${libraryAtStart.length.toLocaleString()} tracks).`
+        assignedLeft > 0
+          ? `Every track without a crystal is scanned. ${assignedLeft.toLocaleString()} ${assignedLeft === 1 ? 'track has' : 'tracks have'} an assigned crystal, not a scan; the new layout's Library tab can scan them too.`
+          : `Every track in your library is already scanned (${libraryAtStart.length.toLocaleString()} tracks).`
       );
       setTimeout(() => setAnalysisNotification(null), 6000);
       return;
@@ -4554,8 +4200,7 @@ const App: React.FC = () => {
         }
 
         // Re-read the track: it may have been deleted since the scan began.
-        // (Only deletion skips it. A crystal assigned meanwhile — e.g. by
-        // Auto-Distribute, which writes a placeholder harmonicFreq — must not
+        // (Only deletion skips it. A crystal Assign gives it meanwhile must not
         // stop the real analysis; the scan's results replace it.)
         const song = libraryRef.current.find(s => s.id === queueIds[qi]);
         if (!song) {
@@ -4655,6 +4300,7 @@ const App: React.FC = () => {
             intervalAnalysis: intervalData,
             isAetheriaCandidate: couldBeAetheria(freq),
             bandEnvelope,
+            crystalSource: 'scan',
           });
 
         } catch (e) {
@@ -4663,7 +4309,8 @@ const App: React.FC = () => {
           applyResult(song.id, {
             harmonicFreq: 440,
             closestSolfeggio: 528,
-            harmonicDeviation: 999
+            harmonicDeviation: 999,
+            crystalSource: 'scan',
           });
         }
 
@@ -4740,7 +4387,7 @@ const App: React.FC = () => {
             const r = results.get(s.id);
             return r ? { ...s, ...r } : s;
           })
-          .filter(s => s.harmonicFreq);
+          .filter(s => s.harmonicFreq && crystalOrigin(s) !== 'assigned');
         const octaveRangeStats = getOctaveRangeStatistics(analyzedSongs);
         const regimeStats = getRegimeStatistics(analyzedSongs);
 
@@ -4936,6 +4583,53 @@ const App: React.FC = () => {
     }
   };
 
+  // v15.8: what every mix recipe reads (utils/mix/recipes.ts): the library and the experience level as this render sees
+  // them (as the generators read them), the play history, and Math.random.
+  const mixInput = (): MixInput => ({ library: originalPlaylist, experience: userExperienceLevel, history: playHistoryRef.current, rng: Math.random });
+  // v15.8: the ONE place a mix's result reaches App's state, in the order the generators wrote it. It never writes the
+  // library (check:writers: a play-order function). v14.17 routes order/play/walk through startPlayOrder instead.
+  const applyMix = (r: MixResult) => {
+    if (r.segmentsAndPhases) {
+      setLoShuWalkSegments(r.segmentsAndPhases.segments);
+      setLoShuWalkPhases(r.segmentsAndPhases.phases);
+    }
+    if (!r.order) {
+      const t = r.toast;
+      if (t) {
+        const details = t.details;
+        showStatusToast(t.text, details
+          ? { durationMs: t.durationMs, actionLabel: 'Details', onAction: () => { dismissStatusToast(); setInfoDialog(details); } }
+          : { durationMs: t.durationMs });
+      }
+      return;
+    }
+    const order = r.order;
+    setPlaylist(order);
+    if (r.walk) {
+      loShuWalkSnapshotRef.current = order.map((s: Song) => s.id).join('|');
+      setLoShuWalkMode(r.walk.mode);
+      setLoShuWalkSteps(r.walk.steps);
+    }
+    setUseChakraOrder(r.chakraOrder);
+    setCurrentSongIndex(0);
+    setSearchTerm('');
+    if (r.solfeggio !== null) setSelectedSolfeggio(r.solfeggio);
+    const viz = r.viz;
+    if (viz) setVizSettings((prev: VizSettings) => ({ ...prev, ...viz }));
+    if (r.closeWalkMenu) setShowLoShuWalkMenu(false);
+    if (r.experience) setUserExperienceLevel(r.experience);
+    for (const n of r.notices) {
+      const show = () => {
+        setAnalysisNotification(n.text);
+        setTimeout(() => setAnalysisNotification(null), n.clearAfterMs);
+      };
+      if (n.delayMs === null) show();
+      else setTimeout(show, n.delayMs);
+    }
+    if (r.play) playTrackRef.current(0, order);
+    if (r.closeDrawerOnPhone && window.innerWidth < 768) setShowSidebar(false);
+  };
+
   const generateFilteredPlaylist = (filterFn: (song: Song) => boolean, name: string) => {
       const candidates = originalPlaylist.filter(filterFn);
       if (candidates.length > 0) {
@@ -4950,174 +4644,13 @@ const App: React.FC = () => {
       if(window.innerWidth < 768) setShowSidebar(false);
   };
 
-  const generateAlignmentJourney = () => {
-      const journeyOrder = [174, 285, 396, 417, 528, 639, 741, 852, 963];
-      const journeyPlaylist: Song[] = [];
-      const usedIds = new Set<string>();
-
-      journeyOrder.forEach(freq => {
-          const candidates = originalPlaylist.filter(s => s.closestSolfeggio === freq && !usedIds.has(s.id));
-          if (candidates.length > 0) {
-              // Enhanced sorting with fractal analysis priority
-              candidates.sort((a, b) => {
-                  // Prioritize songs with high golden ratio alignment
-                  const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
-                  const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
-                  
-                  if (Math.abs(aGolden - bGolden) > 0.1) {
-                      return bGolden - aGolden; // Higher golden ratio first
-                  }
-                  
-                  // Then sort by harmonic deviation (accuracy)
-                  return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
-              });
-              
-              const bestMatch = candidates[0];
-              journeyPlaylist.push(bestMatch);
-              usedIds.add(bestMatch.id);
-          }
-      });
-      
-      if (journeyPlaylist.length > 0) {
-          setPlaylist(journeyPlaylist);
-          // The traditional 9-frequency ascent reuses the walk-overlay
-          // infrastructure so the cube draws its path too. Snapshot the
-          // playlist ids so the auto-clear effect doesn't drop the badge
-          // immediately.
-          loShuWalkSnapshotRef.current = journeyPlaylist.map(s => s.id).join('|');
-          setLoShuWalkMode('traditional');
-          setUseChakraOrder(true);
-          setCurrentSongIndex(0);
-          setSearchTerm(''); // Clear search when creating aligned playlist
-          setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
-          playTrackRef.current(0, journeyPlaylist);
-          if(window.innerWidth < 768) setShowSidebar(false);
-      } else {
-          showStatusToast("Not enough analyzed songs. Try scanning library first.", { durationMs: 8000 });
-      }
-  };
+  const generateAlignmentJourney = () => applyMix(gutAlignment(mixInput()));
 
   // HEART Alignment Journey
-  const generateHeartAlignmentJourney = () => {
-      // Get all HEART frequency ranges (1206-3150 Hz — Orders 4-6).
-      // Upper bound is 3150 inclusive: it is HEART position 9, not a HEAD
-      // frequency. A `< 3000` cutoff here previously dropped it into the
-      // HEAD journey and left HEART with only 8 of its 9 frequencies.
-      const heartFrequencies = SOLFEGGIO_INFO
-          .filter(s => s.freq >= 1000 && s.freq <= 3150)
-          .map(s => s.freq)
-          .sort((a, b) => a - b);
-      
-      const heartPlaylist: Song[] = [];
-      const usedIds = new Set<string>();
-
-      heartFrequencies.forEach(freq => {
-          const candidates = originalPlaylist.filter(s => s.closestSolfeggio === freq && !usedIds.has(s.id));
-          if (candidates.length > 0) {
-              candidates.sort((a, b) => {
-                  const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
-                  const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
-                  
-                  if (Math.abs(aGolden - bGolden) > 0.1) {
-                      return bGolden - aGolden;
-                  }
-                  
-                  return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
-              });
-              
-              const bestMatch = candidates[0];
-              heartPlaylist.push(bestMatch);
-              usedIds.add(bestMatch.id);
-          }
-      });
-      
-      if (heartPlaylist.length > 0) {
-          setPlaylist(heartPlaylist);
-          setUseChakraOrder(true);
-          setCurrentSongIndex(0);
-          setSearchTerm('');
-          setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
-          
-          // Check if experience level is appropriate for HEART frequencies
-          if (userExperienceLevel === 'beginner') {
-              setUserExperienceLevel('intermediate');
-              setAnalysisNotification(
-                  `HEART Alignment activated. Experience level upgraded to 'Intermediate' for emotional frequency range (${heartFrequencies[0]}-${heartFrequencies[heartFrequencies.length-1]}Hz). Found ${heartPlaylist.length} tracks.`
-              );
-              setTimeout(() => setAnalysisNotification(null), 5000);
-          }
-          
-          playTrackRef.current(0, heartPlaylist); 
-          if(window.innerWidth < 768) setShowSidebar(false);
-      } else {
-          // Show diagnostic info for HEART frequencies
-          const heartMatches = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 1206 && (s.closestSolfeggio || 0) <= 3150);
-          const foundFreqs = [...new Set(heartMatches.map(s => s.closestSolfeggio).filter(f => f !== undefined) as number[])].sort((a, b) => a - b);
-          // v15.4: one line. Its old list of "HEART frequencies detected" was always empty (every closestSolfeggio
-          // is one of the 27 crystals, so this branch runs only when no track holds a HEART one).
-          showStatusToast('HEART Alignment: no tracks have a HEART crystal (1206–3150 Hz) yet. Try scanning your library first, or use Auto-Distribute.', { durationMs: 8000 });
-      }
-  };
+  const generateHeartAlignmentJourney = () => applyMix(heartAlignment(mixInput()));
 
   // HEAD Alignment Journey  
-  const generateHeadAlignmentJourney = () => {
-      // Get all HEAD frequency ranges (3504+ Hz — Orders 7-9).
-      // Starts at 3504, the first Seventh-order frequency. 3150 belongs to
-      // HEART (position 9) and is handled by the HEART journey.
-      const headFrequencies = SOLFEGGIO_INFO
-          .filter(s => s.freq >= 3504)
-          .map(s => s.freq)
-          .sort((a, b) => a - b);
-      
-      const headPlaylist: Song[] = [];
-      const usedIds = new Set<string>();
-
-      headFrequencies.forEach(freq => {
-          const candidates = originalPlaylist.filter(s => s.closestSolfeggio === freq && !usedIds.has(s.id));
-          if (candidates.length > 0) {
-              candidates.sort((a, b) => {
-                  const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
-                  const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
-                  
-                  if (Math.abs(aGolden - bGolden) > 0.1) {
-                      return bGolden - aGolden;
-                  }
-                  
-                  return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
-              });
-              
-              const bestMatch = candidates[0];
-              headPlaylist.push(bestMatch);
-              usedIds.add(bestMatch.id);
-          }
-      });
-      
-      if (headPlaylist.length > 0) {
-          setPlaylist(headPlaylist);
-          setUseChakraOrder(true);
-          setCurrentSongIndex(0);
-          setSearchTerm('');
-          setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
-          
-          // HEAD frequencies require expert level
-          if (userExperienceLevel !== 'expert') {
-              setUserExperienceLevel('expert');
-              setAnalysisNotification(
-                  `HEAD Alignment activated. Experience level upgraded to 'Expert' for transpersonal frequency range (${headFrequencies[0]}-${headFrequencies[headFrequencies.length-1]}Hz). Found ${headPlaylist.length} tracks. Use extreme caution.`
-              );
-              setTimeout(() => setAnalysisNotification(null), 8000);
-          }
-          
-          playTrackRef.current(0, headPlaylist); 
-          if(window.innerWidth < 768) setShowSidebar(false);
-      } else {
-          // Show diagnostic info for HEAD frequencies
-          const headMatches = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 3504);
-          const foundFreqs = [...new Set(headMatches.map(s => s.closestSolfeggio).filter(f => f !== undefined) as number[])].sort((a, b) => a - b);
-          // v15.4: one line, as HEART's (its list of "HEAD frequencies detected" was always empty).
-          showStatusToast('HEAD Alignment: no tracks have a HEAD crystal (3504 Hz and up) yet. Try scanning your library first, or use Auto-Distribute.', { durationMs: 8000 });
-      }
-  };
+  const generateHeadAlignmentJourney = () => applyMix(headAlignment(mixInput()));
 
   // Lo Shu Walk — build a journey playlist whose ordering follows one of
   // the Lo Shu walks. Picker behaviour by mode:
@@ -5132,214 +4665,7 @@ const App: React.FC = () => {
   //     so the closing Ouroboros doesn't replay songs heard in the CAB
   //     sweep. SOURCE may be visited up to 6 times total; up to 6 distinct
   //     songs play if the library has them, then repeats.
-  const generateLoShuWalk = (mode: LoShuWalkMode) => {
-      const sequence = LO_SHU_WALKS[mode];
-      const info = LO_SHU_WALK_INFO[mode];
-      const walkPlaylist: Song[] = [];
-
-      const sortCandidates = (a: Song, b: Song) => {
-          const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
-          const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
-          if (Math.abs(aGolden - bGolden) > 0.1) return bGolden - aGolden;
-          const devDiff = (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
-          if (Math.abs(devDiff) > 0.1) return devDiff;
-          // Final tiebreaker: song id. Auto-distribute often produces many
-          // ties at deviation 0 (perfect matches); without this the sort
-          // falls back to insertion order and we end up playing songs
-          // alphabetically by upload order. Song ids are timestamp+random
-          // strings, so this spreads tied songs unpredictably.
-          return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-      };
-
-      // Used song IDs accumulated across the whole walk. Shared between
-      // pickers so cabi's Ouroboros tail avoids replaying songs heard in
-      // its CAB head.
-      const usedIds = new Set<string>();
-      // Parallel to walkPlaylist — same length, '' for steps with no
-      // special phase token. Ouroboros emits ♾️/✕ at the SOURCE visits.
-      const walkPhases: string[] = [];
-
-      // LRU comparator — sorts by [lastPlayed ASC, random tiebreaker].
-      // Never-played songs (timestamp 0) always come first, in random order
-      // among themselves; played songs follow with oldest first. Random
-      // tiebreaker preserves the user's "click again for variety" feel
-      // when the candidate pool is fresh (all timestamps zero).
-      const lruCompare = (a: Song, b: Song): number => {
-          const aLast = playHistoryRef.current[a.id] || 0;
-          const bLast = playHistoryRef.current[b.id] || 0;
-          if (aLast !== bLast) return aLast - bLast;
-          return Math.random() - 0.5;
-      };
-
-      // Top-K candidate cap for CAB-style pickers. Balanced auto-distribute
-      // can place ~13 candidates per freq; the cap keeps shuffle picks
-      // among the strongest matches while still giving C(6,3) × 3! = 120
-      // possible trio arrangements per freq for the user's "regen" variety.
-      const CAB_POOL_SIZE = 6;
-
-      // CAB picker — drives 'combined' and the first 81 steps of 'cabi'.
-      // Returns the per-segment counts [Vortex, Ascent, Pillar] so the
-      // footer chip can show "Vortex 14/27".
-      const runCabPicker = (cabSequence: number[]): [number, number, number] => {
-          const uniqueFreqs = Array.from(new Set(cabSequence));
-          const passPicks = new Map<number, (Song | undefined)[]>();
-          uniqueFreqs.forEach(freq => {
-              const allCandidates = originalPlaylist.filter((s: Song) => s.closestSolfeggio === freq);
-              if (allCandidates.length === 0) {
-                  passPicks.set(freq, [undefined, undefined, undefined]);
-                  return;
-              }
-              // Top-K by quality stays the same — the candidate pool is
-              // still the 6 best-matching songs at this freq.
-              const candidates = [...allCandidates]
-                  .sort(sortCandidates)
-                  .slice(0, Math.min(allCandidates.length, CAB_POOL_SIZE));
-              const n = candidates.length;
-              // Within the top-K pool, pick by LRU instead of pure random.
-              // Never-played candidates surface first (random tiebreak keeps
-              // the "click again for variety" feel when the pool is fresh);
-              // once everyone in the pool has been heard at least once, the
-              // 3 longest-not-heard win — guaranteeing rotation through all
-              // 6 quality candidates over a few CAB sessions instead of
-              // letting random chance favour the same 3 forever.
-              const lruOrdered = [...candidates].sort(lruCompare);
-              const trio: Song[] = [
-                  lruOrdered[0 % n],
-                  lruOrdered[1 % n],
-                  lruOrdered[2 % n],
-              ];
-              const sortedTrio = [...trio].sort(sortCandidates);
-              // sortedTrio[0] = best, [1] = mid, [2] = weakest
-              // Pass 0 (Vortex / C) → mid
-              // Pass 1 (Ascent / A) → weakest
-              // Pass 2 (Pillar / B) → best
-              passPicks.set(freq, [sortedTrio[1], sortedTrio[2], sortedTrio[0]]);
-          });
-
-          // cabSequence = C (0..26) + A (27..53) + B (54..80).
-          //   Pass 0 = Vortex (C), Pass 1 = Ascent (A), Pass 2 = Pillar (B).
-          const segmentCounts: [number, number, number] = [0, 0, 0];
-          cabSequence.forEach((freq, i) => {
-              const pass = Math.floor(i / 27);
-              const pick = passPicks.get(freq)?.[pass];
-              if (pick) {
-                  walkPlaylist.push(pick);
-                  walkPhases.push('');
-                  usedIds.add(pick.id);
-                  segmentCounts[pass]++;
-              }
-          });
-          return segmentCounts;
-      };
-
-      // Ouroboros picker — best-unused-per-freq from the shared usedIds.
-      // When a freq has no unused songs left (typical at the 2nd/3rd
-      // SOURCE visit), it REPEATS the best match instead of skipping —
-      // this is the spec's "do not deduplicate" rule made concrete. The
-      // figure-8's three crossings at SOURCE always produce a playlist
-      // entry. Emits ♾️/✕ tokens into walkPhases at SOURCE visits.
-      const runOuroborosPicker = (ouroSequence: number[]): number => {
-          let pushed = 0;
-          let sourceVisit = 0;
-          ouroSequence.forEach(freq => {
-              const allCandidates = originalPlaylist.filter((s: Song) => s.closestSolfeggio === freq);
-              if (allCandidates.length === 0) return; // no songs at all → skip
-              // Unused-at-this-freq sorted LRU first, quality second.
-              // Means the figure-8's traversal naturally cycles through
-              // the user's library at each freq across sessions, instead
-              // of always picking the same deviation-best song first.
-              const unused = allCandidates
-                  .filter((s: Song) => !usedIds.has(s.id))
-                  .sort((a: Song, b: Song) => {
-                      const cmp = lruCompare(a, b);
-                      return cmp !== 0 ? cmp : sortCandidates(a, b);
-                  });
-              let pick: Song;
-              if (unused.length > 0) {
-                  pick = unused[0];
-                  usedIds.add(pick.id);
-              } else {
-                  // Fresh pool exhausted at this freq — repeat the best
-                  // match. Intentional at the three SOURCE visits when
-                  // the library has fewer distinct SOURCE songs than the
-                  // walk requires.
-                  pick = [...allCandidates].sort(sortCandidates)[0];
-              }
-              walkPlaylist.push(pick);
-              let phase = '';
-              if (freq === SOURCE_FREQ) {
-                  phase = OUROBOROS_PHASES[sourceVisit] ?? '';
-                  sourceVisit++;
-              }
-              walkPhases.push(phase);
-              pushed++;
-          });
-          return pushed;
-      };
-
-      if (mode === 'combined') {
-          const cabCounts = runCabPicker(sequence);
-          setLoShuWalkSegments([...cabCounts]);
-          setLoShuWalkPhases(null);
-      } else if (mode === 'ouroboros') {
-          const oCount = runOuroborosPicker(sequence);
-          setLoShuWalkSegments([oCount]);
-          setLoShuWalkPhases([...walkPhases]);
-      } else if (mode === 'cabi') {
-          // CABI = CAB (81 steps) + Ouroboros (29 steps), shared usedIds
-          // so the closing Ouroboros doesn't replay songs heard in CAB.
-          const cabCounts = runCabPicker(LO_SHU_WALK_COMBINED);
-          const oCount = runOuroborosPicker(LO_SHU_WALK_OUROBOROS);
-          setLoShuWalkSegments([cabCounts[0], cabCounts[1], cabCounts[2], oCount]);
-          setLoShuWalkPhases([...walkPhases]);
-      } else {
-          setLoShuWalkSegments(null);
-          setLoShuWalkPhases(null);
-          // Single walks (A / B / C / traditional): best unused per freq.
-          sequence.forEach(freq => {
-              const candidates = originalPlaylist
-                  .filter((s: Song) => s.closestSolfeggio === freq && !usedIds.has(s.id))
-                  .sort(sortCandidates);
-              if (candidates.length > 0) {
-                  const bestMatch = candidates[0];
-                  walkPlaylist.push(bestMatch);
-                  usedIds.add(bestMatch.id);
-              }
-          });
-      }
-
-      if (walkPlaylist.length > 0) {
-          setPlaylist(walkPlaylist);
-          loShuWalkSnapshotRef.current = walkPlaylist.map(s => s.id).join('|');
-          setLoShuWalkMode(mode);
-          setUseChakraOrder(true);
-          setCurrentSongIndex(0);
-          setSearchTerm('');
-          setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
-          setShowLoShuWalkMenu(false);
-
-          // Walks reach into HEART/HEAD; nudge experience level the same way
-          // the existing HEART/HEAD alignment journeys do so safety messaging
-          // stays consistent.
-          if (userExperienceLevel === 'beginner') setUserExperienceLevel('intermediate');
-
-          setAnalysisNotification(
-              `Lo Shu · ${info.fullName} — ${walkPlaylist.length}/${sequence.length} positions filled.` +
-              ((mode === 'combined' || mode === 'cabi') ? ' Click again for a different shuffle.' : '')
-          );
-          setTimeout(() => setAnalysisNotification(null), 5000);
-
-          playTrackRef.current(0, walkPlaylist);
-          if (window.innerWidth < 768) setShowSidebar(false);
-      } else {
-          showStatusToast(
-              (`Lo Shu · ${info.fullName}: no matching songs in your library yet.\n\n` +
-              `This walk needs songs whose closest Solfeggio frequency matches positions in the 27-frequency Aetheria set. ` +
-              `Try running Deep Scan, or load tracks across the GUT/HEART/HEAD ranges.`).replace(/\n+/g, ' '),
-              { durationMs: 10000 }
-          );
-      }
-  };
+  const generateLoShuWalk = (mode: LoShuWalkMode) => applyMix(loShuWalk(mixInput(), mode));
 
   // Clear the active Lo Shu walk indicator without otherwise touching the
   // playlist. Called by other journey generators (alignment, mood, etc.) so
@@ -5348,6 +4674,7 @@ const App: React.FC = () => {
       setLoShuWalkMode(null);
       setLoShuWalkSegments(null);
       setLoShuWalkPhases(null);
+      setLoShuWalkSteps(null);
   };
 
   // Single deliberate action behind the "Clear Playlist & Cache" button: stop
@@ -5407,64 +4734,10 @@ const App: React.FC = () => {
   }, []);
 
   // Generate full library alignment ordered by frequency
-  const generateFullLibraryAlignment = () => {
-      // Get all frequency values from SOLFEGGIO_INFO in order
-      const frequencyOrder = SOLFEGGIO_INFO.map(info => info.freq);
-      const alignedPlaylist: Song[] = [];
-      
-      // Sort songs by frequency order, then by harmonic deviation (quality)
-      frequencyOrder.forEach(freq => {
-          const songsForFreq = originalPlaylist
-              .filter(s => s.closestSolfeggio === freq)
-              .sort((a, b) => (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999));
-          
-          alignedPlaylist.push(...songsForFreq);
-      });
-      
-      if (alignedPlaylist.length > 0) {
-          setPlaylist(alignedPlaylist);
-          setUseChakraOrder(true);
-          setCurrentSongIndex(0);
-          setSearchTerm(''); // Clear search when creating aligned playlist
-          setVizSettings(prev => ({ ...prev, showTreeOfLife: true }));
-          
-          // Check if we have high frequency tracks and adjust settings accordingly
-          const hasHighFrequencies = alignedPlaylist.some(s => (s.closestSolfeggio || 0) >= 1206);
-          if (hasHighFrequencies && userExperienceLevel === 'beginner') {
-              setUserExperienceLevel('intermediate');
-              setAnalysisNotification(
-                  `Full Alignment includes higher frequency tracks. Experience level temporarily set to 'Intermediate' for proper playback.`
-              );
-              setTimeout(() => setAnalysisNotification(null), 5000);
-          }
-          
-          if(window.innerWidth < 768) setShowSidebar(false);
-      } else {
-          showStatusToast("No analyzed songs found. Please scan your library first.", { durationMs: 8000 });
-      }
-  };
+  const generateFullLibraryAlignment = () => applyMix(fullAlignment(mixInput()));
 
   // Generate specific frequency playlists
-  const generateFrequencyPlaylist = (frequencies: number[], name: string) => {
-      const filtered = originalPlaylist
-          .filter(s => frequencies.includes(s.closestSolfeggio || 0))
-          .sort((a, b) => {
-              const freqIndexA = frequencies.indexOf(a.closestSolfeggio || 0);
-              const freqIndexB = frequencies.indexOf(b.closestSolfeggio || 0);
-              if (freqIndexA !== freqIndexB) return freqIndexA - freqIndexB;
-              return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
-          });
-      
-      if (filtered.length > 0) {
-          setPlaylist(filtered);
-          setUseChakraOrder(true);
-          setCurrentSongIndex(0);
-          setSearchTerm(''); // Clear search when creating filtered playlist
-          if(window.innerWidth < 768) setShowSidebar(false);
-      } else {
-          showStatusToast(`No songs found for ${name}. Try scanning your library first or add more variety.`, { durationMs: 8000 });
-      }
-  };
+  const generateFrequencyPlaylist = (frequencies: number[], name: string) => applyMix(crystalSetMix(mixInput(), frequencies, name));
 
   const generateWellnessPlaylist = () => {
     generateFrequencyPlaylist([174, 285, 528], 'Deep Healing');
@@ -5478,181 +4751,9 @@ const App: React.FC = () => {
     generateFrequencyPlaylist([741, 852, 963], 'Deep Meditation');
   };
 
-  const generateGoldenRatioPlaylist = () => {
-    // Debug: Log fractal analysis values for all tracks
-    console.log('=== GOLDEN RATIO PLAYLIST DEBUG ===');
-    originalPlaylist.forEach(song => {
-      if (song.fractalAnalysis) {
-        console.log(`${song.name}: Golden Ratio = ${(song.fractalAnalysis.goldenRatioAlignment * 100).toFixed(1)}%`);
-      } else {
-        console.log(`${song.name}: No fractal analysis data`);
-      }
-    });
+  const generateGoldenRatioPlaylist = () => applyMix(goldenRatioMix(mixInput()));
 
-    // Lowered threshold from 0.7 to 0.3 (30%) for more realistic filtering
-    const goldenTracks = originalPlaylist
-      .filter(s => s.fractalAnalysis && s.fractalAnalysis.goldenRatioAlignment > 0.3)
-      .sort((a, b) => (b.fractalAnalysis?.goldenRatioAlignment || 0) - (a.fractalAnalysis?.goldenRatioAlignment || 0));
-    
-    console.log(`Found ${goldenTracks.length} tracks with golden ratio alignment > 30%`);
-    
-    if (goldenTracks.length > 0) {
-      setPlaylist(goldenTracks);
-      setUseChakraOrder(false);
-      setCurrentSongIndex(0);
-      setSearchTerm('');
-      if(window.innerWidth < 768) setShowSidebar(false);
-    } else {
-      // v15.4: a one-line toast; Details opens the whole explanation (its per-track list) in a dialog.
-      const details = `No tracks with golden ratio alignment > 30% found.\n\nActual analysis results:\n${originalPlaylist.slice(0, 5).map(s => `• ${s.name}: ${s.fractalAnalysis ? (s.fractalAnalysis.goldenRatioAlignment * 100).toFixed(1) : 'No analysis'}%`).join('\n')}\n\nTry scanning your library with fractal analysis first.`;
-      showStatusToast('No tracks with golden ratio alignment above 30% yet.', {
-        durationMs: 12000,
-        actionLabel: 'Details',
-        onAction: () => { dismissStatusToast(); setInfoDialog({ title: 'Golden Φ', body: details }); },
-      });
-    }
-  };
-
-  const generate111PatternPlaylist = () => {
-    // Composition of the first in sequence of each solfeggio order based on 111 Hz pattern presence
-    console.log('=== 111 PATTERN SOLFEGGIO SEQUENCE COMPOSITION ===');
-    
-    // Define the solfeggio orders and their first frequencies - ALL 9 ORDERS
-    const solfeggioOrders = [
-      { order: 'First', frequencies: [174, 285] },
-      { order: 'Second', frequencies: [396, 417, 528, 639] },
-      { order: 'Third', frequencies: [741, 852, 963] },
-      { order: 'Fourth', frequencies: [1206, 1449, 1692] },
-      { order: 'Fifth', frequencies: [1935, 2178, 2421] },
-      { order: 'Sixth', frequencies: [2664, 2907, 3150] },
-      { order: 'Seventh', frequencies: [3504, 3858, 4212] },
-      { order: 'Eighth', frequencies: [4566, 4920, 5274] },
-      { order: 'Ninth', frequencies: [5628, 5982, 6336] }
-    ];
-
-    const compositionPlaylist: Song[] = [];
-    const usedIds = new Set<string>();
-
-    // For each order, find the best song with the highest 111 pattern presence from the first frequency
-    solfeggioOrders.forEach(orderGroup => {
-      const firstFrequency = orderGroup.frequencies[0]; // Get the first frequency of each order
-      
-      // Find songs that match this frequency and have 111 pattern presence
-      const candidatesForOrder = originalPlaylist.filter(song => {
-        if (!song.fractalAnalysis || usedIds.has(song.id)) return false;
-        return song.closestSolfeggio === firstFrequency;
-      });
-
-      if (candidatesForOrder.length > 0) {
-        // Sort by 111 pattern presence, then by DNA resonance, then by harmonic accuracy
-        candidatesForOrder.sort((a, b) => {
-          const a111 = a.fractalAnalysis?.pattern111Presence || 0;
-          const b111 = b.fractalAnalysis?.pattern111Presence || 0;
-          
-          // Prioritize 111 pattern presence
-          if (Math.abs(a111 - b111) > 0.05) {
-            return b111 - a111;
-          }
-          
-          // Then DNA resonance as a tiebreaker
-          const aDNA = a.fractalAnalysis?.dnaResonanceScore || 0;
-          const bDNA = b.fractalAnalysis?.dnaResonanceScore || 0;
-          
-          if (Math.abs(aDNA - bDNA) > 0.05) {
-            return bDNA - aDNA;
-          }
-          
-          // Finally by harmonic accuracy
-          return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
-        });
-
-        const bestTrack = candidatesForOrder[0];
-        compositionPlaylist.push(bestTrack);
-        usedIds.add(bestTrack.id);
-        
-        const pattern111Strength = (bestTrack.fractalAnalysis?.pattern111Presence || 0) * 100;
-        console.log(`${orderGroup.order} Order (${firstFrequency}Hz): "${bestTrack.name}" - 111 Pattern: ${pattern111Strength.toFixed(1)}%`);
-      } else {
-        console.log(`${orderGroup.order} Order (${firstFrequency}Hz): No suitable tracks found`);
-      }
-    });
-
-    console.log(`111 Pattern Composition: ${compositionPlaylist.length} tracks selected from ${solfeggioOrders.length} orders`);
-    
-    if (compositionPlaylist.length > 0) {
-      setPlaylist(compositionPlaylist);
-      setUseChakraOrder(true); // Maintain order sequence
-      setCurrentSongIndex(0);
-      setSearchTerm('');
-      
-      // Auto-set to 111Hz for resonant pattern alignment
-      setSelectedSolfeggio(111);
-      
-      // Enable Tree of Life visualization for order progression
-      setVizSettings(prev => ({ 
-        ...prev, 
-        showTreeOfLife: true,
-        morphEnabled: true,
-        colorMode: 'chakra',
-        enableFlow: true,
-        autoRotate: true
-      }));
-      
-      // Check for transpersonal frequencies and adjust settings accordingly
-      const hasTranspersonalFrequencies = compositionPlaylist.some(s => (s.closestSolfeggio || 0) >= 3786);
-      if (hasTranspersonalFrequencies && userExperienceLevel !== 'expert') {
-        setUserExperienceLevel('expert');
-        setAnalysisNotification(
-          `111 Pattern Sequence includes transpersonal frequencies (8th-9th Orders). Experience level set to 'Expert' for proper access. Use extreme caution with frequencies above 3675Hz.`
-        );
-        setTimeout(() => setAnalysisNotification(null), 8000);
-      }
-      
-      // Provide detailed feedback about the composition
-      const ordersCovered = compositionPlaylist.length;
-      const avg111Pattern = compositionPlaylist.reduce((sum, song) => 
-        sum + (song.fractalAnalysis?.pattern111Presence || 0), 0) / compositionPlaylist.length * 100;
-      
-      // Create frequency progression display
-      const frequencyProgression = compositionPlaylist.map((s, i) => {
-        const freq = solfeggioOrders[i]?.frequencies[0];
-        if (freq && freq >= 3786) {
-          return `${freq}Hz⚠️`; // Add warning symbol for transpersonal frequencies
-        }
-        return `${freq}Hz`;
-      }).join('→');
-      
-      setTimeout(() => {
-        const safetyNote = hasTranspersonalFrequencies ? ' ⚠️ CAUTION: Contains transpersonal frequencies - use minimal volume.' : '';
-        setAnalysisNotification(
-          `111 Pattern Complete Journey activated! ${ordersCovered}/9 orders represented (${frequencyProgression}). Average 111 pattern strength: ${avg111Pattern.toFixed(1)}%.${safetyNote}`
-        );
-        setTimeout(() => setAnalysisNotification(null), 10000);
-      }, hasTranspersonalFrequencies ? 8500 : 500);
-      
-      if(window.innerWidth < 768) setShowSidebar(false);
-    } else {
-      // Show diagnostic information
-      const analyzedTracks = originalPlaylist.filter(s => s.fractalAnalysis).length;
-      const orderAvailability = solfeggioOrders.map(order => {
-        const freq = order.frequencies[0];
-        const count = originalPlaylist.filter(s => s.closestSolfeggio === freq).length;
-        return `${order.order} (${freq}Hz): ${count} tracks`;
-      }).join('\n');
-      
-      // v15.4: a one-line toast; Details opens the whole explanation (the per-order counts) in a dialog.
-      const details = `Unable to create 111 Pattern Solfeggio Sequence.\n\n` +
-            `Requirements: At least one analyzed track from each order's first frequency:\n\n` +
-            `${orderAvailability}\n\n` +
-            `Total analyzed tracks: ${analyzedTracks}\n\n` +
-            `Try scanning your library with fractal analysis to enable this composition feature.`;
-      showStatusToast('The 111 Sequence needs at least one scanned track for the first frequency of each order.', {
-        durationMs: 12000,
-        actionLabel: 'Details',
-        onAction: () => { dismissStatusToast(); setInfoDialog({ title: '111 Sequence', body: details }); },
-      });
-    }
-  };
+  const generate111PatternPlaylist = () => applyMix(sequence111(mixInput()));
 
   // SOURCE Field Filter — 2178 Hz, HEART position 5 and the geometric centre
   // of the Lo Shu cube. Every row, column, diagonal and the central vertical
@@ -5666,144 +4767,7 @@ const App: React.FC = () => {
   // calculateSacredGeometryAlignment, so goldenRatioAlignment (already
   // peak-normalised, and φ is the first sacred ratio) breaks the ties on
   // older cached analyses. Neither score gates membership.
-  const generateSourceFieldPlaylist = () => {
-    // Strict 2178Hz resonance filter - only the pure 2178Hz frequency
-    console.log('=== STRICT 2178Hz SOURCE FIELD FILTER ===');
-    originalPlaylist.forEach(song => {
-      if (song.fractalAnalysis && song.closestSolfeggio === 2178) {
-        const geometryScore = song.fractalAnalysis.sacredGeometryAlignment * 100;
-        const goldenScore = song.fractalAnalysis.goldenRatioAlignment * 100;
-        console.log(`${song.name}: Geometry=${geometryScore.toFixed(1)}% | Golden=${goldenScore.toFixed(1)}% | 2178Hz=true | Accuracy=${song.harmonicDeviation?.toFixed(1) || 'N/A'}Hz`);
-      }
-    });
-
-    // STRICT filtering: ONLY 2178Hz tracks that carry fractal analysis.
-    // Deliberately NOT gated on a score being > 0: sacredGeometryAlignment is
-    // 0 for every track analysed before the normalisation fix in
-    // calculateSacredGeometryAlignment, so gating on it emptied the playlist
-    // even when 2178Hz matches existed. Frequency match + analysed is the real
-    // requirement; the scores below decide ORDER, not membership.
-    const pure2178Tracks = originalPlaylist
-      .filter(song => {
-        // Must be exactly 2178Hz frequency match
-        if (song.closestSolfeggio !== 2178) return false;
-
-        // Must have fractal analysis data
-        return Boolean(song.fractalAnalysis);
-      })
-      .sort((a, b) => {
-        // Sort by sacred geometry alignment (highest first)
-        const aGeometry = a.fractalAnalysis?.sacredGeometryAlignment || 0;
-        const bGeometry = b.fractalAnalysis?.sacredGeometryAlignment || 0;
-
-        if (Math.abs(aGeometry - bGeometry) > 0.01) {
-          return bGeometry - aGeometry;
-        }
-
-        // Fall back to golden ratio alignment — φ is the first of the sacred
-        // ratios and this metric normalises against the spectrum's own peak,
-        // so it yields real values on tracks analysed before the fix. Keeps
-        // the ordering meaningful without forcing a full library re-scan.
-        const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
-        const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
-
-        if (Math.abs(aGolden - bGolden) > 0.01) {
-          return bGolden - aGolden;
-        }
-
-        // Then by harmonic accuracy (closest to pure 2178Hz)
-        const aAccuracy = a.harmonicDeviation || 999;
-        const bAccuracy = b.harmonicDeviation || 999;
-
-        return aAccuracy - bAccuracy;
-      });
-
-    console.log(`Found ${pure2178Tracks.length} pure 2178Hz tracks for SOURCE field playlist`);
-
-    if (pure2178Tracks.length > 0) {
-      setPlaylist(pure2178Tracks);
-      setUseChakraOrder(false);
-      setCurrentSongIndex(0);
-      setSearchTerm('');
-
-      // Auto-set to 2178Hz for optimal SOURCE field resonance
-      setSelectedSolfeggio(2178);
-
-      // NOTE: missing track durations are no longer repaired here. That was a
-      // stopgap scoped to this one filter; the retry budget in
-      // MAX_DURATION_ATTEMPTS plus the post-scan reset now heals every
-      // playlist from the auto-rescan effect, so this generator does not need
-      // to special-case itself.
-
-      // Enable visualization features optimized for 2178Hz SOURCE field work
-      setVizSettings(prev => ({
-        ...prev,
-        morphEnabled: true,
-        showTreeOfLife: true,
-        colorMode: 'chakra',
-        enableFlow: true,
-        showHexagons: true,
-        hexOpacity: 0.7
-      }));
-
-      // Calculate quality metrics for user feedback. Report whichever
-      // alignment score actually carries data: sacredGeometryAlignment reads 0
-      // across the board on pre-fix analyses, and quoting "0.0%" would look
-      // like a broken playlist rather than a stale metric.
-      const avgGeometryScore = pure2178Tracks.reduce((sum, song) =>
-        sum + (song.fractalAnalysis?.sacredGeometryAlignment || 0), 0) / pure2178Tracks.length;
-
-      const avgGoldenScore = pure2178Tracks.reduce((sum, song) =>
-        sum + (song.fractalAnalysis?.goldenRatioAlignment || 0), 0) / pure2178Tracks.length;
-
-      const usingGeometry = avgGeometryScore > 0;
-      const rankedBy = usingGeometry ? 'sacred geometry' : 'golden ratio';
-      const avgRankScore = usingGeometry ? avgGeometryScore : avgGoldenScore;
-
-      const highQualityTracks = pure2178Tracks.filter(s =>
-        ((usingGeometry ? s.fractalAnalysis?.sacredGeometryAlignment : s.fractalAnalysis?.goldenRatioAlignment) || 0) > 0.3).length;
-
-      const avgAccuracy = pure2178Tracks.reduce((sum, song) =>
-        sum + (song.harmonicDeviation || 0), 0) / pure2178Tracks.length;
-
-      // 2178Hz is a HEART frequency, so apply the same experience-level
-      // guard the HEART Alignment journey uses.
-      if (userExperienceLevel === 'beginner') {
-        setUserExperienceLevel('intermediate');
-      }
-
-      setTimeout(() => {
-        setAnalysisNotification(
-          `Pure 2178Hz SOURCE Field Filter activated! ${pure2178Tracks.length} tracks found. Average ${rankedBy} alignment: ${(avgRankScore * 100).toFixed(1)}%, ${highQualityTracks} high-alignment tracks, avg accuracy: ±${avgAccuracy.toFixed(1)}Hz from pure 2178Hz.${usingGeometry ? '' : ' (Re-scan to rank by sacred geometry.)'}`
-        );
-        setTimeout(() => setAnalysisNotification(null), 8000);
-      }, 500);
-
-      if(window.innerWidth < 768) setShowSidebar(false);
-    } else {
-      const tracksWith2178 = originalPlaylist.filter(s => s.closestSolfeggio === 2178).length;
-      const analyzedTracks = originalPlaylist.filter(s => s.fractalAnalysis).length;
-      const unanalyzedTracks = originalPlaylist.length - analyzedTracks;
-
-      // v15.4: a one-line toast; Details opens the whole explanation (the library's status) in a dialog.
-      const details = (`No pure 2178Hz tracks found for SOURCE field filter.\n\n` +
-            `Current library status:\n` +
-            `• Total tracks: ${originalPlaylist.length}\n` +
-            `• Analyzed tracks: ${analyzedTracks}\n` +
-            `• Unanalyzed tracks: ${unanalyzedTracks}\n` +
-            `• 2178Hz frequency matches: ${tracksWith2178}\n\n` +
-            `To use this filter:\n` +
-            `1. Import music containing 2178Hz content\n` +
-            `2. Run "Deep Scan" to analyze harmonic frequencies\n` +
-            `3. This filter requires exact 2178Hz frequency matches\n\n` +
-            `Note: This filter only shows tracks that are harmonically centered on pure 2178Hz — HEART position 5, the centre of the Lo Shu cube.`);
-      showStatusToast('No scanned 2178 Hz tracks for the SOURCE filter yet.', {
-        durationMs: 12000,
-        actionLabel: 'Details',
-        onAction: () => { dismissStatusToast(); setInfoDialog({ title: '2178 Hz SOURCE filter', body: details }); },
-      });
-    }
-  };
+  const generateSourceFieldPlaylist = () => applyMix(sourceField(mixInput()));
 
   // Show detailed frequency analysis for current track
   const showCurrentTrackAnalysis = () => {
@@ -5817,7 +4781,13 @@ const App: React.FC = () => {
     let analysisInfo = `🎵 EXTENDED OCTAVE RANGE ANALYSIS\n\n`;
     analysisInfo += `📀 Track: "${currentSong.name}"\n\n`;
     
-    if (currentSong.harmonicFreq) {
+    if (currentSong.harmonicFreq && crystalOrigin(currentSong) === 'assigned') {
+      // v15.8: an assigned crystal is not a detection; say so instead of a "Detected" report.
+      analysisInfo += `🎯 Crystal: ${currentSong.closestSolfeggio} Hz, assigned (not scanned).
+
+Run Deep Scan to analyse this track.
+`;
+    } else if (currentSong.harmonicFreq) {
       const report = getFrequencyAnalysisReport(
         currentSong.harmonicFreq,
         currentSong.closestSolfeggio || 396,
@@ -5893,8 +4863,12 @@ const App: React.FC = () => {
   // Diagnostic function to show fractal analysis status
   const showPlaylistDiagnostics = () => {
     const totalTracks = originalPlaylist.length;
-    const analyzedTracks = originalPlaylist.filter(s => s.closestSolfeggio).length;
+    // v15.8: analysed = measured by Deep Scan (an assigned crystal is not a scan); "Scan N remaining" names what the
+    // Deep Scan button does (deepScanQueue's default scope).
+    const analyzedTracks = originalPlaylist.filter(s => { const o = crystalOrigin(s); return o === 'scan' || o === 'scan-replaced'; }).length;
     const unanalyzedTracks = totalTracks - analyzedTracks;
+    const assignedTracks = originalPlaylist.filter(s => crystalOrigin(s) === 'assigned').length;
+    const scanQueueTracks = deepScanQueue(originalPlaylist).length;
     
     // Count tracks by regime
     const gutTracks = originalPlaylist.filter(s => (s.closestSolfeggio || 0) >= 174 && (s.closestSolfeggio || 0) <= 963).length;
@@ -5914,7 +4888,7 @@ const App: React.FC = () => {
       `📊 ANALYSIS STATUS:\n` +
       `• Total tracks: ${totalTracks}\n` +
       `• Analyzed tracks: ${analyzedTracks}\n` +
-      `• Unanalyzed tracks: ${unanalyzedTracks}\n\n` +
+      `• Unanalyzed tracks: ${unanalyzedTracks}${assignedTracks > 0 ? ` (${assignedTracks} with an assigned crystal)` : ''}\n\n` +
       `🎯 REGIME DISTRIBUTION:\n` +
       `• GUT (174-963 Hz): ${gutTracks} tracks\n` +
       `• HEART (1206-3150 Hz): ${heartTracks} tracks\n` +
@@ -5927,7 +4901,7 @@ const App: React.FC = () => {
       `• 111 Pattern tracks (>20%): ${pattern111Tracks}\n` +
       `• DNA Resonance tracks (>30%): ${dnaTracks}\n\n` +
       `💡 RECOMMENDATIONS:\n` +
-      `${unanalyzedTracks > 0 ? `• Scan ${unanalyzedTracks} remaining tracks\n` : ''}` +
+      `${scanQueueTracks > 0 ? `• Scan ${scanQueueTracks} remaining tracks\n` : ''}` +
       `${heartTracks === 0 ? '• No HEART frequencies - use Test Distribution for 27-track playlists\n' : ''}` +
       `${headTracks === 0 ? '• No HEAD frequencies - use Test Distribution for 27-track playlists\n' : ''}`;
       
@@ -5935,86 +4909,7 @@ const App: React.FC = () => {
     setInfoDialog({ title: 'Library diagnostics', body: diagnosticMessage });
   };
 
-  const generateUltimateAlignmentPlaylist = () => {
-    // Get all solfeggio frequencies in order from all Nine orders (1-9)
-    const ultimateFrequencyOrder = SOLFEGGIO_INFO.map(info => info.freq);
-    const ultimatePlaylist: Song[] = [];
-    const usedIds = new Set<string>();
-
-    // For each frequency, find the best matching track
-    ultimateFrequencyOrder.forEach(freq => {
-      const candidates = originalPlaylist.filter(s => s.closestSolfeggio === freq && !usedIds.has(s.id));
-      if (candidates.length > 0) {
-        // Enhanced sorting with multiple criteria
-        candidates.sort((a, b) => {
-          // 1. Prioritize songs with high golden ratio alignment
-          const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
-          const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
-          
-          if (Math.abs(aGolden - bGolden) > 0.1) {
-            return bGolden - aGolden; // Higher golden ratio first
-          }
-          
-          // 2. Then prioritize DNA resonance
-          const aDNA = a.fractalAnalysis?.dnaResonanceScore || 0;
-          const bDNA = b.fractalAnalysis?.dnaResonanceScore || 0;
-          
-          if (Math.abs(aDNA - bDNA) > 0.1) {
-            return bDNA - aDNA;
-          }
-          
-          // 3. Finally sort by harmonic deviation (accuracy)
-          return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
-        });
-        
-        const bestMatch = candidates[0];
-        ultimatePlaylist.push(bestMatch);
-        usedIds.add(bestMatch.id);
-      }
-    });
-    
-    if (ultimatePlaylist.length > 0) {
-      setPlaylist(ultimatePlaylist);
-      setUseChakraOrder(true);
-      setCurrentSongIndex(0);
-      setSearchTerm('');
-      
-      // Enable Tree of Life visualization for this ultimate journey
-      setVizSettings(prev => ({ 
-        ...prev, 
-        showTreeOfLife: true,
-        morphEnabled: true,
-        colorMode: 'chakra'
-      }));
-      
-      // For higher frequencies, set appropriate experience level to prevent interruptions
-      const hasHighFrequencies = ultimatePlaylist.some(s => (s.closestSolfeggio || 0) >= 1206);
-      if (hasHighFrequencies && userExperienceLevel === 'beginner') {
-        setUserExperienceLevel('advanced');
-        setAnalysisNotification(
-          `Ultimate Alignment includes higher frequencies. Experience level temporarily set to 'Advanced' for uninterrupted playback.`
-        );
-        setTimeout(() => setAnalysisNotification(null), 5000);
-      }
-      
-      // Show notification about the ultimate alignment
-      const ordersIncluded = new Set(ultimatePlaylist.map(s => 
-        SOLFEGGIO_INFO.find(info => info.freq === s.closestSolfeggio)?.order
-      )).size;
-      
-      setTimeout(() => {
-        setAnalysisNotification(
-          `Ultimate Alignment activated! Journey through ${ultimatePlaylist.length} frequencies across ${ordersIncluded} orders of consciousness.`
-        );
-        setTimeout(() => setAnalysisNotification(null), 7000);
-      }, hasHighFrequencies ? 5500 : 0);
-      
-      playTrackRef.current(0, ultimatePlaylist);
-      if(window.innerWidth < 768) setShowSidebar(false);
-    } else {
-      showStatusToast("Not enough analyzed songs for Ultimate Alignment. Please scan your library first.", { durationMs: 8000 });
-    }
-  };
+  const generateUltimateAlignmentPlaylist = () => applyMix(ultimateAlignment(mixInput()));
 
   // Generate Complete Aetheria Journey through all 9 Orders
   const generateAetheriaJourney = async () => {
@@ -7612,91 +6507,23 @@ registerProcessor('wav-capture', WavCapture);
   // v15.7: AUTO-DISTRIBUTE (lifted verbatim from the classic button's onClick, which now calls it; the Library tab's
   // health card calls it too).
   const autoDistribute = () => {
-    // Not during a Deep Scan: the scan is writing real analysis
-    // into these tracks, and Auto-Distribute would overwrite it
-    // with placeholder crystals. (aria-disabled rather than
-    // disabled, so a tap explains why instead of doing nothing —
-    // a phone never shows the title tooltip.)
+    // Not during a Deep Scan: the scan is writing real analysis into these tracks.
     if (isScanning) {
       showStatusToast('Auto-Distribute is unavailable while Deep Scan runs.');
       return;
     }
-    // Distribute the whole LIBRARY and apply the assignments by id;
-    // the play order and cursor stay as they are. This used to
-    // distribute the play order and write it over the library, so
-    // running it while a mix or walk showed shrank the library to
-    // that mix — and the blob sync deleted every other track's audio.
-    const library = dedupeById<Song>(originalPlaylist);
-    if (library.length >= 27) {
-      // Use the proven smart harmonic distribution for all libraries 27+ songs
-      const gutFreqs = [174, 285, 396, 417, 528, 639, 741, 852, 963];
-      const heartFreqs = [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150];
-      const headFreqs = [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336];
-      const allFreqs = [...gutFreqs, ...heartFreqs, ...headFreqs];
-
-      const redistributed = distributeUsingHarmonicOctavesMaster(library, allFreqs);
-      const assignments = new Map<string, Partial<Song>>();
-      for (const s of redistributed) {
-        assignments.set(s.id, {
-          harmonicFreq: s.harmonicFreq,
-          closestSolfeggio: s.closestSolfeggio,
-          harmonicDeviation: s.harmonicDeviation,
-        });
-      }
-      setOriginalPlaylist(prev => patchById(prev, assignments));
-      setPlaylist(prev => patchById(prev, assignments));
-
-      const gutCount = redistributed.filter(s => gutFreqs.includes((s.closestSolfeggio as number) || 0)).length;
-      const heartCount = redistributed.filter(s => heartFreqs.includes((s.closestSolfeggio as number) || 0)).length;
-      const headCount = redistributed.filter(s => headFreqs.includes((s.closestSolfeggio as number) || 0)).length;
-
-      // Debug: Check specifically for 4566 Hz
-      const freq4566Count = redistributed.filter(s => s.closestSolfeggio === 4566).length;
-      console.log(`🔍 DEBUG: 4566 Hz assignments: ${freq4566Count}`);
-
-      // Log all frequency assignments for debugging
-      const frequencyDistribution: { [key: number]: number } = {};
-      allFreqs.forEach(freq => frequencyDistribution[freq] = 0);
-      redistributed.forEach(song => {
-        if (song.closestSolfeggio) {
-          frequencyDistribution[song.closestSolfeggio] = (frequencyDistribution[song.closestSolfeggio] || 0) + 1;
-        }
-      });
-
-      const missingFreqs = allFreqs.filter(freq => frequencyDistribution[freq] === 0);
-      if (missingFreqs.length > 0) {
-        console.warn(`⚠️ Missing frequency assignments:`, missingFreqs);
-      }
-
-      // CAB readiness: count frequencies that hit the 3-song
-      // target. Any freq with ≥3 songs gives the Combined Walk
-      // three distinct picks per cube position; the user can
-      // call a CAB as soon as all 27 are at 3+.
-      const cabReadyFreqs = allFreqs.filter(f => (frequencyDistribution[f] || 0) >= 3).length;
-      const cabStatus = cabReadyFreqs === 27
-        ? '🚖 CAB-ready: all 27 frequencies have 3+ songs.'
-        : `CAB readiness: ${cabReadyFreqs}/27 frequencies at 3+ songs.`;
-
-      // CABI readiness: CAB (81) + Ouroboros (29) share song
-      // pools, so each non-SOURCE freq needs 4 unique songs
-      // (3 CAB visits + 1 Ouroboros visit) and SOURCE/2178 Hz
-      // needs 6 (3 CAB visits + 3 Ouroboros crossings).
-      const cabiReadyFreqs = allFreqs.filter(f => {
-        const need = f === SOURCE_FREQ ? 6 : 4;
-        return (frequencyDistribution[f] || 0) >= need;
-      }).length;
-      const cabiStatus = cabiReadyFreqs === 27
-        ? ' ⚛️ CABI-ready: all 27 frequencies have enough unique songs to close the loop (SOURCE has 6+, others have 4+).'
-        : ` CABI readiness: ${cabiReadyFreqs}/27 frequencies meet the unique-song threshold (SOURCE needs 6, others need 4).`;
-
-      setAnalysisNotification(`Harmonic Distribution Complete: ${redistributed.length} songs distributed across all 27 frequencies. ${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD. ${missingFreqs.length > 0 ? `Missing: ${missingFreqs.join(', ')}Hz. ` : ''}${cabStatus}${cabiStatus}`);
-      setTimeout(() => setAnalysisNotification(null), 8000);
-    } else {
-      showStatusToast(
-        `Harmonic Distribution needs at least 27 tracks for full frequency coverage; your library has ${library.length}. (A full CAB ride needs 81: 3 unique songs per frequency.)`,
-        { durationMs: 10000 }
-      );
+    // v15.8: Assign crystals. Deep Scan's crystals stay (one an older Auto-Distribute replaced is put back); every other
+    // track gets a crystal, empty crystals first, the same one on every press (utils/mix/distribution.ts planAssign).
+    // Only the crystal fields change, by id, in the library and the play order; assigned tracks stay unscanned.
+    const plan = planAssign(originalPlaylist);
+    if (plan.patches.size === 0) {
+      showStatusToast(assignNothingText(plan));
+      return;
     }
+    setOriginalPlaylist(prev => patchById<Song>(prev, plan.patches));
+    setPlaylist(prev => patchById<Song>(prev, plan.patches));
+    setAnalysisNotification(assignDoneText(plan));
+    setTimeout(() => setAnalysisNotification(null), 8000);
   };
 
   // v15.7: the new layout's one way to replace the play order (a Library row now; v14.17's generators and v14.18's
@@ -7726,7 +6553,7 @@ registerProcessor('wav-capture', WavCapture);
       cursor: st.currentSongIndex,
       shuffled: st.shuffledIndices.slice(),
       shufflePos: st.shufflePos,
-      walk: loShuWalkMode ? { mode: loShuWalkMode, segments: loShuWalkSegments, phases: loShuWalkPhases } : null,
+      walk: loShuWalkMode ? { mode: loShuWalkMode, segments: loShuWalkSegments, phases: loShuWalkPhases, steps: loShuWalkSteps } : null,
       trackId: st.currentSongIndex >= 0 ? (st.playlist[st.currentSongIndex]?.id ?? null) : null,
       position: el && Number.isFinite(el.currentTime) ? el.currentTime : 0,
       wasPlaying: isPlaying,
@@ -7800,6 +6627,7 @@ registerProcessor('wav-capture', WavCapture);
       setLoShuWalkMode(snap.walk.mode);
       setLoShuWalkSegments(snap.walk.segments);
       setLoShuWalkPhases(snap.walk.phases);
+      setLoShuWalkSteps(snap.walk.steps);
     }
     setCurrentSongIndex(cursor);
     if (stateRef.current.isShuffle && !dropped && snap.shuffled.length === order.length) {
@@ -8058,9 +6886,9 @@ registerProcessor('wav-capture', WavCapture);
         : '';
   // v15.7: the Library tab's tests read the play order's exact state through this hook (dev builds only; production
   // strips it, as it does __aetheriaAnalyse).
-  const libraryHookRef: { current: { walk: LoShuWalkMode | null; segments: number[] | null; phases: string[] | null; playing: boolean } } =
-    useRef({ walk: null, segments: null, phases: null, playing: false });
-  if (IS_DEV_BUILD) libraryHookRef.current = { walk: loShuWalkMode, segments: loShuWalkSegments, phases: loShuWalkPhases, playing: isPlaying };
+  const libraryHookRef: { current: { walk: LoShuWalkMode | null; segments: number[] | null; phases: string[] | null; steps: number[] | null; playing: boolean } } =
+    useRef({ walk: null, segments: null, phases: null, steps: null, playing: false });
+  if (IS_DEV_BUILD) libraryHookRef.current = { walk: loShuWalkMode, segments: loShuWalkSegments, phases: loShuWalkPhases, steps: loShuWalkSteps, playing: isPlaying };
   useEffect(() => {
     if (!IS_DEV_BUILD) return;
     const w = window as unknown as { __aetheriaLibrary?: unknown };
@@ -8080,6 +6908,7 @@ registerProcessor('wav-capture', WavCapture);
           walk: h.walk,
           segments: h.segments,
           phases: h.phases,
+          steps: h.steps,
           libraryIds: libraryRef.current.map((x: Song) => x.id),
           libraryNames: libraryRef.current.map((x: Song) => x.name),
           playing: h.playing,
@@ -8088,6 +6917,7 @@ registerProcessor('wav-capture', WavCapture);
           undo: lastPlayOrderRef.current ? lastPlayOrderRef.current.token : null,
           crystals: libraryRef.current.map((x: Song) => x.closestSolfeggio ?? null),
           scanned: libraryRef.current.map((x: Song) => !!x.harmonicFreq),
+          origins: libraryRef.current.map((x: Song) => crystalOrigin(x)),
           durations: s.playlist.map((x: Song) => (typeof x.duration === 'number' ? x.duration : null)),
           libraryDurations: libraryRef.current.map((x: Song) => (typeof x.duration === 'number' ? x.duration : null)),
         };
@@ -8235,6 +7065,7 @@ registerProcessor('wav-capture', WavCapture);
       assignCrystals: () => A().autoDistribute(),
       analyse: () => A().onAnalyseTap(),
       scan: () => A().scanLibrary(),
+      scanAssigned: () => A().scanLibrary({ includeAssigned: true }),
       stopScan: () => (window as any).cancelAetheriaAnalysis?.(),
       importFiles: (event: React.ChangeEvent<HTMLInputElement>) => A().handleFileUpload(event),
       recoverOrphans: () => A().recoverOrphans(),
@@ -8606,7 +7437,7 @@ registerProcessor('wav-capture', WavCapture);
             settings={vizSettings}
             frequencyColorMode={frequencyColorMode}
             loShuWalkMode={loShuWalkMode}
-            loShuWalkStep={loShuWalkMode ? currentSongIndex : -1}
+            loShuWalkStep={loShuWalkMode ? walkStepAt(loShuWalkSteps, currentSongIndex) : -1}
             bandEnvelope={currentSongIndex >= 0 ? (playlist[currentSongIndex]?.bandEnvelope ?? playlist[currentSongIndex]?.visualEnvelope ?? null) : null}
             audioElementRef={mainAudioRef}
             uiInsets={uiInsets}
@@ -8655,7 +7486,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.7</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.8</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

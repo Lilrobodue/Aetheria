@@ -1,4 +1,4 @@
-// Checks for components/shell/library/libraryModel.ts (v15.7, the Library tab).
+// Checks for components/shell/library/libraryModel.ts (v15.7, the Library tab; v15.8 the crystal origins and Assign).
 // Run with: node components/shell/library/libraryModel.check.ts   (npm run check:shell; Node 22.18+ strips the types)
 // Exits non-zero on any failure.
 
@@ -36,13 +36,14 @@ import {
   healthModel,
   orphanText,
   assignConfirmText,
+  assignNeedsConfirm,
   lastImportLines,
   recoverWords,
-  CRYSTALS_MIN_TRACKS,
 } from './libraryModel.ts';
 import type { LibSong, HealthInput } from './libraryModel.ts';
 import { countAnalysable, capsFor, passButtonText, passEta, passEtaMinutes, PASS_IDLE } from '../../../utils/library/analysePass.ts';
 import { removeIdsWithCursor } from '../../../utils/library/listOps.ts';
+import { planAssign, needsDeepScan, deepScanQueue, ALL_CRYSTALS } from '../../../utils/mix/distribution.ts';
 
 let passed = 0;
 const failures: string[] = [];
@@ -210,24 +211,31 @@ eq(formatBytes(4.1 * 1024 * 1024), '4.1 MB', 'MB');
 eq(formatBytes(512 * 1024), '512 KB', 'KB');
 eq(formatBytes(900), '900 B', 'B');
 for (const n of [NaN, Infinity, -Infinity, -1, '1', null]) eq(formatBytes(n), null, `formatBytes ${String(n)}`);
-// Deep Scan stores deviation = |harmonicFreq − crystal|; Auto-Distribute keeps a scanned harmonicFreq but stores its score.
+// v15.8: the origin is utils/mix/distribution.ts crystalOrigin's: the recorded crystalSource, else derived (Deep Scan
+// always stored isAetheriaCandidate and fractalAnalysis, and deviation = |harmonicFreq − crystal|; the old
+// Auto-Distribute kept a scanned harmonicFreq but stored its own score).
 const scannedTrack = { fractalAnalysis: {}, harmonicFreq: 530.5, closestSolfeggio: 528, harmonicDeviation: 2.5 };
+const REPLACED = "Deep Scan's crystal was replaced by an older Auto-Distribute; Assign crystals puts it back";
 eq(crystalSource(S('x', 'x', scannedTrack)), 'From Deep Scan', 'source: Deep Scan');
-eq(crystalSource(S('x', 'x', { ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0 })), 'Assigned by Auto-Distribute after a Deep Scan', 'source: reassigned by Auto-Distribute after a scan');
-eq(crystalSource(S('x', 'x', { ...scannedTrack, closestSolfeggio: 528, harmonicDeviation: 0 })), 'Assigned by Auto-Distribute after a Deep Scan', 'source: an Assign that kept the crystal still stored its own deviation');
-eq(crystalSource(S('x', 'x', { fractalAnalysis: {} })), 'Assigned by Auto-Distribute after a Deep Scan', 'source: scanned, the fields incomplete');
-check(deepScanned(S('x', 'x', { fractalAnalysis: {} })) && deepScanned(S('x', 'x', { harmonicDeviation: 999 })) && !deepScanned(S('x', 'x', { harmonicFreq: 440 })), 'deepScanned');
-check(crystalFromDeepScan(S('x', 'x', scannedTrack)) && !crystalFromDeepScan(S('x', 'x', { ...scannedTrack, fractalAnalysis: undefined })), 'crystalFromDeepScan needs the fractal analysis');
-for (const n of BAD_NUMBERS) check(!crystalFromDeepScan(S('x', 'x', { ...scannedTrack, harmonicDeviation: n === 0 ? NaN : n })), `crystalFromDeepScan total on ${n}`);
-eq(crystalSource(S('x', 'x', { fractalAnalysis: {}, harmonicDeviation: 999 })), "Deep Scan couldn't read this track; a placeholder crystal", 'source: the 999 fallback');
-eq(crystalSource(S('x', 'x', { harmonicFreq: 400 })), 'Assigned by Auto-Distribute', 'source: Auto-Distribute');
+eq(crystalSource(S('x', 'x', { harmonicFreq: 530.5, closestSolfeggio: 528, harmonicDeviation: 2.5, isAetheriaCandidate: false })), 'From Deep Scan', 'source: Deep Scan, its fractal step failed (the candidate flag marks the scan)');
+eq(crystalSource(S('x', 'x', { ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0 })), REPLACED, 'source: replaced by an older Auto-Distribute');
+eq(crystalSource(S('x', 'x', { ...scannedTrack, closestSolfeggio: 528, harmonicDeviation: 0 })), 'From Deep Scan', 'source: an old Assign that kept the scan\'s crystal (its own deviation stored): still Deep Scan\'s crystal');
+check(crystalFromDeepScan(S('x', 'x', { ...scannedTrack, closestSolfeggio: 528, harmonicDeviation: 0 })) && !crystalFromDeepScan(S('x', 'x', { ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0 })), 'crystalFromDeepScan: the same crystal yes, another no');
+eq(crystalSource(S('x', 'x', { fractalAnalysis: {}, closestSolfeggio: 528 })), 'Assigned, not scanned yet', 'source: a scan marker without a measurement is not a scan');
+eq(crystalSource(S('x', 'x', { ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0, crystalSource: 'scan' })), 'From Deep Scan', 'source: recorded scan (Deep Scan, v15.8)');
+eq(crystalSource(S('x', 'x', { ...scannedTrack, crystalSource: 'assigned' })), 'Assigned, not scanned yet', 'source: recorded assigned wins');
+check(deepScanned(S('x', 'x', scannedTrack)) && deepScanned(S('x', 'x', { harmonicFreq: 440, closestSolfeggio: 528, harmonicDeviation: 999 })) && deepScanned(S('x', 'x', { ...scannedTrack, harmonicDeviation: 0 })) && !deepScanned(S('x', 'x', { harmonicFreq: 440, closestSolfeggio: 528 })), 'deepScanned: a scan, a failed one, a replaced one; not an assigned crystal');
+check(crystalFromDeepScan(S('x', 'x', scannedTrack)) && !crystalFromDeepScan(S('x', 'x', { ...scannedTrack, fractalAnalysis: undefined })), 'crystalFromDeepScan needs a scan marker');
+for (const n of BAD_NUMBERS) check(!crystalFromDeepScan(S('x', 'x', { ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: n === 0 ? NaN : n })), `crystalFromDeepScan total on ${n}`);
+eq(crystalSource(S('x', 'x', { harmonicFreq: 440, closestSolfeggio: 528, harmonicDeviation: 999 })), "Deep Scan couldn't read this track; a placeholder crystal", 'source: the 999 fallback');
+eq(crystalSource(S('x', 'x', { harmonicFreq: 400, closestSolfeggio: 396 })), 'Assigned, not scanned yet', 'source: assigned');
 const seeded = S(`${Date.UTC(2026, 9, 25, 8)}-k1`, 'tone-0142', {
   duration: 232, closestSolfeggio: 528, harmonicFreq: 528, musicKey: 'Am', keyConfidence: 0.62, chromaVersion: 1,
   visualEnvelope: { bass: { length: 10 } }, file: { name: 'tone-0142.wav', size: 4.1 * 1024 * 1024 },
 });
 eq(trackInfoRows(seeded, NOW), [
   { label: 'Length', value: '3:52' },
-  { label: 'Crystal', value: '528 Hz · GUT', note: 'Assigned by Auto-Distribute. An assigned crystal, not a measured pitch.' },
+  { label: 'Crystal', value: '528 Hz · GUT', note: 'Assigned, not scanned yet. An assigned crystal, not a measured pitch.' },
   { label: 'Key', value: 'A minor · confidence 0.62', note: 'From Analyse tracks' },
   { label: 'Visual sync', value: 'From Analyse tracks' },
   { label: 'File', value: 'tone-0142.wav · 4.1 MB' },
@@ -250,7 +258,8 @@ eq(visual({ bandEnvelope: { bass: { length: 3 } }, visualEnvelope: { bass: { len
 eq(visual({ bandEnvelope: { bass: { length: 0 } }, visualEnvelope: { bass: { length: 3 } } }), 'From Analyse tracks', 'visual sync: Analyse tracks');
 eq(visual({ bandEnvelope: null, visualEnvelope: { bass: { length: 0 } } }), 'None yet', 'visual sync: none');
 eq(trackInfoRows(S('x', 'x', { closestSolfeggio: 2178, harmonicFreq: 2180, harmonicDeviation: 2, fractalAnalysis: {} }), NOW)[1], { label: 'Crystal', value: '2178 Hz · SOURCE', note: 'From Deep Scan. An assigned crystal, not a measured pitch.' }, 'crystal: SOURCE, Deep Scan');
-eq(trackInfoRows(S('x', 'x', { closestSolfeggio: 2178, harmonicFreq: 2180, harmonicDeviation: 0, fractalAnalysis: {} }), NOW)[1].note, 'Assigned by Auto-Distribute after a Deep Scan. An assigned crystal, not a measured pitch.', 'crystal: Auto-Distribute after a scan');
+eq(trackInfoRows(S('x', 'x', { closestSolfeggio: 2421, harmonicFreq: 2180, harmonicDeviation: 0, fractalAnalysis: {} }), NOW)[1], { label: 'Crystal', value: '2421 Hz · HEART', note: `${REPLACED}. An assigned crystal, not a measured pitch.` }, 'crystal: replaced after a scan');
+eq(trackInfoRows(S('x', 'x', { closestSolfeggio: 2178, harmonicFreq: 2180, harmonicDeviation: 0, fractalAnalysis: {} }), NOW)[1].note, 'From Deep Scan. An assigned crystal, not a measured pitch.', 'crystal: re-stored on Deep Scan\'s own crystal (fix 3)');
 for (const n of BAD_NUMBERS) {
   const rows = trackInfoRows(S('x', 'x', { duration: n, closestSolfeggio: n, keyConfidence: n, chromaVersion: 1, musicKey: 'C', file: { name: 'f', size: n } }), NOW);
   check(rows.every((r) => typeof r.value === 'string' && !/NaN|Infinity|undefined/.test(r.value + (r.note ?? ''))), `trackInfoRows total on ${n}: ${JSON.stringify(rows)}`);
@@ -258,7 +267,7 @@ for (const n of BAD_NUMBERS) {
 eq(trackInfoText(seeded, NOW).split('\n'), [
   'tone-0142',
   'Length: 3:52',
-  'Crystal: 528 Hz · GUT (Assigned by Auto-Distribute. An assigned crystal, not a measured pitch.)',
+  'Crystal: 528 Hz · GUT (Assigned, not scanned yet. An assigned crystal, not a measured pitch.)',
   'Key: A minor · confidence 0.62 (From Analyse tracks)',
   'Visual sync: From Analyse tracks',
   'File: tone-0142.wav · 4.1 MB',
@@ -276,37 +285,75 @@ const set1 = mk(40, (i) => ({
   visualEnvelope: i % 3 === 0 ? { bass: { length: 5 } } : undefined,
 }));
 const h1 = libraryHealth([...set1, set1[0], set1[1]]);
-eq(h1, { total: 40, noCrystal: 10, unscanned: 8, scanned: 0, placeholder: 32 }, 'libraryHealth: counts by each action’s own rule, each id once (32 Auto-Distribute placeholders)');
-eq(libraryHealth([S('a', 'a', scannedTrack), S('b', 'b', { harmonicDeviation: 999, harmonicFreq: 440 }), S('c', 'c', { harmonicFreq: 400 }), S('d', 'd', {})]),
-  { total: 4, noCrystal: 3, unscanned: 1, scanned: 2, placeholder: 1 }, 'libraryHealth: scanned (fractal analysis or the 999 fallback), placeholder, queue');
-eq(h1.unscanned, set1.filter((s) => !s.harmonicFreq).length, 'Scan count = scanLibrary’s queue (!harmonicFreq)');
-check(h1.noCrystal !== set1.filter((s) => !s.harmonicFreq).length, 'the crystal count is not the scan count (a mutant that swaps them fails)');
+eq(h1, { total: 40, noCrystal: 10, unscanned: 16, assignedToScan: 24, scanned: 0, scanReplaced: 0, emptyCrystals: 26, placeable: 30 }, 'libraryHealth: counts by each action’s own rule, each id once');
+eq(libraryHealth([S('a', 'a', scannedTrack), S('b', 'b', { harmonicDeviation: 999, harmonicFreq: 440 }), S('c', 'c', { harmonicFreq: 400 }), S('d', 'd', {}), S('e', 'e', { ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0 }), S('f', 'f', { ...scannedTrack, closestSolfeggio: 528, harmonicDeviation: 0 })]),
+  { total: 6, noCrystal: 3, unscanned: 2, assignedToScan: 0, scanned: 4, scanReplaced: 1, emptyCrystals: 25, placeable: 0 }, 'libraryHealth: scanned (a scan, the 999 fallback, two the old Auto-Distribute re-stored), the queue, ONE real put-back');
+eq([h1.unscanned, h1.assignedToScan], [deepScanQueue(set1).length, deepScanQueue(set1, { assigned: true }).length - deepScanQueue(set1).length], 'Scan counts = Deep Scan’s two queues');
+eq(h1.unscanned + h1.assignedToScan, set1.filter((s) => needsDeepScan(s)).length, 'together, every unscanned track');
+check(h1.noCrystal !== h1.unscanned, 'the crystal count is not the scan count (a mutant that swaps them fails)');
+// Placeable: what Assign would still place (not scans, put-backs or anchors).
+eq(libraryHealth([S('p', 'p', { closestSolfeggio: 528, harmonicFreq: 528, harmonicDeviation: 3 }), S('q', 'q', { closestSolfeggio: 528, harmonicFreq: 440, harmonicDeviation: 999 }), S('r', 'r', { closestSolfeggio: 528, harmonicFreq: 528, harmonicDeviation: 3, crystalSource: 'assigned' }), S('s', 's', scannedTrack)]).placeable, 2, 'placeable: a legacy placeholder and a failed scan; not an anchor or a scan');
 const counts1 = countAnalysable(set1 as never, CAPS);
 const base = (o: Partial<HealthInput> = {}): HealthInput => ({
   health: h1, pass: PASS_IDLE, analyseCounts: counts1, isScanning: false, scanProgress: 0, restoring: false, mobile: false, durationsLeft: 0, orphans: null, ...o,
 });
 const m1 = healthModel(base());
-eq(m1.lines.map((l) => l.id), ['crystals', 'analyse', 'scan'], 'lines: crystals, analyse, scan');
 eq(m1.lines[0], { id: 'crystals', title: 'Crystals', line: '10 of 40 tracks have none', done: false, todo: true, action: { label: 'Assign', kind: 'assign', blocked: false } }, 'crystals to assign');
 check(counts1.todo > 0, 'the set has tracks to analyse');
 eq(m1.lines[1].line, `${counts1.todo} to analyse · ${passEta(passEtaMinutes(counts1.todoSeconds, false))}`, 'analyse: N to analyse · ETA (passButtonText’s)');
 eq(m1.lines[1].line, passButtonText(PASS_IDLE, counts1, { deepScan: false, restoring: false, mobile: false }).sub, 'the same words as the classic button');
 eq(m1.lines[1].action, { label: `Analyse ${counts1.todo}`, kind: 'analyse', blocked: false }, 'analyse button: its count = countAnalysable');
-eq(m1.lines[2], { id: 'scan', title: 'Deep Scan', line: 'Optional · 8 to scan · about 20 min', sub: '32 more have Auto-Distribute’s crystal, which Deep Scan skips.', done: false, todo: false, action: { label: 'Scan', kind: 'scan', blocked: false } }, 'scan: optional, ×2.5 min; the placeholders it skips said');
-const plainSet = mk(10, (i) => ({ closestSolfeggio: 528, ...(i < 4 ? scannedTrack : {}) }));
-eq(healthModel(base({ health: libraryHealth(plainSet) })).lines[2], { id: 'scan', title: 'Deep Scan', line: 'Optional · 6 unscanned · about 15 min', done: false, todo: false, action: { label: 'Scan', kind: 'scan', blocked: false } }, 'scan: no placeholders → "unscanned" (the mockup)');
+eq(m1.lines.map((l) => l.id), ['crystals', 'analyse', 'scan', 'scan-assigned'], 'with assigned tracks: the explicit line after Deep Scan’s');
+eq(m1.lines[2], { id: 'scan', title: 'Deep Scan', line: 'Optional · 16 unscanned · about 40 min', done: false, todo: false, action: { label: 'Scan', kind: 'scan', blocked: false } }, 'scan: optional, ×2.5 min; its default scope only (decision 6)');
+eq(m1.lines[3], { id: 'scan-assigned', title: 'Deep Scan, assigned tracks', line: 'Also scan the 24 assigned tracks (about 1 h 0 min)', done: false, todo: false, action: { label: 'Scan', kind: 'scan-assigned', blocked: false } }, 'the explicit "Also scan the N assigned tracks (about X)"');
+const plainSet = mk(10, (i) => (i < 4 ? scannedTrack : {}));
+const mPlain = healthModel(base({ health: libraryHealth(plainSet) }));
+eq(mPlain.lines[2], { id: 'scan', title: 'Deep Scan', line: 'Optional · 6 unscanned · about 15 min', done: false, todo: false, action: { label: 'Scan', kind: 'scan', blocked: false } }, 'scan: the mockup');
+check(!mPlain.lines.some((l) => l.id === 'scan-assigned'), 'no assigned track: no explicit line');
+const mOnlyAssigned = healthModel(base({ health: libraryHealth(mk(10, (i) => (i < 4 ? scannedTrack : { closestSolfeggio: 639, harmonicFreq: 639, harmonicDeviation: 3, crystalSource: 'assigned' as const }))) }));
+eq(mOnlyAssigned.lines.slice(2), [
+  { id: 'scan', title: 'Deep Scan', line: '4 of 10 scanned', done: false, todo: false },
+  { id: 'scan-assigned', title: 'Deep Scan, assigned tracks', line: 'Also scan the 6 assigned tracks (about 15 min)', done: false, todo: false, action: { label: 'Scan', kind: 'scan-assigned', blocked: false } },
+], 'only assigned tracks left: Scan has nothing to do; the explicit line offers them');
+eq(healthModel(base({ health: libraryHealth(mk(3, (i) => (i < 2 ? {} : { closestSolfeggio: 639 }))) })).lines[2].line, 'Optional · 3 unscanned · about 7 min', 'a crystal without a harmonicFreq is in the default scope (v15.7’s)');
 eq([m1.status, m1.toDo, m1.autoOpen], ['2 to do', 2, true], 'status: 2 to do (Deep Scan does not count); open');
+// v15.8: no 27-track minimum: Assign works on any library.
 const small = libraryHealth(mk(12, () => ({})));
 const mSmall = healthModel(base({ health: small }));
-eq(mSmall.lines[0], { id: 'crystals', title: 'Crystals', line: `Needs at least ${CRYSTALS_MIN_TRACKS} tracks (you have 12)`, done: false, todo: false }, 'under 27 tracks: no button');
-const allDone = mk(30, () => ({ ...scannedTrack, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
+eq(mSmall.lines[0], { id: 'crystals', title: 'Crystals', line: '12 of 12 tracks have none', done: false, todo: true, action: { label: 'Assign', kind: 'assign', blocked: false } }, 'under 27 tracks: Assign');
+// Every crystal covered, every track scanned: all done.
+const allDone = mk(30, (i) => ({ fractalAnalysis: {}, closestSolfeggio: ALL_CRYSTALS[i % 27], harmonicFreq: ALL_CRYSTALS[i % 27] + 2.5, harmonicDeviation: 2.5, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
 const mDone = healthModel(base({ health: libraryHealth(allDone), analyseCounts: countAnalysable(allDone as never, CAPS) }));
 eq(mDone.lines.map((l) => [l.line, l.done]), [['All 30 tracks have one', true], ['All analysed', true], ['All 30 tracks scanned', true]], 'all done');
-// After an Assign and no Deep Scan: every track has Auto-Distribute's placeholder harmonicFreq; nothing is "scanned".
-const assignedOnly = mk(30, () => ({ closestSolfeggio: 528, harmonicFreq: 512.3, harmonicDeviation: 0, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
+// Every track scanned at 528 only: crystals have no track, but Assign has nothing to place there: no button (fix 4).
+const oneCrystal = mk(30, () => ({ ...scannedTrack, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
+const mOne = healthModel(base({ health: libraryHealth(oneCrystal), analyseCounts: countAnalysable(oneCrystal as never, CAPS) }));
+eq(mOne.lines[0], { id: 'crystals', title: 'Crystals', line: 'All 30 tracks have one', sub: '26 crystals have no track.', done: true, todo: false }, 'gaps Assign can’t fill: an informational line, no Assign');
+eq([mOne.status, mOne.toDo], ['All set', 0], 'all set');
+const anchorsGap = mk(30, () => ({ closestSolfeggio: 528, harmonicFreq: 528, harmonicDeviation: 3, crystalSource: 'assigned' as const }));
+eq(healthModel(base({ health: libraryHealth(anchorsGap) })).lines[0].action, undefined, 'gaps among anchors only: no Assign (it would keep them all)');
+// An older Auto-Distribute's placeholders at 528: Assign would place them, filling the gaps: offered, optional.
+const legacyGap = mk(30, () => ({ closestSolfeggio: 528, harmonicFreq: 512.3, harmonicDeviation: 4, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
+const mLegacy = healthModel(base({ health: libraryHealth(legacyGap), analyseCounts: countAnalysable(legacyGap as never, CAPS) }));
+eq(mLegacy.lines[0], { id: 'crystals', title: 'Crystals', line: 'All 30 have one · 26 crystals have no track', done: false, todo: false, action: { label: 'Assign', kind: 'assign', blocked: false } }, 'gaps Assign can fill: Assign, optional');
+eq([mLegacy.status, mLegacy.toDo], ['All set', 0], 'optional Assign is not to do');
+// Deep Scan crystals an older Auto-Distribute replaced: Assign is to do (it puts them back).
+const replacedSet = mk(30, (i) => ({ fractalAnalysis: {}, closestSolfeggio: ALL_CRYSTALS[i % 27], harmonicFreq: 530.5, harmonicDeviation: i < 5 ? 0 : Math.abs(530.5 - ALL_CRYSTALS[i % 27]), chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
+const mRep = healthModel(base({ health: libraryHealth(replacedSet), analyseCounts: countAnalysable(replacedSet as never, CAPS) }));
+// (Of the five with a broken relation, the one at 528 still shows Deep Scan's crystal for 530.5 Hz: not counted, fix 3.)
+eq(mRep.lines[0], { id: 'crystals', title: 'Crystals', line: "All 30 have one · 4 can get Deep Scan's crystal back", done: false, todo: true, action: { label: 'Assign', kind: 'assign', blocked: false } }, 'replaced crystals: Assign to do, only the real differences counted');
+eq(healthModel(base({ health: libraryHealth(mk(1, () => ({ ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0 }))) })).lines[0].line, "The track has one · 1 can get Deep Scan's crystal back", 'one track');
+eq(healthModel(base({ health: libraryHealth(mk(1, () => ({ ...scannedTrack, harmonicDeviation: 0 }))) })).lines[0], { id: 'crystals', title: 'Crystals', line: 'The track has one', sub: '26 crystals have no track.', done: true, todo: false }, 'a re-stored scan on its own crystal: nothing to put back');
+eq(healthModel(base({ health: libraryHealth([]) })).lines[0], { id: 'crystals', title: 'Crystals', line: 'All 0 tracks have one', done: true, todo: false }, 'an empty library: as v15.7');
+// After an Assign and no Deep Scan: every track has an assigned crystal; all of them are still Deep Scan's to do.
+const assignedOnly = mk(30, (i) => ({ closestSolfeggio: ALL_CRYSTALS[i % 27], harmonicFreq: ALL_CRYSTALS[i % 27], harmonicDeviation: 3, crystalSource: 'assigned' as const, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
 const mAssigned = healthModel(base({ health: libraryHealth(assignedOnly), analyseCounts: countAnalysable(assignedOnly as never, CAPS) }));
-eq(mAssigned.lines[2], { id: 'scan', title: 'Deep Scan', line: '0 of 30 scanned', sub: 'Deep Scan skips the 30 with Auto-Distribute’s crystal', done: false, todo: false }, 'after an Assign: not "All scanned", and no Scan button (it would do nothing)');
-eq([mAssigned.status, mAssigned.autoOpen, mAssigned.folded], ['All set', false, 'All set'], 'after an Assign: folded, Deep Scan has nothing to do');
+eq(mAssigned.lines[0].line, 'All 30 tracks have one', 'after an Assign: every crystal has a track');
+eq(mAssigned.lines.slice(2), [
+  { id: 'scan', title: 'Deep Scan', line: '0 of 30 scanned', done: false, todo: false },
+  { id: 'scan-assigned', title: 'Deep Scan, assigned tracks', line: 'Also scan the 30 assigned tracks (about 1 h 15 min)', done: false, todo: false, action: { label: 'Scan', kind: 'scan-assigned', blocked: false } },
+], 'after an Assign: Scan has nothing left by default; the explicit line can still measure them');
+eq([mAssigned.status, mAssigned.autoOpen, mAssigned.folded], ['All set', false, 'All set · Deep Scan optional'], 'after an Assign: folded, Deep Scan optional');
 eq([mDone.status, mDone.toDo, mDone.autoOpen, mDone.folded], ['All set', 0, false, 'All set'], 'all set: folded');
 const unscannedDone = mk(30, () => ({ closestSolfeggio: 528, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
 const mOpt = healthModel(base({ health: libraryHealth(unscannedDone), analyseCounts: countAnalysable(unscannedDone as never, CAPS) }));
@@ -320,6 +367,7 @@ eq(mRun.lines[1], {
 }, 'analyse running: passButtonText’s words, Stop, progress');
 eq(mRun.lines[2].action, { label: 'Scan', kind: 'scan', blocked: true }, 'scan blocked while Analyse runs');
 eq(mRun.lines[2].sub, 'Unavailable while Analyse tracks runs', 'its reason');
+eq([mRun.lines[3].action, mRun.lines[3].sub], [{ label: 'Scan', kind: 'scan-assigned', blocked: true }, 'Unavailable while Analyse tracks runs'], 'the explicit scan is blocked too');
 eq([mRun.status, mRun.autoOpen], ['Analysing…', true], 'status while analysing');
 eq(healthModel(base({ pass: { ...running, phase: 'parked' } })).lines[1].line, 'Analysing 12 of 230 · Paused while the screen is off', 'parked');
 eq(healthModel(base({ pass: { ...running, phase: 'stopping' } })).lines[1].line, 'Stopping…', 'stopping');
@@ -328,6 +376,7 @@ eq(healthModel(base({ pass: { ...running, total: 0 } })).lines[1].progress, 0, '
 // Deep Scan running.
 const mScan = healthModel(base({ isScanning: true, scanProgress: 12.4 }));
 eq(mScan.lines[2], { id: 'scan', title: 'Deep Scan', line: 'Scanning · 12 %', done: false, todo: false, action: { label: 'Stop', kind: 'stop-scan', blocked: false } }, 'scanning: Stop');
+check(!mScan.lines.some((l) => l.id === 'scan-assigned'), 'scanning: one Stop, no second scan line');
 eq(mScan.lines[1].action?.blocked, true, 'Analyse blocked while Deep Scan runs');
 eq(mScan.lines[1].sub, 'Unavailable while Deep Scan runs', 'its reason (passButtonText)');
 eq(mScan.lines[0].action?.blocked, true, 'Assign blocked while Deep Scan runs (its toast explains)');
@@ -340,7 +389,7 @@ eq(healthModel(base({ analyseCounts: { todo: 0, todoSeconds: 0, failed: 3, faile
 eq(healthModel(base({ analyseCounts: { todo: 0, todoSeconds: 0, failed: 3, failedSeconds: 1, tooLong: 0 } })).lines[1].action?.label, 'Try again', 'Try again');
 eq(healthModel(base({ analyseCounts: { todo: 0, todoSeconds: 0, failed: 0, failedSeconds: 0, tooLong: 2 } })).lines[1].line, 'All analysed · 2 too long for this device', 'too long');
 // Mobile note on Scan.
-eq(healthModel(base({ mobile: true })).lines[2].sub, '32 more have Auto-Distribute’s crystal, which Deep Scan skips. Slow on a phone, and keeps it busy.', 'the phone note, after the placeholder note');
+eq([healthModel(base({ mobile: true })).lines[2].sub, healthModel(base({ mobile: true })).lines[3].sub], ['Slow on a phone, and keeps it busy.', 'Slow on a phone, and keeps it busy.'], 'the phone note, on both scans');
 eq(healthModel(base({ mobile: true, health: libraryHealth(plainSet) })).lines[2].sub, 'Slow on a phone, and keeps it busy.', 'the phone note');
 // Track lengths and orphans.
 const mLen = healthModel(base({ health: libraryHealth(allDone), analyseCounts: countAnalysable(allDone as never, CAPS), durationsLeft: 9 }));
@@ -357,11 +406,24 @@ for (const n of BAD_NUMBERS) {
   const m = healthModel(base({ durationsLeft: n, orphans: { fresh: n, duplicates: n } }));
   check(m.lines.every((l) => !/NaN|Infinity|undefined|-\d/.test(l.line + (l.sub ?? ''))), `healthModel total on ${n}`);
 }
-eq(assignConfirmText(440, 401), {
-  title: 'Assign crystals to all 440 tracks?',
-  body: 'Auto-Distribute gives every track one of the 27 crystals. 401 tracks already have one, and theirs may change. Scan results and keys are kept.',
+// The Assign confirmation (v15.8): from the plan, each sentence only when its count is above 0; asked only when crystals
+// tracks already have would change.
+const quiet = <T,>(f: () => T): T => { const l = console.log; console.log = () => {}; try { return f(); } finally { console.log = l; } };
+const legacy = [
+  ...mk(3, (i) => ({ fractalAnalysis: {}, closestSolfeggio: ALL_CRYSTALS[i], harmonicFreq: ALL_CRYSTALS[i] + 1, harmonicDeviation: 1 })),   // scans
+  ...mk(2, () => ({ fractalAnalysis: {}, closestSolfeggio: 6336, harmonicFreq: 640, harmonicDeviation: 0 })),   // replaced
+  ...mk(2, () => ({})),                                                                                          // none
+].map((s, i) => ({ ...s, id: `L${i}` }));
+const pLegacy = quiet(() => planAssign(legacy));
+eq([pLegacy.kept, pLegacy.restored, pLegacy.given, pLegacy.moved], [3, 2, 2, 0], 'a small legacy plan: 3 kept, 2 put back, 2 given');
+check(assignNeedsConfirm(pLegacy), 'crystals put back: ask first');
+eq(assignConfirmText(pLegacy), {
+  title: 'Assign crystals?',
+  body: "Tracks Deep Scan placed keep their crystal. 2 get back the crystal Deep Scan gave them, which an older Auto-Distribute had replaced. 2 tracks without one get a crystal. Assigned crystals aren't a scan: Deep Scan can still analyse those tracks. Keys and visual sync are kept.",
 }, 'the Assign confirmation');
-eq(assignConfirmText(30, 1).body.includes('1 track already has one, and its may change'), true, 'one track');
+const pNew = quiet(() => planAssign(mk(2, () => ({}))));
+check(!assignNeedsConfirm(pNew), 'only new crystals: no question');
+eq(assignConfirmText(pNew).body, "2 tracks without one get a crystal. Assigned crystals aren't a scan: Deep Scan can still analyse those tracks. Keys and visual sync are kept.", 'no Deep Scan sentence without a scan');
 
 // --- The Import sheet --------------------------------------------------------------------------------------------
 eq(lastImportLines({ added: 12, skipped: 3, joinedPlayOrder: false, at: 0 }, 9), {

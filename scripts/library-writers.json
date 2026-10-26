@@ -93,7 +93,7 @@
   },
   "setOriginalPlaylist call in App › autoDistribute": {
     "count": 1,
-    "sha": "e61563f8bbda523e"
+    "sha": "862061a876c57895"
   },
   "setOriginalPlaylist call in App › clearEntirePlaylist": {
     "count": 1,
@@ -113,7 +113,7 @@
   },
   "setOriginalPlaylist call in App › scanLibrary › applyResult": {
     "count": 1,
-    "sha": "ae4d97b827e79863"
+    "sha": "fd76c5db091871b5"
   },
   "setOriginalPlaylist call in App › settleOrphans": {
     "count": 1,

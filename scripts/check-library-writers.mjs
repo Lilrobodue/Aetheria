@@ -47,7 +47,7 @@ const PINS_PATH = join(root, 'scripts', 'library-writers.json');
 const CACHE_FILE = 'utils/playlistCache.ts';
 const CACHE_WRITERS = ['deleteTracksFromCache', 'clearPlaylistCache'];
 const ROOT_COMPONENT = 'App'; // App.tsx's component: its own body is not a wrapper, its inner functions are
-const PLAY_ORDER_FUNCTIONS = ['startPlayOrder', 'playFromLibrary', 'undoPlayOrder'];
+const PLAY_ORDER_FUNCTIONS = ['startPlayOrder', 'playFromLibrary', 'undoPlayOrder', 'applyMix']; // v15.8: applyMix, the mixes' one way into App's state
 const MUTATORS = new Set(['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin']);
 
 const lf = (s) => s.replace(/^﻿/, '').replace(/\r\n?/g, '\n');
@@ -334,14 +334,16 @@ else {
 // ---------------------------------------------------------------------------------------------------------------
 // Rule 2: the shell never imports playlistCache
 // ---------------------------------------------------------------------------------------------------------------
-for (const file of files.filter((f) => f.startsWith('components/shell/'))) {
+// v15.8: nor do the mix recipes and the crystal data (pure modules: they return data, App applies it).
+const NO_CACHE = (f) => f.startsWith('components/shell/') || f.startsWith('utils/mix/') || f === 'utils/crystalData.ts';
+for (const file of files.filter(NO_CACHE)) {
   const sf = parse(file);
   const visit = (n) => {
     const spec =
       (ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier) ? n.moduleSpecifier.text
       : ts.isCallExpression(n) && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0]) && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === 'require')) ? n.arguments[0].text
       : null;
-    if (spec && resolveImport(file, spec) === CACHE_FILE) problem(`${file}:${lineOf(sf, n)}: imports ${spec} (the shell never reaches the library's storage)`);
+    if (spec && resolveImport(file, spec) === CACHE_FILE) problem(`${file}:${lineOf(sf, n)}: imports ${spec} (the shell, the mix recipes and the crystal data never reach the library's storage)`);
     ts.forEachChild(n, visit);
   };
   visit(sf);
@@ -377,6 +379,6 @@ if (problems.size) {
 }
 console.log(
   `check:writers: ${total} uses of the library's writers and their ${wrappers.size} wrappers, in ${places} places across ` +
-    `${files.length} files, as pinned (counts and code); components/shell never imports playlistCache; ` +
+    `${files.length} files, as pinned (counts and code); components/shell, utils/mix and utils/crystalData never import playlistCache; ` +
     `${PLAY_ORDER_FUNCTIONS.join(', ')} use no writer.`
 );

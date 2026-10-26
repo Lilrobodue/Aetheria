@@ -8,7 +8,7 @@
 // function says why in a toast. Nothing new runs: the card reads existing state and calls existing functions.
 // Open while there is something to do or a pass runs; one line ("All set · Deep Scan optional") otherwise, which a tap
 // opens for the session (App's libraryViewRef). The footer peeks into classic for Clear and the diagnostics.
-// Assign asks first whenever a track already has a crystal (Auto-Distribute reassigns them all).
+// Assign asks first only when crystals tracks already have would change (v15.8: the plan, computed on the tap).
 // React.memo with no props; it reads the library and the passes' state, never the time.
 
 import React, { useMemo, useState } from 'react';
@@ -16,7 +16,9 @@ import { Check, ChevronDown } from 'lucide-react';
 import { useActions, useLibraryList, useLibraryStatus, useShell } from '../contexts';
 import { countRender } from '../devRenders';
 import AssignCrystalsDialog from './AssignCrystalsDialog';
-import { HEALTH_FOOTER, healthModel, libraryHealth } from './libraryModel';
+import { HEALTH_FOOTER, assignNeedsConfirm, healthModel, libraryHealth } from './libraryModel';
+import { planAssign } from '../../../utils/mix/distribution';
+import type { AssignPlan } from '../../../utils/mix/distribution';
 import type { HealthLine } from './libraryModel';
 
 const BUTTON = 'shrink-0 min-h-touch px-3 rounded-control bg-surface-raised border border-line-strong text-sm text-ink hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400';
@@ -42,17 +44,20 @@ const HealthCard = () => {
   });
   const [openPref, setOpenPref] = useState<boolean | null>(libraryViewRef.current.healthOpen);
   const open = openPref ?? model.autoOpen;
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState<AssignPlan | null>(null);
 
   const run = (line: HealthLine) => {
     const a = line.action;
     if (!a) return;
     if (a.kind === 'assign') {
-      // Blocked (Deep Scan runs): Auto-Distribute's own toast says why. With crystals already there: ask first.
-      if (!a.blocked && health.total - health.noCrystal > 0) setConfirming(true);
+      // Blocked (Deep Scan runs): Auto-Distribute's own toast says why. When crystals tracks have would change: ask
+      // first, with the plan's counts. Otherwise it runs at once (its notice, or its toast when there is nothing to do).
+      const plan = a.blocked ? null : planAssign(songs);
+      if (plan && assignNeedsConfirm(plan)) setConfirming(plan);
       else actions.assignCrystals();
     } else if (a.kind === 'analyse') actions.analyse();
     else if (a.kind === 'scan') actions.scan();
+    else if (a.kind === 'scan-assigned') actions.scanAssigned();
     else if (a.kind === 'stop-scan') actions.stopScan();
     else {
       if (!phoneShell) libraryViewRef.current.refocus = 'review';
@@ -141,11 +146,10 @@ const HealthCard = () => {
       </div>
       {confirming ? (
         <AssignCrystalsDialog
-          total={health.total}
-          withCrystal={health.total - health.noCrystal}
-          onCancel={() => setConfirming(false)}
+          plan={confirming}
+          onCancel={() => setConfirming(null)}
           onAssign={() => {
-            setConfirming(false);
+            setConfirming(null);
             actions.assignCrystals();
           }}
         />

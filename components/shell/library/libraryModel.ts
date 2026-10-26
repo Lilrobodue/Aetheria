@@ -14,6 +14,8 @@ import { formatTime, formatTotal, regimeName, regimeOf } from '../shellModel.ts'
 import { passButtonText, passEta, passEtaMinutes } from '../../../utils/library/analysePass.ts';
 import type { PassProgress } from '../../../utils/library/analysePass.ts';
 import { CHROMA_VERSION } from '../../../utils/soundV2/keyAnalysis.ts';
+import { ALL_CRYSTALS, crystalOrigin, deepScanQueue, scanCrystalChanged } from '../../../utils/mix/distribution.ts';
+import type { CrystalSource } from '../../../utils/mix/distribution.ts';
 
 /** What the tab reads of a track (types.ts Song; `file` only for Track info). */
 export interface LibSong {
@@ -24,6 +26,9 @@ export interface LibSong {
   closestSolfeggio?: number;
   harmonicDeviation?: number;
   fractalAnalysis?: unknown;
+  /** v15.8: who placed the crystal (absent before v15.8: utils/mix/distribution.ts crystalOrigin derives it). */
+  crystalSource?: CrystalSource;
+  isAetheriaCandidate?: boolean;
   bandEnvelope?: { bass?: { length: number } } | null;
   visualEnvelope?: { bass?: { length: number } } | null;
   musicKey?: string;
@@ -353,28 +358,28 @@ export function formatBytes(size: unknown): string | null {
 
 export const ASSIGNED_NOTE = 'An assigned crystal, not a measured pitch.';
 
-/** Deep Scan ran on the track: it stored its fractal analysis, or its "couldn't read" fallback (deviation 999). */
+// v15.8: where a crystal comes from is utils/mix/distribution.ts crystalOrigin's answer (the field Deep Scan and Assign
+// record, or, on tracks from before v15.8, what they stored), the same rule Deep Scan's queue and Assign use.
+
+/** Deep Scan ran on the track (its crystal is Deep Scan's, was replaced, or the scan failed). */
 export function deepScanned(s: LibSong): boolean {
-  return !!s.fractalAnalysis || s.harmonicDeviation === 999;
+  const o = crystalOrigin(s);
+  return o === 'scan' || o === 'scan-replaced' || o === 'scan-failed';
 }
 
-/**
- * The crystal is still Deep Scan's own: Deep Scan stores harmonicDeviation = |harmonicFreq − closestSolfeggio| (Hz);
- * Auto-Distribute, which reassigns every track, keeps a scanned track's harmonicFreq but stores its own compatibility
- * score as the deviation, so after an Assign the relation no longer holds.
- */
+/** The crystal is Deep Scan's own: a scan, or one an older Auto-Distribute re-stored without changing its crystal. */
 export function crystalFromDeepScan(s: LibSong): boolean {
-  const f = s.harmonicFreq, c = s.closestSolfeggio, d = s.harmonicDeviation;
-  if (!s.fractalAnalysis || !Number.isFinite(f) || !Number.isFinite(c) || !Number.isFinite(d)) return false;
-  return Math.abs((d as number) - Math.abs((f as number) - (c as number))) < 1e-6;
+  const o = crystalOrigin(s);
+  return o === 'scan' || (o === 'scan-replaced' && !scanCrystalChanged(s));
 }
 
 /** Where a track's crystal came from. */
 export function crystalSource(s: LibSong): string {
-  if (s.harmonicDeviation === 999) return "Deep Scan couldn't read this track; a placeholder crystal";
+  const o = crystalOrigin(s);
+  if (o === 'scan-failed') return "Deep Scan couldn't read this track; a placeholder crystal";
   if (crystalFromDeepScan(s)) return 'From Deep Scan';
-  if (s.fractalAnalysis) return 'Assigned by Auto-Distribute after a Deep Scan';
-  return 'Assigned by Auto-Distribute';
+  if (o === 'scan-replaced') return "Deep Scan's crystal was replaced by an older Auto-Distribute; Assign crystals puts it back";
+  return 'Assigned, not scanned yet';
 }
 
 const hasBass = (e: LibSong['bandEnvelope']) => (e?.bass?.length ?? 0) > 0;
@@ -422,8 +427,6 @@ export function trackInfoText(s: LibSong, now: number): string {
 // The health card (Stage B)
 // ---------------------------------------------------------------------------------------------------------------
 
-/** Auto-Distribute needs this many tracks (App's autoDistribute). */
-export const CRYSTALS_MIN_TRACKS = 27;
 /** Deep Scan's own estimate per track, minutes (App's scanLibrary). */
 export const SCAN_MIN_PER_TRACK = 2.5;
 
@@ -432,38 +435,53 @@ export interface LibraryHealth {
   total: number;
   /** No crystal (closestSolfeggio): what Assign gives one. */
   noCrystal: number;
-  /** No harmonicFreq: Deep Scan's own queue (what Scan will do). */
+  /** Deep Scan's default queue (deepScanQueue: no measurement and no assigned crystal, v15.7's scope): what Scan does. */
   unscanned: number;
+  /** The assigned tracks the explicit "Also scan" adds to it (deepScanQueue with { assigned: true }; decision 6). */
+  assignedToScan: number;
   /** Deep Scan ran on it (deepScanned). */
   scanned: number;
-  /** A harmonicFreq without a scan: Auto-Distribute's placeholder, which Deep Scan's queue skips. */
-  placeholder: number;
+  /** Deep Scan crystals an older Auto-Distribute changed (scanCrystalChanged): Assign puts them back. */
+  scanReplaced: number;
+  /** Of the 27 crystals, how many no track has. */
+  emptyCrystals: number;
+  /** Tracks with a crystal that Assign would still place (an older Auto-Distribute's placeholders, failed scans): an
+   *  empty crystal can be filled only when there is one of these, or a track with no crystal. */
+  placeable: number;
 }
 
 /** One O(n) pass, each id once, by each action's own rule (so a number never promises what its button won't do). */
 export function libraryHealth(songs: readonly LibSong[]): LibraryHealth {
   const seen = new Set<string>();
-  let total = 0;
+  const used = new Set<number>();
+  const unique: LibSong[] = [];
   let noCrystal = 0;
-  let unscanned = 0;
   let scanned = 0;
-  let placeholder = 0;
+  let scanReplaced = 0;
+  let placeable = 0;
   for (const s of songs) {
     if (!s || seen.has(s.id)) continue;
     seen.add(s.id);
-    total++;
+    unique.push(s);
     if (!s.closestSolfeggio) noCrystal++;
-    if (!s.harmonicFreq) unscanned++;
-    if (deepScanned(s)) scanned++;
-    else if (s.harmonicFreq) placeholder++;
+    else used.add(s.closestSolfeggio);
+    const o = crystalOrigin(s);
+    if (o === 'scan' || o === 'scan-replaced' || o === 'scan-failed') scanned++;
+    if (scanCrystalChanged(s)) scanReplaced++;
+    // Assign's own rule (planAssign): it keeps scans, put-backs and anchors (a recorded assigned crystal of the 27).
+    const anchor = s.crystalSource === 'assigned' && ALL_CRYSTALS.includes(s.closestSolfeggio as number);
+    if (s.closestSolfeggio && o !== 'scan' && o !== 'scan-replaced' && !anchor) placeable++;
   }
-  return { total, noCrystal, unscanned, scanned, placeholder };
+  const unscanned = deepScanQueue(unique).length;
+  const assignedToScan = deepScanQueue(unique, { assigned: true }).length - unscanned;
+  const emptyCrystals = ALL_CRYSTALS.filter((f) => !used.has(f)).length;
+  return { total: unique.length, noCrystal, unscanned, assignedToScan, scanned, scanReplaced, emptyCrystals, placeable };
 }
 
-export type HealthAction = 'assign' | 'analyse' | 'scan' | 'stop-scan' | 'review';
+export type HealthAction = 'assign' | 'analyse' | 'scan' | 'scan-assigned' | 'stop-scan' | 'review';
 
 export interface HealthLine {
-  id: 'crystals' | 'analyse' | 'scan' | 'lengths' | 'orphans';
+  id: 'crystals' | 'analyse' | 'scan' | 'scan-assigned' | 'lengths' | 'orphans';
   title: string;
   line: string;
   /** A second, quieter line. */
@@ -514,20 +532,35 @@ export function healthModel(i: HealthInput): HealthModel {
   const lines: HealthLine[] = [];
   const analysing = i.pass.phase !== 'idle';
 
-  // Crystals (Assign = Auto-Distribute).
-  if (h.noCrystal === 0) {
-    lines.push({ id: 'crystals', title: 'Crystals', line: h.total === 1 ? 'The track has one' : `All ${h.total} tracks have one`, done: true, todo: false });
-  } else if (h.total < CRYSTALS_MIN_TRACKS) {
-    lines.push({ id: 'crystals', title: 'Crystals', line: `Needs at least ${CRYSTALS_MIN_TRACKS} tracks (you have ${h.total})`, done: false, todo: false });
+  // Crystals (Assign = Auto-Distribute). v15.8: Assign keeps Deep Scan's crystals and the ones it placed before, and
+  // works on any library size (no 27-track minimum). Its button shows only when it would change something: a track has
+  // no crystal or can get Deep Scan's back (to do), or an empty crystal can be filled from a track it still places
+  // (optional). Otherwise the line only informs.
+  const all = h.total === 1 ? 'The track has one' : `All ${h.total} have one`;
+  const assignAction = (todo: boolean, line: string): HealthLine => ({
+    id: 'crystals',
+    title: 'Crystals',
+    line,
+    sub: i.isScanning ? 'Unavailable while Deep Scan runs' : undefined,
+    done: false,
+    todo,
+    action: { label: 'Assign', kind: 'assign', blocked: i.isScanning },
+  });
+  const gaps = `${h.emptyCrystals} ${plural(h.emptyCrystals, 'crystal has', 'crystals have')} no track`;
+  if (h.noCrystal > 0) {
+    lines.push(assignAction(true, `${h.noCrystal} of ${h.total} tracks have none`));
+  } else if (h.scanReplaced > 0) {
+    lines.push(assignAction(true, `${all} · ${h.scanReplaced} can get Deep Scan's crystal back`));
+  } else if (h.emptyCrystals > 0 && h.placeable > 0 && h.total > 0) {
+    lines.push(assignAction(false, `${all} · ${gaps}`));
   } else {
     lines.push({
       id: 'crystals',
       title: 'Crystals',
-      line: `${h.noCrystal} of ${h.total} tracks have none`,
-      sub: i.isScanning ? 'Unavailable while Deep Scan runs' : undefined,
-      done: false,
-      todo: true,
-      action: { label: 'Assign', kind: 'assign', blocked: i.isScanning },
+      line: h.total === 1 ? 'The track has one' : `All ${h.total} tracks have one`,
+      sub: h.emptyCrystals > 0 && h.total > 0 ? `${gaps}.` : undefined,
+      done: true,
+      todo: false,
     });
   }
 
@@ -577,21 +610,22 @@ export function healthModel(i: HealthInput): HealthModel {
     });
   }
 
-  // Deep Scan (optional).
+  // Deep Scan (optional). v15.8 (decision 6): Scan measures the tracks with no measurement and no assigned crystal
+  // (v15.7's scope) and stops; a separate, explicit line offers the assigned ones (the same pass, the same Stop).
   const scanTime = `about ${formatTotal(h.unscanned * SCAN_MIN_PER_TRACK * 60)}`;
   if (i.isScanning) {
     const pct = Number.isFinite(i.scanProgress) ? Math.min(100, Math.max(0, Math.round(i.scanProgress))) : 0;
     lines.push({ id: 'scan', title: 'Deep Scan', line: `Scanning · ${pct} %`, done: false, todo: false, action: { label: 'Stop', kind: 'stop-scan', blocked: false } });
-  } else if (h.unscanned === 0 && h.placeholder === 0) {
+  } else if (h.unscanned === 0 && h.assignedToScan === 0) {
     lines.push({ id: 'scan', title: 'Deep Scan', line: h.total === 1 ? 'The track is scanned' : `All ${h.total} tracks scanned`, done: true, todo: false });
   } else if (h.unscanned === 0) {
-    // Nothing for Scan to do, yet not every track was scanned: Auto-Distribute's placeholders (which it skips).
-    lines.push({ id: 'scan', title: 'Deep Scan', line: `${h.scanned} of ${h.total} scanned`, sub: `Deep Scan skips the ${h.placeholder} with Auto-Distribute’s crystal`, done: false, todo: false });
+    // Nothing for Scan to do, yet not every track was scanned: the assigned ones (the next line offers them).
+    lines.push({ id: 'scan', title: 'Deep Scan', line: `${h.scanned} of ${h.total} scanned`, done: false, todo: false });
   } else if (analysing) {
     lines.push({
       id: 'scan',
       title: 'Deep Scan',
-      line: `${h.unscanned} ${h.placeholder > 0 ? 'to scan' : 'unscanned'} · ${scanTime}`,
+      line: `${h.unscanned} unscanned · ${scanTime}`,
       sub: 'Unavailable while Analyse tracks runs',
       done: false,
       todo: false,
@@ -601,13 +635,23 @@ export function healthModel(i: HealthInput): HealthModel {
     lines.push({
       id: 'scan',
       title: 'Deep Scan',
-      line: `Optional · ${h.unscanned} ${h.placeholder > 0 ? 'to scan' : 'unscanned'} · ${scanTime}`,
-      sub: [h.placeholder > 0 ? `${h.placeholder} more have Auto-Distribute’s crystal, which Deep Scan skips.` : '', i.mobile ? 'Slow on a phone, and keeps it busy.' : '']
-        .filter(Boolean)
-        .join(' ') || undefined,
+      line: `Optional · ${h.unscanned} unscanned · ${scanTime}`,
+      sub: i.mobile ? 'Slow on a phone, and keeps it busy.' : undefined,
       done: false,
       todo: false,
       action: { label: 'Scan', kind: 'scan', blocked: false },
+    });
+  }
+  if (h.assignedToScan > 0 && !i.isScanning) {
+    const a = h.assignedToScan;
+    lines.push({
+      id: 'scan-assigned',
+      title: 'Deep Scan, assigned tracks',
+      line: `Also scan the ${a} assigned ${plural(a, 'track', 'tracks')} (about ${formatTotal(a * SCAN_MIN_PER_TRACK * 60)})`,
+      sub: analysing ? 'Unavailable while Analyse tracks runs' : i.mobile ? 'Slow on a phone, and keeps it busy.' : undefined,
+      done: false,
+      todo: false,
+      action: { label: 'Scan', kind: 'scan-assigned', blocked: analysing },
     });
   }
 
@@ -631,24 +675,15 @@ export function healthModel(i: HealthInput): HealthModel {
   const toDo = lines.filter((l) => l.todo).length;
   const status = analysing ? 'Analysing…' : i.isScanning ? 'Scanning…' : toDo > 0 ? `${toDo} to do` : 'All set';
   const autoOpen = toDo > 0 || analysing || i.isScanning || left > 0;
-  const folded = h.unscanned > 0 ? 'All set · Deep Scan optional' : 'All set';
+  const folded = h.unscanned > 0 || h.assignedToScan > 0 ? 'All set · Deep Scan optional' : 'All set';
   return { lines, status, toDo, autoOpen, folded };
 }
 
 /** The card's footer (the classic peek). */
 export const HEALTH_FOOTER = 'Clear and the diagnostics are in the classic library.';
 
-/** Assign's confirmation, when tracks already have a crystal (Auto-Distribute reassigns all of them). */
-export function assignConfirmText(total: number, withCrystal: number): { title: string; body: string } {
-  const t = count(total);
-  const w = count(withCrystal);
-  return {
-    title: `Assign crystals to all ${t} tracks?`,
-    body:
-      `Auto-Distribute gives every track one of the 27 crystals. ${w} ${plural(w, 'track already has one, and its', 'tracks already have one, and theirs')} may change. ` +
-      'Scan results and keys are kept.',
-  };
-}
+/** Assign's confirmation (v15.8: from the plan, asked only when crystals tracks already have would change). */
+export { assignConfirmText, assignNeedsConfirm } from '../../../utils/mix/distribution.ts';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The Import sheet (Stage B)

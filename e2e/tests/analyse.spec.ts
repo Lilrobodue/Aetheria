@@ -96,14 +96,16 @@ const doneAtLeast = (page: Page, n: number, timeout = 60_000) =>
   expect.poll(async () => (await analyseState(page)).done, { timeout, intervals: [100, 250] }).toBeGreaterThanOrEqual(n);
 const phaseIs = (page: Page, phase: string, timeout = 3_000) =>
   expect.poll(async () => (await analyseState(page)).phase, { timeout, intervals: [100, 250] }).toBe(phase);
-/** The stored key count once it holds still across two reads 2.5 s apart (and `alsoWhile` holds at both). */
-async function settledKeyed(page: Page, alsoWhile: () => Promise<boolean> = async () => true, timeout = 60_000): Promise<number> {
+/** The stored key count once it holds still across two reads 2.5 s apart and `alsoWhile` holds for THAT count (the
+ *  condition is given the very value returned: re-reading it there let a save landing in between pass a 3 and return
+ *  a 2, v15.8's phone gate). */
+async function settledKeyed(page: Page, alsoWhile: (keyed: number) => Promise<boolean> = async () => true, timeout = 60_000): Promise<number> {
   let settled = -1;
   await expect.poll(async () => {
     const a = (await cacheCounts(page)).keyed;
     await page.waitForTimeout(2500);
     const b = (await cacheCounts(page)).keyed;
-    if (a === b && (await alsoWhile())) settled = a;
+    if (a === b && (await alsoWhile(a))) settled = a;
     return settled;
   }, { timeout, intervals: [100] }).toBeGreaterThanOrEqual(0);
   return settled;
@@ -280,7 +282,7 @@ test('A plain reload mid-pass keeps what was flushed, and a new run resumes', as
   // finished all 27 before the first flush (production is unchanged, ~0.85 s for this pass either way).
   await analyseTune(page, { flushMs: 5000, duty: 0.01 });
   await analyseButton(page).click();
-  const K = await settledKeyed(page, async () => (await analyseRuns(page)) === 0 && (await cacheCounts(page)).keyed >= 3, 90_000);
+  const K = await settledKeyed(page, async (keyed) => (await analyseRuns(page)) === 0 && keyed >= 3, 90_000);
   expect(K).toBeGreaterThanOrEqual(3);
   expect(await analyseRuns(page)).toBe(0);
 

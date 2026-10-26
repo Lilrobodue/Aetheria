@@ -1,5 +1,5 @@
 import { test, expect, ON_DEVICE } from './fixtures';
-import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY, crash, optInNewLayout, layoutPref, tapAt, shellHidden, PHONE_VIEWPORT } from './helpers';
+import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY, crash, optInNewLayout, layoutPref, tapAt, shellHidden, PHONE_VIEWPORT, openSeededNewLayout, openLibraryTab, libraryState, startWalk, type LibraryState } from './helpers';
 import { adb, mediaSession, chromeSessions } from './adb';
 
 // Checks only a real phone can make (npm run test:device). Android's own media
@@ -7,7 +7,7 @@ import { adb, mediaSession, chromeSessions } from './adb';
 // with `adb shell dumpsys media_session`. The screen-off tests must stay LAST
 // (v15.4: the panel-crash one after the lock-screen one, the root crash last;
 // v15.5: the new layout's one before the lock-screen one; v15.6: the new layout in Zen after it; v15.7: the Library
-// tab's row tap after that).
+// tab's row tap after that; v15.8: the walk after Assign after that).
 test.skip(!ON_DEVICE, 'needs an Android device (npm run test:device)');
 
 // Android sends the media keys to a card that is PLAYING, so a card left over
@@ -288,6 +288,79 @@ test('the Library tab: a row tap during a walk puts the tapped track on the card
       timeout: 10_000,
       message: "the mini-player's title is the card's",
     })
+    .toBe(true);
+  expect(dialogs).toEqual([]);
+});
+
+test('v15.8: after Assign, a Layer Ascent walk with the screen off: no gap on the path, the card follows three gapless advances across assigned tracks without a decode; after the wake the cube’s step names the crystal playing @device', async ({ page }) => {
+  // v15.8 (spec §5.8, addendum A5): Assign on a seeded synthetic library (30 tones, a crystal each but none at 852),
+  // then the walk. Assign fills 852, so the walk has every position; its tracks are assigned (not scanned) yet
+  // playback-ready, so playTrack never decodes them. Turns the screen off; a secure lock stays locked after the test.
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__decodes = 0;
+    const decode = BaseAudioContext.prototype.decodeAudioData;
+    BaseAudioContext.prototype.decodeAudioData = function (this: BaseAudioContext, ...a: unknown[]) { w.__decodes++; return (decode as any).apply(this, a); } as typeof decode;
+  });
+  const dialogs = await openSeededNewLayout(page, 30, { real: 30, seconds: 4, patch: [{ index: 7, crystal: null }] });
+  await page.setViewportSize(PHONE_VIEWPORT);
+  await openLibraryTab(page);
+  await expect(page.getByTestId('health-crystals-line')).toHaveText('1 of 30 tracks have none');
+  const assign = await page.getByTestId('health-crystals-action').boundingBox();
+  await tapAt(page, assign!.x + assign!.width / 2, assign!.y + assign!.height / 2);
+  // On the phone a CDP tap lands ~300 ms after tapAt returns, so every outcome is polled, never read once. Before
+  // Assign the library already holds 26 crystals and one null (none at 852): only real crystals count, and the origins
+  // and the playback-ready marker are part of the same condition, so the wait proves Assign ran.
+  const assigned = (s: LibraryState) =>
+    new Set(s.crystals.filter((c) => typeof c === 'number' && c > 0)).size === 27 && s.origins.every((o) => o === 'assigned') && s.scanned.every(Boolean);
+  // The seeded crystals are an older placement's (no recorded origin): when some move, Assign asks first.
+  const ask = page.getByRole('alertdialog', { name: 'Assign crystals?', exact: true });
+  await expect.poll(async () => (await ask.isVisible()) || assigned(await libraryState(page)), { message: 'Assign asks, or applies', timeout: 15_000 }).toBe(true);
+  if (await ask.isVisible()) {
+    const yes = await ask.getByRole('button', { name: 'Assign', exact: true }).boundingBox();
+    await tapAt(page, yes!.x + yes!.width / 2, yes!.y + yes!.height / 2);
+  }
+  await expect
+    .poll(async () => assigned(await libraryState(page)), { message: 'Assign applied: every crystal has a track; every track assigned (not scanned) and playback-ready', timeout: 15_000 })
+    .toBe(true);
+  await startWalk(page, 'A');
+  const s0 = await libraryState(page);
+  expect(s0.steps, 'no gap: every position of the path').toEqual([...Array(27).keys()]);
+  await expect.poll(() => mediaSession()?.state, { timeout: 15_000 }).toBe('playing');
+  const first = mediaSession()!.title;
+  const pausesBefore = await pauseCount(page);
+  const decodesBefore = await page.evaluate(() => (window as any).__decodes);
+
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  const titles: string[] = [];
+  try {
+    await expect
+      .poll(
+        () => {
+          const s = mediaSession();
+          if (s && s.state === 'playing' && s.title !== first && !titles.includes(s.title)) titles.push(s.title);
+          return titles.length;
+        },
+        { timeout: 45_000, intervals: [500], message: 'three gapless advances on the PLAYING card, its title following' }
+      )
+      .toBeGreaterThanOrEqual(3);
+    expect(mediaSession()?.state, 'the card still says playing').toBe('playing');
+    expect(chromeSessions().filter((s) => s.state === 'playing').length, 'one PLAYING Chrome card: none stranded').toBe(1);
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  test.info().annotations.push({ type: 'card titles with the screen off', description: [first, ...titles].join(' → ') });
+  // After the wake, DOM and state reads only (no click or tap: Chrome draws no frames behind the keyguard).
+  expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
+  expect(await page.evaluate(() => (window as any).__decodes) - decodesBefore, 'no decode: assigned tracks are playback-ready').toBe(0);
+  const s = await libraryState(page);
+  expect([s.walk, s.steps], 'the walk and its steps intact').toEqual(['A', s0.steps]);
+  expect(s.cursor, 'three tracks on').toBeGreaterThanOrEqual(3);
+  const ASCENT = [174, 285, 396, 417, 528, 639, 741, 852, 963, 1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150, 3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336];
+  expect(ASCENT[s.steps![s.cursor]], 'the cube’s step names the crystal playing').toBe(s.crystals[s.libraryNames.indexOf(s.current ?? '')]);
+  // (4 s tones advance on their own: the card and the state are compared as one polled pair.)
+  await expect
+    .poll(async () => (await libraryState(page)).current === (mediaSession()?.title ?? '-'), { message: 'the card names the track playing', timeout: 10_000 })
     .toBe(true);
   expect(dialogs).toEqual([]);
 });

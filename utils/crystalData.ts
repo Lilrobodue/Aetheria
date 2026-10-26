@@ -1,0 +1,150 @@
+// utils/crystalData.ts (v15.8)
+//
+// The crystal vocabulary the mix recipes and their checks share, importable by Node (type stripping) as well as the
+// app. The 27 crystals and the walk sequences stay defined in constants.ts (re-exported here; constants.ts's type-only
+// import makes it Node-importable). getHarmonicSolfeggio moved here from App.tsx VERBATIM (Deep Scan, playTrack and
+// Auto-Distribute call it by the same name). The presets are the classic drawer's literals, as data.
+
+import { SOLFEGGIO_INFO } from '../constants.ts';
+export {
+  SOLFEGGIO_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, LO_SHU_WALK_COMBINED, LO_SHU_WALK_OUROBOROS, OUROBOROS_PHASES, SOURCE_FREQ,
+} from '../constants.ts';
+export type { LoShuWalkMode } from '../constants.ts';
+
+/** The three regimes' crystals, ascending (the lists Auto-Distribute and getHarmonicSolfeggio spell out inline). */
+export const GUT_CRYSTALS: readonly number[] = [174, 285, 396, 417, 528, 639, 741, 852, 963];
+export const HEART_CRYSTALS: readonly number[] = [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150];
+export const HEAD_CRYSTALS: readonly number[] = [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336];
+
+/** The classic drawer's five presets (its buttons' literals: name as in the "No songs found for …" toast, label as on
+ *  the button). v14.17 gives them neutral names, here, for both layouts. */
+export type PresetId = 'qi' | 'healing' | 'mood' | 'meditation' | 'flow';
+export interface PresetDef { id: PresetId; name: string; label: string; crystals: readonly number[] }
+export const PRESETS: readonly PresetDef[] = [
+  { id: 'qi', name: 'Qi Strengthening', label: 'Qi Strength', crystals: [174, 285, 396, 417] },
+  { id: 'healing', name: 'Deep Healing', label: 'Deep Healing', crystals: [174, 285, 528] },
+  { id: 'mood', name: 'Mood Elevation', label: 'Mood Elevate', crystals: [396, 417, 639] },
+  { id: 'meditation', name: 'Deep Meditation', label: 'Meditation', crystals: [741, 852, 963] },
+  { id: 'flow', name: 'Flow State', label: 'Flow State', crystals: [285, 417, 528, 639, 741] },
+];
+
+export const getHarmonicSolfeggio = (detectedFreq: number): number => {
+    if (detectedFreq <= 0) return 396; 
+
+    // Define the 3-regime frequency sets for prioritized matching
+    const gutFrequencies = [174, 285, 396, 417, 528, 639, 741, 852, 963];
+    const heartFrequencies = [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150]; // HEART regime with 243 steady progression
+    const headFrequencies = [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336]; // HEAD regime with 354 steady progression
+
+    let bestMatch = 396;
+    let minScore = Infinity;
+
+    console.log(`Analyzing frequency: ${detectedFreq.toFixed(1)}Hz for solfeggio matching`);
+
+    // Enhanced harmonic matching with extended octave range checking
+    SOLFEGGIO_INFO.forEach(s => {
+        const sFreq = s.freq;
+        
+        // Determine tolerance and harmonic checking strategy based on regime
+        let tolerance = 50; // Default for GUT
+        let useExtendedHarmonics = false;
+        
+        if (headFrequencies.includes(sFreq)) {
+            tolerance = 400; // Very wide tolerance for HEAD frequencies
+            useExtendedHarmonics = false; // Direct matching only for high frequencies
+        } else if (heartFrequencies.includes(sFreq)) {
+            tolerance = 200; // Wide tolerance for HEART frequencies  
+            useExtendedHarmonics = true; // Limited harmonic checking
+        } else if (gutFrequencies.includes(sFreq)) {
+            tolerance = 50; // Tighter tolerance for GUT frequencies
+            useExtendedHarmonics = true; // Full harmonic analysis
+        }
+        
+        // Direct frequency matching
+        const directDiff = Math.abs(detectedFreq - sFreq);
+        if (directDiff <= tolerance && directDiff < minScore) {
+            minScore = directDiff;
+            bestMatch = sFreq;
+            console.log(`Direct match found: ${detectedFreq.toFixed(1)}Hz ≈ ${sFreq}Hz (diff: ${directDiff.toFixed(1)}Hz)`);
+        }
+
+        // Extended harmonic matching with comprehensive octave checking
+        if (useExtendedHarmonics && minScore > 10) { // Only if no close direct match
+            const harmonicCandidates: number[] = [];
+            
+            // Traditional octave relationships (powers of 2)
+            for (let octave = -4; octave <= 6; octave++) {
+                if (octave !== 0) {
+                    const octaveFreq = sFreq * Math.pow(2, octave);
+                    if (octaveFreq >= 10 && octaveFreq <= 25000) {
+                        harmonicCandidates.push(octaveFreq);
+                    }
+                }
+            }
+            
+            // Integer harmonic series (for GUT frequencies only)
+            if (gutFrequencies.includes(sFreq)) {
+                // Fundamental and its harmonics
+                for (let harmonic = 1; harmonic <= 12; harmonic++) {
+                    harmonicCandidates.push(sFreq * harmonic);
+                }
+                
+                // Sub-harmonics (fundamental divided by integers)
+                for (let divisor = 2; divisor <= 8; divisor++) {
+                    const subharmonic = sFreq / divisor;
+                    if (subharmonic >= 10) {
+                        harmonicCandidates.push(subharmonic);
+                    }
+                }
+                
+                // Perfect fifth (3:2 ratio) and perfect fourth (4:3 ratio)
+                harmonicCandidates.push(sFreq * 1.5); // Perfect fifth up
+                harmonicCandidates.push(sFreq / 1.5); // Perfect fifth down
+                harmonicCandidates.push(sFreq * 4/3); // Perfect fourth up
+                harmonicCandidates.push(sFreq * 3/4); // Perfect fourth down
+            }
+            
+            // Check all harmonic candidates
+            harmonicCandidates.forEach(candidate => {
+                const harmonicDiff = Math.abs(detectedFreq - candidate);
+                if (harmonicDiff < minScore) {
+                    minScore = harmonicDiff;
+                    bestMatch = sFreq;
+                    console.log(`Harmonic match found: ${detectedFreq.toFixed(1)}Hz ≈ ${candidate.toFixed(1)}Hz (${sFreq}Hz harmonic, diff: ${harmonicDiff.toFixed(1)}Hz)`);
+                }
+            });
+        }
+    });
+
+    // Special case: If detected frequency is very high and no match found, try to find the fundamental
+    if (minScore > 100 && detectedFreq > 1000) {
+        console.log(`High frequency detected (${detectedFreq.toFixed(1)}Hz), searching for fundamental...`);
+        
+        // Try to find the fundamental by dividing by common harmonic ratios
+        const possibleFundamentals = [
+            detectedFreq / 2,   // Octave down
+            detectedFreq / 3,   // Third harmonic
+            detectedFreq / 4,   // Fourth harmonic (two octaves down)
+            detectedFreq / 5,   // Fifth harmonic
+            detectedFreq / 6,   // Sixth harmonic
+            detectedFreq / 8,   // Eighth harmonic (three octaves down)
+            detectedFreq * 2/3, // Perfect fifth down
+            detectedFreq * 3/4, // Perfect fourth down
+        ];
+        
+        for (const fundamental of possibleFundamentals) {
+            if (fundamental >= 50 && fundamental <= 1000) {
+                const recursiveMatch = getHarmonicSolfeggio(fundamental);
+                // Check if this fundamental gives us a better match
+                const fundamentalDiff = Math.abs(fundamental - recursiveMatch);
+                if (fundamentalDiff < minScore * 0.5) { // Significantly better match
+                    console.log(`Found fundamental: ${detectedFreq.toFixed(1)}Hz → ${fundamental.toFixed(1)}Hz → ${recursiveMatch}Hz`);
+                    return recursiveMatch;
+                }
+            }
+        }
+    }
+
+    console.log(`Final solfeggio match: ${detectedFreq.toFixed(1)}Hz → ${bestMatch}Hz (deviation: ${minScore.toFixed(1)}Hz)`);
+    return bestMatch;
+};
