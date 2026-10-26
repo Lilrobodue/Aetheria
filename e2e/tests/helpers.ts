@@ -1045,7 +1045,9 @@ export type CrashView =
   | 'shell' | 'now-playing' | 'mini-player' | 'desktop-transport' | 'tab-library' | 'tab-mixes' | 'tab-layers'
   | 'more' | 'sheet-sound' | 'sheet-crystal' | 'sheet-walks' | 'menu'
   // v15.6, the Layers tab's five sections.
-  | 'layers-sound' | 'layers-crystal' | 'layers-levels' | 'layers-beat' | 'layers-advanced';
+  | 'layers-sound' | 'layers-crystal' | 'layers-levels' | 'layers-beat' | 'layers-advanced'
+  // v15.7, the Library tab.
+  | 'library-list' | 'library-health' | 'library-menu' | 'sheet-import';
 
 /**
  * Make a region throw on its next render, through the app's dev hook window.__aetheriaCrash (ErrorBoundary.tsx; dev
@@ -1366,3 +1368,302 @@ export async function openLayersTab(page: Page): Promise<void> {
 
 /** A jump chip of the Layers tab. */
 export const layersJump = (page: Page, name: LayersSectionName) => page.getByTestId(`layers-jump-${name}`);
+
+// ---------------------------------------------------------------------------------------------------------------
+// The Library tab (v15.7)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The sort the Library tab saves from its select (the app's own key). */
+export const LIBRARY_SORT_KEY = 'aetheria.librarySort.v1';
+
+/** Open the Library tab (the phone's tab bar, or the desktop's nav) and wait for it. */
+export async function openLibraryTab(page: Page): Promise<void> {
+  await tab(page, 'library');
+  await page.getByTestId('tab-library').waitFor();
+}
+
+/** A row of the Library tab's list, by its track's name (only rows in or near the view are mounted). */
+export const libraryRow = (page: Page, name: string) =>
+  page.getByTestId('library-row').filter({ has: page.locator('[data-row-title]').getByText(name, { exact: true }) });
+
+/** A row's play button (the row's tap target). */
+export const libraryRowButton = (page: Page, name: string) => libraryRow(page, name).locator('button[data-row-index]');
+
+/** A row's ⋯ (the row menu). */
+export const rowMenu = (page: Page, name: string) => page.getByRole('button', { name: `Options for ${name}`, exact: true });
+
+/** The play order's exact state through the dev hook (window.__aetheriaLibrary; dev builds only). */
+export interface LibraryState {
+  ids: string[];
+  names: string[];
+  cursor: number;
+  current: string | null;
+  shuffle: boolean;
+  shuffled: number[];
+  shufflePos: number;
+  walk: string | null;
+  segments: number[] | null;
+  phases: string[] | null;
+  libraryIds: string[];
+  libraryNames: string[];
+  playing: boolean;
+  t: number | null;
+  src: string | null;
+  undo: number | null;
+  crystals: Array<number | null>;
+  scanned: boolean[];
+  /** Each play-order entry's / library track's length (null: not read yet). */
+  durations: Array<number | null>;
+  libraryDurations: Array<number | null>;
+}
+
+async function libraryHook(page: Page): Promise<void> {
+  await page
+    .waitForFunction(() => typeof (window as any).__aetheriaLibrary?.state === 'function', null, { timeout: 10_000 })
+    .catch(() => {
+      throw new Error('window.__aetheriaLibrary is missing: the Library tab tests need the dev server (it is stripped from builds)');
+    });
+}
+
+export async function libraryState(page: Page): Promise<LibraryState> {
+  await libraryHook(page);
+  return page.evaluate(() => (window as any).__aetheriaLibrary.state());
+}
+
+/** The latest row tap's Undo through the hook (as its toast's button does), for when the toast has gone. */
+export async function libraryUndo(page: Page): Promise<void> {
+  await libraryHook(page);
+  await page.evaluate(() => (window as any).__aetheriaLibrary.undo());
+}
+
+/**
+ * "Open the classic library": since v15.7 the peek is the health card's footer (the Library tab). The card folds to
+ * one line when all is done, so it is opened first if folded.
+ */
+export async function peekClassicLibrary(page: Page): Promise<void> {
+  if (!(await page.getByTestId('tab-library').isVisible().catch(() => false))) await openLibraryTab(page);
+  const toggle = page.getByTestId('library-health-toggle');
+  if (await toggle.isVisible().catch(() => false)) await toggle.click();
+  await page.getByRole('button', { name: 'Open the classic library', exact: true }).click();
+}
+
+export interface SeedOptions {
+  /** The first `real` tracks are real tones of `seconds` (default 40), the rest tiny WAVs with a stated length. */
+  real?: number;
+  seconds?: number;
+  /** 'all': every track a crystal (the 27 in turn, so 27+ tracks fill a walk); 'real': only the real tones have one (a
+   *  walk then plays real tones only); 'some': 7 in 10; 'none'. */
+  crystals?: 'all' | 'real' | 'some' | 'none';
+  /** Key data (Analyse tracks' fields) on every other track. */
+  keys?: boolean;
+  /** Analyse tracks' visual envelope on 2 in 5. */
+  envelopes?: boolean;
+  /** Names `${prefix}-0001` … (default 'tone'); `pad: false` gives tone-1 …; `names` gives each its own. */
+  prefix?: string;
+  pad?: boolean;
+  names?: string[];
+  /** Per-track fields (by index): a crystal (null: none), a key with its confidence, Analyse tracks' visual envelope;
+   *  `unscanned` drops harmonicFreq (Deep Scan's queue, and playTrack decodes it); `scanned` gives it Deep Scan's own
+   *  fields (a fractal analysis, harmonicFreq 2.5 Hz off its crystal, that deviation). */
+  patch?: Array<{ index: number; crystal?: number | null; key?: string; confidence?: number; visual?: boolean; unscanned?: boolean; scanned?: boolean }>;
+}
+
+/**
+ * A synthetic library written straight into IndexedDB ('aetheria-db', playlistCache's schema), as an earlier session
+ * would have saved it: `n` tracks named tone-0001 …, each with its audio, its metadata (a stated length, so a restore
+ * never probes it) and the saved lists (library = play order, nothing current). 5,000 records restore in about a second,
+ * where importing them would take minutes of length probes. Done from /manifest.json, so the app can't save over it;
+ * load the app afterwards (openSeededNewLayout does both). The ids carry an import time, as the app's own do.
+ */
+export async function seedLibraryRecords(page: Page, n: number, opts: SeedOptions = {}): Promise<number> {
+  await page.goto('/manifest.json');
+  return page.evaluate(
+    async ({ n, real, seconds, crystals, keys, envelopes, prefix, pad, names, patch }) => {
+      const CRY = [174, 285, 396, 417, 528, 639, 741, 852, 963, 1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150, 3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336];
+      const KEYS = ['Am', 'C', 'Em', 'G', 'Dm', 'F', 'Bm', 'C#m'];
+      const wav = (secs: number, freq: number) => {
+        const rate = 8000;
+        const len = Math.max(8, Math.round(secs * rate));
+        const buf = new ArrayBuffer(44 + len * 2);
+        const v = new DataView(buf);
+        const w = (o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+        w(0, 'RIFF'); v.setUint32(4, 36 + len * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+        v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+        w(36, 'data'); v.setUint32(40, len * 2, true);
+        for (let i = 0; i < len; i++) {
+          const f = Math.min(1, i / 400, (len - i) / 400);
+          v.setInt16(44 + i * 2, Math.round(Math.sin((2 * Math.PI * freq * i) / rate) * 8000 * f), true);
+        }
+        return new Blob([buf], { type: 'audio/wav' });
+      };
+      const db: IDBDatabase = await new Promise((resolve, reject) => {
+        const r = indexedDB.open('aetheria-db', 2);
+        r.onupgradeneeded = () => {
+          const d = r.result;
+          for (const s of ['blobs', 'meta']) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' });
+          if (!d.objectStoreNames.contains('playlist-state')) d.createObjectStore('playlist-state', { keyPath: 'key' });
+        };
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+      const t0 = Date.now() - n * 1000;
+      const ids: string[] = [];
+      const tiny = wav(0.01, 440);
+      const width = Math.max(4, String(n).length);
+      for (let start = 0; start < n; start += 500) {
+        const tx = db.transaction(['blobs', 'meta'], 'readwrite');
+        for (let i = start; i < Math.min(n, start + 500); i++) {
+          const num = i + 1;
+          const name = names?.[i] ?? `${prefix}-${pad ? String(num).padStart(width, '0') : String(num)}`;
+          const id = `${t0 + i * 1000}-${Math.random().toString(36).slice(2, 11)}`;
+          ids.push(id);
+          const isReal = i < real;
+          tx.objectStore('blobs').put({ id, fileBlob: isReal ? wav(seconds, 220 + (i % 40) * 17) : tiny, fileName: `${name}.wav`, fileType: 'audio/wav' });
+          const meta: any = { id, name, duration: isReal ? seconds : 150 + ((num * 37) % 240) };
+          const hz = crystals === 'all' || (crystals === 'real' && isReal) ? CRY[i % 27] : crystals === 'some' && num % 10 < 7 ? CRY[(num * 7) % 27] : 0;
+          if (hz) {
+            meta.harmonicFreq = hz;
+            meta.closestSolfeggio = hz;
+            meta.harmonicDeviation = 3;
+          }
+          if (keys && num % 2 === 0) {
+            meta.chroma = Array.from({ length: 12 }, (_, k) => (k === num % 12 ? 0.34 : 0.06));
+            meta.chromaA4Hz = 440;
+            meta.musicKey = KEYS[num % KEYS.length];
+            meta.keyConfidence = 0.62;
+            meta.chromaVersion = 1;
+          }
+          if (envelopes && num % 5 < 2) {
+            const a = () => new Uint8Array(20).fill(90);
+            meta.visualEnvelope = { fps: 20, sub: a(), bass: a(), mid: a(), high: a() };
+          }
+          for (const p of patch.filter((x: any) => x.index === i)) {
+            if (p.crystal === null) {
+              delete meta.harmonicFreq;
+              delete meta.closestSolfeggio;
+              delete meta.harmonicDeviation;
+            } else if (typeof p.crystal === 'number') {
+              meta.harmonicFreq = p.crystal;
+              meta.closestSolfeggio = p.crystal;
+              meta.harmonicDeviation = 3;
+            }
+            if (p.key) {
+              meta.chroma = Array.from({ length: 12 }, (_, k) => (k === 9 ? 0.34 : 0.06));
+              meta.chromaA4Hz = 440;
+              meta.musicKey = p.key;
+              meta.keyConfidence = p.confidence ?? 0.5;
+              meta.chromaVersion = 1;
+            }
+            if (p.visual) {
+              const a = () => new Uint8Array(20).fill(90);
+              meta.visualEnvelope = { fps: 20, sub: a(), bass: a(), mid: a(), high: a() };
+            }
+            if (p.unscanned) delete meta.harmonicFreq;
+            if (p.scanned && meta.closestSolfeggio) {
+              meta.harmonicFreq = meta.closestSolfeggio + 2.5;
+              meta.harmonicDeviation = 2.5;
+              meta.fractalAnalysis = {
+                dominantFrequency: meta.harmonicFreq, harmonicSeries: [meta.harmonicFreq], fractalDimension: 1.4, goldenRatioAlignment: 0.2,
+                pattern111Presence: 0.1, dnaResonanceScore: 0.2, safetyLevel: 'SAFE', recommendedVolume: 0.8, infiniteOrderHarmonics: [],
+                sacredGeometryAlignment: 0.2, schumannResonanceHarmony: 0.1,
+              };
+            }
+          }
+          tx.objectStore('meta').put(meta);
+        }
+        await new Promise((resolve, reject) => {
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error);
+        });
+      }
+      const tx = db.transaction('playlist-state', 'readwrite');
+      tx.objectStore('playlist-state').put({ key: 'current', playlistOrder: ids, originalOrder: ids, currentSongIndex: -1, loShuWalkMode: null, selectedSolfeggio: 396, savedAt: Date.now() });
+      await new Promise((resolve) => (tx.oncomplete = resolve));
+      db.close();
+      return ids.length;
+    },
+    {
+      n,
+      real: opts.real ?? Math.min(n, 30),
+      seconds: opts.seconds ?? 40,
+      crystals: opts.crystals ?? 'all',
+      keys: opts.keys ?? false,
+      envelopes: opts.envelopes ?? false,
+      prefix: opts.prefix ?? 'tone',
+      pad: opts.pad ?? true,
+      names: opts.names ?? null,
+      patch: opts.patch ?? [],
+    }
+  );
+}
+
+/**
+ * The new layout over a seeded library (seedLibraryRecords), v2 with Headphones answered (or `engine`): the choices
+ * stored before the first load, the tutorial skipped, pause() counted, the disclaimer accepted, the library restored.
+ * Returns the native-dialog list.
+ */
+export async function openSeededNewLayout(
+  page: Page,
+  n: number,
+  opts: SeedOptions & { engine?: 'v2' | 'classic' } = {}
+): Promise<string[]> {
+  const dialogs = watchNativeDialogs(page);
+  const engine = opts.engine ?? 'v2';
+  await page.addInitScript(
+    ({ engine, keys }) => {
+      try {
+        if (sessionStorage.getItem('__e2eSeededLib') === null) {
+          sessionStorage.setItem('__e2eSeededLib', '1');
+          localStorage.setItem(keys.engine, engine);
+          if (engine === 'v2') localStorage.setItem(keys.output, 'headphones');
+          localStorage.setItem(keys.layout, 'new');
+        }
+        localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
+      } catch {}
+      const w = window as any;
+      w.__pauseCount = 0;
+      const original = HTMLMediaElement.prototype.pause;
+      HTMLMediaElement.prototype.pause = function (this: HTMLMediaElement) {
+        w.__pauseCount++;
+        return original.call(this);
+      };
+    },
+    { engine, keys: { engine: LAYER_ENGINE_KEY, output: LAYER_OUTPUT_KEY, layout: LAYOUT_KEY } }
+  );
+  await seedLibraryRecords(page, n, opts);
+  await page.goto('/');
+  await acceptDisclaimerNew(page);
+  await expect.poll(async () => (await libraryState(page)).libraryIds.length, { message: 'the seeded library restores', timeout: 60_000 }).toBe(n);
+  return dialogs;
+}
+
+/** Start a Lo Shu walk from Now Playing's Walks sheet (or the desktop's) and wait until it plays. */
+export async function startWalk(page: Page, mode: 'A' | 'B' | 'C' | 'combined' | 'ouroboros' | 'cabi'): Promise<void> {
+  if (!(await page.getByTestId('view-now').isVisible().catch(() => false)) && !(await page.getByTestId('desktop-walks').isVisible().catch(() => false))) {
+    await tab(page, 'now');
+  }
+  await page.getByTestId('np-walks').or(page.getByTestId('desktop-walks')).click();
+  await page.getByTestId(`walk-${mode}`).click();
+  await expect.poll(async () => { const s = await libraryState(page); return s.walk === mode && s.playing && (s.t ?? 0) > 0.2; }, { message: `walk ${mode} plays`, timeout: 20_000 }).toBe(true);
+}
+
+/** The Library tab's Undo toast (the notices region's card with an Undo button). */
+export const undoToast = (page: Page) => page.getByTestId('notices').locator('div[aria-atomic="true"]').filter({ has: page.getByRole('button', { name: 'Undo', exact: true }) });
+
+/** From the next page load on, count IndexedDB deletes and clears on the library's stores in window.__idbDeletes. */
+export async function countLibraryDeletes(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__idbDeletes = 0;
+    const del = IDBObjectStore.prototype.delete;
+    IDBObjectStore.prototype.delete = function (this: IDBObjectStore, ...args: unknown[]) {
+      if (this.name === 'blobs' || this.name === 'meta') w.__idbDeletes++;
+      return (del as any).apply(this, args);
+    } as typeof del;
+    const clear = IDBObjectStore.prototype.clear;
+    IDBObjectStore.prototype.clear = function (this: IDBObjectStore) {
+      if (this.name === 'blobs' || this.name === 'meta') w.__idbDeletes++;
+      return clear.call(this);
+    } as typeof clear;
+  });
+}

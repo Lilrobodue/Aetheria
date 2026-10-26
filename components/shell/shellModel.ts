@@ -9,7 +9,8 @@ export const LAYOUT_KEY = 'aetheria.layout.v1';
 
 export type LayoutPref = 'classic' | 'new';
 export type ShellTab = 'now' | 'library' | 'mixes' | 'layers' | 'more';
-export type ShellSheet = 'sound' | 'crystal' | 'walks' | 'menu';
+/** v15.7 adds the Import sheet. */
+export type ShellSheet = 'sound' | 'crystal' | 'walks' | 'menu' | 'import';
 /** The classic panel a stub "peeks" into (decision 4). */
 export type PeekPanel = 'library' | 'mixes' | 'sound';
 
@@ -210,4 +211,21 @@ export function carLine(engine: 'v2' | 'classic', v2Failed: boolean, hz: number,
   if (engine !== 'v2') return 'Classic layers ignore Car output';
   if (v2Failed) return 'Only the music · the layers are off';
   return `Music and a quiet tone for the ${hz} Hz crystal · no beat`;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// v15.7: classic's "Analysis Status" notice in the new layout
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * What the new layout does with a message classic shows in its blue "Analysis Status" notice: an import's skipped-files
+ * line is the Import sheet's to say, and Deep Scan's start and per-track progress the health card's ('mute'); anything
+ * else (a walk built, a mix, Auto-Distribute's summary, Deep Scan's end) goes to the status toast ('toast').
+ */
+export function newLayoutNotice(message: string): 'mute' | 'toast' {
+  const m = String(message ?? '');
+  if (/^Added [\d,]+ tracks?\. Skipped [\d,]+ files? /.test(m)) return 'mute';
+  if (/^Analyzing: .+ \([\d,]+\/[\d,]+\)$/.test(m)) return 'mute';
+  if (/^Starting deep fractal analysis of /.test(m)) return 'mute';
+  return 'toast';
 }

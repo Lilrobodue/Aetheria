@@ -8,6 +8,7 @@
 // A tab change moves the focus to the new view's heading.
 // v15.6: the Layers tab replaces its stub (still the tab-layers region), and Zen hides this root: inert and transparent
 // (a 500 ms fade out, none under reduced motion; the reveal is instant). Its ref is the shell root Zen watches.
+// v15.7: the Library tab replaces its stub (still the tab-library region).
 
 import React, { useEffect, useRef } from 'react';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
@@ -22,6 +23,7 @@ import MiniPlayer from './MiniPlayer';
 import TabStub from './tabs/TabStub';
 import MoreStub from './tabs/MoreStub';
 import LayersTab from './layers/LayersTab';
+import LibraryTab from './library/LibraryTab';
 import SheetHost from './SheetHost';
 import { NowPlayingCrash, TabCrash, TransportCrash } from './fallbacks';
 
@@ -68,7 +70,7 @@ const PhoneShell = () => {
         <ViewBoundary
           name="tab-library"
           fallback={(api) => (tab === 'library' ? <TabCrash api={api} inPanel={false} /> : null)}
-          render={() => tab === 'library' && <TabStub tab="library" />}
+          render={() => tab === 'library' && <LibraryTab />}
         />
         <ViewBoundary
           name="tab-mixes"

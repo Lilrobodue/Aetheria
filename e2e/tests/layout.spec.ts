@@ -16,6 +16,7 @@ import {
   openNewLayout,
   optInNewLayout,
   pauseCount,
+  peekClassicLibrary,
   recordHudDraws,
   renders,
   resetRenders,
@@ -325,6 +326,25 @@ const DRILLS: Drill[] = [
   { view: 'layers-levels', open: (p) => tab(p, 'layers'), present: (p) => p.getByTestId('layers-levels') },
   { view: 'layers-beat', open: (p) => tab(p, 'layers'), present: (p) => p.getByTestId('layers-beat') },
   { view: 'layers-advanced', open: (p) => tab(p, 'layers'), present: (p) => p.getByTestId('layers-advanced') },
+  // v15.7: the Library tab's four regions.
+  { view: 'library-list', open: (p) => tab(p, 'library'), present: (p) => p.getByTestId('library-list') },
+  { view: 'library-health', open: (p) => tab(p, 'library'), present: (p) => p.getByTestId('library-health') },
+  {
+    view: 'library-menu',
+    open: async (p) => {
+      await tab(p, 'library');
+      await p.getByRole('button', { name: 'Options for tone-02', exact: true }).click();
+    },
+    present: (p) => p.getByTestId('library-menu-body'),
+  },
+  {
+    view: 'sheet-import',
+    open: async (p) => {
+      await tab(p, 'library');
+      await p.getByTestId('library-import').click();
+    },
+    present: (p) => p.getByTestId('import-body'),
+  },
 ];
 
 const fallbackOf = (page: Page, view: Drill['view']): Locator =>
@@ -460,8 +480,9 @@ test.describe('phone, renders', () => {
     await resetRenders(page);
     await page.waitForTimeout(3000);
     const lib = await renders(page);
-    test.info().annotations.push({ type: 'renders on the Library stub, 3 s', description: JSON.stringify(lib) });
-    expect.soft(lib['TabStub:library'] ?? 0, 'the Library stub renders').toBe(0);
+    test.info().annotations.push({ type: 'renders on the Library tab, 3 s', description: JSON.stringify(lib) });
+    // v15.7: the Library tab (no longer a stub) renders nothing on the clock either.
+    for (const view of ['LibraryTab', 'LibraryList', 'LibraryRow', 'HealthCard']) expect.soft(lib[view] ?? 0, `${view} renders`).toBe(0);
     expect.soft(lib.MiniPlayer ?? 0, 'MiniPlayer renders').toBe(0);
     expect.soft(lib.MiniProgress ?? 0, 'MiniProgress renders').toBeGreaterThanOrEqual(8);
     expect(dialogs).toEqual([]);
@@ -643,6 +664,20 @@ test.describe('phone, accessibility', () => {
         await tab(page, 'library');
         await expect(page.getByTestId('mini-player')).toBeVisible();
       }],
+      // v15.7: the Library tab, its row menu and the Import sheet.
+      ['the Library tab', async () => {
+        await expect(page.getByTestId('library-list')).toBeVisible();
+      }],
+      ['the row menu', async () => {
+        await page.getByRole('button', { name: 'Options for tone-02', exact: true }).click();
+        await expect(page.getByTestId('library-menu-body')).toBeVisible();
+      }],
+      ['the Import sheet', async () => {
+        await page.keyboard.press('Escape');
+        await page.getByTestId('library-import').click();
+        await expect(page.getByTestId('import-body')).toBeVisible();
+        await page.keyboard.press('Escape');
+      }],
       // v15.6: the Layers tab (each section on screen in turn).
       ['the Layers tab', async () => {
         await tab(page, 'layers');
@@ -790,7 +825,7 @@ test.describe('phone, peek', () => {
     const pill = page.getByTestId('peek-pill');
     await expect(pill, 'no pill in the new layout').toHaveCount(0);
     await tab(page, 'library');
-    await page.getByRole('button', { name: 'Open the classic library', exact: true }).click();
+    await peekClassicLibrary(page);
     await expect(classicHeader(page)).toBeVisible();
     await expect(page.locator('aside').getByText('tone-02', { exact: true }), 'the library is open').toBeVisible();
     await expect(pill).toBeVisible();
@@ -802,7 +837,7 @@ test.describe('phone, peek', () => {
     await expect(page.getByTestId('tab-library')).toBeVisible();
     await expect(pill).toHaveCount(0);
     // A reload during a peek opens the new layout.
-    await page.getByRole('button', { name: 'Open the classic library', exact: true }).click();
+    await peekClassicLibrary(page);
     await expect(pill).toBeVisible();
     await page.reload();
     await newShell(page).waitFor();
@@ -926,7 +961,7 @@ test.describe('phone, review fixes', () => {
     const dialogs = await playingInNewLayout(page);
     await phoneSize(page);
     await tab(page, 'library');
-    await page.getByRole('button', { name: 'Open the classic library', exact: true }).click();
+    await peekClassicLibrary(page);
     await expect(page.getByTestId('peek-pill')).toBeVisible();
     // Classic's Zen toggle (a DOM click: on a phone the open library drawer lies over most of the player bar).
     await page.getByTitle('Zen Mode (Hide UI)', { exact: true }).evaluate((b) => (b as HTMLElement).click());
@@ -1082,7 +1117,7 @@ test.describe('small phone, review fixes', () => {
       for (const stub of ['library', 'layers'] as const) {
         await tab(page, stub);
         if (stub === 'library') {
-          await page.getByRole('button', { name: 'Open the classic library', exact: true }).click();
+          await peekClassicLibrary(page);
         } else {
           await page.getByTestId('layers-jump-advanced').click();
           await page.getByTestId('layers-open-visualizer').click();
@@ -1133,9 +1168,11 @@ test.describe('small phone, review fixes', () => {
       await page.waitForTimeout(300);
       const found = await page.evaluate(() => {
         const cards = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="notices"] > div')).filter((c) => c.getBoundingClientRect().height > 0);
+        // v15.7: the Library tab's scrolling content passes under a notice; its spacer lets every row scroll clear of it
+        // (checked below), so only the fixed controls count here.
         const controls = Array.from(
           document.querySelectorAll<HTMLElement>('[data-testid="new-shell"] button, [data-testid="new-shell"] [role="slider"], [data-testid="new-shell"] input')
-        );
+        ).filter((el) => !el.closest('[data-testid="library-scroll"]'));
         const out: string[] = [];
         for (const card of cards) {
           const c = card.getBoundingClientRect();
@@ -1160,6 +1197,16 @@ test.describe('small phone, review fixes', () => {
     await clear('Now Playing');
     await tab(page, 'library');
     await clear('the Library tab, above the mini-player');
+    // Scrolled to its end, the list's last row and its ⋯ sit clear of the notice (the spacer).
+    await page.getByTestId('library-scroll').evaluate((el) => (el.scrollTop = el.scrollHeight));
+    await page.waitForTimeout(300);
+    const lastRowClear = await page.evaluate(() => {
+      const card = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="notices"] > div')).find((c) => c.getBoundingClientRect().height > 0)!.getBoundingClientRect();
+      const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="library-row"]'));
+      const last = rows.sort((a, b) => Number(b.getAttribute('aria-posinset')) - Number(a.getAttribute('aria-posinset')))[0].getBoundingClientRect();
+      return last.bottom <= card.top + 0.5;
+    });
+    expect(lastRowClear, 'the last row scrolls clear of the notice').toBe(true);
     await tab(page, 'now');
     await page.getByTestId('np-output').click();
     await sheet(page, 'Sound').getByRole('group', { name: 'Output' }).getByRole('button', { name: 'Car', exact: true }).click();

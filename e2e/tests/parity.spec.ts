@@ -33,6 +33,7 @@ import { importTones, openHarmonicControl, openSafety } from './helpers';
 // otherwise unchanged by the new layout, its branch, the heat guard's wrapper and the peek. v15.6 adds no mask.
 //
 // v15.6: E2E_PARITY=new runs the new layout's screens instead (walkNew, below): the same procedure, other rules.
+// v15.7: the Library tab (phone) and the desktop Library panel are reviewed shots, no longer compared.
 
 const VIEWPORTS = {
   desktop: { width: 1280, height: 800 },
@@ -478,10 +479,11 @@ async function walkNew(page: Page, vp: Viewport): Promise<void> {
     await page.getByRole('dialog', { name: 'Walks', exact: true }).waitFor();
     await shot('sheet-walks', { compare: true, zenMask: menu });
     await page.keyboard.press('Escape');
+    // v15.7: the Library tab replaced its stub, so its shot is reviewed (against the mockups), not compared.
     for (const t of ['library', 'mixes'] as const) {
       await page.getByTestId(`tab-${t}-button`).click();
       await page.getByTestId(`tab-${t}`).waitFor();
-      await shot(`tab-${t}`, { compare: true });
+      await shot(`tab-${t}`, { compare: t !== 'library' });
     }
     for (const t of ['layers', 'more'] as const) {
       await page.getByTestId(`tab-${t}-button`).click();
@@ -517,7 +519,7 @@ async function walkNew(page: Page, vp: Viewport): Promise<void> {
     for (const t of ['library', 'mixes'] as const) {
       await page.getByTestId(`nav-${t}`).click();
       await page.getByTestId(`tab-${t}`).waitFor();
-      await shot(`panel-${t}`, { compare: true, masks: [transport] });
+      await shot(`panel-${t}`, { compare: t !== 'library', masks: [transport] });
     }
     await page.getByTestId('nav-layers').click();
     await shot('panel-layers', { compare: false });

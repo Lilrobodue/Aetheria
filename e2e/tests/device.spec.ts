@@ -6,7 +6,8 @@ import { adb, mediaSession, chromeSessions } from './adb';
 // session — what the lock screen, the notification and the car show — is read
 // with `adb shell dumpsys media_session`. The screen-off tests must stay LAST
 // (v15.4: the panel-crash one after the lock-screen one, the root crash last;
-// v15.5: the new layout's one before the lock-screen one; v15.6: the new layout in Zen after it).
+// v15.5: the new layout's one before the lock-screen one; v15.6: the new layout in Zen after it; v15.7: the Library
+// tab's row tap after that).
 test.skip(!ON_DEVICE, 'needs an Android device (npm run test:device)');
 
 // Android sends the media keys to a card that is PLAYING, so a card left over
@@ -200,6 +201,92 @@ test('in Zen, the new layout keeps the lock-screen card across three gapless adv
     .poll(async () => ((await page.getByTestId('np-title').textContent()) ?? '') === (mediaSession()?.title ?? '-'), {
       timeout: 10_000,
       message: "Now Playing's title is the card's",
+    })
+    .toBe(true);
+  expect(dialogs).toEqual([]);
+});
+
+test('the Library tab: a row tap during a walk puts the tapped track on the card at once; car Next 2/2 and Pause/Play follow the library; with the screen off it advances through the library @device', async ({ page }) => {
+  // v15.7 (spec §5.9 step 3), the riskiest path: a walk plays, a Library row is tapped, and the card, the car keys and
+  // the gapless advance all follow the LIBRARY from that track. Screen on first (the car keys), then off. Turns the
+  // screen off; a phone with a secure lock stays locked after the test (unlock it by hand).
+  const dialogs = await openApp(page);
+  await importTones(page, 28, 4);
+  await page.getByRole('button', { name: /Auto-Distribute Frequencies/ }).click();
+  await page.setViewportSize(PHONE_VIEWPORT);
+  await optInNewLayout(page);
+  await expect(page.getByTestId('view-now')).toBeVisible();
+  const at = async (testId: string) => {
+    const box = await page.getByTestId(testId).boundingBox();
+    expect(box, testId).toBeTruthy();
+    await tapAt(page, box!.x + box!.width / 2, box!.y + box!.height / 2);
+  };
+  // A walk, with a finger (Walks › Vortex): polled, as each tap's click lands after tapAt returns.
+  await at('np-walks');
+  await expect(page.getByTestId('walk-C')).toBeVisible({ timeout: 5_000 });
+  await at('walk-C');
+  await expect.poll(() => mediaSession()?.state, { timeout: 15_000 }).toBe('playing');
+  // The Library tab, and a row: tone-10 (or tone-11 when the walk is on tone-10).
+  await at('tab-library-button');
+  await expect(page.getByTestId('library-list')).toBeVisible({ timeout: 5_000 });
+  const walkTitle = mediaSession()!.title;
+  const n = walkTitle === 'tone-10' ? 11 : 10;
+  const name = (k: number) => `tone-${String(k).padStart(2, '0')}`;
+  // The list is virtualized: scroll it so the row is mounted and in view (a DOM scroll; the tap itself is a finger's).
+  await page.evaluate((i) => {
+    const sc = document.querySelector('[data-testid="library-scroll"]') as HTMLElement;
+    const list = document.querySelector('[data-testid="library-list"]') as HTMLElement;
+    sc.scrollTop = Math.max(0, list.offsetTop + i * 64 - 120);
+  }, n - 1);
+  const row = page.getByTestId('library-row').filter({ has: page.locator('[data-row-title]').getByText(name(n), { exact: true }) });
+  await expect(row).toBeVisible({ timeout: 5_000 });
+  await page.waitForTimeout(300);
+  const box = await row.boundingBox();
+  expect(box, `the ${name(n)} row`).toBeTruthy();
+  await tapAt(page, box!.x + 80, box!.y + box!.height / 2);
+  await expect
+    .poll(() => mediaSession(), { timeout: 15_000, message: 'the card names the tapped track' })
+    .toEqual({ state: 'playing', title: name(n) });
+  await expect(page.getByTestId('mini-title')).toHaveText(name(n));
+  // The car's (and the lock screen's) Next, twice: the library's next tracks, in order.
+  for (const k of [n + 1, n + 2]) {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_MEDIA_NEXT');
+    await expect.poll(() => mediaSession(), { timeout: 15_000, message: `car Next → ${name(k)}` }).toEqual({ state: 'playing', title: name(k) });
+  }
+  adb('shell', 'input', 'keyevent', 'KEYCODE_MEDIA_PAUSE');
+  await expect.poll(() => mediaSession()?.state, { timeout: 10_000, message: 'Pause' }).toBe('paused');
+  adb('shell', 'input', 'keyevent', 'KEYCODE_MEDIA_PLAY');
+  await expect.poll(() => mediaSession(), { timeout: 10_000, message: 'Play' }).toEqual({ state: 'playing', title: name(n + 2) });
+  const first = name(n + 2);
+  const pausesBefore = await pauseCount(page);
+
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  const titles: string[] = [];
+  try {
+    await expect
+      .poll(
+        () => {
+          const s = mediaSession();
+          if (s && s.state === 'playing' && s.title !== first && !titles.includes(s.title)) titles.push(s.title);
+          return titles.length;
+        },
+        { timeout: 45_000, intervals: [500], message: 'three gapless advances on the PLAYING card, through the library' }
+      )
+      .toBeGreaterThanOrEqual(3);
+    expect(mediaSession()?.state, 'the card still says playing').toBe('playing');
+    expect(chromeSessions().filter((s) => s.state === 'playing').length, 'one PLAYING Chrome card: none stranded').toBe(1);
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  test.info().annotations.push({ type: 'card titles with the screen off, from a Library row', description: [first, ...titles].join(' → ') });
+  expect(titles.slice(0, 3), 'the library in order from the tapped track').toEqual([name(n + 3), name(n + 4), name(n + 5)]);
+  // After the wake, DOM reads only (the keyguard: no frames, no taps).
+  expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
+  await expect(page.getByTestId('tab-library'), 'still the Library tab').toBeAttached();
+  await expect
+    .poll(async () => ((await page.getByTestId('mini-title').textContent()) ?? '') === (mediaSession()?.title ?? '-'), {
+      timeout: 10_000,
+      message: "the mini-player's title is the card's",
     })
     .toBe(true);
   expect(dialogs).toEqual([]);

@@ -8,6 +8,8 @@
 // contexts that did not change.
 //
 // v15.6 adds TuningContext (the Layers tab's slow settings), Zen's state on ShellValue and the tab's actions.
+// v15.7 adds LibraryListContext (the library itself) and LibraryStatusContext (the passes' and imports' state) for the
+// Library tab, where it was left (ShellValue.libraryViewRef), and the tab's actions.
 //
 // Each reader throws a clear error without its provider; the ViewBoundary around the view then catches it.
 // No @types/react here: React is `any` to tsc, so these interfaces document the values rather than enforce them.
@@ -15,7 +17,10 @@
 import { createContext, useContext } from 'react';
 import type { LayerEngine, LayerOutput, BeatRender } from '../../utils/soundV2/layerHost';
 import type { ShellSheet, ShellTab, PeekPanel, LayoutPref } from './shellModel';
+import type { Song } from '../../types';
 import type { LayersSection } from './layers/layersModel';
+import type { LastImport } from './library/libraryModel';
+import type { PassProgress } from '../../utils/library/analysePass';
 
 /** The transport's state. Changes on play/pause, a track change, shuffle/repeat, a new play order. */
 export interface PlayerValue {
@@ -142,8 +147,9 @@ export interface TimeValue {
 export interface ShellValue {
   tab: ShellTab;
   sheet: ShellSheet | null;
-  /** Where the open sheet should start (the Sound sheet opened from Output starts at its Output group). */
-  sheetFocus: 'output' | null;
+  /** Where the open sheet should start (the Sound sheet opened from Output starts at its Output group; v15.7: the Import
+   *  sheet opened from the health card starts at its Recover offer). */
+  sheetFocus: 'output' | 'recover' | null;
   peek: PeekPanel | null;
   /** The phone shell's Car screen (Output = Car). */
   car: boolean;
@@ -156,6 +162,45 @@ export interface ShellValue {
   rootRef: { current: HTMLDivElement | null };
   /** v15.6: where the Layers tab was left (its content's scrollTop), and a section to open at instead. */
   layersScrollRef: { current: { top: number; jump: LayersSection | null } };
+  /** v15.7: where the Library tab was left (session only; the query is never saved). */
+  libraryViewRef: { current: LibraryViewState };
+}
+
+/** v15.7: the Library tab as it was left: its query, its content's scrollTop, and the health card's fold (null: by
+ *  decision 5 A, open while there is something to do). */
+export interface LibraryViewState {
+  query: string;
+  top: number;
+  healthOpen: boolean | null;
+  /** Desktop: the button that opened the Import panel, to focus when the tab comes back. */
+  refocus?: 'import' | 'review' | null;
+}
+
+/** v15.7: the library itself (App's originalPlaylist, the same array): an import or its duration batches, a delete, a
+ *  scan's or analysis's patch change it; never the clock. */
+export interface LibraryListValue {
+  songs: Song[];
+}
+
+/** v15.7: the passes' and imports' state, for the health card and the Import sheet only (it ticks with their progress). */
+export interface LibraryStatusValue {
+  isScanning: boolean;
+  /** Deep Scan's percentage. */
+  scanProgress: number;
+  /** Analyse tracks' progress (PASS_IDLE when idle). */
+  pass: PassProgress;
+  /** The Analyse tracks button's counts (countAnalysable over the library). */
+  analyseCounts: { todo: number; todoSeconds: number; failed: number; failedSeconds: number; tooLong: number };
+  restoring: boolean;
+  /** Tracks whose length is still being read (the duration queue). */
+  durationsLeft: number;
+  /** Stored tracks the library doesn't list (classic's banner counts), or null. */
+  orphans: { fresh: number; duplicates: number } | null;
+  orphanBusy: boolean;
+  discardArmed: boolean;
+  lastImport: LastImport | null;
+  /** Analyse tracks treats this device as a phone. */
+  analyseMobile: boolean;
 }
 
 /** One object for the app's lifetime: every member calls App's latest function (no view re-renders for a handler). */
@@ -204,6 +249,26 @@ export interface ShellActions {
   setZen: (on: boolean) => void;
   /** Bring the hidden controls back (the reveal surface's click, "Show controls"). */
   revealZen: () => void;
+  // v15.7, the Library tab (references to App's functions).
+  /** A row: the whole library (in this order of ids, or the library's own with null) from that track. */
+  playFromLibrary: (id: string, orderIds: readonly string[] | null) => void;
+  undoPlayOrder: () => void;
+  /** v15.4's delete confirmation for this track. */
+  requestDelete: (id: string) => void;
+  /** Auto-Distribute. */
+  assignCrystals: () => void;
+  /** Analyse tracks' button (Start, or Stop while it runs). */
+  analyse: () => void;
+  /** Deep Scan, and its cancel. */
+  scan: () => void;
+  stopScan: () => void;
+  /** The import handler (classic's, unchanged). */
+  importFiles: (event: any) => void;
+  recoverOrphans: () => void;
+  discardOrphans: () => void;
+  openImport: (focus?: 'recover' | null) => void;
+  /** The list element, the delete Dialog's focus fallback. */
+  setLibraryFocusTarget: (el: HTMLElement | null) => void;
 }
 
 export const PlayerContext = createContext(null);
@@ -215,6 +280,8 @@ export const TimeContext = createContext(null);
 export const ActionsContext = createContext(null);
 export const ShellContext = createContext(null);
 export const TuningContext = createContext(null);
+export const LibraryListContext = createContext(null);
+export const LibraryStatusContext = createContext(null);
 
 function read<T>(ctx: unknown, name: string): T {
   const v = useContext(ctx);
@@ -231,3 +298,5 @@ export const useTime = (): TimeValue => read<TimeValue>(TimeContext, 'TimeContex
 export const useActions = (): ShellActions => read<ShellActions>(ActionsContext, 'ActionsContext');
 export const useShell = (): ShellValue => read<ShellValue>(ShellContext, 'ShellContext');
 export const useTuning = (): TuningValue => read<TuningValue>(TuningContext, 'TuningContext');
+export const useLibraryList = (): LibraryListValue => read<LibraryListValue>(LibraryListContext, 'LibraryListContext');
+export const useLibraryStatus = (): LibraryStatusValue => read<LibraryStatusValue>(LibraryStatusContext, 'LibraryStatusContext');

@@ -9,6 +9,7 @@ import {
   removeIdsWithCursor,
   appendToLibrary,
   splitOrphans,
+  refreshById,
 } from './listOps.ts';
 
 type T = { id: string; tag?: string; n?: number };
@@ -126,6 +127,22 @@ check(!sameIdOrder(mk('a', 'b'), mk('a', 'b', 'c')), 'different length');
   const mix2 = patchById(mix, results);
   check(lib2[1].n === 1 && lib2[3].n === 2 && lib2[0] === library[0], 'library gets the results for its tracks only');
   check(mix2[0].n === 1 && mix2[1].n === 2 && mix2[2].n === 1, 'the mix gets them too, repeats included');
+}
+
+// refreshById (v15.7): the play order takes the library's own objects, by id; nothing else changes.
+{
+  const lib: T[] = [{ id: 'a', n: 2 }, { id: 'b', n: 2 }, { id: 'c', n: 2 }];
+  const stale: T[] = [{ id: 'c', n: 1 }, lib[0], { id: 'c', n: 1 }, { id: 'x', n: 1 }];
+  const r = refreshById(stale, lib);
+  check(ids(r) === 'c,a,c,x' && r.length === 4, 'refreshById keeps the ids, the order and the length');
+  check(r[0] === lib[2] && r[2] === lib[2] && r[1] === lib[0], "stale entries (repeats too) become the library's objects");
+  check(r[3] === stale[3], 'an entry the library lacks stays');
+  check(stale[0].n === 1, 'the input is not mutated');
+  const fresh = [lib[1], lib[0]];
+  check(refreshById(fresh, lib) === fresh, 'nothing stale: the same array');
+  check(refreshById([], lib).length === 0 && refreshById(stale, []) === stale, 'empty lists');
+  const dupLib: T[] = [{ id: 'a', n: 5 }, { id: 'a', n: 6 }];
+  check(refreshById([{ id: 'a' }], dupLib)[0] === dupLib[0], 'a library repeat: its first entry');
 }
 
 console.log(`listOps: ${passed} checks passed, ${failures.length} failed`);

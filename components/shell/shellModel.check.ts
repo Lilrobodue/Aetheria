@@ -18,6 +18,7 @@ import {
   carLine,
   CRYSTALS,
   TABS,
+  newLayoutNotice,
 } from './shellModel.ts';
 
 let passed = 0;
@@ -125,6 +126,18 @@ eq(carLine('v2', true, 396, true), 'Only the music · Music only is on', "v2's f
 
 // The five tabs.
 eq(TABS.map((t) => t.id), ['now', 'library', 'mixes', 'layers', 'more'], 'the five tabs, in order');
+
+// newLayoutNotice (v15.7): the import and Deep Scan progress lines are muted; everything else is a toast.
+eq(newLayoutNotice("Added 12 tracks. Skipped 3 files that are not a playable audio format (Chrome can't decode WMA or Apple Lossless)."), 'mute', 'import skipped');
+eq(newLayoutNotice("Added 1,200 tracks. Skipped 1 file that is not a playable audio format (Chrome can't decode WMA or Apple Lossless)."), 'mute', 'import skipped, one');
+eq(newLayoutNotice('Analyzing: tone-0001 (3/128)'), 'mute', 'scan progress');
+eq(newLayoutNotice('Analyzing: a (b) (1,203/5,000)'), 'mute', 'scan progress, thousands');
+eq(newLayoutNotice('Starting deep fractal analysis of 9 unscanned songs. Estimated time: 23m.'), 'mute', 'scan start');
+eq(newLayoutNotice('Lo Shu · Flying Star Vortex — 27/27 positions filled.'), 'toast', 'a walk');
+eq(newLayoutNotice('Harmonic Distribution Complete: 30 songs distributed across all 27 frequencies.'), 'toast', 'Auto-Distribute');
+eq(newLayoutNotice('Every track in your library is already scanned (30 tracks).'), 'toast', 'nothing to scan');
+eq(newLayoutNotice(''), 'toast', 'empty');
+eq(newLayoutNotice(undefined as unknown as string), 'toast', 'undefined');
 
 console.log(`shellModel: ${passed} checks passed, ${failures.length} failed`);
 for (const f of failures) console.log('  FAILED ' + f);

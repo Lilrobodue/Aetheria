@@ -21,6 +21,7 @@ import {
   zenLayer,
   zenToggle,
   PHONE_VIEWPORT,
+  peekClassicLibrary,
 } from './helpers';
 
 // v15.6, Zen in the new layout (spec §3.11; decisions 1 A and 2 A): an eye button in Now Playing's top bar (the desktop
@@ -375,7 +376,7 @@ test.describe('phone, touch', () => {
     await eye.click();
     await expect(eye).toHaveAttribute('aria-pressed', 'true');
     await tab(page, 'library');
-    await page.getByRole('button', { name: 'Open the classic library', exact: true }).click();
+    await peekClassicLibrary(page);
     await expect(page.getByTestId('peek-pill')).toBeVisible();
     await page.getByTestId('peek-pill').click();
     await tab(page, 'now');

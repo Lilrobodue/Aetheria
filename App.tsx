@@ -35,6 +35,7 @@ import {
   removeIdsWithCursor,
   appendToLibrary,
   splitOrphans,
+  refreshById,
 } from './utils/library/listOps';
 import { countCommit, reportPassWork } from './utils/perfHud';
 import {
@@ -139,12 +140,17 @@ import AppShell from './components/shell/AppShell';
 import VisualsPause from './components/shell/VisualsPause';
 import PeekPill from './components/shell/PeekPill';
 import { useMediaQuery } from './components/shell/useMediaQuery';
-import { LAYOUT_KEY, parseLayoutPref, sourceLine, walkSegment } from './components/shell/shellModel';
+import { LAYOUT_KEY, parseLayoutPref, sourceLine, walkSegment, newLayoutNotice } from './components/shell/shellModel';
 import type { LayoutPref, ShellTab, ShellSheet, PeekPanel } from './components/shell/shellModel';
 import { zenActive } from './components/shell/zenModel';
 import { useShellZen } from './components/shell/useShellZen';
 import { CRYSTAL_FILTER_KEY, parseCrystalFilter, toneLoweredText } from './components/shell/layers/layersModel';
 import type { LayersSection } from './components/shell/layers/layersModel';
+// v15.7: the Library tab (new layout). The row tap's pure rules; App's renders are counted in dev builds only.
+import { libraryOrderFor, rebuildOrder, stillTapOrder, sameIdSet, libraryTapText, UNDO_CHANGED_TEXT, TAP_GONE_TEXT } from './components/shell/library/libraryModel';
+import type { LastImport } from './components/shell/library/libraryModel';
+import type { LibraryViewState } from './components/shell/contexts';
+import { countRender } from './components/shell/devRenders';
 
 // --- Helpers ---
 
@@ -1339,7 +1345,33 @@ const DISCLAIMER_VERSION = '2026-10-21';
 // an older text and is ignored.
 const DISCLAIMER_STORAGE_KEY = 'aetheria.disclaimer.v1';
 
+/** v15.7: what a Library row's tap replaced, for its Undo (App's startPlayOrder / undoPlayOrder). Ids only, never
+ *  Song objects: the Undo rebuilds the order from the library as it is then. */
+interface PlayOrderSnapshot {
+  ids: string[];
+  cursor: number;
+  shuffled: number[];
+  shufflePos: number;
+  walk: { mode: LoShuWalkMode; segments: number[] | null; phases: string[] | null } | null;
+  trackId: string | null;
+  position: number;
+  wasPlaying: boolean;
+  /** cacheGeneration() at the tap: a Clear since makes the Undo a no-op. */
+  generation: number;
+  /** The order the tap started: any other play order since makes the Undo refuse. */
+  newIds: string[];
+  /** Only the latest tap's Undo acts. */
+  token: number;
+  /** When the latest tap of a chain was made (its toast's 10 s run from here). */
+  at: number;
+  /** The chain's toast (the first tap's words: what it stopped). */
+  toast: string;
+  /** statusToastSeqRef once this tap's toast showed (-1: none showed): another toast since ends the chain. */
+  toastSeq: number;
+}
+
 const App: React.FC = () => {
+  countRender('App');
   const [playlist, setPlaylist] = useState<Song[]>([]);
   const [originalPlaylist, setOriginalPlaylist] = useState<Song[]>([]);
   // Playlist cache (IndexedDB) — persists the library across reloads.
@@ -1413,7 +1445,7 @@ const App: React.FC = () => {
   // (decision 4: classic shows with `layout` still 'new', and a pill comes back).
   const [shellTab, setShellTab] = useState<ShellTab>('now');
   const [shellSheet, setShellSheet] = useState<ShellSheet | null>(null);
-  const [sheetFocus, setSheetFocus] = useState<'output' | null>(null);
+  const [sheetFocus, setSheetFocus] = useState<'output' | 'recover' | null>(null);
   const [classicPeek, setClassicPeek] = useState<PeekPanel | null>(null);
   // The desktop shell from 1024 × 600 (a laptop, a landscape iPad); anything smaller gets the phone shell.
   const desktopShell = useMediaQuery('(min-width: 1024px) and (min-height: 600px)');
@@ -1426,6 +1458,14 @@ const App: React.FC = () => {
   const layersScrollRef: { current: { top: number; jump: LayersSection | null } } = useRef({ top: 0, jump: null });
   const noticeInsetsRef: { current: { top: number; bottom: number } } = useRef({ top: 0, bottom: 0 });
   const shellOnRef: { current: boolean } = useRef(false);
+  // v15.7, the Library tab: where it was left (its query, its scroll and the health card's fold; session only, the
+  // query never saved), the last import (the Import sheet's summary), the latest row tap's Undo, and the list element
+  // that takes the focus when a deleted row's ⋯ is gone.
+  const libraryViewRef: { current: LibraryViewState } = useRef({ query: '', top: 0, healthOpen: null });
+  const [lastImport, setLastImport] = useState<LastImport | null>(null);
+  const lastPlayOrderRef: { current: PlayOrderSnapshot | null } = useRef(null);
+  const playOrderSeqRef: { current: number } = useRef(0);
+  const libraryFocusTargetRef: { current: HTMLElement | null } = useRef(null);
   // v15.6: the Layers tab's optional experience filter on the crystals (plan decision 11): off unless the user turns it
   // on; saved from its switch (and Show all) only, never from an effect.
   const [crystalFilter, setCrystalFilter] = useState<boolean>(() => {
@@ -1895,6 +1935,8 @@ const App: React.FC = () => {
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
   const statusToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stickyToastRef = useRef<StatusToast | null>(null);
+  // v15.7: counts every toast shown or dismissed, so a Library tap's Undo chain knows its toast is still the one up.
+  const statusToastSeqRef: { current: number } = useRef(0);
   const showStatusToast = useCallback((
     message: string,
     opts?: {
@@ -1907,6 +1949,7 @@ const App: React.FC = () => {
   ) => {
     if (statusToastTimerRef.current) clearTimeout(statusToastTimerRef.current);
     statusToastTimerRef.current = null;
+    statusToastSeqRef.current++;
     const toast: StatusToast = {
       message,
       actionLabel: opts?.actionLabel,
@@ -1929,6 +1972,7 @@ const App: React.FC = () => {
   const dismissStatusToast = useCallback(() => {
     if (statusToastTimerRef.current) clearTimeout(statusToastTimerRef.current);
     statusToastTimerRef.current = null;
+    statusToastSeqRef.current++;
     setStatusToast((prev: StatusToast | null) => {
       if (!prev || prev.sticky) {
         // The user has seen the metadata warning: not again this spell.
@@ -2322,6 +2366,13 @@ const App: React.FC = () => {
   useEffect(() => {
     libraryRef.current = originalPlaylist;
   }, [originalPlaylist]);
+  // v15.7: the play order's entries are the library's own objects, by id (listOps.refreshById). An order built from a
+  // library one commit old (a Library tap racing a patch) or a patch that reached only the library would otherwise
+  // leave an older copy of a track in the play order, which the metadata save prefers. Same ids, order and length, the
+  // cursor untouched, and no update when nothing is stale. O(n), after a change of either list only (never on the clock).
+  useEffect(() => {
+    if (refreshById(playlist, originalPlaylist) !== playlist) setPlaylist((prev: Song[]) => refreshById(prev, originalPlaylist));
+  }, [playlist, originalPlaylist]);
 
   // Analyse tracks (v15.1): true from a run's start until its loop has exited (a stop flips the UI at once while
   // the loop finishes its current step); the running pass, for Clear, Reload and Stop.
@@ -2538,13 +2589,18 @@ const App: React.FC = () => {
     }
   };
   const recoverOrphans = () => settleOrphans('recover');
+  // v15.7: the second tap counts only 600 ms or more after the first, so a double tap is never both (the banner and the
+  // Import sheet share this).
+  const discardArmedAtRef: { current: number } = useRef(0);
   const discardOrphans = () => {
     if (!orphanOfferRef.current || orphanActionRef.current) return;
     if (!discardArmed) {
+      discardArmedAtRef.current = Date.now();
       setDiscardArmed(true);
       setTimeout(() => setDiscardArmed(false), 4000);
       return;
     }
+    if (Date.now() - discardArmedAtRef.current < 600) return;
     settleOrphans('discard');
   };
 
@@ -2997,6 +3053,10 @@ const App: React.FC = () => {
 
   const playTrackRef = useRef<(index: number, list?: Song[]) => Promise<void>>(async () => {});
   const playNextRef = useRef<() => void>(() => {});
+  // v15.7: playTrack's request number. A newer playTrack supersedes an older one still awaiting a decode or play(): the
+  // older returns at its next await, before it writes the tone, the card, the cursor or plays anything (a Library tap,
+  // its Undo, or a tap during a pending Next on an unscanned track would otherwise land its index in another order).
+  const playRequestSeqRef: { current: number } = useRef(0);
 
   // Guards the pre-end auto-advance so it fires at most once per track. We swap
   // to the next track a hair BEFORE the element reaches its natural `ended`
@@ -4404,6 +4464,7 @@ const App: React.FC = () => {
             `(Chrome can't decode WMA or Apple Lossless).`
         );
     }
+    setLastImport({ added: newSongs.length, skipped: skippedCount, joinedPlayOrder: playOrderIsLibrary || playOrderIsEmpty, at: Date.now() });
     event.target.value = '';
   };
 
@@ -6442,6 +6503,7 @@ const App: React.FC = () => {
     const tracks = playlistOverride || (stateRef.current.playlist.length > 0 ? stateRef.current.playlist : playlist);
 
     if (index < 0 || index >= tracks.length) return;
+    const playRequest = ++playRequestSeqRef.current; // v15.7: superseded by any later playTrack (checked after each await)
 
     // Manual track pick under shuffle: regenerate the shuffle order so the
     // picked song sits at position 0 and the rest of the shuffle plays from
@@ -6582,9 +6644,12 @@ const App: React.FC = () => {
           // those buffers per-track is what caused the freeze around
           // song 57 of a long playlist.)
           const arrayBuffer = await song.file.arrayBuffer();
+          if (playRequest !== playRequestSeqRef.current) return;
           const audioBuffer = await audioCtxRef.current!.decodeAudioData(arrayBuffer);
+          if (playRequest !== playRequestSeqRef.current) return;
           audioBufferRef.current = audioBuffer;
           freq = await detectDominantFrequencyAdvanced(audioBuffer);
+          if (playRequest !== playRequestSeqRef.current) return;
       } else {
           // Release any prior decoded buffer so it can be GC'd while the
           // next track plays.
@@ -6628,6 +6693,7 @@ const App: React.FC = () => {
       // Set a conservative volume on the element itself as additional safety
       // Don't set volume on the element - we want pure Web Audio output only
       await mainAudioRef.current.play();
+      if (playRequest !== playRequestSeqRef.current) return;
 
       // Re-assert the FULL media session synchronously on the new track —
       // metadata AND playing state — at the instant playback starts. The
@@ -6665,6 +6731,7 @@ const App: React.FC = () => {
       // We'll clean them up when creating new ones or on unmount
 
     } catch (error) {
+      if (playRequest !== playRequestSeqRef.current) return;
       // No alert() here. A blocking dialog fired from a backgrounded / locked
       // screen (e.g. a transient play() rejection during an auto-advance or a
       // lock-screen skip) is invisible and unmissable until the app is
@@ -7542,6 +7609,235 @@ registerProcessor('wav-capture', WavCapture);
       ? { top: noticeInsets.top + 8 }
       : { bottom: noticeInsets.bottom + 8 };
 
+  // v15.7: AUTO-DISTRIBUTE (lifted verbatim from the classic button's onClick, which now calls it; the Library tab's
+  // health card calls it too).
+  const autoDistribute = () => {
+    // Not during a Deep Scan: the scan is writing real analysis
+    // into these tracks, and Auto-Distribute would overwrite it
+    // with placeholder crystals. (aria-disabled rather than
+    // disabled, so a tap explains why instead of doing nothing —
+    // a phone never shows the title tooltip.)
+    if (isScanning) {
+      showStatusToast('Auto-Distribute is unavailable while Deep Scan runs.');
+      return;
+    }
+    // Distribute the whole LIBRARY and apply the assignments by id;
+    // the play order and cursor stay as they are. This used to
+    // distribute the play order and write it over the library, so
+    // running it while a mix or walk showed shrank the library to
+    // that mix — and the blob sync deleted every other track's audio.
+    const library = dedupeById<Song>(originalPlaylist);
+    if (library.length >= 27) {
+      // Use the proven smart harmonic distribution for all libraries 27+ songs
+      const gutFreqs = [174, 285, 396, 417, 528, 639, 741, 852, 963];
+      const heartFreqs = [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150];
+      const headFreqs = [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336];
+      const allFreqs = [...gutFreqs, ...heartFreqs, ...headFreqs];
+
+      const redistributed = distributeUsingHarmonicOctavesMaster(library, allFreqs);
+      const assignments = new Map<string, Partial<Song>>();
+      for (const s of redistributed) {
+        assignments.set(s.id, {
+          harmonicFreq: s.harmonicFreq,
+          closestSolfeggio: s.closestSolfeggio,
+          harmonicDeviation: s.harmonicDeviation,
+        });
+      }
+      setOriginalPlaylist(prev => patchById(prev, assignments));
+      setPlaylist(prev => patchById(prev, assignments));
+
+      const gutCount = redistributed.filter(s => gutFreqs.includes((s.closestSolfeggio as number) || 0)).length;
+      const heartCount = redistributed.filter(s => heartFreqs.includes((s.closestSolfeggio as number) || 0)).length;
+      const headCount = redistributed.filter(s => headFreqs.includes((s.closestSolfeggio as number) || 0)).length;
+
+      // Debug: Check specifically for 4566 Hz
+      const freq4566Count = redistributed.filter(s => s.closestSolfeggio === 4566).length;
+      console.log(`🔍 DEBUG: 4566 Hz assignments: ${freq4566Count}`);
+
+      // Log all frequency assignments for debugging
+      const frequencyDistribution: { [key: number]: number } = {};
+      allFreqs.forEach(freq => frequencyDistribution[freq] = 0);
+      redistributed.forEach(song => {
+        if (song.closestSolfeggio) {
+          frequencyDistribution[song.closestSolfeggio] = (frequencyDistribution[song.closestSolfeggio] || 0) + 1;
+        }
+      });
+
+      const missingFreqs = allFreqs.filter(freq => frequencyDistribution[freq] === 0);
+      if (missingFreqs.length > 0) {
+        console.warn(`⚠️ Missing frequency assignments:`, missingFreqs);
+      }
+
+      // CAB readiness: count frequencies that hit the 3-song
+      // target. Any freq with ≥3 songs gives the Combined Walk
+      // three distinct picks per cube position; the user can
+      // call a CAB as soon as all 27 are at 3+.
+      const cabReadyFreqs = allFreqs.filter(f => (frequencyDistribution[f] || 0) >= 3).length;
+      const cabStatus = cabReadyFreqs === 27
+        ? '🚖 CAB-ready: all 27 frequencies have 3+ songs.'
+        : `CAB readiness: ${cabReadyFreqs}/27 frequencies at 3+ songs.`;
+
+      // CABI readiness: CAB (81) + Ouroboros (29) share song
+      // pools, so each non-SOURCE freq needs 4 unique songs
+      // (3 CAB visits + 1 Ouroboros visit) and SOURCE/2178 Hz
+      // needs 6 (3 CAB visits + 3 Ouroboros crossings).
+      const cabiReadyFreqs = allFreqs.filter(f => {
+        const need = f === SOURCE_FREQ ? 6 : 4;
+        return (frequencyDistribution[f] || 0) >= need;
+      }).length;
+      const cabiStatus = cabiReadyFreqs === 27
+        ? ' ⚛️ CABI-ready: all 27 frequencies have enough unique songs to close the loop (SOURCE has 6+, others have 4+).'
+        : ` CABI readiness: ${cabiReadyFreqs}/27 frequencies meet the unique-song threshold (SOURCE needs 6, others need 4).`;
+
+      setAnalysisNotification(`Harmonic Distribution Complete: ${redistributed.length} songs distributed across all 27 frequencies. ${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD. ${missingFreqs.length > 0 ? `Missing: ${missingFreqs.join(', ')}Hz. ` : ''}${cabStatus}${cabiStatus}`);
+      setTimeout(() => setAnalysisNotification(null), 8000);
+    } else {
+      showStatusToast(
+        `Harmonic Distribution needs at least 27 tracks for full frequency coverage; your library has ${library.length}. (A full CAB ride needs 81: 3 unique songs per frequency.)`,
+        { durationMs: 10000 }
+      );
+    }
+  };
+
+  // v15.7: the new layout's one way to replace the play order (a Library row now; v14.17's generators and v14.18's
+  // queue later): `order` starts at `index`. It writes the play order, the cursor, the shuffle order and the walk state,
+  // NEVER the library (originalPlaylist): every order comes from libraryRef's own tracks (libraryModel), so the id set
+  // the blob save keys on can't change, and nothing is deleted (scripts/check-library-writers.mjs pins this). The
+  // cursor is set eagerly, before playTrack's decode and await (as generateLoShuWalk does), so the media-session hook
+  // never names the old cursor's track in the new order. Under shuffle the shuffle order is set here, with the track
+  // first: playTrack skips its own rule when it gets an order. Leaves an Undo for 10 s (undoPlayOrder).
+  const startPlayOrder = (order: Song[], index: number, toast: string) => {
+    const st = stateRef.current;                       // the latest commit (the pinned sync effect)
+    const el = mainAudioRef.current;
+    if (index < 0 || index >= order.length) return;
+    const same = sameIdOrder(st.playlist, order);
+    if (same && st.currentSongIndex === index) {       // the current track: resume it if paused, never restart it
+      if (!isPlaying) resumePlayback();
+      return;
+    }
+    // A tap while the previous tap's toast still shows (no other toast since, within its 10 s, and nothing else changed
+    // the play order) continues its chain: the Undo goes back to the state before the FIRST tap, as it was then
+    // (playing or paused).
+    const prev = lastPlayOrderRef.current;
+    const chained = prev !== null && prev.toastSeq === statusToastSeqRef.current && Date.now() - prev.at < 10_000 &&
+      prev.generation === cacheGeneration() && stillTapOrder(st.playlist, prev.newIds, libraryRef.current);
+    const snap: PlayOrderSnapshot = chained ? { ...prev, newIds: order.map((s: Song) => s.id), token: ++playOrderSeqRef.current, at: Date.now() } : {
+      ids: st.playlist.map((s: Song) => s.id),
+      cursor: st.currentSongIndex,
+      shuffled: st.shuffledIndices.slice(),
+      shufflePos: st.shufflePos,
+      walk: loShuWalkMode ? { mode: loShuWalkMode, segments: loShuWalkSegments, phases: loShuWalkPhases } : null,
+      trackId: st.currentSongIndex >= 0 ? (st.playlist[st.currentSongIndex]?.id ?? null) : null,
+      position: el && Number.isFinite(el.currentTime) ? el.currentTime : 0,
+      wasPlaying: isPlaying,
+      generation: cacheGeneration(),
+      newIds: order.map((s: Song) => s.id),
+      token: ++playOrderSeqRef.current,
+      at: Date.now(),
+      toast,
+      toastSeq: -1,
+    };
+    if (same) {
+      playTrackRef.current(index);                     // playTrack's own shuffle rule: this track first, position 0
+    } else {
+      setPlaylist(order);
+      clearLoShuWalkMode();
+      loShuWalkSnapshotRef.current = '';
+      setCurrentSongIndex(index);                      // eagerly (spec §2.3: the card never names the wrong track)
+      if (st.isShuffle) {
+        const fresh = getLruShuffledIndices(order, playHistoryRef.current);
+        setShuffledIndices([index, ...fresh.filter((i: number) => i !== index)]);
+        setShufflePos(0);                              // set here: playTrack skips its shuffle rule with an order
+      }
+      playTrackRef.current(index, order);
+    }
+    lastPlayOrderRef.current = snap;
+    if (snap.trackId !== null || !same || chained) {
+      const token = snap.token;
+      showStatusToast(snap.toast, { actionLabel: 'Undo', onAction: () => shellActionsRef.current?.undoPlayOrder(token), durationMs: 10_000 });
+      snap.toastSeq = statusToastSeqRef.current;
+    } else {
+      snap.toastSeq = -1;
+    }
+  };
+
+  /** A Library row: the whole library (in the list's order when one is given) from that track. Never a search's
+   *  subset (the plan's "always the whole library"). */
+  const playFromLibrary = (id: string, orderIds: readonly string[] | null) => {
+    const order = libraryOrderFor(libraryRef.current, orderIds);
+    const index = order.findIndex((s: Song) => s.id === id);
+    if (index < 0) {
+      showStatusToast(TAP_GONE_TEXT);
+      return;
+    }
+    const walkName = loShuWalkMode ? (LO_SHU_WALK_INFO[loShuWalkMode]?.shortName ?? 'Lo Shu') : null;
+    startPlayOrder(order, index, libraryTapText(walkName, sameIdSet(stateRef.current.playlist, order)));
+  };
+
+  /**
+   * The row tap's Undo: the earlier play order, cursor, shuffle order and walk, and the earlier track from where it was
+   * when it was playing. Rebuilt by id from the library as it is NOW (rebuildOrder): a track deleted since is left out
+   * (a walk with a step gone ends, as the snapshot effect ends it today), and no stale metadata comes back. It writes
+   * what startPlayOrder writes, never the library. Only the latest tap's Undo acts; after a Clear it does nothing; after
+   * another play order it refuses and says so.
+   * Known limits: an earlier track that was paused comes back unloaded, so Play starts it from 0 (the pinned
+   * resumePlayback has no seek); the play history keeps the tapped track's play; another toast can replace this one.
+   */
+  const undoPlayOrder = (token?: number) => {
+    const snap = lastPlayOrderRef.current;
+    if (!snap || (token !== undefined && token !== snap.token)) return;
+    lastPlayOrderRef.current = null;
+    dismissStatusToast();
+    if (cacheGeneration() !== snap.generation) return;                                  // a Clear since
+    if (!stillTapOrder(stateRef.current.playlist, snap.newIds, libraryRef.current)) {  // another play order since
+      showStatusToast(UNDO_CHANGED_TEXT, { durationMs: 6000 });
+      return;
+    }
+    const { order, cursor, dropped, removedCurrent } = rebuildOrder(snap.ids, snap.cursor, libraryRef.current);
+    setPlaylist(order);
+    if (snap.walk && !dropped) {
+      loShuWalkSnapshotRef.current = order.map((s: Song) => s.id).join('|');
+      setLoShuWalkMode(snap.walk.mode);
+      setLoShuWalkSegments(snap.walk.segments);
+      setLoShuWalkPhases(snap.walk.phases);
+    }
+    setCurrentSongIndex(cursor);
+    if (stateRef.current.isShuffle && !dropped && snap.shuffled.length === order.length) {
+      setShuffledIndices(snap.shuffled);
+      setShufflePos(snap.shufflePos);
+    }
+    if (snap.wasPlaying && cursor >= 0 && !removedCurrent) {
+      const wantId = order[cursor].id;
+      const at = snap.position;
+      Promise.resolve(playTrackRef.current(cursor, order)).then(() => {
+        const a = mainAudioRef.current;
+        const now = stateRef.current;
+        if (a && at > 1 && now.playlist[now.currentSongIndex]?.id === wantId && Number.isFinite(a.duration) && at < a.duration - 1) {
+          a.currentTime = at;                                                           // seekTo's body
+          setCurrTime(at);
+        }
+      });
+    } else {
+      // It was paused (or its track is gone): stop the tapped track and unload, as deleteSong does, so Play starts
+      // the restored cursor's track. A tapped track still decoding (unscanned) must not start after this either:
+      // the request number supersedes its playTrack, which returns at its next await.
+      playRequestSeqRef.current++;
+      const a = mainAudioRef.current;
+      if (a && !a.paused) pausePlayback();
+      else setIsPlaying(false);
+      if (a) {
+        a.removeAttribute('src');
+        try { a.load(); } catch {}
+      }
+    }
+  };
+
+  /** A Library row's Delete: v15.4's confirmation Dialog, which deletes through confirmPendingDelete → deleteSong. */
+  const requestDelete = (id: string) => {
+    const s = libraryRef.current.find((x: Song) => x.id === id);
+    if (s) setPendingDelete({ id: s.id, name: s.name });
+  };
+
   /** The layout switch: saved from a tap only. The music, the visualizer and the lock-screen card carry over. */
   const setLayout = (next: LayoutPref) => {
     try {
@@ -7597,8 +7893,10 @@ registerProcessor('wav-capture', WavCapture);
   // restored state from another version) must not throw here, in either layout.
   const shellWalkName = loShuWalkMode ? (LO_SHU_WALK_INFO[loShuWalkMode]?.shortName ?? null) : null;
   const shellWalkFullName = loShuWalkMode ? (LO_SHU_WALK_INFO[loShuWalkMode]?.fullName ?? null) : null;
+  // v15.7: "the library" is the same ids, as many times each, in any order (decision 2 A: a library started from a
+  // sorted list still reads "Library · 12 of 440"). The import rule in handleFileUpload keeps sameIdOrder.
   const playOrderIsLibrary = useMemo(
-    () => (shellOn ? sameIdOrder(playlist, originalPlaylist) : true),
+    () => (shellOn ? sameIdOrder(playlist, originalPlaylist) || sameIdSet(playlist, originalPlaylist) : true),
     [shellOn, playlist, originalPlaylist]
   );
   const libraryTotalSeconds = useMemo(
@@ -7713,6 +8011,92 @@ registerProcessor('wav-capture', WavCapture);
     [loShuWalkMode, shellWalkName, shellWalkFullName, currentSongIndex, playlist.length]
   );
   const shellTime = useMemo(() => ({ t: currTime, d: currDuration }), [currTime, currDuration]);
+  // v15.7, the Library tab: the library itself (the same array, no copy: it changes with an import, a delete or a
+  // patch, never on the clock), and the passes' and imports' state, which only the health card and the Import sheet
+  // read (it changes on their progress ticks, so the list never reads it).
+  const shellLibraryList = useMemo(() => ({ songs: originalPlaylist }), [originalPlaylist]);
+  const shellOrphans = useMemo(
+    () => (orphanSplit ? { fresh: orphanSplit.fresh.length, duplicates: orphanSplit.duplicates.length } : null),
+    [orphanSplit]
+  );
+  const shellLibraryStatus = useMemo(
+    () => ({
+      isScanning,
+      scanProgress,
+      pass,
+      analyseCounts,
+      restoring: isRestoring,
+      durationsLeft: pendingDurationAnalysis.length,
+      orphans: shellOrphans,
+      orphanBusy,
+      discardArmed,
+      lastImport,
+      analyseMobile: ANALYSE_MOBILE,
+    }),
+    [isScanning, scanProgress, pass, analyseCounts, isRestoring, pendingDurationAnalysis.length, shellOrphans, orphanBusy, discardArmed, lastImport]
+  );
+  // v15.7: classic's blue "Analysis Status" notice is not shown in the new layout: an import's summary is the Import
+  // sheet's and Deep Scan's progress the health card's (newLayoutNotice: 'mute'); any other message goes to the status
+  // toast, once per message.
+  const routedNoticeRef: { current: string | null } = useRef(null);
+  useEffect(() => {
+    if (!analysisNotification) {
+      routedNoticeRef.current = null;
+      return;
+    }
+    if (!shellOn || analysisNotification === routedNoticeRef.current) return;
+    routedNoticeRef.current = analysisNotification;
+    if (newLayoutNotice(analysisNotification) === 'toast') showStatusToast(analysisNotification);
+  }, [shellOn, analysisNotification]);
+  // v15.7: the delete confirmation's one new-layout sentence. Classic's text stays byte for byte ('' there).
+  const deleteNote = !shellOn || !pendingDelete
+    ? ''
+    : pendingDelete.id === nowPlayingId && isPlaying
+      ? ' It is playing now, so the music stops.'
+      : (loShuWalkMode || !playOrderIsLibrary) && playlist.some((s: Song) => s.id === pendingDelete.id)
+        ? " It also comes out of the list that's playing."
+        : '';
+  // v15.7: the Library tab's tests read the play order's exact state through this hook (dev builds only; production
+  // strips it, as it does __aetheriaAnalyse).
+  const libraryHookRef: { current: { walk: LoShuWalkMode | null; segments: number[] | null; phases: string[] | null; playing: boolean } } =
+    useRef({ walk: null, segments: null, phases: null, playing: false });
+  if (IS_DEV_BUILD) libraryHookRef.current = { walk: loShuWalkMode, segments: loShuWalkSegments, phases: loShuWalkPhases, playing: isPlaying };
+  useEffect(() => {
+    if (!IS_DEV_BUILD) return;
+    const w = window as unknown as { __aetheriaLibrary?: unknown };
+    w.__aetheriaLibrary = {
+      state: () => {
+        const s = stateRef.current;
+        const h = libraryHookRef.current;
+        const el = mainAudioRef.current;
+        return {
+          ids: s.playlist.map((x: Song) => x.id),
+          names: s.playlist.map((x: Song) => x.name),
+          cursor: s.currentSongIndex,
+          current: s.currentSongIndex >= 0 ? (s.playlist[s.currentSongIndex]?.name ?? null) : null,
+          shuffle: s.isShuffle,
+          shuffled: s.shuffledIndices.slice(),
+          shufflePos: s.shufflePos,
+          walk: h.walk,
+          segments: h.segments,
+          phases: h.phases,
+          libraryIds: libraryRef.current.map((x: Song) => x.id),
+          libraryNames: libraryRef.current.map((x: Song) => x.name),
+          playing: h.playing,
+          t: el && Number.isFinite(el.currentTime) ? el.currentTime : null,
+          src: el ? el.getAttribute('src') : null,
+          undo: lastPlayOrderRef.current ? lastPlayOrderRef.current.token : null,
+          crystals: libraryRef.current.map((x: Song) => x.closestSolfeggio ?? null),
+          scanned: libraryRef.current.map((x: Song) => !!x.harmonicFreq),
+          durations: s.playlist.map((x: Song) => (typeof x.duration === 'number' ? x.duration : null)),
+          libraryDurations: libraryRef.current.map((x: Song) => (typeof x.duration === 'number' ? x.duration : null)),
+        };
+      },
+      /** The latest tap's Undo, as its toast's button does (for the negative halves once the toast is gone). */
+      undo: () => shellActionsRef.current?.undoPlayOrder(),
+    };
+    return () => { delete w.__aetheriaLibrary; };
+  }, []);
   const shellValue = useMemo(
     () => ({
       tab: shellTab,
@@ -7726,6 +8110,7 @@ registerProcessor('wav-capture', WavCapture);
       zen: { on: shellZen, hidden: shellZenHidden },
       rootRef: shellRootRef,
       layersScrollRef,
+      libraryViewRef,
     }),
     [shellTab, shellSheet, sheetFocus, classicPeek, carLayout, desktopShell, shellZen, shellZenHidden]
   );
@@ -7756,6 +8141,16 @@ registerProcessor('wav-capture', WavCapture);
       v2Active,
       chooseCrystalFilter,
       revealZen: shellZenState.reveal,
+      // v15.7, the Library tab.
+      playFromLibrary,
+      undoPlayOrder,
+      requestDelete,
+      autoDistribute,
+      onAnalyseTap,
+      scanLibrary,
+      handleFileUpload,
+      recoverOrphans,
+      discardOrphans,
     };
   });
   const shellActions = useMemo(() => {
@@ -7831,6 +8226,26 @@ registerProcessor('wav-capture', WavCapture);
       // v15.6, Zen in the new layout.
       setZen: (on: boolean) => setShellZen(on),
       revealZen: () => A().revealZen(),
+      // v15.7, the Library tab: references to App's functions (the row tap and its Undo, the existing delete, Auto-
+      // Distribute, Analyse tracks, Deep Scan, the import handler and the orphan offer). None writes the library itself
+      // but the existing paths that already do.
+      playFromLibrary: (id: string, orderIds: readonly string[] | null) => A().playFromLibrary(id, orderIds),
+      undoPlayOrder: () => A().undoPlayOrder(),
+      requestDelete: (id: string) => A().requestDelete(id),
+      assignCrystals: () => A().autoDistribute(),
+      analyse: () => A().onAnalyseTap(),
+      scan: () => A().scanLibrary(),
+      stopScan: () => (window as any).cancelAetheriaAnalysis?.(),
+      importFiles: (event: React.ChangeEvent<HTMLInputElement>) => A().handleFileUpload(event),
+      recoverOrphans: () => A().recoverOrphans(),
+      discardOrphans: () => A().discardOrphans(),
+      openImport: (focus?: 'recover' | null) => {
+        setSheetFocus(focus ?? null);
+        setShellSheet('import');
+      },
+      setLibraryFocusTarget: (el: HTMLElement | null) => {
+        libraryFocusTargetRef.current = el;
+      },
     };
   }, []);
 
@@ -8100,6 +8515,7 @@ registerProcessor('wav-capture', WavCapture);
             title="Delete this track?"
             onClose={() => setPendingDelete(null)}
             initialFocusRef={deleteCancelRef}
+            returnFocusFallback={shellOn ? libraryFocusTargetRef.current : undefined}
             data-testid="delete-dialog"
             actions={
               <>
@@ -8108,15 +8524,15 @@ registerProcessor('wav-capture', WavCapture);
               </>
             }
           >
-            {`"${pendingDelete?.name ?? ''}" will be removed from your library, and the copy stored on this device deleted. The original file is not touched.`}
+            {`"${pendingDelete?.name ?? ''}" will be removed from your library, and the copy stored on this device deleted. The original file is not touched.${deleteNote}`}
           </Dialog>
 
           {/* v2's output question (v14.9): a non-blocking sheet, v2 only, between the header and the player bar
               (uiInsets, as the Spectrum lens), so the transport stays usable while it is open (v15.0). */}
           <OutputSheet open={showOutputSheet} insets={uiInsets} onChoose={chooseLayerOutput} onLater={outputSheetLater} />
 
-          {/* Analysis Notification */}
-          {analysisNotification && (
+          {/* Analysis Notification (v15.7: classic only; the new layout routes it, below) */}
+          {analysisNotification && !shellOn && (
             <div className={shellOn && desktopShell ? 'fixed top-4 right-4 z-[100] max-w-lg' : "fixed top-20 left-1/2 transform -translate-x-1/2 z-[100] max-w-lg"}>
               <div className={shellOn ? 'bg-blue-900/90 border border-blue-500 text-blue-100 p-4 rounded-lg shadow-lg' : "bg-blue-900/90 border border-blue-500 text-blue-100 p-4 rounded-lg shadow-lg backdrop-blur-md"}>
                 <div className="flex items-start gap-3">
@@ -8214,6 +8630,8 @@ registerProcessor('wav-capture', WavCapture);
           library={shellLibrary}
           walk={shellWalk}
           time={shellTime}
+          libraryList={shellLibraryList}
+          libraryStatus={shellLibraryStatus}
         >
           <AppShell />
         </ShellProviders>
@@ -8237,7 +8655,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.6</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.7</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -9145,93 +9563,7 @@ registerProcessor('wav-capture', WavCapture);
                <button
                 aria-disabled={isScanning}
                 title={isScanning ? 'Unavailable while Deep Scan runs' : undefined}
-                onClick={() => {
-                  // Not during a Deep Scan: the scan is writing real analysis
-                  // into these tracks, and Auto-Distribute would overwrite it
-                  // with placeholder crystals. (aria-disabled rather than
-                  // disabled, so a tap explains why instead of doing nothing —
-                  // a phone never shows the title tooltip.)
-                  if (isScanning) {
-                    showStatusToast('Auto-Distribute is unavailable while Deep Scan runs.');
-                    return;
-                  }
-                  // Distribute the whole LIBRARY and apply the assignments by id;
-                  // the play order and cursor stay as they are. This used to
-                  // distribute the play order and write it over the library, so
-                  // running it while a mix or walk showed shrank the library to
-                  // that mix — and the blob sync deleted every other track's audio.
-                  const library = dedupeById<Song>(originalPlaylist);
-                  if (library.length >= 27) {
-                    // Use the proven smart harmonic distribution for all libraries 27+ songs
-                    const gutFreqs = [174, 285, 396, 417, 528, 639, 741, 852, 963];
-                    const heartFreqs = [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150];
-                    const headFreqs = [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336];
-                    const allFreqs = [...gutFreqs, ...heartFreqs, ...headFreqs];
-
-                    const redistributed = distributeUsingHarmonicOctavesMaster(library, allFreqs);
-                    const assignments = new Map<string, Partial<Song>>();
-                    for (const s of redistributed) {
-                      assignments.set(s.id, {
-                        harmonicFreq: s.harmonicFreq,
-                        closestSolfeggio: s.closestSolfeggio,
-                        harmonicDeviation: s.harmonicDeviation,
-                      });
-                    }
-                    setOriginalPlaylist(prev => patchById(prev, assignments));
-                    setPlaylist(prev => patchById(prev, assignments));
-                    
-                    const gutCount = redistributed.filter(s => gutFreqs.includes((s.closestSolfeggio as number) || 0)).length;
-                    const heartCount = redistributed.filter(s => heartFreqs.includes((s.closestSolfeggio as number) || 0)).length;
-                    const headCount = redistributed.filter(s => headFreqs.includes((s.closestSolfeggio as number) || 0)).length;
-                    
-                    // Debug: Check specifically for 4566 Hz
-                    const freq4566Count = redistributed.filter(s => s.closestSolfeggio === 4566).length;
-                    console.log(`🔍 DEBUG: 4566 Hz assignments: ${freq4566Count}`);
-                    
-                    // Log all frequency assignments for debugging
-                    const frequencyDistribution: { [key: number]: number } = {};
-                    allFreqs.forEach(freq => frequencyDistribution[freq] = 0);
-                    redistributed.forEach(song => {
-                      if (song.closestSolfeggio) {
-                        frequencyDistribution[song.closestSolfeggio] = (frequencyDistribution[song.closestSolfeggio] || 0) + 1;
-                      }
-                    });
-                    
-                    const missingFreqs = allFreqs.filter(freq => frequencyDistribution[freq] === 0);
-                    if (missingFreqs.length > 0) {
-                      console.warn(`⚠️ Missing frequency assignments:`, missingFreqs);
-                    }
-                    
-                    // CAB readiness: count frequencies that hit the 3-song
-                    // target. Any freq with ≥3 songs gives the Combined Walk
-                    // three distinct picks per cube position; the user can
-                    // call a CAB as soon as all 27 are at 3+.
-                    const cabReadyFreqs = allFreqs.filter(f => (frequencyDistribution[f] || 0) >= 3).length;
-                    const cabStatus = cabReadyFreqs === 27
-                      ? '🚖 CAB-ready: all 27 frequencies have 3+ songs.'
-                      : `CAB readiness: ${cabReadyFreqs}/27 frequencies at 3+ songs.`;
-
-                    // CABI readiness: CAB (81) + Ouroboros (29) share song
-                    // pools, so each non-SOURCE freq needs 4 unique songs
-                    // (3 CAB visits + 1 Ouroboros visit) and SOURCE/2178 Hz
-                    // needs 6 (3 CAB visits + 3 Ouroboros crossings).
-                    const cabiReadyFreqs = allFreqs.filter(f => {
-                      const need = f === SOURCE_FREQ ? 6 : 4;
-                      return (frequencyDistribution[f] || 0) >= need;
-                    }).length;
-                    const cabiStatus = cabiReadyFreqs === 27
-                      ? ' ⚛️ CABI-ready: all 27 frequencies have enough unique songs to close the loop (SOURCE has 6+, others have 4+).'
-                      : ` CABI readiness: ${cabiReadyFreqs}/27 frequencies meet the unique-song threshold (SOURCE needs 6, others need 4).`;
-
-                    setAnalysisNotification(`Harmonic Distribution Complete: ${redistributed.length} songs distributed across all 27 frequencies. ${gutCount} GUT, ${heartCount} HEART, ${headCount} HEAD. ${missingFreqs.length > 0 ? `Missing: ${missingFreqs.join(', ')}Hz. ` : ''}${cabStatus}${cabiStatus}`);
-                    setTimeout(() => setAnalysisNotification(null), 8000);
-                  } else {
-                    showStatusToast(
-                      `Harmonic Distribution needs at least 27 tracks for full frequency coverage; your library has ${library.length}. (A full CAB ride needs 81: 3 unique songs per frequency.)`,
-                      { durationMs: 10000 }
-                    );
-                  }
-                }}
+                onClick={autoDistribute}
                 className={`mb-3 w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg font-medium tracking-wide transition-all border border-gold-500/30 ${isScanning ? 'opacity-40 cursor-not-allowed' : 'active:scale-95 hover:border-gold-500/50'}`}
                >
                  <Target size={14} className="text-gold-400" />

@@ -30,7 +30,7 @@ import { waitForBlobSaves } from '../utils/playlistCache';
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 /** The version the error log records. Bump it with the header badge (App.tsx); isolation.spec checks the two agree. */
-export const APP_VERSION = 'v15.6';
+export const APP_VERSION = 'v15.7';
 
 export type ViewName =
   | 'visualizer'
@@ -63,7 +63,12 @@ export type ViewName =
   | 'layers-crystal'
   | 'layers-levels'
   | 'layers-beat'
-  | 'layers-advanced';
+  | 'layers-advanced'
+  // v15.7, the Library tab: the list, the health card, the row menu (and Track info), and the Import sheet.
+  | 'library-list'
+  | 'library-health'
+  | 'library-menu'
+  | 'sheet-import';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The error log

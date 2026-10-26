@@ -6,6 +6,8 @@
 // Escape closes it. The ⋯ menu is a modal sheet. The heat guard never pauses the visualizer here.
 // v15.6: Layers shows the Layers tab in the panel (inPanel); Zen hides this root (nav and transport) with the panel
 // closed, as on the phone: inert and transparent, a mouse move brings it back.
+// v15.7: Library shows the Library tab in the panel; an Escape in its search field with text clears the text and stops
+// there (the field handles it first); the Import sheet takes the panel until closed.
 
 import React, { useEffect, useRef } from 'react';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
@@ -19,6 +21,7 @@ import SheetHost from './SheetHost';
 import TabStub from './tabs/TabStub';
 import MoreStub from './tabs/MoreStub';
 import LayersTab from './layers/LayersTab';
+import LibraryTab from './library/LibraryTab';
 import { TabCrash, TransportCrash } from './fallbacks';
 import { focusViewHeading } from './PhoneShell';
 
@@ -36,6 +39,9 @@ const DesktopShell = () => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' && e.key !== 'Esc') return;
       if (overlayDepth() > 0 || document.querySelector('[data-testid="output-sheet"]')) return;
+      // A search field with text clears first (its own handler stops the event; this is the second guard).
+      const field = document.activeElement;
+      if (field instanceof HTMLInputElement && field.type === 'search' && field.value) return;
       actions.setTab('now');
     };
     document.addEventListener('keydown', onKey);
@@ -73,7 +79,7 @@ const DesktopShell = () => {
               <ViewBoundary
                 name="tab-library"
                 fallback={(api) => (tab === 'library' ? <TabCrash api={api} inPanel /> : null)}
-                render={() => tab === 'library' && <TabStub tab="library" inPanel />}
+                render={() => tab === 'library' && <LibraryTab inPanel />}
               />
               <ViewBoundary
                 name="tab-mixes"

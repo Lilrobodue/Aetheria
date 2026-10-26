@@ -1,0 +1,146 @@
+{
+  "autoDistribute reference in App › <ViewBoundary render> › <button onClick>": {
+    "count": 1,
+    "sha": "8b8e2441c7501f39"
+  },
+  "autoDistribute reference in App › useLayoutEffect(no deps)": {
+    "count": 1,
+    "sha": "5f1227c01c5f4d16"
+  },
+  "clearEntirePlaylist reference in App › <ViewBoundary render> › <ClearPlaylistButton onClear>": {
+    "count": 1,
+    "sha": "6e710798b6e8f677"
+  },
+  "clearPlaylistCache call in App › clearEntirePlaylist": {
+    "count": 1,
+    "sha": "f181799c19efd307"
+  },
+  "clearPlaylistCache call in tools/cache-check.ts: (module)": {
+    "count": 4,
+    "sha": "af776566ae73f068"
+  },
+  "confirmPendingDelete reference in App › <ViewBoundary render> › <Dialog actions> › <Button onClick>": {
+    "count": 1,
+    "sha": "30d7c964039530ce"
+  },
+  "deleteSong call in App › confirmPendingDelete": {
+    "count": 1,
+    "sha": "3f8d612054131081"
+  },
+  "deleteTracksFromCache call in App › deleteSong": {
+    "count": 1,
+    "sha": "e4358ef352e963f7"
+  },
+  "deleteTracksFromCache call in App › settleOrphans": {
+    "count": 1,
+    "sha": "de49cdccaa8fa472"
+  },
+  "deleteTracksFromCache call in tools/cache-check.ts: (module)": {
+    "count": 5,
+    "sha": "af776566ae73f068"
+  },
+  "discardOrphans reference in App › <ViewBoundary render> › <button onClick>": {
+    "count": 1,
+    "sha": "45d96abba144dbb8"
+  },
+  "discardOrphans reference in App › useLayoutEffect(no deps)": {
+    "count": 1,
+    "sha": "5f1227c01c5f4d16"
+  },
+  "flushAndReload reference in App › <ViewBoundary render> › <button onClick>": {
+    "count": 1,
+    "sha": "a6f3570d883083d2"
+  },
+  "handleFileUpload call in App › importAetheriaCollection": {
+    "count": 2,
+    "sha": "91c8734a18d75f72"
+  },
+  "handleFileUpload reference in App › <ViewBoundary render> › <input onChange>": {
+    "count": 2,
+    "sha": "b7aa5127c2fb16d6"
+  },
+  "handleFileUpload reference in App › useLayoutEffect(no deps)": {
+    "count": 1,
+    "sha": "5f1227c01c5f4d16"
+  },
+  "libraryRef.current = call in App › useEffect([originalPlaylist])": {
+    "count": 1,
+    "sha": "4b77cf7aea5e7869"
+  },
+  "onAnalyseTap reference in App › <ViewBoundary render> › <button onClick>": {
+    "count": 1,
+    "sha": "215bffeac2c18026"
+  },
+  "onAnalyseTap reference in App › useLayoutEffect(no deps)": {
+    "count": 1,
+    "sha": "5f1227c01c5f4d16"
+  },
+  "recoverOrphans reference in App › <ViewBoundary render> › <button onClick>": {
+    "count": 1,
+    "sha": "074564708c5fd8f3"
+  },
+  "recoverOrphans reference in App › useLayoutEffect(no deps)": {
+    "count": 1,
+    "sha": "5f1227c01c5f4d16"
+  },
+  "scanLibrary reference in App › <ViewBoundary render> › <button onClick>": {
+    "count": 1,
+    "sha": "fb6ed9268f3a6ec6"
+  },
+  "scanLibrary reference in App › useLayoutEffect(no deps)": {
+    "count": 1,
+    "sha": "5f1227c01c5f4d16"
+  },
+  "setOriginalPlaylist call in App › autoDistribute": {
+    "count": 1,
+    "sha": "e61563f8bbda523e"
+  },
+  "setOriginalPlaylist call in App › clearEntirePlaylist": {
+    "count": 1,
+    "sha": "f181799c19efd307"
+  },
+  "setOriginalPlaylist call in App › deleteSong": {
+    "count": 1,
+    "sha": "e4358ef352e963f7"
+  },
+  "setOriginalPlaylist call in App › flushAndReload": {
+    "count": 1,
+    "sha": "e15f200030aa0f5a"
+  },
+  "setOriginalPlaylist call in App › handleFileUpload": {
+    "count": 1,
+    "sha": "36327d33643aa333"
+  },
+  "setOriginalPlaylist call in App › scanLibrary › applyResult": {
+    "count": 1,
+    "sha": "ae4d97b827e79863"
+  },
+  "setOriginalPlaylist call in App › settleOrphans": {
+    "count": 1,
+    "sha": "de49cdccaa8fa472"
+  },
+  "setOriginalPlaylist call in App › startAnalysePass › apply": {
+    "count": 1,
+    "sha": "f666a469f345873d"
+  },
+  "setOriginalPlaylist call in App › useEffect([])": {
+    "count": 2,
+    "sha": "a7575fbbe664ad50"
+  },
+  "setOriginalPlaylist call in App › useEffect([pendingDurationAnalysis]) › processNextBatch": {
+    "count": 1,
+    "sha": "3b155ec63e002f05"
+  },
+  "settleOrphans call in App › discardOrphans": {
+    "count": 1,
+    "sha": "131f2381ae875126"
+  },
+  "settleOrphans call in App › recoverOrphans": {
+    "count": 1,
+    "sha": "b6337dad746b1fb2"
+  },
+  "startAnalysePass call in App › onAnalyseTap": {
+    "count": 1,
+    "sha": "8da32f77badf438b"
+  }
+}

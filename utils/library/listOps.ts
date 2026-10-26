@@ -161,3 +161,24 @@ export function splitOrphans<T extends HasFile>(
   }
   return { fresh, duplicates, unconfirmed };
 }
+
+/**
+ * v15.7: the list with every entry the library also holds replaced by the LIBRARY's own object for that id (its first
+ * entry), so a play order never keeps an older copy of a track than the library (a patch raced, or an order was built
+ * from a library one commit old; the metadata save prefers the play order's copy). Same ids, same order, same length;
+ * entries the library doesn't hold stay as they are. Returns the SAME array when nothing differs (a setState with it is
+ * a no-op). O(n).
+ */
+export function refreshById<T extends HasId>(list: T[], library: readonly T[]): T[] {
+  if (list.length === 0 || library.length === 0) return list;
+  const byId = new Map<string, T>();
+  for (const s of library) if (!byId.has(s.id)) byId.set(s.id, s);
+  let out: T[] | null = null;
+  for (let i = 0; i < list.length; i++) {
+    const fresh = byId.get(list[i].id);
+    if (fresh === undefined || fresh === list[i]) continue;
+    if (!out) out = list.slice();
+    out[i] = fresh;
+  }
+  return out ?? list;
+}

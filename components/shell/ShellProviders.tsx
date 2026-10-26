@@ -1,4 +1,4 @@
-// components/shell/ShellProviders.tsx (v15.5, the new layout beta; v15.6 adds the tuning context)
+// components/shell/ShellProviders.tsx (v15.5, the new layout beta; v15.6 adds the tuning context; v15.7 the library's two)
 //
 // Nests the new layout's context providers around it. It re-renders with App (four times a second while playing);
 // its children do not: App hands it one memo'd <AppShell /> with no props, and each view reads only the contexts it
@@ -16,6 +16,8 @@ import {
   LibrarySummaryContext,
   WalkContext,
   TimeContext,
+  LibraryListContext,
+  LibraryStatusContext,
 } from './contexts';
 import type {
   ShellActions,
@@ -27,6 +29,8 @@ import type {
   LibrarySummaryValue,
   WalkValue,
   TimeValue,
+  LibraryListValue,
+  LibraryStatusValue,
 } from './contexts';
 
 interface ShellProvidersProps {
@@ -39,10 +43,12 @@ interface ShellProvidersProps {
   library: LibrarySummaryValue;
   walk: WalkValue;
   time: TimeValue;
+  libraryList: LibraryListValue;
+  libraryStatus: LibraryStatusValue;
   children: ReactNode;
 }
 
-const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library, walk, time, children }: ShellProvidersProps) => (
+const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library, walk, time, libraryList, libraryStatus, children }: ShellProvidersProps) => (
   <ActionsContext.Provider value={actions}>
     <ShellContext.Provider value={shell}>
       <PlayerContext.Provider value={player}>
@@ -51,7 +57,11 @@ const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library
             <TuningContext.Provider value={tuning}>
               <LibrarySummaryContext.Provider value={library}>
                 <WalkContext.Provider value={walk}>
-                  <TimeContext.Provider value={time}>{children}</TimeContext.Provider>
+                  <TimeContext.Provider value={time}>
+                    <LibraryListContext.Provider value={libraryList}>
+                      <LibraryStatusContext.Provider value={libraryStatus}>{children}</LibraryStatusContext.Provider>
+                    </LibraryListContext.Provider>
+                  </TimeContext.Provider>
                 </WalkContext.Provider>
               </LibrarySummaryContext.Provider>
             </TuningContext.Provider>

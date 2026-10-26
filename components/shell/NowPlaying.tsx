@@ -71,9 +71,9 @@ const NowPlaying = () => {
                 <EmptyState
                   data-testid="np-empty"
                   title="Your library is empty"
-                  body="Add music in the classic library for now. The new Library comes in a later beta."
-                  actionLabel="Open the classic library"
-                  onAction={() => actions.peekClassic('library')}
+                  body="Import music from this device. Aetheria keeps its own copy here; your files are not changed."
+                  actionLabel="Import music"
+                  onAction={() => actions.openImport()}
                 />
               ) : (
                 <EmptyState data-testid="np-empty" title="Ready when you are" body="Play starts your play order from the top; Walks starts a Lo Shu walk." />

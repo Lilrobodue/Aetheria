@@ -2,7 +2,7 @@ import { type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from './fixtures';
-import { crash, hideZen, importTones, openApp, openHarmonicControl, openSafety } from './helpers';
+import { crash, hideZen, importTones, openApp, openHarmonicControl, openNewLayout, openSafety, peekClassicLibrary, seedLibraryRecords } from './helpers';
 
 // v15.3 "style foundation": the app's CSS is the bundled main-*.css alone. Until v15.2.1 index.html also ran the
 // Tailwind Play CDN, which regenerated the same rules in the page and hid any class the build had missed; it is gone
@@ -403,7 +403,7 @@ test.describe('style foundation (v15.3)', () => {
     await census('mini-player fallback');
     await page.getByRole('button', { name: 'Reload controls', exact: true }).click();
     await page.getByTestId('tab-library-button').click();
-    await page.getByRole('button', { name: 'Open the classic library', exact: true }).click();
+    await peekClassicLibrary(page);
     await page.getByTestId('peek-pill').waitFor();
     await census('peek');
     await page.getByTestId('peek-pill').click();
@@ -460,6 +460,100 @@ test.describe('style foundation (v15.3)', () => {
     expect(seen.size, 'the walk saw the new layout').toBeGreaterThan(150);
     expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
     expect([...effects], 'backdrop-filter or an endless animation in the new layout').toEqual([]);
+  });
+
+  test('f. the Library tab (v15.7): every class on screen has a rule; no blur and no endless animation, in each of its states', async ({ page }) => {
+    test.setTimeout(240_000);
+    const seen = new Map<string, string>();
+    const effects = new Set<string>();
+    const census = async (state: string) => {
+      await page.waitForTimeout(250);
+      await collectClasses(page, state, seen);
+      const found = await page.evaluate(() => {
+        const roots = Array.from(document.querySelectorAll('[data-testid="new-shell"], [role="dialog"], [role="alertdialog"], [data-testid="notices"]'));
+        const out: string[] = [];
+        for (const root of roots) {
+          for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+            const cs = getComputedStyle(el);
+            const tag = `${el.tagName.toLowerCase()}.${(el.getAttribute('class') || '').split(/\s+/).slice(0, 3).join('.')}`;
+            if (cs.backdropFilter && cs.backdropFilter !== 'none') out.push(`backdrop-filter ${cs.backdropFilter} on ${tag}`);
+            if (cs.animationName && cs.animationName !== 'none' && /infinite/.test(cs.animationIterationCount)) out.push(`infinite animation ${cs.animationName} on ${tag}`);
+          }
+        }
+        return out;
+      });
+      for (const f of found) effects.add(`${f} (${state})`);
+    };
+    await page.setViewportSize({ width: 411, height: 752 });
+    // Empty first (a new profile), then 30 seeded tracks.
+    await openNewLayout(page, { engine: 'v2', output: 'headphones' });
+    await page.getByTestId('tab-library-button').click();
+    await page.getByTestId('library-empty').waitFor();
+    await census('library, empty');
+    await seedLibraryRecords(page, 30, { crystals: 'some', keys: true, envelopes: true });
+    await page.goto('/');
+    await page.getByTestId('new-shell').waitFor();
+    await page.getByTestId('tab-library-button').click();
+    await page.getByTestId('library-list').waitFor();
+    await census('library, top');
+    const row = (name: string) => page.getByTestId('library-row').filter({ has: page.locator('[data-row-title]').getByText(name, { exact: true }) }).locator('button[data-row-index]');
+    await row('tone-0003').click();
+    await page.getByTestId('mini-title').filter({ hasText: 'tone-0003' }).waitFor({ timeout: 20_000 }); // playing; then a tap that changes it
+    await row('tone-0005').click();
+    await page.getByTestId('notices').getByRole('button', { name: 'Undo', exact: true }).waitFor();
+    await census('library, playing, the Undo toast');
+    await page.getByTestId('library-scroll').evaluate((el) => (el.scrollTop = 64 * 14));
+    await census('library, mid-list');
+    await page.getByTestId('library-search').fill('tone-001');
+    await census('library, searching');
+    await page.getByTestId('library-search').fill('nothing like this');
+    await page.getByTestId('library-no-results').waitFor();
+    await census('library, no results');
+    await page.getByTestId('library-search').fill('');
+    await page.getByRole('button', { name: 'Options for tone-0002', exact: true }).click();
+    await page.getByTestId('library-menu-body').waitFor();
+    await census('row menu');
+    await page.getByTestId('library-menu-info').click();
+    await page.getByRole('dialog', { name: 'Track info', exact: true }).waitFor();
+    await census('track info');
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Options for tone-0002', exact: true }).click();
+    await page.getByTestId('library-menu-delete').click();
+    await page.getByRole('alertdialog', { name: 'Delete this track?' }).waitFor();
+    await census('delete');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('health-crystals-action').click();
+    await page.getByTestId('assign-dialog').waitFor();
+    await census('assign crystals');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => (window as any).__aetheriaAnalyse.tune({ duty: 0.02 }));
+    await page.getByTestId('health-analyse-action').click();
+    await page.getByTestId('library-health-status').getByText('Analysing…').waitFor();
+    await census('health card, analysing');
+    await page.getByTestId('health-analyse-action').click();
+    await page.getByTestId('library-import').click();
+    await page.getByTestId('import-body').waitFor();
+    await census('import sheet');
+    await page.keyboard.press('Escape');
+    await crash(page, 'library-list');
+    await page.getByRole('alert').filter({ hasText: /hit a problem/ }).waitFor();
+    await census('list fallback');
+    await page.getByRole('button', { name: 'Reload panel', exact: true }).click();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.getByTestId('desktop-panel').waitFor();
+    await census('desktop, library panel');
+    await page.getByTestId('library-import').click();
+    await page.getByRole('region', { name: 'Import music', exact: true }).waitFor();
+    await census('desktop, import panel');
+
+    const styled = await stylesheetClasses(page);
+    const unstyled = [...seen]
+      .filter(([t]) => !styled.has(t) && !LUCIDE.test(t) && !INERT.has(t))
+      .map(([t, state]) => `${t} (${state})`)
+      .sort();
+    expect(seen.size, 'the walk saw the Library tab').toBeGreaterThan(100);
+    expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
+    expect([...effects], 'backdrop-filter or an endless animation in the Library tab').toEqual([]);
   });
 
   test('d. the --ae-* CSS variables equal the tailwind.config.js tokens', async ({ page }) => {

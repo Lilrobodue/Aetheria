@@ -40,6 +40,7 @@ import {
   TONE_LEVEL_CLASSIC_KEY,
   TONE_LEVEL_V2_KEY,
   type LayersSectionName,
+  peekClassicLibrary,
 } from './helpers';
 
 // v15.6, the Layers tab: every sound control classic keeps in Harmonic Control, on one page in the new layout (decision
@@ -750,7 +751,7 @@ test.describe('phone, controls', () => {
     await page.keyboard.press('Escape');
     // And no Safety state leaks into classic (v15.5 set it here too, spec §2.6): a peek shows no Safety panel.
     await tab(page, 'library');
-    await page.getByRole('button', { name: 'Open the classic library', exact: true }).click();
+    await peekClassicLibrary(page);
     await expect(peekPill(page)).toBeVisible();
     await page.waitForTimeout(500);
     await expect(page.getByRole('button', { name: 'Close Safety Panel' }), 'no Safety panel in the peek').toHaveCount(0);

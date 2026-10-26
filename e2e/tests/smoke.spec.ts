@@ -378,6 +378,7 @@ test('freeing space with Discard saves the library order again, not only the aud
     (window as any).__failStateSaves = false;
   });
   await page.getByRole('button', { name: 'Discard' }).click();
+  await page.waitForTimeout(650); // v15.7: the second tap counts from 600 ms after the first (a double tap is one)
   await page.getByRole('button', { name: 'Tap again to delete them' }).click();
   await expectCache(page, { blobs: 4, library: 4 });
   await expect(page.getByText(/could not be saved/)).toHaveCount(0);
