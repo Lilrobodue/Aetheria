@@ -271,16 +271,16 @@ const AccessibleGuidebook: React.FC = () => {
             </p>
           </div>
           <div className="p-5 bg-slate-900/50 border-l-4 border-gold-500/60 rounded-r-lg">
-            <h3 className="text-lg font-serif text-gold-200 mb-2">Quick Presets</h3>
+            <h3 className="text-lg font-serif text-gold-200 mb-2">Crystal Sets</h3>
             <p className="text-slate-300 leading-relaxed text-sm mb-3">
-              The player includes presets that select specific combinations of frequencies:
+              Five sets each play the tracks on a few crystals, one crystal after another:
             </p>
             <ul className="space-y-1.5 text-sm">
-              <li className="text-slate-300"><strong className="text-gold-200">Deep Healing</strong> — a curated selection from across the ranges</li>
-              <li className="text-slate-300"><strong className="text-gold-200">Mood Elevate</strong> — frequencies often associated with uplifting energy</li>
-              <li className="text-slate-300"><strong className="text-gold-200">Meditation</strong> — frequencies often used in contemplative practices</li>
-              <li className="text-slate-300"><strong className="text-gold-200">Flow State</strong> — a combination designed for focused listening</li>
-              <li className="text-slate-300"><strong className="text-gold-200">Qi Strength</strong> — frequencies drawn from traditional energy practices</li>
+              <li className="text-slate-300"><strong className="text-gold-200">Grounding</strong> — 174, 285, 396 and 417 Hz</li>
+              <li className="text-slate-300"><strong className="text-gold-200">Stillness</strong> — 174, 285 and 528 Hz</li>
+              <li className="text-slate-300"><strong className="text-gold-200">Uplift</strong> — 396, 417 and 639 Hz</li>
+              <li className="text-slate-300"><strong className="text-gold-200">Meditation</strong> — 741, 852 and 963 Hz</li>
+              <li className="text-slate-300"><strong className="text-gold-200">Flow</strong> — 285, 417, 528, 639 and 741 Hz</li>
             </ul>
             <p className="text-slate-400 italic text-sm mt-3">
               These presets are starting points. Try different ones and find what you enjoy.

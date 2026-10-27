@@ -63,14 +63,14 @@ Plays through all 27 frequencies in order — low to high. Your music is arrange
 ### Single Range
 Choose just GUT, HEART, or HEAD to focus your listening on one frequency range.
 
-### Quick Presets
-The player includes presets that select specific combinations of frequencies:
+### Crystal Sets
+Five sets each play the tracks on a few crystals, one crystal after another:
 
-- **Deep Healing** — a curated selection from across the ranges
-- **Mood Elevate** — frequencies often associated with uplifting energy
-- **Meditation** — frequencies often used in contemplative practices
-- **Flow State** — a combination designed for focused listening
-- **Qi Strength** — frequencies drawn from traditional energy practices
+- **Grounding** — 174, 285, 396 and 417 Hz
+- **Stillness** — 174, 285 and 528 Hz
+- **Uplift** — 396, 417 and 639 Hz
+- **Meditation** — 741, 852 and 963 Hz
+- **Flow** — 285, 417, 528, 639 and 741 Hz
 
 These presets are starting points. Try different ones and find what you enjoy.
 

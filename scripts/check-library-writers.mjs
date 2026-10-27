@@ -47,7 +47,7 @@ const PINS_PATH = join(root, 'scripts', 'library-writers.json');
 const CACHE_FILE = 'utils/playlistCache.ts';
 const CACHE_WRITERS = ['deleteTracksFromCache', 'clearPlaylistCache'];
 const ROOT_COMPONENT = 'App'; // App.tsx's component: its own body is not a wrapper, its inner functions are
-const PLAY_ORDER_FUNCTIONS = ['startPlayOrder', 'playFromLibrary', 'undoPlayOrder', 'applyMix']; // v15.8: applyMix, the mixes' one way into App's state
+const PLAY_ORDER_FUNCTIONS = ['startPlayOrder', 'playFromLibrary', 'undoPlayOrder', 'applyMix', 'restoreLibrary', 'startMix']; // v15.8: applyMix, the mixes' one way into App's state; v15.9: restoreLibrary, and the Mixes tab's startMix
 const MUTATORS = new Set(['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin']);
 
 const lf = (s) => s.replace(/^﻿/, '').replace(/\r\n?/g, '\n');

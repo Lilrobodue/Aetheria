@@ -16,17 +16,20 @@ export const GUT_CRYSTALS: readonly number[] = [174, 285, 396, 417, 528, 639, 74
 export const HEART_CRYSTALS: readonly number[] = [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150];
 export const HEAD_CRYSTALS: readonly number[] = [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336];
 
-/** The classic drawer's five presets (its buttons' literals: name as in the "No songs found for …" toast, label as on
- *  the button). v14.17 gives them neutral names, here, for both layouts. */
+/** The five crystal-set presets (the classic drawer's literals: name as in the "No songs found for …" toast, label as
+ *  the button's first line). v15.9: the neutral names the user confirmed on 2026-10-26, in both layouts (decision 12;
+ *  they were Qi Strengthening, Deep Healing, Mood Elevation, Deep Meditation and Flow State). The ids stay. */
 export type PresetId = 'qi' | 'healing' | 'mood' | 'meditation' | 'flow';
 export interface PresetDef { id: PresetId; name: string; label: string; crystals: readonly number[] }
 export const PRESETS: readonly PresetDef[] = [
-  { id: 'qi', name: 'Qi Strengthening', label: 'Qi Strength', crystals: [174, 285, 396, 417] },
-  { id: 'healing', name: 'Deep Healing', label: 'Deep Healing', crystals: [174, 285, 528] },
-  { id: 'mood', name: 'Mood Elevation', label: 'Mood Elevate', crystals: [396, 417, 639] },
-  { id: 'meditation', name: 'Deep Meditation', label: 'Meditation', crystals: [741, 852, 963] },
-  { id: 'flow', name: 'Flow State', label: 'Flow State', crystals: [285, 417, 528, 639, 741] },
+  { id: 'qi', name: 'Grounding', label: 'Grounding', crystals: [174, 285, 396, 417] },
+  { id: 'healing', name: 'Stillness', label: 'Stillness', crystals: [174, 285, 528] },
+  { id: 'mood', name: 'Uplift', label: 'Uplift', crystals: [396, 417, 639] },
+  { id: 'meditation', name: 'Meditation', label: 'Meditation', crystals: [741, 852, 963] },
+  { id: 'flow', name: 'Flow', label: 'Flow', crystals: [285, 417, 528, 639, 741] },
 ];
+/** A preset's recipe as its sub-line: "174 · 285 · 396 · 417 Hz" (the Mixes tab); classic's drawer shows "174·285·396·417". */
+export const presetRecipe = (p: { crystals: readonly number[] }, sep: string = ' · ', unit: string = ' Hz'): string => p.crystals.join(sep) + unit;
 
 export const getHarmonicSolfeggio = (detectedFreq: number): number => {
     if (detectedFreq <= 0) return 396; 

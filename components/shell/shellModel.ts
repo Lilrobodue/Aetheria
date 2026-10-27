@@ -12,7 +12,7 @@ export type ShellTab = 'now' | 'library' | 'mixes' | 'layers' | 'more';
 /** v15.7 adds the Import sheet. */
 export type ShellSheet = 'sound' | 'crystal' | 'walks' | 'menu' | 'import';
 /** The classic panel a stub "peeks" into (decision 4). */
-export type PeekPanel = 'library' | 'mixes' | 'sound';
+export type PeekPanel = 'library' | 'sound'; // v15.9: no 'mixes' (the Mixes tab replaced its stub's peek)
 
 export function isLayoutPref(v: unknown): v is LayoutPref {
   return v === 'new' || v === 'classic';

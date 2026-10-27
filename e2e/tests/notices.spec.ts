@@ -49,11 +49,13 @@ const ONE_LINERS: Array<[string, string]> = [
   ['Full Alignment', 'No analyzed songs found. Please scan your library first.'],
   ['HEART Alignment', 'HEART Alignment: no tracks have a HEART crystal (1206–3150 Hz) yet. Try scanning your library first, or use Auto-Distribute.'],
   ['HEAD Alignment', 'HEAD Alignment: no tracks have a HEAD crystal (3504 Hz and up) yet. Try scanning your library first, or use Auto-Distribute.'],
-  ['Qi Strength', 'No songs found for Qi Strengthening. Try scanning your library first or add more variety.'],
-  ['Deep Healing', 'No songs found for Deep Healing. Try scanning your library first or add more variety.'],
-  ['Mood Elevate', 'No songs found for Mood Elevation. Try scanning your library first or add more variety.'],
-  ['Meditation', 'No songs found for Deep Meditation. Try scanning your library first or add more variety.'],
-  ['Flow State', 'No songs found for Flow State. Try scanning your library first or add more variety.'],
+  // v15.9: the presets' neutral names, by their whole accessible name (the recipe is their second line; "Flow" alone
+  // is also the visual settings' Flow switch).
+  ['Grounding 174·285·396·417', 'No songs found for Grounding. Try scanning your library first or add more variety.'],
+  ['Stillness 174·285·528', 'No songs found for Stillness. Try scanning your library first or add more variety.'],
+  ['Uplift 396·417·639', 'No songs found for Uplift. Try scanning your library first or add more variety.'],
+  ['Meditation 741·852·963', 'No songs found for Meditation. Try scanning your library first or add more variety.'],
+  ['Flow 285·417·528·639·741', 'No songs found for Flow. Try scanning your library first or add more variety.'],
   ['Ultimate', 'Not enough analyzed songs for Ultimate Alignment. Please scan your library first.'],
   ['Current Track', 'No track currently selected for analysis.'],
 ];

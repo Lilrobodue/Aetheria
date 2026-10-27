@@ -7,7 +7,7 @@ import { adb, mediaSession, chromeSessions } from './adb';
 // with `adb shell dumpsys media_session`. The screen-off tests must stay LAST
 // (v15.4: the panel-crash one after the lock-screen one, the root crash last;
 // v15.5: the new layout's one before the lock-screen one; v15.6: the new layout in Zen after it; v15.7: the Library
-// tab's row tap after that; v15.8: the walk after Assign after that).
+// tab's row tap after that; v15.8: the walk after Assign after that; v15.9: a mix from the Mixes tab after that).
 test.skip(!ON_DEVICE, 'needs an Android device (npm run test:device)');
 
 // Android sends the media keys to a card that is PLAYING, so a card left over
@@ -358,6 +358,65 @@ test('v15.8: after Assign, a Layer Ascent walk with the screen off: no gap on th
   expect(s.cursor, 'three tracks on').toBeGreaterThanOrEqual(3);
   const ASCENT = [174, 285, 396, 417, 528, 639, 741, 852, 963, 1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150, 3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336];
   expect(ASCENT[s.steps![s.cursor]], 'the cube’s step names the crystal playing').toBe(s.crystals[s.libraryNames.indexOf(s.current ?? '')]);
+  // (4 s tones advance on their own: the card and the state are compared as one polled pair.)
+  await expect
+    .poll(async () => (await libraryState(page)).current === (mediaSession()?.title ?? '-'), { message: 'the card names the track playing', timeout: 10_000 })
+    .toBe(true);
+  expect(dialogs).toEqual([]);
+});
+
+test('v15.9: Grounding from the Mixes tab puts its first track on the card at once; with the screen off the card follows three gapless advances through the mix, in its order; after the wake the order and the cursor are intact @device', async ({ page }) => {
+  // v15.9 (spec §5.10 step 4): a mix now starts playing (startPlayOrder), so the card, the car and the gapless advance
+  // must follow the MIX from its first track. 30 seeded tones of 4 s (crystals the 27 in turn), the new layout on the
+  // phone, the Mixes tab, Grounding by a finger tap: tone-0001, tone-0028, tone-0002, tone-0029, tone-0003, tone-0030,
+  // tone-0004. Turns the screen off; a phone with a secure lock stays locked after the test (unlock it by hand).
+  const dialogs = await openSeededNewLayout(page, 30, { real: 30, seconds: 4 });
+  await page.setViewportSize(PHONE_VIEWPORT);
+  const at = async (testId: string) => {
+    const box = await page.getByTestId(testId).boundingBox();
+    expect(box, testId).toBeTruthy();
+    await tapAt(page, box!.x + box!.width / 2, box!.y + box!.height / 2);
+  };
+  await at('tab-mixes-button');
+  await expect(page.getByTestId('tab-mixes')).toBeVisible({ timeout: 5_000 });
+  const row = page.getByTestId('mix-preset:qi');
+  await row.evaluate((el) => el.scrollIntoView({ block: 'center' })); // a DOM scroll; the tap itself is a finger's
+  await page.waitForTimeout(300);
+  await at('mix-preset:qi');
+  const MIX = ['tone-0001', 'tone-0028', 'tone-0002', 'tone-0029', 'tone-0003', 'tone-0030', 'tone-0004'];
+  // Polled: the tap's click lands after tapAt returns.
+  await expect.poll(async () => (await libraryState(page)).names, { timeout: 15_000, message: 'the mix is the play order' }).toEqual(MIX);
+  await expect.poll(() => mediaSession(), { timeout: 15_000, message: 'the card names the mix’s first track at once' }).toEqual({ state: 'playing', title: MIX[0] });
+  const s0 = await libraryState(page);
+  const first = mediaSession()!.title;
+  const pausesBefore = await pauseCount(page);
+
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  const titles: string[] = [];
+  try {
+    await expect
+      .poll(
+        () => {
+          const s = mediaSession();
+          if (s && s.state === 'playing' && s.title !== first && !titles.includes(s.title)) titles.push(s.title);
+          return titles.length;
+        },
+        { timeout: 45_000, intervals: [500], message: 'three gapless advances on the PLAYING card, through the mix' }
+      )
+      .toBeGreaterThanOrEqual(3);
+    expect(mediaSession()?.state, 'the card still says playing').toBe('playing');
+    expect(chromeSessions().filter((s) => s.state === 'playing').length, 'one PLAYING Chrome card: none stranded').toBe(1);
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  test.info().annotations.push({ type: 'card titles with the screen off, from the Mixes tab', description: [first, ...titles].join(' → ') });
+  expect(titles.slice(0, 3), 'the mix in its order: its 2nd, 3rd and 4th tracks').toEqual(MIX.slice(1, 4));
+  // After the wake, DOM and state reads only (no click or tap: Chrome draws no frames behind the keyguard).
+  expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
+  const s = await libraryState(page);
+  expect([s.ids, s.walk], 'the mix’s order intact, no walk').toEqual([s0.ids, null]);
+  expect(s.cursor, 'three tracks on').toBeGreaterThanOrEqual(3);
+  await expect(page.getByTestId('tab-mixes'), 'still the Mixes tab').toBeAttached();
   // (4 s tones advance on their own: the card and the state are compared as one polled pair.)
   await expect
     .poll(async () => (await libraryState(page)).current === (mediaSession()?.title ?? '-'), { message: 'the card names the track playing', timeout: 10_000 })

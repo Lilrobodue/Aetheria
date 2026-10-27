@@ -13,5 +13,12 @@ export function buildScenarios(H1) {
   for (const fixture of ['F160g', 'F160d', 'F26', 'FGUT', 'F3', 'F0', 'F160u', 'F111gap', 'FLEG'])
     for (const exp of ['beginner', 'expert']) scenarios.push({ fixture, exp, historyName: 'none', history: null, seed: 1, width: 411 });
   scenarios.push({ fixture: 'F160', exp: 'beginner', historyName: 'none', history: null, seed: 1, width: 1280, scanning: true, only: ['autoDistribute'] });
+  // v15.9: the new layout (applyMix leaves classic's notices out there), for every generator on F160 and FGUT.
+  for (const fixture of ['F160', 'FGUT']) scenarios.push({ fixture, exp: 'beginner', historyName: 'none', history: null, seed: 1, width: 411, shell: true });
+  // v15.9: Restore Library from a mix (40 library tracks, reversed) with the cursor on its 8th, with and without
+  // shuffle, and with nothing current; F160d's duplicate library entries included.
+  for (const fixture of ['F160', 'F160d'])
+    for (const [cursor, shuffle] of [[7, false], [7, true], [-1, false]])
+      scenarios.push({ fixture, exp: 'beginner', historyName: 'none', history: null, seed: 1, width: 411, playOrder: { from: 0, count: 40, reverse: true }, cursor, shuffle, only: ['restore'] });
   return scenarios;
 }

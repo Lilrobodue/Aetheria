@@ -31,7 +31,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadTs, liftText, definesModuleFuncs, APP_FUNCS, APP_FUNCS_V158, ENV_NAMES } from './mix-golden/lift.mjs';
+import { loadTs, liftText, definesModuleFuncs, APP_FUNCS, APP_FUNCS_V158, ENV_NAMES, ENV_NAMES_V159, buttonLabel } from './mix-golden/lift.mjs';
 import { buildFixtures, buildHistory, mulberry32 } from './mix-golden/fixture.mjs';
 import { runScenarios } from './mix-golden/recorder.mjs';
 import { GENS, buildScenarios } from './mix-golden/scenarios.mjs';
@@ -102,7 +102,9 @@ async function sources(rev) {
   if (definesModuleFuncs(ts, app)) return { label: 'working tree (v15.7 shape)', app, constants: read('constants.ts'), listOps: read('utils/library/listOps.ts'), modules: null };
   const imp = (p) => import(pathToFileURL(ROOT + '/' + p).href);
   const [C, D, R, L] = await Promise.all([imp('utils/crystalData.ts'), imp('utils/mix/distribution.ts'), imp('utils/mix/recipes.ts'), imp('utils/library/listOps.ts')]);
-  return { label: 'working tree', app, modules: { C, D, R, L } };
+  // v15.9: the mix catalogue (mixStartText, the Undo toast's words); absent before v15.9.
+  const K = await imp('utils/mix/catalog.ts').catch(() => ({}));
+  return { label: 'working tree', app, modules: { C, D, R, L, K } };
 }
 
 function run(src) {
@@ -120,15 +122,17 @@ function run(src) {
   } else {
     // v15.8 and later: App's generators, mixInput and applyMix are lifted; the recipes, the distribution and the
     // crystal data come from the modules as Node loads them (every export is offered; the code takes what it uses).
-    const { C, D, R, L } = src.modules;
-    const moduleImports = Object.fromEntries(Object.entries({ ...C, ...D, ...R }).filter(([k, v]) => typeof v === 'function' || k === k.toUpperCase()));
+    const { C, D, R, L, K } = src.modules;
+    const moduleImports = Object.fromEntries(Object.entries({ ...C, ...D, ...R, ...(K || {}) }).filter(([k, v]) => typeof v === 'function' || k === k.toUpperCase()));
+    // v15.9: App's module-level shuffle (Restore Library under shuffle) is lifted too; the rest of startPlayOrder's
+    // world is the recorder's (it is recorded, never run).
     lifted = liftText(ts, src.app, {
-      moduleFuncs: [],
+      moduleFuncs: ['getLruShuffledIndices'],
       appFuncs: APP_FUNCS_V158,
-      envNames: [...new Set([...ENV_NAMES, 'setLoShuWalkSteps', ...Object.keys(moduleImports)])],
+      envNames: [...new Set([...ENV_NAMES, 'setLoShuWalkSteps', ...ENV_NAMES_V159, ...Object.keys(moduleImports)])],
       moduleImports,
     });
-    deps = { ...moduleImports, dedupeById: L.dedupeById, patchById: L.patchById };
+    deps = { ...moduleImports, dedupeById: L.dedupeById, patchById: L.patchById, sameIdOrder: L.sameIdOrder };
   }
   const live = materialize(lifted);
   // The copied debug logging (Golden Φ, 111, SOURCE, getHarmonicSolfeggio) prints names: keep it out of the output.
@@ -195,19 +199,18 @@ function presetsAgainstDrawer(appText, PRESETS) {
   const visit = (n) => {
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) consts.set(n.name.text, n.initializer);
     if (ts.isJsxElement(n) && n.openingElement.tagName.getText(sf) === 'button') {
-      const label = n.children.map((c) => (ts.isJsxText(c) ? c.getText(sf) : '')).join(' ').replace(/\s+/g, ' ').trim();
+      const label = buttonLabel(ts, sf, n); // v15.9: the first line (the presets have their recipe on a second line)
       const attr = n.openingElement.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'onClick');
       const expr = attr?.initializer && ts.isJsxExpression(attr.initializer) ? attr.initializer.expression : null;
-      if (expr) byLabel.set(label, expr);
+      if (expr) byLabel.set(label, [...(byLabel.get(label) ?? []), expr]); // v15.9: "Flow" labels two buttons
     }
     ts.forEachChild(n, visit);
   };
   visit(sf);
   const problems = [];
   for (const p of PRESETS) {
-    const expr = byLabel.get(p.label);
-    const target = expr && ts.isIdentifier(expr) ? consts.get(expr.text) : expr;
-    const lit = target ? callIn(target) : null;
+    const lits = (byLabel.get(p.label) ?? []).map((expr) => (ts.isIdentifier(expr) ? consts.get(expr.text) : expr)).map((x) => (x ? callIn(x) : null)).filter(Boolean);
+    const lit = lits.length === 1 ? lits[0] : null;
     if (!lit) problems.push(`${p.id}: no drawer button "${p.label}" calling generateFrequencyPlaylist`);
     else if (JSON.stringify(lit.crystals) !== JSON.stringify([...p.crystals]) || lit.name !== p.name) problems.push(`${p.id}: the drawer has ${JSON.stringify(lit)}`);
   }
@@ -296,12 +299,195 @@ function stepDiff(step, A, B) {
   return { step, runs: Object.keys(A.runs).length, violations: violations.length, firstViolations: violations.slice(0, 10), touched, assertionFailures: asserts.length, firstAssertionFailures: asserts.slice(0, 10) };
 }
 
+// ---- v15.9's steps (the plan's v14.17): one change at a time, each with its own allow-list -----------------------
+// Each step goes from the golden before that change to the golden after it, all captured with this (v15.9) harness
+// (the v15.8 one reproduces the shipped golden run for run, plus the new layout and Restore-from-a-mix runs). A step's
+// allow-list names the only calls that may change, and its assertions say how; every other call, every random draw
+// (except Restore's own shuffle in step 8), the walk facts and Restore / Assign / the dead paths stay identical:
+//   4  mixes never change the visual settings (the user's decision 2): a mix's setVizSettings is removed, nothing else.
+//      The report lists what each generator used to switch on;
+//   5  the 111/2178 tone overrides and the experience raises go: setSelectedSolfeggio (the 111 Sequence, the 2178
+//      filter) and setUserExperienceLevel are removed, each raise notice goes with its clear, and the two notices that
+//      waited for a raise notice show without the wait (111's at 500 ms, was 8,500; Ultimate's at 0, was 5,500);
+//   6  the neutral preset names: only a preset's not-found toast changes, and only by the preset's name;
+//   7  every mix plays: v15.8's setPlaylist / walk snapshot / mode / segments / phases / steps / cursor 0 / playTrack
+//      become ONE startPlayOrder(order, 0, text, { walk, mix: true }) with v15.8's order and walk and the toast's words
+//      (written out here, not taken from the catalogue); in the new layout (shell runs) the classic notices and their
+//      timers are gone (the Undo toast is the message); a mix that finds nothing starts nothing;
+//   8  Restore Library: from a mix, the walk ends and the cursor moves to the playing track's place in the library
+//      (under shuffle a fresh shuffle order starts with it); with the library already playing, only the search and the
+//      flag are written. Every mix identical.
+const NOT_MIX = ['restore', 'autoDistribute', 'filtered', 'aetheriaJourney', 'aetheriaOnly'];
+const OLD_NAMES = { 'Qi Strengthening': 'Grounding', 'Deep Healing': 'Stillness', 'Mood Elevation': 'Uplift', 'Deep Meditation': 'Meditation', 'Flow State': 'Flow' };
+const MIX_NAMES = {
+  gut: 'GUT Alignment', heart: 'HEART Alignment', head: 'HEAD Alignment', full: 'Full Alignment', 'preset:qi': 'Grounding',
+  'preset:healing': 'Stillness', 'preset:mood': 'Uplift', 'preset:meditation': 'Meditation', 'preset:flow': 'Flow',
+  golden: 'Golden Φ', seq111: '111 Sequence', source2178: '2178 Hz · SOURCE', ultimate: 'Ultimate',
+};
+const PLAY_OPS = ['setPlaylist', 'walkSnapshot', 'setLoShuWalkMode', 'setLoShuWalkSteps', 'setLoShuWalkSegments', 'setLoShuWalkPhases', 'setCurrentSongIndex', 'playTrack'];
+const RAISE = /[Ee]xperience level/;
+const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+const lastOf = (calls, op) => { const c = calls.filter((x) => x[0] === op); return c.length ? c[c.length - 1] : null; };
+const isTiming = (c) => c[0] === 'notice' || c[0] === 'setTimeout';
+/** The classic notices of a run: each shown text with its time, the timers in order, and the clears' times (sorted). */
+function noticeTimeline(calls) {
+  const shown = [], timers = [], clears = [];
+  for (const c of calls) {
+    if (c[0] === 'notice' && typeof c[1] === 'string') shown.push([c[1], c[2]]);
+    else if (c[0] === 'notice') clears.push(c[2]);
+    else if (c[0] === 'setTimeout') timers.push(c[1]);
+  }
+  return { shown, timers, clears: clears.sort((x, y) => x - y) };
+}
+/** Step 5: v15.8's notices without the raise notices (and each one's clear timer and clear), and with 111's and
+ *  Ultimate's closing notices shown without waiting for one. A shown notice's clear timer is the call right after it. */
+function expectedNotices(gen, calls) {
+  const shown = [], timers = [], clears = [];
+  const moved = (text, t) => (gen === 'seq111' && text.startsWith('111 Pattern Complete Journey activated!') ? 500
+    : gen === 'ultimate' && text.startsWith('Ultimate Alignment activated!') ? 0 : t);
+  for (let i = 0; i < calls.length; i++) {
+    const c = calls[i];
+    if (c[0] === 'notice' && typeof c[1] === 'string') {
+      const clear = calls[i + 1] && calls[i + 1][0] === 'setTimeout' ? calls[i + 1][1] : null;
+      if (RAISE.test(c[1])) { i++; continue; }                  // the raise notice and its clear timer
+      const t = moved(c[1], c[2]);
+      shown.push([c[1], t]);
+      if (clear !== null) clears.push(t + clear);
+    } else if (c[0] === 'setTimeout') {
+      timers.push(gen === 'seq111' && c[1] === 8500 ? 500 : gen === 'ultimate' && c[1] === 5500 ? 0 : c[1]);
+    }
+  }
+  return { shown, timers, clears: clears.sort((x, y) => x - y) };
+}
+/** Step 7: the Undo toast's words, written out (the catalogue's mixStartText must agree). */
+function startText(name, count, walkMode, C) {
+  if (!walkMode) return `Playing ${name}: ${count} ${count === 1 ? 'track' : 'tracks'}.`;
+  const draw = ['combined', 'ouroboros', 'cabi'].includes(walkMode) ? ' Tap again for a new draw.' : '';
+  return `Playing ${name}: ${count} of ${C.LO_SHU_WALKS[walkMode].length} positions.${draw}`;
+}
+
+async function stepV159(step, A, B) {
+  if (!['4', '5', '6', '7', '8'].includes(step)) throw new Error('--step=1|2|3|4|5|6|7|8');
+  const C = await import(pathToFileURL(ROOT + '/utils/crystalData.ts').href);
+  const violations = [];
+  const asserts = [];
+  const touched = {};
+  const touch = (k) => { touched[k] = (touched[k] || 0) + 1; };
+  const switchedOn = {};
+  for (const key of Object.keys(A.runs)) {
+    const parts = key.split('|');
+    const gen = parts[0];
+    const shell = parts.includes('shell');
+    const po = parts.find((p) => p.startsWith('po:'));
+    const a = A.outputs[A.runs[key]];
+    const b = B.outputs[B.runs[key]];
+    if (!b) { violations.push([key, 'missing']); continue; }
+    if (b.thrown) asserts.push([key, 'threw: ' + b.thrown]);
+    if (!same(a.derived, b.derived) || a.returned !== b.returned || a.thrown !== b.thrown) violations.push([key, 'walk facts / returned / thrown']);
+    const restoreShuffles = step === '8' && gen === 'restore' && po && po.endsWith('s') && !po.includes('@-1');
+    if (a.rngCalls !== b.rngCalls && !restoreShuffles) violations.push([key, `draws ${a.rngCalls} → ${b.rngCalls}`]);
+    const mix = !NOT_MIX.includes(gen);
+    const identical = () => { if (!same(a.calls, b.calls)) violations.push([key, 'must be identical']); };
+
+    if (step === '4') {
+      if (!mix) { identical(); continue; }
+      const viz = a.calls.filter((c) => c[0] === 'setVizSettings');
+      if (!same(a.calls.filter((c) => c[0] !== 'setVizSettings'), b.calls)) violations.push([key, 'outside the allow-list']);
+      if (b.calls.some((c) => c[0] === 'setVizSettings')) asserts.push([key, 'still changes the visual settings']);
+      if (viz.length) {
+        touch('visual settings no longer applied');
+        for (const v of viz) (switchedOn[gen] ??= new Set()).add(JSON.stringify(v[1].patch ?? v[1]));
+      }
+    } else if (step === '5') {
+      if (!mix) { identical(); continue; }
+      const removable = ['setUserExperienceLevel', ...(gen === 'seq111' || gen === 'source2178' ? ['setSelectedSolfeggio'] : [])];
+      if (!same(a.calls.filter((c) => !removable.includes(c[0]) && !isTiming(c)), b.calls.filter((c) => !isTiming(c)))) violations.push([key, 'outside the allow-list']);
+      for (const op of removable) {
+        if (b.calls.some((c) => c[0] === op)) asserts.push([key, 'still writes ' + op]);
+        if (a.calls.some((c) => c[0] === op)) touch(op === 'setSelectedSolfeggio' ? 'tone override dropped' : 'experience raise dropped');
+      }
+      const want = expectedNotices(gen, a.calls);
+      const got = noticeTimeline(b.calls);
+      if (!same(want, got)) asserts.push([key, `notices ${JSON.stringify(got)} vs ${JSON.stringify(want)}`]);
+      if (a.calls.some((c) => c[0] === 'notice' && typeof c[1] === 'string' && RAISE.test(c[1]))) touch('raise notice removed');
+      if (!same(noticeTimeline(a.calls).shown.filter(([t]) => !RAISE.test(t)), got.shown)) touch('a notice shown without the wait');
+    } else if (step === '6') {
+      if (!gen.startsWith('preset:')) { identical(); continue; }
+      const rename = (c) => (c[0] === 'toast' ? [c[0], Object.entries(OLD_NAMES).reduce((s, [o, n]) => s.replace(`for ${o}.`, `for ${n}.`), c[1]), ...c.slice(2)] : c);
+      if (!same(a.calls.map(rename), b.calls)) violations.push([key, 'outside the allow-list']);
+      if (a.calls.some((c) => c[0] === 'toast')) {
+        touch('preset names');
+        const t = b.calls.find((c) => c[0] === 'toast')[1];
+        if (!t.includes(`for ${MIX_NAMES[gen]}.`)) asserts.push([key, 'toast without the new name: ' + t]);
+      }
+    } else if (step === '7') {
+      if (!mix) { identical(); continue; }
+      const keep = (calls) => calls.filter((c) => !PLAY_OPS.includes(c[0]) && c[0] !== 'startPlayOrder' && !(shell && isTiming(c)));
+      if (!same(keep(a.calls), keep(b.calls))) violations.push([key, 'outside the allow-list']);
+      if (shell) {
+        if (b.calls.some(isTiming)) asserts.push([key, 'a classic notice in the new layout']);
+        if (a.calls.some(isTiming)) touch('new layout: no classic notices');
+      }
+      if (b.calls.some((c) => PLAY_OPS.includes(c[0]))) asserts.push([key, 'writes the play state itself: ' + b.calls.filter((c) => PLAY_OPS.includes(c[0])).map((c) => c[0]).join(',')]);
+      const sp = b.calls.filter((c) => c[0] === 'startPlayOrder');
+      const order = lastOf(a.calls, 'setPlaylist');
+      if (!order) { if (sp.length) asserts.push([key, 'a mix that found nothing started']); continue; }
+      if (sp.length !== 1) { asserts.push([key, `${sp.length} startPlayOrder calls`]); continue; }
+      const s = sp[0][1];
+      const mode = lastOf(a.calls, 'setLoShuWalkMode');
+      const val = (op) => (lastOf(a.calls, op) ? lastOf(a.calls, op)[1] : null);
+      const walkA = mode ? { mode: mode[1], segments: val('setLoShuWalkSegments'), phases: val('setLoShuWalkPhases'), steps: val('setLoShuWalkSteps') } : null;
+      const walkMode = gen.startsWith('walk:') ? gen.slice(5) : null;
+      const name = walkMode ? C.LO_SHU_WALK_INFO[walkMode].fullName : MIX_NAMES[gen];
+      const problems = [];
+      if (!same(s.ids, order[1].ids)) problems.push('order');
+      if (s.index !== 0) problems.push('index ' + s.index);
+      if (!same(s.walk, walkA)) problems.push('walk');
+      if (s.viz !== null) problems.push('visual settings');
+      const text = startText(name, order[1].ids.length, walkMode, C);
+      if (s.text !== text) problems.push(`text "${s.text}" vs "${text}"`);
+      if (s.mix !== true) problems.push('mix flag');
+      if (problems.length) asserts.push([key, 'startPlayOrder: ' + problems.join(', ')]);
+      else touch('startPlayOrder');
+      if (!a.calls.some((c) => c[0] === 'playTrack')) touch('a list swap now plays');
+    } else if (step === '8') {
+      if (gen !== 'restore') { identical(); continue; }
+      if (!po) {
+        // The library already plays: v15.8 rewrote the same list; now only the flag and the search are written.
+        if (!same(a.calls.filter((c) => c[0] !== 'setPlaylist'), b.calls)) violations.push([key, 'restore (library playing) outside the allow-list']);
+        // (An empty library: nothing at all, in both.)
+        if (!same(b.calls.map((c) => c[0]), a.calls.length ? ['setUseChakraOrder', 'setSearchTerm'] : [])) asserts.push([key, 'restore (library playing): ' + b.calls.map((c) => c[0]).join(',')]);
+        touch('Restore: the library already plays');
+        continue;
+      }
+      const cursor = Number(po.split('@')[1].replace('s', ''));
+      const shuffle = po.endsWith('s');
+      const added = ['setLoShuWalkMode', 'setLoShuWalkSegments', 'setLoShuWalkPhases', 'setLoShuWalkSteps', 'walkSnapshot', 'setCurrentSongIndex', 'setShuffledIndices', 'setShufflePos'];
+      if (!same(b.calls.filter((c) => !added.includes(c[0])), a.calls)) violations.push([key, 'restore outside the allow-list']);
+      const libIds = a.calls.find((c) => c[0] === 'setPlaylist')[1].ids;
+      const expected = cursor < 0 ? -1 : libIds.indexOf(libIds[39 - cursor]);   // the order is the library's first 40, reversed
+      const want = [['setPlaylist'], ['setLoShuWalkMode', null], ['setLoShuWalkSegments', null], ['setLoShuWalkPhases', null], ['setLoShuWalkSteps', null], ['walkSnapshot', ''], ['setCurrentSongIndex', expected]];
+      const got = b.calls.slice(0, 7).map((c, i) => (i === 0 ? [c[0]] : c));
+      if (!same(got, want)) asserts.push([key, `restore: ${JSON.stringify(got)} vs ${JSON.stringify(want)}`]);
+      if (!b.calls[0][1].isLibrary) asserts.push([key, 'restore: not the library']);
+      const sh = lastOf(b.calls, 'setShuffledIndices');
+      if (shuffle && cursor >= 0) {
+        if (!sh || sh[1][0] !== expected || sh[1].length !== libIds.length || new Set(sh[1]).size !== sh[1].length || !same(lastOf(b.calls, 'setShufflePos'), ['setShufflePos', 0])) asserts.push([key, 'restore: the shuffle order']);
+      } else if (sh || lastOf(b.calls, 'setShufflePos')) asserts.push([key, 'restore: a shuffle order without shuffle']);
+      touch('Restore: the cursor on the playing track');
+    }
+  }
+  const report = { step, runs: Object.keys(A.runs).length, violations: violations.length, firstViolations: violations.slice(0, 10), touched, assertionFailures: asserts.length, firstAssertionFailures: asserts.slice(0, 10) };
+  if (step === '4') report.switchedOn = Object.fromEntries(Object.entries(switchedOn).map(([g, set]) => [g, [...set].map((s) => JSON.parse(s))]));
+  return report;
+}
+
 // ---- main -------------------------------------------------------------------------------------------------------------
 const STEP = arg('step');
 const CAPTURE = arg('capture');
 const WRITE = arg('write');
 if (STEP) {
-  const report = { ...stepDiff(STEP, load(arg('from')), load(arg('to'))), from: arg('from'), to: arg('to') };
+  const report = { ...(Number(STEP) >= 4 ? await stepV159(STEP, load(arg('from')), load(arg('to'))) : stepDiff(STEP, load(arg('from')), load(arg('to')))), from: arg('from'), to: arg('to') };
   if (arg('report')) writeFileSync(arg('report'), JSON.stringify(report, null, 1) + '\n');
   console.log(`check-mix-golden --step=${STEP}: ${report.runs} runs; ${report.violations} outside the allow-list; ${report.assertionFailures} assertion failures; touched ${JSON.stringify(report.touched)}`);
   if (report.violations || report.assertionFailures) { console.log(JSON.stringify({ firstViolations: report.firstViolations, firstAssertionFailures: report.firstAssertionFailures })); process.exit(1); }

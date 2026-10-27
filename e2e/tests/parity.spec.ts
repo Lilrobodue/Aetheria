@@ -479,11 +479,12 @@ async function walkNew(page: Page, vp: Viewport): Promise<void> {
     await page.getByRole('dialog', { name: 'Walks', exact: true }).waitFor();
     await shot('sheet-walks', { compare: true, zenMask: menu });
     await page.keyboard.press('Escape');
-    // v15.7: the Library tab replaced its stub, so its shot is reviewed (against the mockups), not compared.
+    // v15.7: the Library tab replaced its stub, so its shot is reviewed (against the mockups), not compared; v15.9 the
+    // Mixes tab likewise.
     for (const t of ['library', 'mixes'] as const) {
       await page.getByTestId(`tab-${t}-button`).click();
       await page.getByTestId(`tab-${t}`).waitFor();
-      await shot(`tab-${t}`, { compare: t !== 'library' });
+      await shot(`tab-${t}`, { compare: false });
     }
     for (const t of ['layers', 'more'] as const) {
       await page.getByTestId(`tab-${t}-button`).click();
@@ -519,7 +520,7 @@ async function walkNew(page: Page, vp: Viewport): Promise<void> {
     for (const t of ['library', 'mixes'] as const) {
       await page.getByTestId(`nav-${t}`).click();
       await page.getByTestId(`tab-${t}`).waitFor();
-      await shot(`panel-${t}`, { compare: t !== 'library', masks: [transport] });
+      await shot(`panel-${t}`, { compare: false, masks: [transport] }); // v15.7 Library, v15.9 Mixes: reviewed
     }
     await page.getByTestId('nav-layers').click();
     await shot('panel-layers', { compare: false });

@@ -144,7 +144,7 @@ test('an emptied list still saves the library, and a reload restores it', async 
   await expectCache(page, { blobs: 28, library: 28, playOrder: 28 });
 
   // A few-track preset mix, then delete every track in it.
-  await page.getByRole('button', { name: /Qi Strength/ }).click();
+  await page.getByRole('button', { name: /^Grounding 174·285·396·417/ }).click(); // v15.9: it now plays (was a list swap)
   await expect.poll(async () => (await cacheCounts(page)).playOrder, { timeout: 15_000 }).toBeLessThan(28);
   const mix = (await cacheCounts(page)).playOrder;
   const rows = page.locator('div.group').filter({ has: page.getByTitle('Delete song') });

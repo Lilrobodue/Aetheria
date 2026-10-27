@@ -1047,7 +1047,9 @@ export type CrashView =
   // v15.6, the Layers tab's five sections.
   | 'layers-sound' | 'layers-crystal' | 'layers-levels' | 'layers-beat' | 'layers-advanced'
   // v15.7, the Library tab.
-  | 'library-list' | 'library-health' | 'library-menu' | 'sheet-import';
+  | 'library-list' | 'library-health' | 'library-menu' | 'sheet-import'
+  // v15.9, the Mixes tab.
+  | 'mixes-walks' | 'mixes-lists' | 'mixes-experimental';
 
 /**
  * Make a region throw on its next render, through the app's dev hook window.__aetheriaCrash (ErrorBoundary.tsx; dev

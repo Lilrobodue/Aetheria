@@ -530,16 +530,22 @@ test.describe('phone, Undo', () => {
     await page.waitForTimeout(800);
     const again = await libraryState(page);
     expect([again.ids, again.cursor, again.walk, again.current], 'a second Undo changes nothing').toEqual([afterUndo.ids, afterUndo.cursor, afterUndo.walk, afterUndo.current]);
-    // Another play order since (a walk): the Undo refuses and says why.
+    // Another play order since: the Undo refuses and says why. (v15.9: a walk now has its own Undo, so the other play
+    // order is classic's Restore Library, which leaves none: a row tapped in the Newest-first list, then Restore.)
+    await sortSelect(page).selectOption('newest');
     await tapRow(page, 'tone-0011');
     await expectPlaying(page, 'tone-0011');
-    await startWalk(page, 'B');
-    const walkB = await libraryState(page);
-    await libraryUndo(page); // the walk's message is a status toast now (v15.7), in the Undo toast's place
+    await peekClassicLibrary(page);
+    await page.locator('aside').getByRole('button', { name: 'Restore Library', exact: true }).click();
+    await expect.poll(async () => { const s = await libraryState(page); return JSON.stringify(s.ids) === JSON.stringify(s.libraryIds); }, { message: 'Restore: the library in its own order', timeout: 10_000 }).toBe(true);
+    await page.getByTestId('peek-pill').click();
+    const restored = await libraryState(page);
+    await libraryUndo(page);
     await expect(page.getByTestId('notices')).toContainText("The play order changed since, so the earlier one can't come back.");
     await page.waitForTimeout(500);
     const still = await libraryState(page);
-    expect([still.ids, still.walk], 'nothing changed').toEqual([walkB.ids, 'B']);
+    expect([still.ids, still.cursor, still.current], 'nothing changed').toEqual([restored.ids, restored.cursor, 'tone-0011']);
+    await sortSelect(page).selectOption('library');
     // A Clear since: nothing.
     await openLibraryTab(page);
     await tapRow(page, 'tone-0012');
@@ -1621,7 +1627,9 @@ test.describe('phone, notices', () => {
     await expect(notices, 'and no toast: the sheet says it').not.toContainText('Skipped');
     await page.keyboard.press('Escape');
     await startWalk(page, 'C');
-    await expect(notices, 'a walk’s message is the status toast').toContainText(/^Lo Shu · .+ positions filled\./);
+    // v15.9: a walk's message is its Undo toast's words (the classic notice would push the Undo out).
+    await expect(notices, 'a walk’s message is its Undo toast').toContainText(/^Playing Flying Star Vortex: \d+ of 27 positions\./);
+    await expect(notices).not.toContainText('positions filled');
     await expect(box).toHaveCount(0);
     await openLibraryTab(page);
     const scanAt = Date.now();

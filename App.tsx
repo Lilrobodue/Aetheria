@@ -42,7 +42,11 @@ import { countCommit, reportPassWork } from './utils/perfHud';
 import { gutAlignment, heartAlignment, headAlignment, fullAlignment, crystalSetMix, goldenRatioMix, sequence111, sourceField, ultimateAlignment, loShuWalk, walkStepAt } from './utils/mix/recipes';
 import type { MixInput, MixResult } from './utils/mix/recipes';
 import { planAssign, assignDoneText, assignNothingText, deepScanQueue, crystalOrigin } from './utils/mix/distribution';
-import { getHarmonicSolfeggio } from './utils/crystalData';
+import { getHarmonicSolfeggio, PRESETS } from './utils/crystalData';
+// v15.9: the mix catalogue (names, sub-lines, counts) and the Undo toast's words.
+import { mixStartText } from './utils/mix/catalog';
+import type { MixId } from './utils/mix/catalog';
+import { walkToSave } from './utils/library/walkRecord';
 import {
   analyzeFractalFrequencies,
   assessFrequencySafety,
@@ -872,7 +876,7 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
                     <li className="flex gap-2">🌅 <strong className="text-gold-200">Full Alignment:</strong> All 27 frequencies played in order, low to high — the complete journey.</li>
                     <li className="flex gap-2">🎚️ <strong className="text-gold-200">Single Range:</strong> Focus on just GUT, HEART, or HEAD if you want one feeling.</li>
-                    <li className="flex gap-2">🧩 <strong className="text-gold-200">Quick Presets:</strong> Curated combinations like Deep Healing, Mood Elevate, Meditation, Flow State, Qi Strength.</li>
+                    <li className="flex gap-2">🧩 <strong className="text-gold-200">Crystal Sets:</strong> Grounding, Stillness, Uplift, Meditation and Flow, each a few crystals from the GUT range.</li>
                 </ul>
             )
         },
@@ -980,6 +984,9 @@ const DISCLAIMER_VERSION = '2026-10-21';
 // an older text and is ignored.
 const DISCLAIMER_STORAGE_KEY = 'aetheria.disclaimer.v1';
 
+/** v15.9: how long the Mixes tab waits for the saved library to be read back before it shows what it has. */
+const LIBRARY_LOADING_MAX_MS = 15_000;
+
 /** v15.7: what a Library row's tap replaced, for its Undo (App's startPlayOrder / undoPlayOrder). Ids only, never
  *  Song objects: the Undo rebuilds the order from the library as it is then. */
 interface PlayOrderSnapshot {
@@ -991,6 +998,8 @@ interface PlayOrderSnapshot {
   trackId: string | null;
   position: number;
   wasPlaying: boolean;
+  /** v15.9: the tone as it was (the crystal, and whether it sounded on its own: tone-only), so the Undo puts it back. */
+  tone: { hz: number; active: boolean };
   /** cacheGeneration() at the tap: a Clear since makes the Undo a no-op. */
   generation: number;
   /** The order the tap started: any other play order since makes the Undo refuse. */
@@ -1003,6 +1012,9 @@ interface PlayOrderSnapshot {
   toast: string;
   /** statusToastSeqRef once this tap's toast showed (-1: none showed): another toast since ends the chain. */
   toastSeq: number;
+  /** v15.9: a mix started it (else a Library row). Only taps of one kind chain: a row tapped while a mix's toast shows
+   *  gets its own Undo, back to the mix (and the reverse). */
+  mix: boolean;
 }
 
 const App: React.FC = () => {
@@ -1015,6 +1027,9 @@ const App: React.FC = () => {
   const [isRestoring, setIsRestoring] = useState(false);
   // How many library tracks the restore brought back, for its toast.
   const [restoredCount, setRestoredCount] = useState(0);
+  // v15.9: the saved library has not been read back yet (the first restore is in flight): the Mixes tab says
+  // "Loading your library…" and waits, rather than offering an empty library's Import music.
+  const [libraryLoading, setLibraryLoading] = useState(true);
   const [currentSongIndex, setCurrentSongIndex] = useState<number>(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isShuffle, setIsShuffle] = useState(false);
@@ -1038,6 +1053,9 @@ const App: React.FC = () => {
   const playHistoryRef = useRef<Record<string, number>>({});
   const recordPlay = (songId: string) => {
     playHistoryRef.current[songId] = Date.now();
+    // v15.9: the play request that has started (playTrack and the gapless swap call this once the track plays):
+    // Restore Library tells a start still in flight from one that has landed by it.
+    startedRequestRef.current = playRequestSeqRef.current;
   };
 
   const [showInfo, setShowInfo] = useState(false);
@@ -1099,6 +1117,9 @@ const App: React.FC = () => {
   const libraryViewRef: { current: LibraryViewState } = useRef({ query: '', top: 0, healthOpen: null });
   const [lastImport, setLastImport] = useState<LastImport | null>(null);
   const lastPlayOrderRef: { current: PlayOrderSnapshot | null } = useRef(null);
+  // v15.9: the latest classic notice a mix showed (in classic, or a classic peek). The new layout never routes it to its
+  // one toast slot: there the mix's Undo toast is the message, and a notice still up when a peek ends would replace it.
+  const mixNoticeRef: { current: string | null } = useRef(null);
   const playOrderSeqRef: { current: number } = useRef(0);
   const libraryFocusTargetRef: { current: HTMLElement | null } = useRef(null);
   // v15.6: the Layers tab's optional experience filter on the crystals (plan decision 11): off unless the user turns it
@@ -1123,15 +1144,6 @@ const App: React.FC = () => {
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
     } catch {}
   }, []);
-  // "Open the classic mixes": the library panel opens at its mix buttons.
-  useEffect(() => {
-    if (classicPeek !== 'mixes') return;
-    const id = window.requestAnimationFrame(() => {
-      const first = Array.from(document.querySelectorAll('aside button')).find((b) => /GUT Alignment/.test(b.textContent || ''));
-      if (first instanceof HTMLElement) first.scrollIntoView({ block: 'start' });
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [classicPeek]);
   const [currDuration, setCurrDuration] = useState(0);
 
   const [isUploading, setIsUploading] = useState(false);
@@ -2022,11 +2034,16 @@ const App: React.FC = () => {
   const playStartBusyRef: { current: boolean } = useRef(false);
   useLayoutEffect(() => { playStartBusyRef.current = isAnalyzing; }, [isAnalyzing]);
 
+  // v15.9: the walk as it is saved with the play order (walks survive a reload): a new object only when the walk changes.
+  const savedWalk = useMemo(
+    () => walkToSave(loShuWalkMode, loShuWalkSegments, loShuWalkPhases, loShuWalkSteps),
+    [loShuWalkMode, loShuWalkSegments, loShuWalkPhases, loShuWalkSteps]
+  );
   // Session values for handlers created once (the update banner's Reload).
-  const sessionRef = useRef({ loShuWalkMode, selectedSolfeggio, isScanning });
+  const sessionRef = useRef({ loShuWalkMode, walk: savedWalk, selectedSolfeggio, isScanning });
   useEffect(() => {
-    sessionRef.current = { loShuWalkMode, selectedSolfeggio, isScanning };
-  }, [loShuWalkMode, selectedSolfeggio, isScanning]);
+    sessionRef.current = { loShuWalkMode, walk: savedWalk, selectedSolfeggio, isScanning };
+  }, [loShuWalkMode, savedWalk, selectedSolfeggio, isScanning]);
 
   // Reload for a new version without losing in-memory work. Saves are
   // debounced (metadata is held back while Deep Scan runs), and a reload
@@ -2086,7 +2103,7 @@ const App: React.FC = () => {
           saveOrder,
           saveLibrary,
           cursor,
-          sessionRef.current.loShuWalkMode,
+          sessionRef.current.walk,
           sessionRef.current.selectedSolfeggio
         );
       }
@@ -2205,7 +2222,7 @@ const App: React.FC = () => {
           const lib = libraryRef.current;
           if (!order.length && !lib.length) return;
           saveBlobsNow(order, lib, 0);
-          debouncedSaveMeta(order, lib, cursor, sessionRef.current.loShuWalkMode, sessionRef.current.selectedSolfeggio, 0);
+          debouncedSaveMeta(order, lib, cursor, sessionRef.current.walk, sessionRef.current.selectedSolfeggio, 0);
         });
       }
       setOrphanOffer(unconfirmed.length ? unconfirmed : null);
@@ -2264,7 +2281,9 @@ const App: React.FC = () => {
     let cancelled = false;
     (async () => {
       const cached = await restorePlaylist();
-      if (cancelled || !cached) return;
+      if (cancelled) return;
+      setLibraryLoading(false); // v15.9: in the same batch as the restored lists (none: nothing was saved)
+      if (!cached) return;
 
       const hasLists = cached.playlist.length > 0 || cached.originalPlaylist.length > 0;
       if (hasLists) {
@@ -2286,7 +2305,17 @@ const App: React.FC = () => {
           setPlaylist(cached.playlist);
           setOriginalPlaylist(cached.originalPlaylist);
           setCurrentSongIndex(cached.currentSongIndex);
-          if (cached.loShuWalkMode) setLoShuWalkMode(cached.loShuWalkMode);
+          // v15.9: walks survive a reload. The walk comes back only when it matches the restored order exactly
+          // (restoredWalk), with its segments, phases and steps; the snapshot first, so the snapshot effect keeps it.
+          // (Before, the mode was set with no snapshot, and the effect ended the walk in the same commit.)
+          const walk = cached.walk;
+          if (walk) {
+            loShuWalkSnapshotRef.current = cached.playlist.map((s: Song) => s.id).join('|');
+            setLoShuWalkMode(walk.mode);
+            setLoShuWalkSegments(walk.segments);
+            setLoShuWalkPhases(walk.phases);
+            setLoShuWalkSteps(walk.steps);
+          }
           if (cached.selectedSolfeggio != null) setSelectedSolfeggio(cached.selectedSolfeggio);
         }
 
@@ -2311,6 +2340,19 @@ const App: React.FC = () => {
     })();
     return () => { cancelled = true; };
   }, []); // mount-only
+
+  // v15.9: the Mixes tab waits for the saved library only while it can come: a library that arrives another way (an
+  // import) ends the wait, and so do LIBRARY_LOADING_MAX_MS (an IndexedDB open that never fires must not leave the tab
+  // waiting for the session).
+  useEffect(() => {
+    if (!libraryLoading) return;
+    if (originalPlaylist.length > 0) {
+      setLibraryLoading(false);
+      return;
+    }
+    const id = window.setTimeout(() => setLibraryLoading(false), LIBRARY_LOADING_MAX_MS);
+    return () => window.clearTimeout(id);
+  }, [libraryLoading, originalPlaylist.length > 0]);
 
   // The set of cached track ids, as a stable string key. Audio blobs are heavy
   // but only need (re)writing when this set changes — i.e. on import or delete,
@@ -2349,10 +2391,10 @@ const App: React.FC = () => {
       playlist,
       originalPlaylist,
       currentSongIndex,
-      loShuWalkMode,
+      savedWalk,
       selectedSolfeggio
     );
-  }, [playlist, originalPlaylist, currentSongIndex, loShuWalkMode, selectedSolfeggio, isRestoring, isScanning]);
+  }, [playlist, originalPlaylist, currentSongIndex, savedWalk, selectedSolfeggio, isRestoring, isScanning]);
 
   // Precompute song.id -> playlist index once per playlist change. The library
   // list render used to call playlist.findIndex() per row (O(n²) per render);
@@ -2696,6 +2738,8 @@ const App: React.FC = () => {
   // older returns at its next await, before it writes the tone, the card, the cursor or plays anything (a Library tap,
   // its Undo, or a tap during a pending Next on an unscanned track would otherwise land its index in another order).
   const playRequestSeqRef: { current: number } = useRef(0);
+  // v15.9: the last request that started playing (recordPlay). Any other value of playRequestSeqRef: a start in flight.
+  const startedRequestRef: { current: number } = useRef(0);
 
   // Guards the pre-end auto-advance so it fires at most once per track. We swap
   // to the next track a hair BEFORE the element reaches its natural `ended`
@@ -4586,13 +4630,14 @@ const App: React.FC = () => {
   // v15.8: what every mix recipe reads (utils/mix/recipes.ts): the library and the experience level as this render sees
   // them (as the generators read them), the play history, and Math.random.
   const mixInput = (): MixInput => ({ library: originalPlaylist, experience: userExperienceLevel, history: playHistoryRef.current, rng: Math.random });
-  // v15.8: the ONE place a mix's result reaches App's state, in the order the generators wrote it. It never writes the
-  // library (check:writers: a play-order function). v14.17 routes order/play/walk through startPlayOrder instead.
-  const applyMix = (r: MixResult) => {
-    if (r.segmentsAndPhases) {
-      setLoShuWalkSegments(r.segmentsAndPhases.segments);
-      setLoShuWalkPhases(r.segmentsAndPhases.phases);
-    }
+  // v15.8: the ONE place a mix's result reaches App's state. It never writes the library (check:writers: a play-order
+  // function). v15.9 (the plan's v14.17): every found mix STARTS PLAYING through startPlayOrder, as a Library row does:
+  // the eager cursor (the title and the lock-screen card name what plays), the explicit shuffle order, the walk with its
+  // snapshot, segments, phases and steps, and an Undo for 10 s. This ends the list swap, where nine mixes replaced the
+  // list under the playing track and the next advance skipped the mix's first track. A mix never changes the visual
+  // settings (decision 2), the tone or the experience level. `name` is the toast's; `positions`: a Lo Shu walk (its
+  // toast counts positions; GUT Alignment's 'traditional' walk counts tracks).
+  const applyMix = (r: MixResult, name: string, positions: boolean = false) => {
     if (!r.order) {
       const t = r.toast;
       if (t) {
@@ -4604,29 +4649,28 @@ const App: React.FC = () => {
       return;
     }
     const order = r.order;
-    setPlaylist(order);
-    if (r.walk) {
-      loShuWalkSnapshotRef.current = order.map((s: Song) => s.id).join('|');
-      setLoShuWalkMode(r.walk.mode);
-      setLoShuWalkSteps(r.walk.steps);
-    }
+    const sp = r.segmentsAndPhases;
+    const walk = r.walk ? { mode: r.walk.mode, segments: sp ? sp.segments : null, phases: sp ? sp.phases : null, steps: r.walk.steps } : null;
+    startPlayOrder(order, 0, mixStartText(name, order.length, positions && r.walk ? r.walk.mode : null), { walk, mix: true });
     setUseChakraOrder(r.chakraOrder);
-    setCurrentSongIndex(0);
     setSearchTerm('');
-    if (r.solfeggio !== null) setSelectedSolfeggio(r.solfeggio);
-    const viz = r.viz;
-    if (viz) setVizSettings((prev: VizSettings) => ({ ...prev, ...viz }));
     if (r.closeWalkMenu) setShowLoShuWalkMenu(false);
-    if (r.experience) setUserExperienceLevel(r.experience);
-    for (const n of r.notices) {
-      const show = () => {
-        setAnalysisNotification(n.text);
-        setTimeout(() => setAnalysisNotification(null), n.clearAfterMs);
-      };
-      if (n.delayMs === null) show();
-      else setTimeout(show, n.delayMs);
+    // Classic's Analysis Status notices. In the new layout they would be routed to the one toast slot and push the
+    // Undo toast out, so there the Undo toast's own words are the message.
+    if (!shellOnRef.current) {
+      for (const n of r.notices) {
+        const show = () => {
+          // A classic peek may have ended meanwhile (111's and 2178's notices wait 500 ms): nothing lands in the new
+          // layout. And the routing effect leaves this one to classic.
+          if (shellOnRef.current) return;
+          mixNoticeRef.current = n.text;
+          setAnalysisNotification(n.text);
+          setTimeout(() => setAnalysisNotification(null), n.clearAfterMs);
+        };
+        if (n.delayMs === null) show();
+        else setTimeout(show, n.delayMs);
+      }
     }
-    if (r.play) playTrackRef.current(0, order);
     if (r.closeDrawerOnPhone && window.innerWidth < 768) setShowSidebar(false);
   };
 
@@ -4644,13 +4688,13 @@ const App: React.FC = () => {
       if(window.innerWidth < 768) setShowSidebar(false);
   };
 
-  const generateAlignmentJourney = () => applyMix(gutAlignment(mixInput()));
+  const generateAlignmentJourney = () => applyMix(gutAlignment(mixInput()), 'GUT Alignment');
 
   // HEART Alignment Journey
-  const generateHeartAlignmentJourney = () => applyMix(heartAlignment(mixInput()));
+  const generateHeartAlignmentJourney = () => applyMix(heartAlignment(mixInput()), 'HEART Alignment');
 
   // HEAD Alignment Journey  
-  const generateHeadAlignmentJourney = () => applyMix(headAlignment(mixInput()));
+  const generateHeadAlignmentJourney = () => applyMix(headAlignment(mixInput()), 'HEAD Alignment');
 
   // Lo Shu Walk — build a journey playlist whose ordering follows one of
   // the Lo Shu walks. Picker behaviour by mode:
@@ -4665,7 +4709,7 @@ const App: React.FC = () => {
   //     so the closing Ouroboros doesn't replay songs heard in the CAB
   //     sweep. SOURCE may be visited up to 6 times total; up to 6 distinct
   //     songs play if the library has them, then repeats.
-  const generateLoShuWalk = (mode: LoShuWalkMode) => applyMix(loShuWalk(mixInput(), mode));
+  const generateLoShuWalk = (mode: LoShuWalkMode) => applyMix(loShuWalk(mixInput(), mode), LO_SHU_WALK_INFO[mode]?.fullName ?? 'Lo Shu walk', true);
 
   // Clear the active Lo Shu walk indicator without otherwise touching the
   // playlist. Called by other journey generators (alignment, mood, etc.) so
@@ -4734,26 +4778,26 @@ const App: React.FC = () => {
   }, []);
 
   // Generate full library alignment ordered by frequency
-  const generateFullLibraryAlignment = () => applyMix(fullAlignment(mixInput()));
+  const generateFullLibraryAlignment = () => applyMix(fullAlignment(mixInput()), 'Full Alignment');
 
   // Generate specific frequency playlists
-  const generateFrequencyPlaylist = (frequencies: number[], name: string) => applyMix(crystalSetMix(mixInput(), frequencies, name));
+  const generateFrequencyPlaylist = (frequencies: number[], name: string) => applyMix(crystalSetMix(mixInput(), frequencies, name), name);
 
   const generateWellnessPlaylist = () => {
-    generateFrequencyPlaylist([174, 285, 528], 'Deep Healing');
+    generateFrequencyPlaylist([174, 285, 528], 'Stillness');
   };
 
   const generateMoodPlaylist = () => {
-    generateFrequencyPlaylist([396, 417, 639], 'Mood Elevation');
+    generateFrequencyPlaylist([396, 417, 639], 'Uplift');
   };
 
   const generateMeditationPlaylist = () => {
-    generateFrequencyPlaylist([741, 852, 963], 'Deep Meditation');
+    generateFrequencyPlaylist([741, 852, 963], 'Meditation');
   };
 
-  const generateGoldenRatioPlaylist = () => applyMix(goldenRatioMix(mixInput()));
+  const generateGoldenRatioPlaylist = () => applyMix(goldenRatioMix(mixInput()), 'Golden Φ');
 
-  const generate111PatternPlaylist = () => applyMix(sequence111(mixInput()));
+  const generate111PatternPlaylist = () => applyMix(sequence111(mixInput()), '111 Sequence');
 
   // SOURCE Field Filter — 2178 Hz, HEART position 5 and the geometric centre
   // of the Lo Shu cube. Every row, column, diagonal and the central vertical
@@ -4767,7 +4811,7 @@ const App: React.FC = () => {
   // calculateSacredGeometryAlignment, so goldenRatioAlignment (already
   // peak-normalised, and φ is the first sacred ratio) breaks the ties on
   // older cached analyses. Neither score gates membership.
-  const generateSourceFieldPlaylist = () => applyMix(sourceField(mixInput()));
+  const generateSourceFieldPlaylist = () => applyMix(sourceField(mixInput()), '2178 Hz · SOURCE');
 
   // Show detailed frequency analysis for current track
   const showCurrentTrackAnalysis = () => {
@@ -4909,7 +4953,33 @@ Run Deep Scan to analyse this track.
     setInfoDialog({ title: 'Library diagnostics', body: diagnosticMessage });
   };
 
-  const generateUltimateAlignmentPlaylist = () => applyMix(ultimateAlignment(mixInput()));
+  const generateUltimateAlignmentPlaylist = () => applyMix(ultimateAlignment(mixInput()), 'Ultimate');
+
+  // v15.9: the Mixes tab's tap (utils/mix/catalog.ts ids): the very generator classic's drawer, its Lo Shu menu and the
+  // Guidebook run, so every way into a mix is one code path (startPlayOrder, with its Undo). The presets by PRESETS,
+  // which the golden holds equal to the drawer's own literals. A play-order function (check:writers): no library write.
+  const startMix = (id: MixId) => {
+    if (id.startsWith('walk:')) {
+      generateLoShuWalk(id.slice(5) as LoShuWalkMode);
+      return;
+    }
+    if (id.startsWith('preset:')) {
+      const p = PRESETS.find((x) => `preset:${x.id}` === id);
+      if (p) generateFrequencyPlaylist([...p.crystals], p.name);
+      return;
+    }
+    const run: Partial<Record<MixId, () => void>> = {
+      gut: generateAlignmentJourney,
+      heart: generateHeartAlignmentJourney,
+      head: generateHeadAlignmentJourney,
+      ultimate: generateUltimateAlignmentPlaylist,
+      full: generateFullLibraryAlignment,
+      golden: generateGoldenRatioPlaylist,
+      seq111: generate111PatternPlaylist,
+      source2178: generateSourceFieldPlaylist,
+    };
+    run[id]?.();
+  };
 
   // Generate Complete Aetheria Journey through all 9 Orders
   const generateAetheriaJourney = async () => {
@@ -5135,9 +5205,36 @@ Run Deep Scan to analyse this track.
 
 
 
+  // v15.9: Restore Library / Show library (classic). The library becomes the play order around the track that is
+  // playing (or loaded): the cursor moves to that track's place in the library, so the title, the lock-screen card and
+  // Next follow the music, which never restarts (no playTrack). Before, the cursor kept its number, so the title named
+  // another track and Next jumped. A walk ends. Under shuffle the shuffle order starts again from that track. Nothing
+  // current: no cursor. Never writes the library (check:writers: a play-order function).
   const restoreLibrary = () => {
       if (originalPlaylist.length > 0) {
-          setPlaylist(originalPlaylist);
+          const st = stateRef.current;
+          if (!sameIdOrder(st.playlist, originalPlaylist)) {
+              // A track still starting (a mix tapped a moment ago: its playTrack is awaiting a decode or play()) would
+              // land its index in the mix into this library order once it starts. Its track is the element's source.
+              const el = mainAudioRef.current;
+              const starting = el && startedRequestRef.current !== playRequestSeqRef.current && (playStartBusyRef.current || (!el.paused && el.currentTime < 1))
+                ? (Object.keys(blobUrlsRef.current).find((id: string) => blobUrlsRef.current[id] === el.getAttribute('src')) ?? null)
+                : null;
+              const currentId = starting ?? (st.currentSongIndex >= 0 ? (st.playlist[st.currentSongIndex]?.id ?? null) : null);
+              const at = currentId === null ? -1 : originalPlaylist.findIndex((s: Song) => s.id === currentId);
+              setPlaylist(originalPlaylist);
+              clearLoShuWalkMode();
+              loShuWalkSnapshotRef.current = '';
+              setCurrentSongIndex(at);
+              if (st.isShuffle && at >= 0) {
+                  const fresh = getLruShuffledIndices(originalPlaylist, playHistoryRef.current);
+                  setShuffledIndices([at, ...fresh.filter((i: number) => i !== at)]);
+                  setShufflePos(0);
+              }
+              // That track starts again at its library place, through the normal path: the new request supersedes the
+              // one in flight (it returns at its next await, writing nothing), and its cursor is the library's.
+              if (starting && at >= 0) playTrackRef.current(at, originalPlaylist);
+          }
           setUseChakraOrder(false);
           setSearchTerm(''); // Clear search when restoring library
       }
@@ -6533,12 +6630,25 @@ registerProcessor('wav-capture', WavCapture);
   // cursor is set eagerly, before playTrack's decode and await (as generateLoShuWalk does), so the media-session hook
   // never names the old cursor's track in the new order. Under shuffle the shuffle order is set here, with the track
   // first: playTrack skips its own rule when it gets an order. Leaves an Undo for 10 s (undoPlayOrder).
-  const startPlayOrder = (order: Song[], index: number, toast: string) => {
+  // v15.9: every mix starts through here too (applyMix). opts.walk: the walk the order is (its snapshot first, then the
+  // mode, segments, phases and steps, so the snapshot effect keeps it); opts.mix: a mix started it, so only taps of one
+  // kind chain, and a chained mix's toast says what it started (a Library row's chain keeps the first tap's words).
+  const startPlayOrder = (order: Song[], index: number, toast: string, opts?: { walk?: PlayOrderSnapshot['walk']; mix?: boolean }) => {
     const st = stateRef.current;                       // the latest commit (the pinned sync effect)
     const el = mainAudioRef.current;
     if (index < 0 || index >= order.length) return;
+    const walk = opts?.walk ?? null;
+    const mix = !!opts?.mix;
+    const setWalk = (w: NonNullable<PlayOrderSnapshot['walk']>) => {
+      loShuWalkSnapshotRef.current = order.map((s: Song) => s.id).join('|');   // before the mode: the effect keeps it
+      setLoShuWalkMode(w.mode);
+      setLoShuWalkSegments(w.segments);
+      setLoShuWalkPhases(w.phases);
+      setLoShuWalkSteps(w.steps);
+    };
     const same = sameIdOrder(st.playlist, order);
     if (same && st.currentSongIndex === index) {       // the current track: resume it if paused, never restart it
+      if (walk) setWalk(walk);
       if (!isPlaying) resumePlayback();
       return;
     }
@@ -6547,8 +6657,10 @@ registerProcessor('wav-capture', WavCapture);
     // (playing or paused).
     const prev = lastPlayOrderRef.current;
     const chained = prev !== null && prev.toastSeq === statusToastSeqRef.current && Date.now() - prev.at < 10_000 &&
-      prev.generation === cacheGeneration() && stillTapOrder(st.playlist, prev.newIds, libraryRef.current);
-    const snap: PlayOrderSnapshot = chained ? { ...prev, newIds: order.map((s: Song) => s.id), token: ++playOrderSeqRef.current, at: Date.now() } : {
+      prev.generation === cacheGeneration() && stillTapOrder(st.playlist, prev.newIds, libraryRef.current) && prev.mix === mix;
+    const snap: PlayOrderSnapshot = chained ? {
+      ...prev, newIds: order.map((s: Song) => s.id), token: ++playOrderSeqRef.current, at: Date.now(), toast: mix ? toast : prev.toast,
+    } : {
       ids: st.playlist.map((s: Song) => s.id),
       cursor: st.currentSongIndex,
       shuffled: st.shuffledIndices.slice(),
@@ -6557,19 +6669,23 @@ registerProcessor('wav-capture', WavCapture);
       trackId: st.currentSongIndex >= 0 ? (st.playlist[st.currentSongIndex]?.id ?? null) : null,
       position: el && Number.isFinite(el.currentTime) ? el.currentTime : 0,
       wasPlaying: isPlaying,
+      tone: { hz: selectedSolfeggio, active: isSolfeggioActive },
       generation: cacheGeneration(),
       newIds: order.map((s: Song) => s.id),
       token: ++playOrderSeqRef.current,
       at: Date.now(),
       toast,
       toastSeq: -1,
+      mix,
     };
     if (same) {
+      if (walk) setWalk(walk);
       playTrackRef.current(index);                     // playTrack's own shuffle rule: this track first, position 0
     } else {
       setPlaylist(order);
       clearLoShuWalkMode();
       loShuWalkSnapshotRef.current = '';
+      if (walk) setWalk(walk);                         // after the clear (one batch: the walk is what commits)
       setCurrentSongIndex(index);                      // eagerly (spec §2.3: the card never names the wrong track)
       if (st.isShuffle) {
         const fresh = getLruShuffledIndices(order, playHistoryRef.current);
@@ -6644,6 +6760,11 @@ registerProcessor('wav-capture', WavCapture);
           a.currentTime = at;                                                           // seekTo's body
           setCurrTime(at);
         }
+        // v15.9: the tone as it was (playTrack set the track's crystal; a crystal picked by hand comes back).
+        if (now.playlist[now.currentSongIndex]?.id === wantId) {
+          setSelectedSolfeggio(snap.tone.hz);
+          setIsSolfeggioActive(snap.tone.active);
+        }
       });
     } else {
       // It was paused (or its track is gone): stop the tapped track and unload, as deleteSong does, so Play starts
@@ -6657,6 +6778,9 @@ registerProcessor('wav-capture', WavCapture);
         a.removeAttribute('src');
         try { a.load(); } catch {}
       }
+      // v15.9: the tone as it was (pausePlayback stops every layer): a tone-only session comes back at its crystal.
+      setSelectedSolfeggio(snap.tone.hz);
+      setIsSolfeggioActive(snap.tone.active);
     }
   };
 
@@ -6842,7 +6966,7 @@ registerProcessor('wav-capture', WavCapture);
   // v15.7, the Library tab: the library itself (the same array, no copy: it changes with an import, a delete or a
   // patch, never on the clock), and the passes' and imports' state, which only the health card and the Import sheet
   // read (it changes on their progress ticks, so the list never reads it).
-  const shellLibraryList = useMemo(() => ({ songs: originalPlaylist }), [originalPlaylist]);
+  const shellLibraryList = useMemo(() => ({ songs: originalPlaylist, loading: libraryLoading }), [originalPlaylist, libraryLoading]);
   const shellOrphans = useMemo(
     () => (orphanSplit ? { fresh: orphanSplit.fresh.length, duplicates: orphanSplit.duplicates.length } : null),
     [orphanSplit]
@@ -6874,6 +6998,7 @@ registerProcessor('wav-capture', WavCapture);
     }
     if (!shellOn || analysisNotification === routedNoticeRef.current) return;
     routedNoticeRef.current = analysisNotification;
+    if (analysisNotification === mixNoticeRef.current) return; // v15.9: a mix's notice is classic's (its Undo toast stays)
     if (newLayoutNotice(analysisNotification) === 'toast') showStatusToast(analysisNotification);
   }, [shellOn, analysisNotification]);
   // v15.7: the delete confirmation's one new-layout sentence. Classic's text stays byte for byte ('' there).
@@ -6956,6 +7081,7 @@ registerProcessor('wav-capture', WavCapture);
       stopLayersNow,
       selectFrequency,
       generateLoShuWalk,
+      startMix,
       clearLoShuWalkMode,
       chooseLayerOutput,
       toggleMusicOnly,
@@ -7000,6 +7126,8 @@ registerProcessor('wav-capture', WavCapture);
       },
       setPerfectGut: (on: boolean) => setLoShuPerfectGUT(on),
       startWalk: (mode: LoShuWalkMode) => A().generateLoShuWalk(mode),
+      // v15.9, the Mixes tab.
+      startMix: (id: MixId) => A().startMix(id),
       clearWalk: () => A().clearLoShuWalkMode(),
       chooseOutput: (o: LayerOutput) => A().chooseLayerOutput(o),
       toggleMusicOnly: () => A().toggleMusicOnly(),
@@ -7486,7 +7614,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.8</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.9</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -8492,11 +8620,12 @@ registerProcessor('wav-capture', WavCapture);
                    </button>
 
                    <button 
-                    onClick={() => generateFrequencyPlaylist([174, 285, 396, 417], 'Qi Strengthening')}
+                    onClick={() => generateFrequencyPlaylist([174, 285, 396, 417], 'Grounding')}
                     className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-red-400 hover:border-red-500 transition-all active:scale-95"
                    >
                      <Flame size={16} className="mb-1 text-red-500" />
-                     Qi Strength
+                     <span>Grounding</span>
+                     <span className="text-[8px] text-slate-500">174·285·396·417</span>
                    </button>
 
                    <button 
@@ -8504,7 +8633,8 @@ registerProcessor('wav-capture', WavCapture);
                     className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-emerald-400 hover:border-emerald-500 transition-all active:scale-95"
                    >
                      <Heart size={16} className="mb-1 text-emerald-500" />
-                     Deep Healing
+                     <span>Stillness</span>
+                     <span className="text-[8px] text-slate-500">174·285·528</span>
                    </button>
 
                    <button 
@@ -8512,7 +8642,8 @@ registerProcessor('wav-capture', WavCapture);
                     className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-pink-400 hover:border-pink-500 transition-all active:scale-95"
                    >
                      <Smile size={16} className="mb-1 text-pink-500" />
-                     Mood Elevate
+                     <span>Uplift</span>
+                     <span className="text-[8px] text-slate-500">396·417·639</span>
                    </button>
 
                    <button 
@@ -8520,15 +8651,17 @@ registerProcessor('wav-capture', WavCapture);
                     className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-purple-400 hover:border-purple-500 transition-all active:scale-95"
                    >
                      <Moon size={16} className="mb-1 text-purple-500" />
-                     Meditation
+                     <span>Meditation</span>
+                     <span className="text-[8px] text-slate-500">741·852·963</span>
                    </button>
 
                    <button 
-                    onClick={() => generateFrequencyPlaylist([285, 417, 528, 639, 741], 'Flow State')}
+                    onClick={() => generateFrequencyPlaylist([285, 417, 528, 639, 741], 'Flow')}
                     className="flex flex-col items-center justify-center p-2 text-[10px] rounded-lg font-medium border border-slate-800 bg-slate-900 text-slate-400 hover:text-cyan-400 hover:border-cyan-500 transition-all active:scale-95"
                    >
                      <Waves size={16} className="mb-1 text-cyan-500" />
-                     Flow State
+                     <span>Flow</span>
+                     <span className="text-[8px] text-slate-500">285·417·528·639·741</span>
                    </button>
 
                    <button 
@@ -9269,6 +9402,20 @@ registerProcessor('wav-capture', WavCapture);
                             {applyLoShuPerfectMap(s.freq)}
                           </button>
                         ))}
+                      </div>
+                      {/* v15.9: 111 Hz, the labelled non-canonical exception (the plan's chip; the new layout has had it
+                          since v15.6). The 111 Sequence no longer sets this tone, so this is where 111 Hz is reached. */}
+                      <div className="mt-2 flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => selectFrequency(111)}
+                          aria-pressed={selectedSolfeggio === 111}
+                          data-testid="classic-crystal-111"
+                          className={`min-h-[44px] px-3 rounded-lg text-xs font-medium border border-dashed transition-all active:scale-95 ${selectedSolfeggio === 111 ? 'bg-gold-600 text-black border-gold-600' : 'border-slate-600 bg-slate-900 text-slate-300 hover:border-gold-500'}`}
+                        >
+                          111 Hz · non-canonical
+                        </button>
+                        <span className="text-[10px] text-slate-500">Not one of the 27 crystals.</span>
                       </div>
                     </div>
 

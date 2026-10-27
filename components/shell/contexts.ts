@@ -180,6 +180,8 @@ export interface LibraryViewState {
  *  scan's or analysis's patch change it; never the clock. */
 export interface LibraryListValue {
   songs: Song[];
+  /** v15.9: the saved library has not been read back yet (the first restore is in flight): the Mixes tab waits. */
+  loading: boolean;
 }
 
 /** v15.7: the passes' and imports' state, for the health card and the Import sheet only (it ticks with their progress). */
@@ -218,6 +220,8 @@ export interface ShellActions {
   backToTrackCrystal: () => void;
   setPerfectGut: (on: boolean) => void;
   startWalk: (mode: string) => void;
+  /** v15.9: a mix of the Mixes tab (utils/mix/catalog.ts ids): App's existing generator, which starts it playing. */
+  startMix: (id: string) => void;
   clearWalk: () => void;
   chooseOutput: (o: LayerOutput) => void;
   toggleMusicOnly: () => void;

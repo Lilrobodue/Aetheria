@@ -24,12 +24,15 @@ export function runScenarios(makeApp, deps, fixtures, scenarios, gens, mulberry3
     const history = sc.history ? JSON.parse(JSON.stringify(sc.history)) : {};
     for (const gen of gens) {
       if (sc.only && !sc.only.includes(gen)) continue;
-      const key = [gen, sc.fixture, sc.exp, sc.historyName || 'none', sc.seed, sc.width, sc.scanning ? 'scan' : 'idle'].join('|');
+      // v15.9: optional scenario parts (added to the key only when present, so every older key stays as it was): the
+      // new layout (shell), and a play order other than the library with a cursor and shuffle (Restore Library).
+      const extra = [sc.shell ? 'shell' : null, sc.playOrder ? `po:${sc.playOrder.from}+${sc.playOrder.count}${sc.playOrder.reverse ? 'r' : ''}@${sc.cursor}${sc.shuffle ? 's' : ''}` : null].filter(Boolean);
+      const key = [gen, sc.fixture, sc.exp, sc.historyName || 'none', sc.seed, sc.width, sc.scanning ? 'scan' : 'idle', ...extra].join('|');
       const calls = [];
       const timers = [];
       let now = 0;
       let seq = 0;
-      const playOrder = lib;
+      const playOrder = sc.playOrder ? (() => { const p = lib.slice(sc.playOrder.from, sc.playOrder.from + sc.playOrder.count); return sc.playOrder.reverse ? p.reverse() : p; })() : lib;
       const listArg = (v, base) => {
         if (typeof v === 'function') {
           const res = v(base);
@@ -75,6 +78,25 @@ export function runScenarios(makeApp, deps, fixtures, scenarios, gens, mulberry3
         },
         dismissStatusToast: () => calls.push(['dismissToast']),
         setInfoDialog: (v) => calls.push(['infoDialog', v]),
+        // v15.9: every mix plays through App's startPlayOrder (recorded with what it is given, never run), the new
+        // layout's flag, the play state Restore Library reads, and the shuffle setters.
+        startPlayOrder: (order, index, text, opts) => calls.push(['startPlayOrder', {
+          ids: idsOf(order), index, text,
+          walk: opts && opts.walk ? { mode: opts.walk.mode, segments: opts.walk.segments ? [...opts.walk.segments] : null, phases: opts.walk.phases ? [...opts.walk.phases] : null, steps: opts.walk.steps ? [...opts.walk.steps] : null } : null,
+          viz: opts && opts.viz ? { ...opts.viz } : null,
+          mix: !!(opts && opts.mix),
+        }]),
+        shellOnRef: { current: !!sc.shell },
+        stateRef: { current: { playlist: playOrder, currentSongIndex: sc.cursor ?? (playOrder.length ? 0 : -1), isShuffle: !!sc.shuffle, isLoop: false, shuffledIndices: [], shufflePos: 0 } },
+        setShuffledIndices: (v) => calls.push(['setShuffledIndices', [...v]]),
+        setShufflePos: set('setShufflePos'),
+        // Never a start in flight here (no music element), and a notice's text is only remembered.
+        mixNoticeRef: { current: null },
+        mainAudioRef: { current: null },
+        startedRequestRef: { current: 0 },
+        playRequestSeqRef: { current: 0 },
+        playStartBusyRef: { current: false },
+        blobUrlsRef: { current: {} },
         ...deps,
       };
       const realRandom = Math.random;
@@ -139,7 +161,7 @@ export function runScenarios(makeApp, deps, fixtures, scenarios, gens, mulberry3
       // track has that crystal), and how far the cube's index (the cursor) lags behind it.
       let derived = null;
       const mode = WALK_GENS[gen];
-      const order = canon.state.setPlaylist && canon.state.setPlaylist.ids;
+      const order = (canon.state.setPlaylist && canon.state.setPlaylist.ids) || (canon.state.startPlayOrder && canon.state.startPlayOrder.ids);
       if (mode && order) {
         const seqArr = LO_SHU_WALKS[mode];
         const has = new Set(lib.filter((s) => s.closestSolfeggio).map((s) => s.closestSolfeggio));

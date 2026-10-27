@@ -41,6 +41,10 @@
 
 import type { Song } from '../types';
 import type { LoShuWalkMode } from '../constants';
+// v15.9: walks survive a reload (the walk is stored with the play order it belongs to, and validated on restore).
+import { restoredWalk } from './library/walkRecord';
+import type { SavedWalk } from './library/walkRecord';
+export type { SavedWalk } from './library/walkRecord';
 
 const DB_NAME = 'aetheria-db';
 // v2: split the old combined `songs` store into `blobs` + `meta`. The schema is
@@ -96,7 +100,10 @@ interface CachedState {
   playlistOrder: string[];
   originalOrder: string[];
   currentSongIndex: number;
+  /** Kept for older releases reading a newer record (they end the walk at once, as before v15.9). */
   loShuWalkMode: LoShuWalkMode | null;
+  /** v15.9: the walk that built playlistOrder (optional: older records have none). */
+  walk?: SavedWalk | null;
   selectedSolfeggio: number;
   savedAt: number;
 }
@@ -106,6 +113,8 @@ export interface RestoredPlaylist {
   originalPlaylist: Song[];
   currentSongIndex: number;
   loShuWalkMode: LoShuWalkMode | null;
+  /** v15.9: the stored walk, only when it matches the restored play order exactly (restoredWalk); else null. */
+  walk: SavedWalk | null;
   /** null when there was no saved state (only orphans were found). */
   selectedSolfeggio: number | null;
   savedAt: number;
@@ -466,7 +475,7 @@ async function saveMetaAndState(
   playlist: Song[],
   originalPlaylist: Song[],
   currentSongIndex: number,
-  loShuWalkMode: LoShuWalkMode | null,
+  walk: SavedWalk | null,
   selectedSolfeggio: number,
   epoch: number = cacheEpoch
 ): Promise<void> {
@@ -488,7 +497,8 @@ async function saveMetaAndState(
       playlistOrder: playlist.map((s) => s.id),
       originalOrder: originalPlaylist.map((s) => s.id),
       currentSongIndex,
-      loShuWalkMode,
+      loShuWalkMode: walk ? walk.mode : null,
+      walk: walk ?? null,
       selectedSolfeggio,
       savedAt: Date.now(),
     };
@@ -530,7 +540,7 @@ async function savePlaylist(
   playlist: Song[],
   originalPlaylist: Song[],
   currentSongIndex: number,
-  loShuWalkMode: LoShuWalkMode | null,
+  walk: SavedWalk | null,
   selectedSolfeggio: number
 ): Promise<void> {
   await saveBlobs(playlist, originalPlaylist);
@@ -538,7 +548,7 @@ async function savePlaylist(
     playlist,
     originalPlaylist,
     currentSongIndex,
-    loShuWalkMode,
+    walk,
     selectedSolfeggio
   );
 }
@@ -632,6 +642,8 @@ async function restorePlaylist(): Promise<RestoredPlaylist | null> {
     const originalPlaylist = songsOf(libraryOrder);
 
     let playlist = songsOf(savedPlayOrder);
+    // v15.9: the walk, only if every one of its tracks came back in its saved order.
+    const walk = restoredWalk(state?.walk, savedPlayOrder, playlist.map((s) => s.id));
     let currentSongIndex = state
       ? Math.min(Math.max(state.currentSongIndex, -1), playlist.length - 1)
       : -1;
@@ -663,6 +675,7 @@ async function restorePlaylist(): Promise<RestoredPlaylist | null> {
       originalPlaylist,
       currentSongIndex,
       loShuWalkMode: state?.loShuWalkMode ?? null,
+      walk,
       selectedSolfeggio: state ? state.selectedSolfeggio : null,
       savedAt: state?.savedAt ?? 0,
       orphans,
@@ -783,7 +796,7 @@ function debouncedSaveMeta(
   playlist: Song[],
   originalPlaylist: Song[],
   currentSongIndex: number,
-  loShuWalkMode: LoShuWalkMode | null,
+  walk: SavedWalk | null,
   selectedSolfeggio: number,
   delayMs: number = 2000
 ): void {
@@ -795,7 +808,7 @@ function debouncedSaveMeta(
       playlist,
       originalPlaylist,
       currentSongIndex,
-      loShuWalkMode,
+      walk,
       selectedSolfeggio,
       epoch
     );

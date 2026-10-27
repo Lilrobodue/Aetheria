@@ -1,8 +1,8 @@
 // components/shell/tabs/MoreStub.tsx (v15.5, the new layout beta)
 //
 // More: Back to classic (saves the choice; the music keeps playing), Track info and Stop all sound, and one line on
-// what the beta has (v15.6: Zen and the Layers tab; v15.7: the Library tab). Settings, the Guidebook and Safety stay in
-// the classic layout during the beta.
+// what the beta has (v15.6: Zen and the Layers tab; v15.7: the Library tab; v15.9: the Mixes tab). Settings, the
+// Guidebook and Safety stay in the classic layout during the beta.
 
 import React from 'react';
 import { ArrowLeftRight, Circle, Info, OctagonX, X } from 'lucide-react';
@@ -59,8 +59,8 @@ const MoreStub = ({ inPanel = false }: MoreStubProps) => {
           onClick={actions.stopAll}
         />
         <p className="px-4 py-4 text-sm text-ink-muted">
-          This beta has Now Playing with Zen, the Library and Layers tabs, the Sound, Crystal and Walks sheets, and the Car
-          screen. The mixes, settings, the Guidebook and Safety are in the classic layout for now, one tap away.
+          This beta has Now Playing with Zen, the Library, Mixes and Layers tabs, the Sound, Crystal and Walks sheets, and
+          the Car screen. Settings, the Guidebook and Safety are in the classic layout for now, one tap away.
         </p>
       </div>
     </div>

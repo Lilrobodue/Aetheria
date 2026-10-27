@@ -43,6 +43,22 @@ export const ENV_NAMES = [
   'SOLFEGGIO_INFO', 'LO_SHU_WALKS', 'LO_SHU_WALK_INFO', 'LO_SHU_WALK_COMBINED', 'LO_SHU_WALK_OUROBOROS',
   'OUROBOROS_PHASES', 'SOURCE_FREQ', 'dedupeById', 'patchById',
 ];
+/** v15.9: what the generators and Restore Library read since every mix plays through startPlayOrder. */
+export const ENV_NAMES_V159 = ['startPlayOrder', 'shellOnRef', 'stateRef', 'setShuffledIndices', 'setShufflePos', 'sameIdOrder',
+  // the review's fixes: a mix's classic notice (applyMix), and a start still in flight (Restore Library)
+  'mixNoticeRef', 'mainAudioRef', 'startedRequestRef', 'playRequestSeqRef', 'playStartBusyRef', 'blobUrlsRef'];
+
+/** A button's label: its first line of text (a direct text child, or a <span>'s), e.g. "Qi Strength", "Grounding". */
+export function buttonLabel(ts, sf, el) {
+  for (const c of el.children) {
+    const text = ts.isJsxText(c) ? c.getText(sf)
+      : ts.isJsxElement(c) && c.openingElement.tagName.getText(sf) === 'span' ? c.children.map((x) => (ts.isJsxText(x) ? x.getText(sf) : '')).join(' ')
+      : '';
+    const line = text.replace(/\s+/g, ' ').trim();
+    if (line) return line;
+  }
+  return '';
+}
 
 /** Does this App.tsx still define the mix helpers at module level (v15.7), or import them (v15.8)? */
 export function definesModuleFuncs(ts, appText) {
@@ -88,15 +104,17 @@ export function liftText(ts, appText, cfg = {}) {
 
   // The classic drawer's preset arrows, by label.
   const jsxArrows = {};
-  const labels = cfg.jsxLabels ?? { qi: 'Qi Strength', flow: 'Flow State' };
+  // v15.9: the presets' neutral names; either name is the same button (one of them exists in any version).
+  const labels = cfg.jsxLabels ?? { qi: ['Qi Strength', 'Grounding'], flow: ['Flow State', 'Flow'] };
   const visit = (n) => {
     if (ts.isJsxElement(n) && n.openingElement.tagName.getText(sf) === 'button') {
-      const text = n.children.map((c) => (ts.isJsxText(c) ? c.getText(sf) : '')).join(' ').replace(/\s+/g, ' ').trim();
+      const text = buttonLabel(ts, sf, n);
       for (const [key, label] of Object.entries(labels)) {
-        if (text === label) {
+        if ((Array.isArray(label) ? label : [label]).includes(text)) {
           const attr = n.openingElement.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'onClick');
           const expr = attr?.initializer && ts.isJsxExpression(attr.initializer) ? attr.initializer.expression : null;
-          if (expr && ts.isArrowFunction(expr)) {
+          // v15.9: a preset's arrow calls generateFrequencyPlaylist ("Flow" is also a visual-settings toggle's label).
+          if (expr && ts.isArrowFunction(expr) && expr.getText(sf).includes('generateFrequencyPlaylist(')) {
             if (jsxArrows[key]) throw new Error('two buttons labelled ' + label);
             jsxArrows[key] = expr.getText(sf);
           }
@@ -106,7 +124,7 @@ export function liftText(ts, appText, cfg = {}) {
     ts.forEachChild(n, visit);
   };
   visit(sf);
-  for (const k of Object.keys(labels)) if (!jsxArrows[k]) throw new Error('no button labelled ' + labels[k]);
+  for (const k of Object.keys(labels)) if (!jsxArrows[k]) throw new Error('no button labelled ' + [labels[k]].flat().join(' or '));
 
   // The Collection title list and the file marker (in-memory only).
   let titles = null;

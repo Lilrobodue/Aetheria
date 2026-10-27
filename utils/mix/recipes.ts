@@ -12,8 +12,15 @@
 // Behaviour otherwise kept exactly (the golden gate holds it): GUT/HEART/HEAD Alignment, Ultimate and the walks start
 // playing; Full Alignment, the five presets, Golden Φ, the 111 Sequence and the 2178 Hz filter only swap the list
 // (`play: false`, the bug v14.17 fixes); 111 and 2178 set the tone (`solfeggio`, which v14.17 drops).
+// v15.9 (the user's decision 2): a mix never changes the visual settings. The recipes no longer carry the Tree of Life,
+// morph, chakra colours, flow, auto-rotate or hexagons they used to switch on (the `viz` field is gone), so nothing
+// can apply them; the user's own visual settings stay exactly as they set them.
+// v15.9 (the plan's v14.17): the 111 Sequence and the 2178 Hz filter no longer set the tone (the 111/2178 overrides are
+// dropped: each track plays its own crystal; 111 Hz itself is the "111 Hz · non-canonical" chip), and no recipe raises
+// the experience level any more, nor announces it (decision 11: the level is an optional filter the user sets).
+// The selection code is otherwise kept exactly (the golden gate holds it).
 
-import type { Song, VizSettings } from '../../types.ts';
+import type { Song } from '../../types.ts';
 import {
   SOLFEGGIO_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, LO_SHU_WALK_COMBINED, LO_SHU_WALK_OUROBOROS, OUROBOROS_PHASES, SOURCE_FREQ,
 } from '../crystalData.ts';
@@ -24,7 +31,7 @@ export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced' | 'expert
 export interface MixInput {
   /** App's originalPlaylist (the LIBRARY) as the calling render sees it. Never the play order; never written. */
   library: readonly Song[];
-  /** userExperienceLevel as the calling render sees it (some recipes raise it). */
+  /** userExperienceLevel as the calling render sees it. v15.9: no recipe reads it (decision 11); kept for the builder. */
   experience: ExperienceLevel;
   /** playHistoryRef.current: song id → last-played ms (the walks' LRU order). Read only. */
   history?: Readonly<Record<string, number>>;
@@ -59,12 +66,6 @@ export interface MixResult {
   walk: MixWalk | null;
   /** setUseChakraOrder's value (written, never read; kept until v14.26). */
   chakraOrder: boolean;
-  /** Visualizer settings merged over the current ones (saved: aetheria.vizSettings.v1). */
-  viz: Partial<VizSettings> | null;
-  /** The tone: 111 Sequence → 111, 2178 filter → 2178. Null: unchanged. */
-  solfeggio: number | null;
-  /** The raised experience level (saved: aetheria.experienceLevel.v1), or null. */
-  experience: ExperienceLevel | null;
   notices: MixNotice[];
   /** The classic walk popover closes (the walks). */
   closeWalkMenu: boolean;
@@ -75,11 +76,11 @@ export interface MixResult {
 }
 
 const found = (order: Song[], fields: Partial<MixResult>): MixResult => ({
-  order, play: false, walk: null, chakraOrder: true, viz: null, solfeggio: null, experience: null, notices: [],
+  order, play: false, walk: null, chakraOrder: true, notices: [],
   closeWalkMenu: false, closeDrawerOnPhone: true, toast: null, ...fields,
 });
 const notFound = (toast: MixToast, fields: Partial<MixResult> = {}): MixResult => ({
-  order: null, play: false, walk: null, chakraOrder: true, viz: null, solfeggio: null, experience: null, notices: [],
+  order: null, play: false, walk: null, chakraOrder: true, notices: [],
   closeWalkMenu: false, closeDrawerOnPhone: false, toast, ...fields,
 });
 
@@ -123,7 +124,7 @@ export function gutAlignment(input: MixInput): MixResult {
       });
 
       if (journeyPlaylist.length > 0) {
-          return found(journeyPlaylist, { segmentsAndPhases: { segments: null, phases: null }, play: true, walk: { mode: 'traditional', steps }, viz: { showTreeOfLife: true } });
+          return found(journeyPlaylist, { segmentsAndPhases: { segments: null, phases: null }, play: true, walk: { mode: 'traditional', steps } });
       }
       return notFound({ text: "Not enough analyzed songs. Try scanning library first.", durationMs: 8000 });
 }
@@ -133,7 +134,6 @@ export function gutAlignment(input: MixInput): MixResult {
 // ---------------------------------------------------------------------------------------------------------------
 export function heartAlignment(input: MixInput): MixResult {
   const originalPlaylist = input.library;
-  const userExperienceLevel = input.experience;
       const heartFrequencies = SOLFEGGIO_INFO
           .filter(s => s.freq >= 1000 && s.freq <= 3150)
           .map(s => s.freq)
@@ -163,16 +163,8 @@ export function heartAlignment(input: MixInput): MixResult {
       });
 
       if (heartPlaylist.length > 0) {
-          const r = found(heartPlaylist, { play: true, viz: { showTreeOfLife: true } });
-          // Check if experience level is appropriate for HEART frequencies
-          if (userExperienceLevel === 'beginner') {
-              r.experience = 'intermediate';
-              r.notices.push({
-                  text: `HEART Alignment activated. Experience level upgraded to 'Intermediate' for emotional frequency range (${heartFrequencies[0]}-${heartFrequencies[heartFrequencies.length-1]}Hz). Found ${heartPlaylist.length} tracks.`,
-                  delayMs: null, clearAfterMs: 5000,
-              });
-          }
-          return r;
+          // v15.9: no experience raise, and no notice announcing one (decision 11).
+          return found(heartPlaylist, { play: true });
       }
       // v15.4: one line. Its old list of "HEART frequencies detected" was always empty (every closestSolfeggio
       // is one of the 27 crystals, so this branch runs only when no track holds a HEART one).
@@ -184,7 +176,6 @@ export function heartAlignment(input: MixInput): MixResult {
 // ---------------------------------------------------------------------------------------------------------------
 export function headAlignment(input: MixInput): MixResult {
   const originalPlaylist = input.library;
-  const userExperienceLevel = input.experience;
       const headFrequencies = SOLFEGGIO_INFO
           .filter(s => s.freq >= 3504)
           .map(s => s.freq)
@@ -214,16 +205,8 @@ export function headAlignment(input: MixInput): MixResult {
       });
 
       if (headPlaylist.length > 0) {
-          const r = found(headPlaylist, { play: true, viz: { showTreeOfLife: true } });
-          // HEAD frequencies require expert level
-          if (userExperienceLevel !== 'expert') {
-              r.experience = 'expert';
-              r.notices.push({
-                  text: `HEAD Alignment activated. Experience level upgraded to 'Expert' for transpersonal frequency range (${headFrequencies[0]}-${headFrequencies[headFrequencies.length-1]}Hz). Found ${headPlaylist.length} tracks. Use extreme caution.`,
-                  delayMs: null, clearAfterMs: 8000,
-              });
-          }
-          return r;
+          // v15.9: no experience raise, and no notice announcing one (decision 11).
+          return found(headPlaylist, { play: true });
       }
       // v15.4: one line, as HEART's (its list of "HEAD frequencies detected" was always empty).
       return notFound({ text: 'HEAD Alignment: no tracks have a HEAD crystal (3504 Hz and up) yet. Try scanning your library first, or use Auto-Distribute.', durationMs: 8000 });
@@ -235,7 +218,6 @@ export function headAlignment(input: MixInput): MixResult {
 // ---------------------------------------------------------------------------------------------------------------
 export function loShuWalk(input: MixInput, mode: LoShuWalkMode): MixResult {
   const originalPlaylist = input.library;
-  const userExperienceLevel = input.experience;
   const history = input.history ?? {};
   const rng = input.rng ?? Math.random;
       const sequence = LO_SHU_WALKS[mode];
@@ -415,16 +397,12 @@ export function loShuWalk(input: MixInput, mode: LoShuWalkMode): MixResult {
       }
 
       if (walkPlaylist.length > 0) {
-          // Walks reach into HEART/HEAD; nudge experience level the same way
-          // the existing HEART/HEAD alignment journeys do so safety messaging
-          // stays consistent.
+          // v15.9: walks no longer raise the experience level (decision 11).
           return found(walkPlaylist, {
               segmentsAndPhases,
               play: true,
               walk: { mode, steps: walkSteps },
-              viz: { showTreeOfLife: true },
               closeWalkMenu: true,
-              experience: userExperienceLevel === 'beginner' ? 'intermediate' : null,
               notices: [{
                   text: `Lo Shu · ${info.fullName} — ${walkPlaylist.length}/${sequence.length} positions filled.` +
                       ((mode === 'combined' || mode === 'cabi') ? ' Click again for a different shuffle.' : ''),
@@ -445,7 +423,6 @@ export function loShuWalk(input: MixInput, mode: LoShuWalkMode): MixResult {
 // ---------------------------------------------------------------------------------------------------------------
 export function fullAlignment(input: MixInput): MixResult {
   const originalPlaylist = input.library;
-  const userExperienceLevel = input.experience;
       // Get all frequency values from SOLFEGGIO_INFO in order
       const frequencyOrder = SOLFEGGIO_INFO.map(info => info.freq);
       const alignedPlaylist: Song[] = [];
@@ -460,17 +437,8 @@ export function fullAlignment(input: MixInput): MixResult {
       });
 
       if (alignedPlaylist.length > 0) {
-          const r = found(alignedPlaylist, { viz: { showTreeOfLife: true } });
-          // Check if we have high frequency tracks and adjust settings accordingly
-          const hasHighFrequencies = alignedPlaylist.some(s => (s.closestSolfeggio || 0) >= 1206);
-          if (hasHighFrequencies && userExperienceLevel === 'beginner') {
-              r.experience = 'intermediate';
-              r.notices.push({
-                  text: `Full Alignment includes higher frequency tracks. Experience level temporarily set to 'Intermediate' for proper playback.`,
-                  delayMs: null, clearAfterMs: 5000,
-              });
-          }
-          return r;
+          // v15.9: no experience raise, and no notice announcing one (decision 11).
+          return found(alignedPlaylist, {});
       }
       return notFound({ text: "No analyzed songs found. Please scan your library first.", durationMs: 8000 });
 }
@@ -531,7 +499,6 @@ export function goldenRatioMix(input: MixInput): MixResult {
 // ---------------------------------------------------------------------------------------------------------------
 export function sequence111(input: MixInput): MixResult {
   const originalPlaylist = input.library;
-  const userExperienceLevel = input.experience;
     // Composition of the first in sequence of each solfeggio order based on 111 Hz pattern presence
     console.log('=== 111 PATTERN SOLFEGGIO SEQUENCE COMPOSITION ===');
 
@@ -598,19 +565,10 @@ export function sequence111(input: MixInput): MixResult {
     console.log(`111 Pattern Composition: ${compositionPlaylist.length} tracks selected from ${solfeggioOrders.length} orders`);
 
     if (compositionPlaylist.length > 0) {
-      const r = found(compositionPlaylist, {
-        solfeggio: 111,
-        viz: { showTreeOfLife: true, morphEnabled: true, colorMode: 'chakra', enableFlow: true, autoRotate: true },
-      });
-      // Check for transpersonal frequencies and adjust settings accordingly
+      // v15.9: the 111 Hz tone override is dropped (each track plays its own crystal; 111 Hz itself is the chip), and
+      // so is the experience raise with its notice (decision 11).
+      const r = found(compositionPlaylist, {});
       const hasTranspersonalFrequencies = compositionPlaylist.some(s => (s.closestSolfeggio || 0) >= 3786);
-      if (hasTranspersonalFrequencies && userExperienceLevel !== 'expert') {
-        r.experience = 'expert';
-        r.notices.push({
-          text: `111 Pattern Sequence includes transpersonal frequencies (8th-9th Orders). Experience level set to 'Expert' for proper access. Use extreme caution with frequencies above 3675Hz.`,
-          delayMs: null, clearAfterMs: 8000,
-        });
-      }
 
       // Provide detailed feedback about the composition
       const ordersCovered = compositionPlaylist.length;
@@ -629,7 +587,7 @@ export function sequence111(input: MixInput): MixResult {
       const safetyNote = hasTranspersonalFrequencies ? ' ⚠️ CAUTION: Contains transpersonal frequencies - use minimal volume.' : '';
       r.notices.push({
         text: `111 Pattern Complete Journey activated! ${ordersCovered}/9 orders represented (${frequencyProgression}). Average 111 pattern strength: ${avg111Pattern.toFixed(1)}%.${safetyNote}`,
-        delayMs: hasTranspersonalFrequencies ? 8500 : 500, clearAfterMs: 10000,
+        delayMs: 500, clearAfterMs: 10000, // v15.9: no notice before it any more (it waited 8.5 s for one)
       });
       return r;
     }
@@ -656,7 +614,6 @@ export function sequence111(input: MixInput): MixResult {
 // ---------------------------------------------------------------------------------------------------------------
 export function sourceField(input: MixInput): MixResult {
   const originalPlaylist = input.library;
-  const userExperienceLevel = input.experience;
     // Strict 2178Hz resonance filter - only the pure 2178Hz frequency
     console.log('=== STRICT 2178Hz SOURCE FIELD FILTER ===');
     originalPlaylist.forEach(song => {
@@ -711,10 +668,9 @@ export function sourceField(input: MixInput): MixResult {
     console.log(`Found ${pure2178Tracks.length} pure 2178Hz tracks for SOURCE field playlist`);
 
     if (pure2178Tracks.length > 0) {
+      // v15.9: the 2178 Hz tone override is dropped (every track here plays 2178 Hz anyway).
       const r = found(pure2178Tracks, {
         chakraOrder: false,
-        solfeggio: 2178,
-        viz: { morphEnabled: true, showTreeOfLife: true, colorMode: 'chakra', enableFlow: true, showHexagons: true, hexOpacity: 0.7 },
       });
 
       // Calculate quality metrics for user feedback. Report whichever
@@ -736,12 +692,6 @@ export function sourceField(input: MixInput): MixResult {
 
       const avgAccuracy = pure2178Tracks.reduce((sum, song) =>
         sum + (song.harmonicDeviation || 0), 0) / pure2178Tracks.length;
-
-      // 2178Hz is a HEART frequency, so apply the same experience-level
-      // guard the HEART Alignment journey uses.
-      if (userExperienceLevel === 'beginner') {
-        r.experience = 'intermediate';
-      }
 
       r.notices.push({
         text: `Pure 2178Hz SOURCE Field Filter activated! ${pure2178Tracks.length} tracks found. Average ${rankedBy} alignment: ${(avgRankScore * 100).toFixed(1)}%, ${highQualityTracks} high-alignment tracks, avg accuracy: ±${avgAccuracy.toFixed(1)}Hz from pure 2178Hz.${usingGeometry ? '' : ' (Re-scan to rank by sacred geometry.)'}`,
@@ -773,7 +723,6 @@ export function sourceField(input: MixInput): MixResult {
 // ---------------------------------------------------------------------------------------------------------------
 export function ultimateAlignment(input: MixInput): MixResult {
   const originalPlaylist = input.library;
-  const userExperienceLevel = input.experience;
     // Get all solfeggio frequencies in order from all Nine orders (1-9)
     const ultimateFrequencyOrder = SOLFEGGIO_INFO.map(info => info.freq);
     const ultimatePlaylist: Song[] = [];
@@ -812,16 +761,8 @@ export function ultimateAlignment(input: MixInput): MixResult {
     });
 
     if (ultimatePlaylist.length > 0) {
-      const r = found(ultimatePlaylist, { play: true, viz: { showTreeOfLife: true, morphEnabled: true, colorMode: 'chakra' } });
-      // For higher frequencies, set appropriate experience level to prevent interruptions
-      const hasHighFrequencies = ultimatePlaylist.some(s => (s.closestSolfeggio || 0) >= 1206);
-      if (hasHighFrequencies && userExperienceLevel === 'beginner') {
-        r.experience = 'advanced';
-        r.notices.push({
-          text: `Ultimate Alignment includes higher frequencies. Experience level temporarily set to 'Advanced' for uninterrupted playback.`,
-          delayMs: null, clearAfterMs: 5000,
-        });
-      }
+      // v15.9: no experience raise, and no notice announcing one (decision 11).
+      const r = found(ultimatePlaylist, { play: true });
 
       // Show notification about the ultimate alignment
       const ordersIncluded = new Set(ultimatePlaylist.map(s =>
@@ -830,7 +771,7 @@ export function ultimateAlignment(input: MixInput): MixResult {
 
       r.notices.push({
         text: `Ultimate Alignment activated! Journey through ${ultimatePlaylist.length} frequencies across ${ordersIncluded} orders of consciousness.`,
-        delayMs: hasHighFrequencies ? 5500 : 0, clearAfterMs: 7000,
+        delayMs: 0, clearAfterMs: 7000, // v15.9: no notice before it any more (it waited 5.5 s for one)
       });
       return r;
     }

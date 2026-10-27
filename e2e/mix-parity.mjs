@@ -7,6 +7,9 @@
 // DevTools-shaped hook). The expectation is the lifted code run IN THE SAME CHROME, on the same tracks and seed (V8's
 // short-array sort differs between Node and Chrome, so the random-tiebreak walks are compared engine to engine).
 // Then the cube: Layer Ascent and a CAB, Next through each, the Visualizer's step against the crystal playing.
+// v15.9: every found mix plays through App's startPlayOrder, which the lifted code records (never runs): the expectation
+// is that call's order, cursor and walk, playing, with the Undo toast's words on the page; the visual settings exactly
+// as they were before the tap (decision 2); the experience level unchanged; and the tone the first track's crystal.
 //
 //   node e2e/mix-parity.mjs [--port 3298] [--reuse] [--report <json>] [--only gen,gen]
 //
@@ -32,7 +35,7 @@ const REPORT = arg('report');
 const ONLY = arg('only')?.split(',');
 const ORIGIN = `http://localhost:${PORT}`;
 
-const { loadTs, liftText, APP_FUNCS_V158, ENV_NAMES } = await import(pathToFileURL(path.join(ROOT, 'scripts/mix-golden/lift.mjs')).href);
+const { loadTs, liftText, APP_FUNCS_V158, ENV_NAMES, ENV_NAMES_V159 } = await import(pathToFileURL(path.join(ROOT, 'scripts/mix-golden/lift.mjs')).href);
 const { buildFixtures, mulberry32 } = await import(pathToFileURL(path.join(ROOT, 'scripts/mix-golden/fixture.mjs')).href);
 const { runScenarios } = await import(pathToFileURL(path.join(ROOT, 'scripts/mix-golden/recorder.mjs')).href);
 const ts = loadTs(ROOT);
@@ -44,15 +47,17 @@ const MODULES = {
   'recipes': cjs('utils/mix/recipes.ts'),
   'distribution': cjs('utils/mix/distribution.ts'),
   'listOps': cjs('utils/library/listOps.ts'),
+  'catalog': cjs('utils/mix/catalog.ts'),
 };
 const C = await import(pathToFileURL(path.join(ROOT, 'utils/crystalData.ts')).href);
 const D = await import(pathToFileURL(path.join(ROOT, 'utils/mix/distribution.ts')).href);
 const R = await import(pathToFileURL(path.join(ROOT, 'utils/mix/recipes.ts')).href);
-const moduleNames = Object.keys({ ...C, ...D, ...R }).filter((k) => typeof ({ ...C, ...D, ...R })[k] === 'function' || k === k.toUpperCase());
+const K = await import(pathToFileURL(path.join(ROOT, 'utils/mix/catalog.ts')).href);
+const moduleNames = Object.keys({ ...C, ...D, ...R, ...K }).filter((k) => typeof ({ ...C, ...D, ...R, ...K })[k] === 'function' || k === k.toUpperCase());
 const lifted = liftText(ts, readFileSync(path.join(ROOT, 'App.tsx'), 'utf8'), {
-  moduleFuncs: [],
+  moduleFuncs: ['getLruShuffledIndices'],
   appFuncs: APP_FUNCS_V158,
-  envNames: [...new Set([...ENV_NAMES, 'setLoShuWalkSteps', ...moduleNames])],
+  envNames: [...new Set([...ENV_NAMES, 'setLoShuWalkSteps', ...ENV_NAMES_V159, ...moduleNames])],
   moduleImports: Object.fromEntries(moduleNames.map((k) => [k, true])),
 });
 const F160 = buildFixtures().F160.map(({ collection, ...s }) => s);
@@ -151,9 +156,9 @@ async function expectInPage(page, gen, sc, lib) {
       new Function('module', 'exports', 'require', MODULES[name])(m, m.exports, req);
       return m.exports;
     };
-    const all = { ...load('crystalData'), ...load('distribution'), ...load('recipes') };
+    const all = { ...load('crystalData'), ...load('distribution'), ...load('recipes'), ...load('catalog') };
     const L = load('listOps');
-    const deps = { ...Object.fromEntries(envModules.map((k) => [k, all[k]])), dedupeById: L.dedupeById, patchById: L.patchById };
+    const deps = { ...Object.fromEntries(envModules.map((k) => [k, all[k]])), dedupeById: L.dedupeById, patchById: L.patchById, sameIdOrder: L.sameIdOrder };
     const run = new Function('return ' + runSrc)();
     const ev = (code) => { const m = { exports: {} }; new Function('module', 'exports', 'require', code)(m, m.exports, () => ({})); return m.exports; };
     const quiet = console.log; console.log = () => {};
@@ -164,8 +169,8 @@ async function expectInPage(page, gen, sc, lib) {
 }
 
 const LABEL = {
-  gut: 'GUT Alignment', heart: 'HEART Alignment', head: 'HEAD Alignment', full: 'Full Alignment', 'preset:qi': 'Qi Strength',
-  'preset:healing': 'Deep Healing', 'preset:mood': 'Mood Elevate', 'preset:meditation': 'Meditation', 'preset:flow': 'Flow State',
+  gut: 'GUT Alignment', heart: 'HEART Alignment', head: 'HEAD Alignment', full: 'Full Alignment', 'preset:qi': 'Grounding',
+  'preset:healing': 'Stillness', 'preset:mood': 'Uplift', 'preset:meditation': 'Meditation', 'preset:flow': 'Flow',
   golden: 'Golden Φ', seq111: '111 Sequence', source2178: '2178Hz Filter', ultimate: 'Ultimate', restore: 'Restore Library',
   autoDistribute: 'Auto-Distribute Frequencies',
 };
@@ -221,43 +226,49 @@ try {
     const st0 = await page.evaluate(() => window.__aetheriaLibrary.state());
     const lib = F160.map((s, i) => ({ ...s, duration: st0.libraryDurations[i] }));
     const want = await expectInPage(page, gen, { exp, history: null, historyName: 'none', seed: seedN, width: 1280 }, lib);
+    const viz0 = await page.evaluate(() => localStorage.getItem('aetheria.vizSettings.v1'));
     const rngCalls = await clickSeeded(page, gen, seedN);
     await page.waitForTimeout(600);
     const st = await page.evaluate(() => window.__aetheriaLibrary.state());
     const ls = await page.evaluate(() => ({ exp: localStorage.getItem('aetheria.experienceLevel.v1'), viz: JSON.parse(localStorage.getItem('aetheria.vizSettings.v1') || '{}') }));
     const bodyText = await page.evaluate(() => document.body.innerText);
     const W = want.canon.state;
+    const sp = W.startPlayOrder ?? null; // v15.9: a found mix's one call
+    const wantIds = sp ? sp.ids : W.setPlaylist ? W.setPlaylist.ids : null;
     // The 2 s debounced save, polled until it holds the new play order.
     let saved = await savedState(page);
-    for (let i = 0; i < 24 && saved.order !== (W.setPlaylist ? W.setPlaylist.ids.length : saved.order); i++) { await page.waitForTimeout(500); saved = await savedState(page); }
+    for (let i = 0; i < 24 && saved.order !== (wantIds ? wantIds.length : saved.order); i++) { await page.waitForTimeout(500); saved = await savedState(page); }
     await page.waitForTimeout(500);
     saved = await savedState(page);
     const vizFreq = await page.evaluate(() => window.__vizProps()?.freq ?? null);
-    const wantOrder = W.setPlaylist ? W.setPlaylist.ids : st0.ids;
+    const wantOrder = wantIds ?? st0.ids;
     const firstNotice = want.canon.notices.find((n) => n[0] === 0 && n[1]);
+    const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    const firstCrystal = sp ? st.crystals[st.libraryIds.indexOf(sp.ids[0])] : null;
     const c = {
       gen, exp, seed: seedN,
       rngCallsApp: rngCalls, rngCallsLifted: want.rngCalls, thrown: want.canon.thrown,
       order: JSON.stringify(st.ids) === JSON.stringify(wantOrder),
-      cursor: W.setCurrentSongIndex === undefined ? st.cursor === st0.cursor : st.cursor === W.setCurrentSongIndex,
-      walk: (st.walk ?? null) === (W.setLoShuWalkMode ?? null),
-      segments: W.setLoShuWalkSegments === undefined ? true : JSON.stringify(st.segments) === JSON.stringify(W.setLoShuWalkSegments),
-      phases: W.setLoShuWalkPhases === undefined ? true : JSON.stringify(st.phases) === JSON.stringify(W.setLoShuWalkPhases),
-      steps: W.setLoShuWalkSteps === undefined ? true : JSON.stringify(st.steps) === JSON.stringify(W.setLoShuWalkSteps),
-      playing: st.playing === want.canon.play.length > 0,
+      cursor: sp ? st.cursor === sp.index : W.setCurrentSongIndex === undefined ? st.cursor === st0.cursor : st.cursor === W.setCurrentSongIndex,
+      walk: sp ? same(st.walk, sp.walk?.mode) : (st.walk ?? null) === (W.setLoShuWalkMode ?? null),
+      segments: sp ? same(st.segments, sp.walk?.segments) : W.setLoShuWalkSegments === undefined ? true : JSON.stringify(st.segments) === JSON.stringify(W.setLoShuWalkSegments),
+      phases: sp ? same(st.phases, sp.walk?.phases) : W.setLoShuWalkPhases === undefined ? true : JSON.stringify(st.phases) === JSON.stringify(W.setLoShuWalkPhases),
+      steps: sp ? same(st.steps, sp.walk?.steps) : W.setLoShuWalkSteps === undefined ? true : JSON.stringify(st.steps) === JSON.stringify(W.setLoShuWalkSteps),
+      playing: st.playing === (want.canon.play.length > 0 || !!sp),
       experience: ls.exp === (W.setUserExperienceLevel ?? exp),
-      viz: !W.setVizSettings || Object.entries(W.setVizSettings).every(([k, v]) => JSON.stringify(ls.viz[k]) === JSON.stringify(v)),
+      viz: !W.setVizSettings && JSON.stringify(ls.viz) === JSON.stringify(JSON.parse(viz0 || '{}')),
       notice: !firstNotice || bodyText.includes(firstNotice[1].slice(0, 60)),
-      selectedSolfeggio: W.setSelectedSolfeggio !== undefined ? saved.selectedSolfeggio === W.setSelectedSolfeggio && vizFreq === W.setSelectedSolfeggio : true,
+      toast: !sp || bodyText.includes(sp.text),
+      selectedSolfeggio: W.setSelectedSolfeggio !== undefined ? saved.selectedSolfeggio === W.setSelectedSolfeggio && vizFreq === W.setSelectedSolfeggio : !sp || vizFreq === firstCrystal,
       crystals: gen !== 'autoDistribute' ? true : (() => {
         const ch = new Map((W.setOriginalPlaylist?.changed ?? []).map(([id, t]) => [id, t[1]]));
         return st.libraryIds.every((id, i) => (ch.has(id) ? ch.get(id) === st.crystals[i] : st.crystals[i] === (F160[i].closestSolfeggio ?? null)));
       })(),
       lengths: { app: st.ids.length, lifted: wantOrder.length },
     };
-    c.ok = !c.thrown && ['order', 'cursor', 'walk', 'segments', 'phases', 'steps', 'playing', 'experience', 'viz', 'notice', 'selectedSolfeggio', 'crystals'].every((k) => c[k]) && c.rngCallsApp === c.rngCallsLifted;
+    c.ok = !c.thrown && ['order', 'cursor', 'walk', 'segments', 'phases', 'steps', 'playing', 'experience', 'viz', 'notice', 'toast', 'selectedSolfeggio', 'crystals'].every((k) => c[k]) && c.rngCallsApp === c.rngCallsLifted;
     report.checks.push(c);
-    console.log(`${c.ok ? 'OK  ' : 'DIFF'} ${gen.padEnd(18)} ${exp.padEnd(12)} seed ${seedN}  draws ${c.rngCallsApp}/${c.rngCallsLifted}  order ${c.order} (${c.lengths.app}/${c.lengths.lifted}) cursor ${c.cursor} walk ${c.walk} seg ${c.segments} ph ${c.phases} steps ${c.steps} play ${c.playing} exp ${c.experience} viz ${c.viz} notice ${c.notice} tone ${c.selectedSolfeggio} crystals ${c.crystals}`);
+    console.log(`${c.ok ? 'OK  ' : 'DIFF'} ${gen.padEnd(18)} ${exp.padEnd(12)} seed ${seedN}  draws ${c.rngCallsApp}/${c.rngCallsLifted}  order ${c.order} (${c.lengths.app}/${c.lengths.lifted}) cursor ${c.cursor} walk ${c.walk} seg ${c.segments} ph ${c.phases} steps ${c.steps} play ${c.playing} exp ${c.experience} viz ${c.viz} notice ${c.notice} toast ${c.toast} tone ${c.selectedSolfeggio} crystals ${c.crystals}`);
     await context.close();
   }
 

@@ -20,7 +20,7 @@ import TabBar from './TabBar';
 import NowPlaying from './NowPlaying';
 import CarNowPlaying from './CarNowPlaying';
 import MiniPlayer from './MiniPlayer';
-import TabStub from './tabs/TabStub';
+import MixesTab from './mixes/MixesTab';
 import MoreStub from './tabs/MoreStub';
 import LayersTab from './layers/LayersTab';
 import LibraryTab from './library/LibraryTab';
@@ -75,7 +75,7 @@ const PhoneShell = () => {
         <ViewBoundary
           name="tab-mixes"
           fallback={(api) => (tab === 'mixes' ? <TabCrash api={api} inPanel={false} /> : null)}
-          render={() => tab === 'mixes' && <TabStub tab="mixes" />}
+          render={() => tab === 'mixes' && <MixesTab />}
         />
         <ViewBoundary
           name="tab-layers"

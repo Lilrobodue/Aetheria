@@ -18,7 +18,7 @@ import { countRender } from './devRenders';
 import SideNav from './SideNav';
 import DesktopTransport from './DesktopTransport';
 import SheetHost from './SheetHost';
-import TabStub from './tabs/TabStub';
+import MixesTab from './mixes/MixesTab';
 import MoreStub from './tabs/MoreStub';
 import LayersTab from './layers/LayersTab';
 import LibraryTab from './library/LibraryTab';
@@ -84,7 +84,7 @@ const DesktopShell = () => {
               <ViewBoundary
                 name="tab-mixes"
                 fallback={(api) => (tab === 'mixes' ? <TabCrash api={api} inPanel /> : null)}
-                render={() => tab === 'mixes' && <TabStub tab="mixes" inPanel />}
+                render={() => tab === 'mixes' && <MixesTab inPanel />}
               />
               <ViewBoundary
                 name="tab-layers"

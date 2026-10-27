@@ -9,6 +9,7 @@ import {
   openLibraryTab,
   openApp,
   openSeededNewLayout,
+  peekClassicLibrary,
   phoneSize,
   savedState,
   seedLibraryRecords,
@@ -118,7 +119,7 @@ test.describe('phone, the cube', () => {
     expect(dialogs).toEqual([]);
   });
 
-  test('3. a walk’s end clears the steps: the Walks sheet’s clear, a Library tap, classic’s Clear walk badge and a Full Alignment; GUT Alignment sets the traditional steps', async ({ page }) => {
+  test('3. a walk’s end clears the steps: the Walks sheet’s clear, a Library tap, classic’s Clear walk badge and a Full Alignment; GUT Alignment (the Mixes tab) sets the traditional steps', async ({ page }) => {
     test.setTimeout(240_000);
     await vizPropsHook(page);
     const dialogs = await openSeededNewLayout(page, 30, NO_852);
@@ -139,25 +140,27 @@ test.describe('phone, the cube', () => {
     await openLibraryTab(page);
     await libraryRowButton(page, 'tone-0003').click();
     await ended('a Library tap');
-    // Classic (the Mixes stub's peek): GUT Alignment, then Clear walk badge; then GUT again and Full Alignment. On the
-    // desktop width, where a mix leaves classic's drawer open (on a phone it closes it).
+    // v15.9: the Mixes tab's GUT Alignment (was the Mixes stub's classic peek), on the desktop width; then classic's
+    // Clear walk badge (a peek of the classic library); then GUT again and Full Alignment from the tab.
     await page.setViewportSize({ width: 1280, height: 800 });
     await tab(page, 'mixes');
-    await page.getByTestId('peek-mixes').click();
-    const drawer = page.locator('aside');
-    await drawer.getByRole('button', { name: /^GUT Alignment/ }).click();
+    await page.getByTestId('mix-gut').click();
     await expect
       .poll(async () => { const s = await libraryState(page); return [s.walk, s.steps]; }, { message: 'GUT Alignment: the traditional nine but 852', timeout: 15_000 })
       .toEqual(['traditional', [0, 1, 2, 3, 4, 5, 6, 8]]);
     await expect.poll(() => vizStep(page), { timeout: 5_000 }).toBe(0);
+    await peekClassicLibrary(page);
     await loShuButton(page).click();
     // (A DOM click: the peek's "Back to the new layout" pill floats over the popover's foot.)
     await page.getByRole('button', { name: 'Clear walk badge', exact: true }).evaluate((b) => (b as HTMLElement).click());
     await ended('classic’s Clear walk badge');
     await expect.poll(() => vizStep(page), { message: 'no walk: -1', timeout: 5_000 }).toBe(-1);
-    await drawer.getByRole('button', { name: /^GUT Alignment/ }).click();
+    await page.mouse.click(3, 3); // the popover's click-away catcher
+    await page.getByTestId('peek-pill').click();
+    await tab(page, 'mixes');
+    await page.getByTestId('mix-gut').click();
     await expect.poll(async () => (await libraryState(page)).walk, { timeout: 15_000 }).toBe('traditional');
-    await drawer.getByRole('button', { name: /^Full Alignment/ }).click();
+    await page.getByTestId('mix-full').click();
     await ended('a Full Alignment (the walk-state effect)');
     expect(dialogs).toEqual([]);
   });
@@ -189,7 +192,8 @@ test.describe('desktop, classic', () => {
       expect.soft((await savedState(page)).originalOrder, `${label}: the saved library order`).toEqual(baseOrder);
       expect.soft((await libraryState(page)).libraryIds, `${label}: the library in memory`).toEqual(baseOrder);
     };
-    const MIXES = ['GUT Alignment', 'HEART Alignment', 'HEAD Alignment', 'Full Alignment', 'Qi Strength', 'Deep Healing', 'Mood Elevate', 'Meditation', 'Flow State', 'Golden Φ', '111 Sequence', '2178Hz Filter', 'Ultimate'];
+    // v15.9: the presets by their neutral names and recipes (their whole accessible names).
+    const MIXES = ['GUT Alignment', 'HEART Alignment', 'HEAD Alignment', 'Full Alignment', 'Grounding 174·285·396·417', 'Stillness 174·285·528', 'Uplift 396·417·639', 'Meditation 741·852·963', 'Flow 285·417·528·639·741', 'Golden Φ', '111 Sequence', '2178Hz Filter', 'Ultimate'];
     for (const label of MIXES) {
       await drawer.getByRole('button', { name: new RegExp('^' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) }).first().click();
       await settle(label);
@@ -246,11 +250,9 @@ test.describe('phone, the slips', () => {
     const o = await libraryState(page);
     expect(o.phases?.length, 'Ouroboros: one phase per entry').toBe(o.ids.length);
     await expect(page.getByTestId('np-source')).toContainText(' · ♾️');
-    await tab(page, 'mixes');
-    await page.getByTestId('peek-mixes').click();
-    await page.locator('aside').getByRole('button', { name: /^GUT Alignment/ }).click();
+    await tab(page, 'mixes'); // v15.9: the Mixes tab's row (was the stub's classic peek)
+    await page.getByTestId('mix-gut').click();
     await expect.poll(async () => { const s = await libraryState(page); return [s.walk, s.segments, s.phases]; }, { message: 'GUT: traditional, no segments, no phases', timeout: 15_000 }).toEqual(['traditional', null, null]);
-    await page.getByRole('button', { name: /Back to the new layout/ }).click();
     await tab(page, 'now');
     await expect(page.getByTestId('np-source')).toHaveText('Lo Shu walk · Solfeggio · step 1 of 8');
     expect(dialogs).toEqual([]);
