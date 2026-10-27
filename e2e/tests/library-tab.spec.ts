@@ -759,6 +759,11 @@ test.describe('phone, the row menu', () => {
     const menu = page.getByRole('dialog', { name: 'tone-0003', exact: true });
     await expect(menu).toBeVisible();
     await expect(menu.getByTestId('library-menu-play')).toContainText('Play from here');
+    // v16.0: Play next and Add to queue after it (nothing is loaded here, so both go first when Play is pressed).
+    await expect(menu.getByTestId('library-menu-next')).toContainText('Play next');
+    await expect(menu.getByTestId('library-menu-next')).toContainText('First when you press Play');
+    await expect(menu.getByTestId('library-menu-queue')).toContainText('Add to queue');
+    await expect(menu.getByRole('button')).toHaveText([/Play from here/, /Play next/, /Add to queue/, /Track info/, /Delete from library…/, /Cancel/]);
     await expect(menu.getByTestId('library-menu-info')).toContainText('Track info');
     await expect(menu.getByTestId('library-menu-delete')).toContainText('Delete from library…');
     await expect(menu.getByTestId('library-menu-delete')).toContainText('The original file is not touched.');

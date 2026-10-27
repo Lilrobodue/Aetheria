@@ -5,10 +5,12 @@
 // and Add to playlist as items: Play from here (the same call as a row tap), Track info, and Delete from library… (v15.4's
 // confirmation Dialog, through App's existing delete); Cancel below. Each item closes the sheet first, so a Dialog never
 // sits on a Sheet (v15.5's rule); focus goes back to the ⋯ (the overlay stack). The body is the `library-menu` region.
+// v16.0 (mockup rowmenu-phone): Play next and Add to queue, after Play from here; their lines say where the track goes
+// (queueViewModel: right after the track that's playing, after the tracks waiting, or first when Play is pressed).
 
 import React from 'react';
 import type { ReactNode } from 'react';
-import { Info, Play, Trash2 } from 'lucide-react';
+import { Info, ListEnd, ListStart, Play, Trash2 } from 'lucide-react';
 import Sheet from '../../ui/Sheet';
 import ListRow from '../../ui/ListRow';
 import { ViewBoundary } from '../../ErrorBoundary';
@@ -18,7 +20,7 @@ import { REGIME_DOT } from '../shellModel';
 import { sheetFallback } from '../sheets/sheetFallback';
 import { rowFacts, rowRegime } from './libraryModel';
 
-export type RowMenuAction = 'play' | 'info' | 'delete';
+export type RowMenuAction = 'play' | 'next' | 'queue' | 'info' | 'delete';
 
 interface MenuItem {
   id: RowMenuAction;
@@ -27,8 +29,11 @@ interface MenuItem {
   icon: ReactNode;
 }
 
-const ITEMS: readonly MenuItem[] = [
+/** The items, in order; the queue's two lines are the caller's (they depend on the queue). */
+const items = (lines: { next: string; queue: string }): readonly MenuItem[] => [
   { id: 'play', title: 'Play from here', subtitle: 'Your library, starting with this track', icon: <Play size={20} /> },
+  { id: 'next', title: 'Play next', subtitle: lines.next, icon: <ListStart size={20} /> },
+  { id: 'queue', title: 'Add to queue', subtitle: lines.queue, icon: <ListEnd size={20} /> },
   { id: 'info', title: 'Track info', subtitle: 'Length, crystal, key, visual sync and the file', icon: <Info size={20} /> },
   {
     id: 'delete',
@@ -40,11 +45,13 @@ const ITEMS: readonly MenuItem[] = [
 
 interface RowMenuProps {
   song: Song;
+  /** v16.0: Play next's and Add to queue's lines (queueViewModel.playNextLine, addToQueueLine). */
+  lines: { next: string; queue: string };
   onAction: (a: RowMenuAction) => void;
   onClose: () => void;
 }
 
-const RowMenuBody = ({ song, onAction, onClose }: RowMenuProps) => {
+const RowMenuBody = ({ song, lines, onAction, onClose }: RowMenuProps) => {
   countRender('RowMenu');
   const regime = rowRegime(song);
   return (
@@ -60,7 +67,7 @@ const RowMenuBody = ({ song, onAction, onClose }: RowMenuProps) => {
           <span className="block text-xs text-ink-muted tabular-nums truncate">{rowFacts(song)}</span>
         </span>
       </div>
-      {ITEMS.map((it) => (
+      {items(lines).map((it) => (
         <React.Fragment key={it.id}>
           <ListRow title={it.title} subtitle={it.subtitle} icon={it.icon} onClick={() => onAction(it.id)} data-testid={`library-menu-${it.id}`} />
         </React.Fragment>
@@ -76,9 +83,9 @@ const RowMenuBody = ({ song, onAction, onClose }: RowMenuProps) => {
   );
 };
 
-const RowMenu = ({ song, onAction, onClose }: RowMenuProps) => (
+const RowMenu = ({ song, lines, onAction, onClose }: RowMenuProps) => (
   <Sheet open title={song.name} headerless onClose={onClose} data-testid="library-menu">
-    <ViewBoundary name="library-menu" fallback={sheetFallback(onClose)} render={() => <RowMenuBody song={song} onAction={onAction} onClose={onClose} />} />
+    <ViewBoundary name="library-menu" fallback={sheetFallback(onClose)} render={() => <RowMenuBody song={song} lines={lines} onAction={onAction} onClose={onClose} />} />
   </Sheet>
 );
 

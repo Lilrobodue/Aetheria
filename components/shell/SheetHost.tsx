@@ -2,7 +2,8 @@
 //
 // The one open sheet (App's shellSheet: only one at a time). Closed sheets are unmounted. The phone shell shows them
 // as modal bottom sheets; the desktop shell shows Sound, Crystal and Walks in its panel, and the ⋯ menu as a modal.
-// v15.7: the Import sheet (the Library tab), in the panel on the desktop too.
+// v15.7: the Import sheet (the Library tab), in the panel on the desktop too. v16.0: the Up next sheet (the queue), in the
+// panel on the desktop too.
 
 import React from 'react';
 import { useShell } from './contexts';
@@ -11,6 +12,7 @@ import SoundSheet from './sheets/SoundSheet';
 import CrystalSheet from './sheets/CrystalSheet';
 import WalksSheet from './sheets/WalksSheet';
 import ImportSheet from './sheets/ImportSheet';
+import QueueSheet from './queue/QueueSheet';
 
 interface SheetHostProps {
   presentation: 'sheet' | 'panel';
@@ -27,6 +29,7 @@ const SheetHost = ({ presentation, only = 'all' }: SheetHostProps) => {
       {sheet === 'crystal' && only !== 'menu' ? <CrystalSheet presentation={presentation} /> : null}
       {sheet === 'walks' && only !== 'menu' ? <WalksSheet presentation={presentation} /> : null}
       {sheet === 'import' && only !== 'menu' ? <ImportSheet presentation={presentation} /> : null}
+      {sheet === 'queue' && only !== 'menu' ? <QueueSheet presentation={presentation} /> : null}
     </>
   );
 };

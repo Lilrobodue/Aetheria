@@ -1,4 +1,5 @@
-// components/shell/ShellProviders.tsx (v15.5, the new layout beta; v15.6 adds the tuning context; v15.7 the library's two)
+// components/shell/ShellProviders.tsx (v15.5, the new layout beta; v15.6 adds the tuning context; v15.7 the library's two;
+// v16.0 the queue's)
 //
 // Nests the new layout's context providers around it. It re-renders with App (four times a second while playing);
 // its children do not: App hands it one memo'd <AppShell /> with no props, and each view reads only the contexts it
@@ -18,6 +19,7 @@ import {
   TimeContext,
   LibraryListContext,
   LibraryStatusContext,
+  QueueContext,
 } from './contexts';
 import type {
   ShellActions,
@@ -31,6 +33,7 @@ import type {
   TimeValue,
   LibraryListValue,
   LibraryStatusValue,
+  QueueValue,
 } from './contexts';
 
 interface ShellProvidersProps {
@@ -45,10 +48,11 @@ interface ShellProvidersProps {
   time: TimeValue;
   libraryList: LibraryListValue;
   libraryStatus: LibraryStatusValue;
+  queue: QueueValue;
   children: ReactNode;
 }
 
-const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library, walk, time, libraryList, libraryStatus, children }: ShellProvidersProps) => (
+const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library, walk, time, libraryList, libraryStatus, queue, children }: ShellProvidersProps) => (
   <ActionsContext.Provider value={actions}>
     <ShellContext.Provider value={shell}>
       <PlayerContext.Provider value={player}>
@@ -59,7 +63,9 @@ const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library
                 <WalkContext.Provider value={walk}>
                   <TimeContext.Provider value={time}>
                     <LibraryListContext.Provider value={libraryList}>
-                      <LibraryStatusContext.Provider value={libraryStatus}>{children}</LibraryStatusContext.Provider>
+                      <LibraryStatusContext.Provider value={libraryStatus}>
+                        <QueueContext.Provider value={queue}>{children}</QueueContext.Provider>
+                      </LibraryStatusContext.Provider>
                     </LibraryListContext.Provider>
                   </TimeContext.Provider>
                 </WalkContext.Provider>

@@ -30,7 +30,7 @@ import { waitForBlobSaves } from '../utils/playlistCache';
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 /** The version the error log records. Bump it with the header badge (App.tsx); isolation.spec checks the two agree. */
-export const APP_VERSION = 'v15.9';
+export const APP_VERSION = 'v16.0';
 
 export type ViewName =
   | 'visualizer'
@@ -72,7 +72,9 @@ export type ViewName =
   // v15.9, the Mixes tab: the walks, the journeys and sets, and the Experimental scores.
   | 'mixes-walks'
   | 'mixes-lists'
-  | 'mixes-experimental';
+  | 'mixes-experimental'
+  // v16.0, the queue: the Up next sheet's body (the phone's sheet, the desktop's panel).
+  | 'queue';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The error log

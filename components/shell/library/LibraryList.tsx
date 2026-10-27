@@ -11,11 +11,13 @@
 // Enter or Space plays; → moves to the row's ⋯ and ← back; Shift+F10 or the ContextMenu key opens the menu. The list
 // element itself takes the focus only as the delete Dialog's fallback, and hands it to the nearest row.
 // React.memo; it reads no context (its rows' props come from the tab), so the clock never reaches it.
+// v16.0: `marks` (the queue's: a waiting track's first place) gives a row its mark, "Queued · 1".
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Song } from '../../../types';
 import { countRender } from '../devRenders';
 import LibraryRow, { ROW_PX } from './LibraryRow';
+import { libraryMark } from '../queue/queueViewModel';
 
 export const OVERSCAN = 6;
 
@@ -37,6 +39,8 @@ interface LibraryListProps {
   initialTopRef: { current: number };
   /** The scroll position the tab keeps (libraryViewRef.top), zeroed with a reset. */
   onReset: () => void;
+  /** v16.0: a waiting track's first place in the queue, by id (QueueContext.positions). */
+  marks?: ReadonlyMap<string, number>;
 }
 
 interface Range {
@@ -44,7 +48,8 @@ interface Range {
   end: number;
 }
 
-const LibraryList = ({ view, trackId, isPlaying, resetKey, scrollRef, onPlay, onMenu, listRef, initialTopRef, onReset }: LibraryListProps) => {
+const LibraryList = ({ view, trackId, isPlaying, resetKey, scrollRef, onPlay, onMenu, listRef, initialTopRef, onReset, marks }: LibraryListProps) => {
+  const markOf = (id: string): string | undefined => { const q = marks?.get(id); return q ? libraryMark(q) : undefined; };
   countRender('LibraryList');
   const viewRef: { current: Song[] } = useRef(view);
   viewRef.current = view;
@@ -205,6 +210,7 @@ const LibraryList = ({ view, trackId, isPlaying, resetKey, scrollRef, onPlay, on
         onPlay={onPlay}
         onMenu={onMenu}
         onFocusRow={onFocusRow}
+        mark={markOf(s.id)}
       />
     );
   }
@@ -222,6 +228,7 @@ const LibraryList = ({ view, trackId, isPlaying, resetKey, scrollRef, onPlay, on
         onPlay={onPlay}
         onMenu={onMenu}
         onFocusRow={onFocusRow}
+        mark={markOf(s.id)}
       />
     );
   }

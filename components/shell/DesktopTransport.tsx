@@ -4,10 +4,13 @@
 // panel), the title and the chips (24 px, one line, clipped: display only); shuffle, previous, Play 48, next, repeat
 // over the seek bar with its φ ticks and both times; Output, Walks, the master volume and ⋯. The desktop has no Car
 // screen: its layers chip says "Layers v2 · Car (tone only)". v15.6: the Zen button sits left of ⋯ (decision 1, option A).
+// v16.0 (mockup queue-desktop): a compact Up next button after Walks (the list icon and the queue's count; 44 px, so
+// every target stays 44 × 44 at 1280 px), which opens and closes the queue in the panel.
 
 import React from 'react';
-import { Ellipsis, Music2, Pause, Play, Repeat, Route, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, Waves } from 'lucide-react';
-import { useActions, useLevels, usePlayer, useShell, useSound } from './contexts';
+import { Ellipsis, ListVideo, Music2, Pause, Play, Repeat, Route, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, Waves } from 'lucide-react';
+import { useActions, useLevels, usePlayer, useQueue, useShell, useSound } from './contexts';
+import { upNextButtonName } from './queue/queueViewModel';
 import { countRender } from './devRenders';
 import SeekBar from './SeekBar';
 import { outputIcon } from './outputIcon';
@@ -46,7 +49,9 @@ const DesktopTransport = () => {
   const p = usePlayer();
   const s = useSound();
   const actions = useActions();
-  const { barRef } = useShell();
+  const { barRef, sheet } = useShell();
+  const queue = useQueue();
+  const queueOpen = sheet === 'queue';
   const regime = regimeOf(s.crystalHz);
   return (
     <footer
@@ -161,6 +166,22 @@ const DesktopTransport = () => {
         >
           <Route size={16} className="text-ink-muted" aria-hidden="true" />
           Walks
+        </button>
+        <button
+          type="button"
+          data-testid="desktop-queue"
+          aria-label={upNextButtonName(queue.waiting)}
+          title="Up next"
+          aria-expanded={queueOpen}
+          onClick={actions.toggleQueue}
+          className={
+            queueOpen
+              ? `h-touch min-w-touch px-2.5 rounded-control border border-ink-muted bg-surface-raised text-sm text-ink-strong flex items-center justify-center gap-1.5 ${FOCUS}`
+              : `h-touch min-w-touch px-2.5 rounded-control border border-line-strong text-sm text-ink flex items-center justify-center gap-1.5 hover:border-ink-faint transition-colors duration-fast ${FOCUS}`
+          }
+        >
+          <ListVideo size={18} className="text-ink-soft" aria-hidden="true" />
+          {queue.waiting > 0 ? <span className="text-xs text-ink-soft tabular-nums">{queue.waiting}</span> : null}
         </button>
         <DesktopVolume />
         <ZenButton data-testid="zen-button-desktop" />

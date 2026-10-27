@@ -5,12 +5,12 @@
 // The current track's row: aria-current, a raised background, a still icon in the tile (AudioLines while it plays, Pause
 // while paused; no animation, I13) and "Playing · " or "Paused · " before its facts; no gold. The row is absolutely placed at `index × 64` px in the list's tall container.
 // The whole row is one button (a tap plays the library from it); the ⋯ opens the row menu. Only the active row's button
-// is in the tab order (the list's roving tab stop); the ⋯ is reached with →. `mark` is v14.18's slot ("Next · 2"),
-// empty in v15.7. React.memo: it renders when its own props change, never on the clock.
+// is in the tab order (the list's roving tab stop); the ⋯ is reached with →. `mark` is the queue's (v16.0, mockup
+// library-marks-phone): "Queued · 1" for a track waiting in the queue, a string, so React.memo keeps the other rows still.
+// React.memo: it renders when its own props change, never on the clock.
 
 import React from 'react';
-import type { ReactNode } from 'react';
-import { AudioLines, EllipsisVertical, Pause } from 'lucide-react';
+import { AudioLines, EllipsisVertical, ListVideo, Pause } from 'lucide-react';
 import type { Song } from '../../../types';
 import { countRender } from '../devRenders';
 import { REGIME_DOT } from '../shellModel';
@@ -31,7 +31,8 @@ interface LibraryRowProps {
   onPlay: (id: string) => void;
   onMenu: (id: string, opener: HTMLElement) => void;
   onFocusRow: (index: number) => void;
-  mark?: ReactNode;
+  /** v16.0: the queue's mark ("Queued · 1"), or none. */
+  mark?: string;
 }
 
 const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold-400';
@@ -87,7 +88,12 @@ const LibraryRow = ({ song, index, size, current, paused, active, onPlay, onMenu
           </span>
         </span>
       </button>
-      {mark ?? null}
+      {mark ? (
+        <span data-testid="library-row-mark" className="shrink-0 ml-1 inline-flex items-center gap-1 h-6 px-2 rounded-pill border border-line-strong text-xs text-ink-soft tabular-nums">
+          <ListVideo size={12} className="text-ink-muted" aria-hidden="true" />
+          {mark}
+        </span>
+      ) : null}
       <button
         type="button"
         tabIndex={-1}

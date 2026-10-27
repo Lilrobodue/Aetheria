@@ -45,6 +45,10 @@ import type { LoShuWalkMode } from '../constants';
 import { restoredWalk } from './library/walkRecord';
 import type { SavedWalk } from './library/walkRecord';
 export type { SavedWalk } from './library/walkRecord';
+// v16.0: the queue survives a reload (the waiting and played entries' indices into the play order, on the same record).
+import { restoredQueue } from './queue/queueModel';
+import type { Mark, SavedQueue } from './queue/queueModel';
+export type { SavedQueue } from './queue/queueModel';
 
 const DB_NAME = 'aetheria-db';
 // v2: split the old combined `songs` store into `blobs` + `meta`. The schema is
@@ -104,6 +108,9 @@ interface CachedState {
   loShuWalkMode: LoShuWalkMode | null;
   /** v15.9: the walk that built playlistOrder (optional: older records have none). */
   walk?: SavedWalk | null;
+  /** v16.0: the queued entries of playlistOrder, as indices (optional: older records have none; older releases ignore
+   *  it, and theirs drop a walk holding a queued entry, keeping the order). */
+  queue?: SavedQueue | null;
   selectedSolfeggio: number;
   savedAt: number;
 }
@@ -115,6 +122,8 @@ export interface RestoredPlaylist {
   loShuWalkMode: LoShuWalkMode | null;
   /** v15.9: the stored walk, only when it matches the restored play order exactly (restoredWalk); else null. */
   walk: SavedWalk | null;
+  /** v16.0: the queue's marks, only when the stored queue matches the restored play order exactly (restoredQueue). */
+  queue: Mark[] | null;
   /** null when there was no saved state (only orphans were found). */
   selectedSolfeggio: number | null;
   savedAt: number;
@@ -477,7 +486,8 @@ async function saveMetaAndState(
   currentSongIndex: number,
   walk: SavedWalk | null,
   selectedSolfeggio: number,
-  epoch: number = cacheEpoch
+  epoch: number = cacheEpoch,
+  queue: SavedQueue | null = null
 ): Promise<void> {
   const seq = ++saveSeq;
   let db: IDBDatabase | null = null;
@@ -499,6 +509,7 @@ async function saveMetaAndState(
       currentSongIndex,
       loShuWalkMode: walk ? walk.mode : null,
       walk: walk ?? null,
+      queue: queue ?? null,
       selectedSolfeggio,
       savedAt: Date.now(),
     };
@@ -647,11 +658,14 @@ async function restorePlaylist(): Promise<RestoredPlaylist | null> {
     let currentSongIndex = state
       ? Math.min(Math.max(state.currentSongIndex, -1), playlist.length - 1)
       : -1;
+    // v16.0: the queue, only if every track of the play order came back in its saved order (as the walk).
+    let queue = restoredQueue(state?.queue, savedPlayOrder, playlist.map((s) => s.id), currentSongIndex);
     // The saved play order can resolve to nothing (every track of a mix was
     // deleted). Show the library rather than restoring an empty app.
     if (playlist.length === 0 && originalPlaylist.length > 0) {
       playlist = originalPlaylist.slice();
       currentSongIndex = -1;
+      queue = null;
     }
 
     // Stored audio that neither saved list references: offered for recovery.
@@ -676,6 +690,7 @@ async function restorePlaylist(): Promise<RestoredPlaylist | null> {
       currentSongIndex,
       loShuWalkMode: state?.loShuWalkMode ?? null,
       walk,
+      queue,
       selectedSolfeggio: state ? state.selectedSolfeggio : null,
       savedAt: state?.savedAt ?? 0,
       orphans,
@@ -798,7 +813,8 @@ function debouncedSaveMeta(
   currentSongIndex: number,
   walk: SavedWalk | null,
   selectedSolfeggio: number,
-  delayMs: number = 2000
+  delayMs: number = 2000,
+  queue: SavedQueue | null = null
 ): void {
   if (metaTimer) clearTimeout(metaTimer);
   const epoch = cacheEpoch;
@@ -810,7 +826,8 @@ function debouncedSaveMeta(
       currentSongIndex,
       walk,
       selectedSolfeggio,
-      epoch
+      epoch,
+      queue
     );
   }, delayMs);
 }

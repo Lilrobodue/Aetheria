@@ -1049,7 +1049,9 @@ export type CrashView =
   // v15.7, the Library tab.
   | 'library-list' | 'library-health' | 'library-menu' | 'sheet-import'
   // v15.9, the Mixes tab.
-  | 'mixes-walks' | 'mixes-lists' | 'mixes-experimental';
+  | 'mixes-walks' | 'mixes-lists' | 'mixes-experimental'
+  // v16.0, the queue (the Up next sheet's body).
+  | 'queue';
 
 /**
  * Make a region throw on its next render, through the app's dev hook window.__aetheriaCrash (ErrorBoundary.tsx; dev

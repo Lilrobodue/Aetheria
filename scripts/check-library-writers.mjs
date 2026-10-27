@@ -25,8 +25,10 @@
 //      by its enclosing function / effect / JSX attribute, equals the pinned table (scripts/library-writers.json):
 //      the count AND a hash of the enclosing code (the innermost site, and the whole App-level function or effect it
 //      sits in), so a changed line inside an allowed writer fails until it is deliberately re-pinned.
-//   2. Nothing under components/shell/ imports utils/playlistCache.
-//   3. The play-order functions (startPlayOrder, playFromLibrary, undoPlayOrder) exist once each in App.tsx and use no
+//   2. Nothing under components/shell/ imports utils/playlistCache (v15.8: nor utils/mix and utils/crystalData; v16.0:
+//      nor utils/queue).
+//   3. The play-order functions (startPlayOrder, playFromLibrary, undoPlayOrder, …; v16.0: the queue's queueTracks,
+//      editQueue, undoQueue, and its one writer commitQueue and applyQueueOp) exist once each in App.tsx and use no
 //      writer and no wrapper.
 //
 //   node scripts/check-library-writers.mjs            compare against scripts/library-writers.json
@@ -47,7 +49,7 @@ const PINS_PATH = join(root, 'scripts', 'library-writers.json');
 const CACHE_FILE = 'utils/playlistCache.ts';
 const CACHE_WRITERS = ['deleteTracksFromCache', 'clearPlaylistCache'];
 const ROOT_COMPONENT = 'App'; // App.tsx's component: its own body is not a wrapper, its inner functions are
-const PLAY_ORDER_FUNCTIONS = ['startPlayOrder', 'playFromLibrary', 'undoPlayOrder', 'applyMix', 'restoreLibrary', 'startMix']; // v15.8: applyMix, the mixes' one way into App's state; v15.9: restoreLibrary, and the Mixes tab's startMix
+const PLAY_ORDER_FUNCTIONS = ['startPlayOrder', 'playFromLibrary', 'undoPlayOrder', 'applyMix', 'restoreLibrary', 'startMix', 'queueTracks', 'editQueue', 'undoQueue', 'commitQueue', 'applyQueueOp']; // v15.8: applyMix, the mixes' one way into App's state; v15.9: restoreLibrary, and the Mixes tab's startMix; v16.0: the queue's handlers and its one writer
 const MUTATORS = new Set(['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin']);
 
 const lf = (s) => s.replace(/^﻿/, '').replace(/\r\n?/g, '\n');
@@ -334,8 +336,9 @@ else {
 // ---------------------------------------------------------------------------------------------------------------
 // Rule 2: the shell never imports playlistCache
 // ---------------------------------------------------------------------------------------------------------------
-// v15.8: nor do the mix recipes and the crystal data (pure modules: they return data, App applies it).
-const NO_CACHE = (f) => f.startsWith('components/shell/') || f.startsWith('utils/mix/') || f === 'utils/crystalData.ts';
+// v15.8: nor do the mix recipes and the crystal data (pure modules: they return data, App applies it). v16.0: nor the
+// queue's model (pure: App applies its writes).
+const NO_CACHE = (f) => f.startsWith('components/shell/') || f.startsWith('utils/mix/') || f.startsWith('utils/queue/') || f === 'utils/crystalData.ts';
 for (const file of files.filter(NO_CACHE)) {
   const sf = parse(file);
   const visit = (n) => {
@@ -379,6 +382,6 @@ if (problems.size) {
 }
 console.log(
   `check:writers: ${total} uses of the library's writers and their ${wrappers.size} wrappers, in ${places} places across ` +
-    `${files.length} files, as pinned (counts and code); components/shell, utils/mix and utils/crystalData never import playlistCache; ` +
+    `${files.length} files, as pinned (counts and code); components/shell, utils/mix, utils/queue and utils/crystalData never import playlistCache; ` +
     `${PLAY_ORDER_FUNCTIONS.join(', ')} use no writer.`
 );

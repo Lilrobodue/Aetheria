@@ -11,6 +11,8 @@
 // It reopens where it was left (App's libraryViewRef: the query, the scroll, the card's fold; session only); the sort
 // is saved as aetheria.librarySort.v1 from the select only. The query is tab-local state with useDeferredValue, so
 // App never renders for a keystroke. React.memo; nothing here reads the time.
+// v16.0: the row menu's Play next and Add to queue (App's queueTracks; the sheet closes first, the tab stays, the toast
+// confirms), and the rows' queue marks (QueueContext: never the clock).
 
 import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Plus, X } from 'lucide-react';
@@ -20,7 +22,8 @@ import IconButton from '../../ui/IconButton';
 import { PanelFallback, ViewBoundary } from '../../ErrorBoundary';
 import type { FallbackApi } from '../../ErrorBoundary';
 import type { Song } from '../../../types';
-import { useActions, useLibraryList, useLibrarySummary, usePlayer, useShell, useWalk } from '../contexts';
+import { useActions, useLibraryList, useLibrarySummary, usePlayer, useQueue, useShell, useWalk } from '../contexts';
+import { addToQueueLine, playNextLine } from '../queue/queueViewModel';
 import { countRender } from '../devRenders';
 import SearchSortRow from './SearchSortRow';
 import LibraryList from './LibraryList';
@@ -69,7 +72,12 @@ const LibraryTab = ({ inPanel = false }: LibraryTabProps) => {
   const { trackId, hasTrack, isPlaying } = usePlayer();
   const lib = useLibrarySummary();
   const walk = useWalk();
+  const queue = useQueue();
   const { libraryViewRef, phoneShell } = useShell();
+  const menuLines = useMemo(
+    () => ({ next: playNextLine(queue.nothingCurrent), queue: addToQueueLine(queue.waiting, queue.nothingCurrent) }),
+    [queue.nothingCurrent, queue.waiting]
+  );
 
   const [query, setQueryState] = useState<string>(() => libraryViewRef.current.query);
   const deferredQuery = useDeferredValue(query);
@@ -163,6 +171,7 @@ const LibraryTab = ({ inPanel = false }: LibraryTabProps) => {
     setMenuId(null); // the sheet closes first: a Dialog never sits on a Sheet
     if (id === null) return;
     if (a === 'play') onPlay(id);
+    else if (a === 'next' || a === 'queue') actions.queueTracks([id], a);
     else if (a === 'info') setInfoId(id);
     else actions.requestDelete(id);
   };
@@ -234,6 +243,7 @@ const LibraryTab = ({ inPanel = false }: LibraryTabProps) => {
                     listRef={listRef}
                     initialTopRef={initialTopRef}
                     onReset={onReset}
+                    marks={queue.positions}
                   />
                 ) : (
                   <div data-testid="library-no-results" className="px-4 pt-2 pb-6 text-sm text-ink-muted">
@@ -267,7 +277,7 @@ const LibraryTab = ({ inPanel = false }: LibraryTabProps) => {
           </div>
         )}
       </div>
-      {menuSong ? <RowMenu song={menuSong} onAction={onMenuAction} onClose={() => setMenuId(null)} /> : null}
+      {menuSong ? <RowMenu song={menuSong} lines={menuLines} onAction={onMenuAction} onClose={() => setMenuId(null)} /> : null}
       {infoSong ? <TrackInfoDialog song={infoSong} onClose={() => setInfoId(null)} /> : null}
     </div>
   );

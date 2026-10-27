@@ -6,11 +6,15 @@
 // hides and this becomes two columns: what plays on the left, the controls on the right.
 // React.memo with no props; it reads the player, sound and library contexts, never the time: the seek bar and the
 // time text under it are the time readers, so the 4 Hz clock re-renders those two and nothing here.
+// v16.0 (decision 1 A, mockup np-phone-A-upnext): the Up next line under the transport, above Output · Walks: the track
+// that plays next and the queue's count; a tap opens the queue. Shown with a track loaded or a queue waiting. It reads
+// the queue's context (never the clock).
 
 import React from 'react';
-import { Ellipsis, Pause, Play, Repeat, Route, Shuffle, SkipBack, SkipForward } from 'lucide-react';
+import { ChevronRight, Ellipsis, ListVideo, Pause, Play, Repeat, Route, Shuffle, SkipBack, SkipForward } from 'lucide-react';
 import EmptyState from '../ui/EmptyState';
-import { useActions, useLibrarySummary, usePlayer, useShell, useSound } from './contexts';
+import { useActions, useLibrarySummary, usePlayer, useQueue, useShell, useSound } from './contexts';
+import { queuedCount, upNextName, upNextTitle } from './queue/queueViewModel';
 import { countRender } from './devRenders';
 import NowPlayingChips from './NowPlayingChips';
 import SeekBar from './SeekBar';
@@ -27,8 +31,10 @@ const NowPlaying = () => {
   const p = usePlayer();
   const s = useSound();
   const lib = useLibrarySummary();
+  const queue = useQueue();
   const actions = useActions();
   const { barRef } = useShell();
+  const count = queuedCount(queue.waiting);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col justify-end">
@@ -134,6 +140,25 @@ const NowPlaying = () => {
               <Repeat size={20} />
             </button>
           </div>
+
+          {p.hasTrack || queue.waiting > 0 ? (
+            <button
+              type="button"
+              data-testid="np-upnext"
+              aria-label={upNextName(queue.nextTitle, queue.waiting, queue.shuffle)}
+              aria-haspopup="dialog"
+              onClick={() => actions.openSheet('queue')}
+              className={`mt-2 w-full min-h-touch px-3 rounded-control border border-line-strong bg-surface-raised/80 flex items-center gap-2 text-left hover:border-ink-faint transition-colors duration-fast ${FOCUS}`}
+            >
+              <ListVideo size={18} className="shrink-0 text-ink-muted" aria-hidden="true" />
+              <span className="shrink-0 text-xs uppercase tracking-widest text-ink-muted">Up next</span>
+              <span data-testid="np-upnext-title" className={queue.nextTitle ? 'flex-1 min-w-0 text-sm text-ink-strong truncate' : 'flex-1 min-w-0 text-sm text-ink-muted truncate'}>
+                {upNextTitle(queue.nextTitle, queue.shuffle)}
+              </span>
+              {count ? <span className="shrink-0 text-xs text-ink-muted tabular-nums">{count}</span> : null}
+              <ChevronRight size={18} className="shrink-0 text-ink-faint" aria-hidden="true" />
+            </button>
+          ) : null}
 
           <div className="mt-2 grid grid-cols-2 gap-2">
             <button

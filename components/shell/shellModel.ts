@@ -9,8 +9,8 @@ export const LAYOUT_KEY = 'aetheria.layout.v1';
 
 export type LayoutPref = 'classic' | 'new';
 export type ShellTab = 'now' | 'library' | 'mixes' | 'layers' | 'more';
-/** v15.7 adds the Import sheet. */
-export type ShellSheet = 'sound' | 'crystal' | 'walks' | 'menu' | 'import';
+/** v15.7 adds the Import sheet; v16.0 the Up next sheet (the queue). */
+export type ShellSheet = 'sound' | 'crystal' | 'walks' | 'menu' | 'import' | 'queue';
 /** The classic panel a stub "peeks" into (decision 4). */
 export type PeekPanel = 'library' | 'sound'; // v15.9: no 'mixes' (the Mixes tab replaced its stub's peek)
 
@@ -118,6 +118,28 @@ export function sourceLine(
   if (count <= 0) return sameOrder ? 'Library · no tracks yet' : 'Play order · empty';
   if (at) return `${head} · ${at} of ${count}`;
   return `${head} · ${count} track${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * v16.0: the source line while a queued track plays (mockups np-phone-A-queued-current, -walk-queued): "Your queue · 1 of
+ * 3 · then Library", "Your queue · 1 of 1 · then Vortex step 4 of 27". `at`/`of`: the run of queued tracks around the
+ * current one (queueModel.queueRun); `then`: what plays after it (queueThen), or null when nothing does.
+ */
+export function queueSourceLine(at: number, of: number, then: string | null): string {
+  return `Your queue · ${at} of ${of}${then ? ` · then ${then}` : ''}`;
+}
+
+/** v16.0: what plays after the queue, for queueSourceLine: the walk's next step ("Vortex step 4 of 27"), "Library", or
+ *  "Play order"; null when nothing of the play order's own plays after it. */
+export function queueThen(walkName: string | null, sameOrder: boolean, walkStep: number, walkCount: number, hasNext: boolean): string | null {
+  if (!hasNext) return null;
+  if (walkName) return walkStep > 0 && walkCount > 0 ? `${walkName} step ${walkStep} of ${walkCount}` : walkName;
+  return sameOrder ? 'Library' : 'Play order';
+}
+
+/** v16.0: the mini-player's short source while a queued track plays: "Queue 1/3". */
+export function queueSourceShort(at: number, of: number): string {
+  return `Queue ${at}/${of}`;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

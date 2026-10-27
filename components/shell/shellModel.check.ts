@@ -19,6 +19,9 @@ import {
   CRYSTALS,
   TABS,
   newLayoutNotice,
+  queueSourceLine,
+  queueThen,
+  queueSourceShort,
 } from './shellModel.ts';
 
 let passed = 0;
@@ -55,6 +58,17 @@ eq(sourceLine(null, true, -1, 28), 'Library · 28 tracks', 'the library, nothing
 eq(sourceLine(null, true, -1, 1), 'Library · 1 track', 'one track');
 eq(sourceLine(null, true, -1, 0), 'Library · no tracks yet', 'an empty library');
 eq(sourceLine(null, true, 40, 28), 'Library · 28 tracks', 'an index past the end counts, never "29 of 28"');
+
+// v16.0: the source line while a queued track plays.
+eq(queueSourceLine(1, 3, queueThen(null, true, 0, 0, true)), 'Your queue · 1 of 3 · then Library', 'a queued track, then the library');
+eq(queueSourceLine(2, 3, queueThen(null, false, 0, 0, true)), 'Your queue · 2 of 3 · then Play order', 'then another play order');
+eq(queueSourceLine(1, 1, queueThen('Vortex', false, 4, 27, true)), 'Your queue · 1 of 1 · then Vortex step 4 of 27', 'inside a walk: its next step');
+eq(queueSourceLine(1, 2, queueThen(null, true, 0, 0, false)), 'Your queue · 1 of 2', 'nothing after the queue');
+eq(queueThen('Vortex', false, 0, 27, true), 'Vortex', 'a walk without a next step number');
+eq(queueSourceShort(1, 3), 'Queue 1/3', 'the mini-player short form');
+// With a queue the walk counts walk entries only, and the library line counts the play order's own entries: the same
+// sourceLine and walkSegment with those numbers (App passes them; no queue, the numbers are the old ones).
+eq(sourceLine('CAB', false, 30, 81, walkSegment('combined', [27, 27, 27], 30)), 'Lo Shu walk · CAB · step 31 of 81 · Ascent 4/27', 'a CAB step counted without its queued entries');
 
 // walkSegment: the CAB and CABI segments; single walks have none.
 eq(walkSegment('combined', [27, 27, 27], 0), 'Vortex 1/27', 'CAB start');

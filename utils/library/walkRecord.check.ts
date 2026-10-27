@@ -34,10 +34,24 @@ check(restoredWalk(ascent, [], []) === null, 'an empty order has no walk');
 check(restoredWalk({ ...ascent, steps: [0, 1, 3, 4] }, five, five) === null, 'steps shorter than the order');
 check(restoredWalk({ ...ascent, steps: [0, 1, 1, 4, 9] }, five, five) === null, 'steps not strictly increasing');
 check(restoredWalk({ ...ascent, steps: [0, 1, 3, 4, 27] }, five, five) === null, 'a step past the walk (27 positions)');
-check(restoredWalk({ ...ascent, steps: [-1, 1, 3, 4, 9] }, five, five) === null, 'a negative step');
+check(restoredWalk({ ...ascent, steps: [-2, 1, 3, 4, 9] }, five, five) === null, 'a negative step other than -1');
 check(restoredWalk({ ...ascent, steps: [0, 1, 3.5, 4, 9] }, five, five) === null, 'a fractional step');
 check(restoredWalk({ ...ascent, steps: [0, 1, '3', 4, 9] }, five, five) === null, 'a string step');
 check(restoredWalk({ mode: 'cabi', segments: [1, 1, 1, 2], phases: null, steps: [0, 1, 2, 81, LO_SHU_WALKS.cabi.length - 1] }, five, five) !== null, 'CABI steps run to 109');
+
+// v16.0, the queue: queued entries have step -1 and phase '' (the walk positions still strictly increase).
+const six = ids(6);
+const ascentQ = { mode: 'A', segments: null, phases: null, steps: [0, -1, 1, 3, 4, 9] };
+check(JSON.stringify(restoredWalk(ascentQ, six, six)) === JSON.stringify(ascentQ), 'Ascent with a queued entry restores');
+check(JSON.stringify(restoredWalk({ ...ascent, steps: [-1, 1, 3, 4, 9] }, five, five)) === JSON.stringify({ ...ascent, steps: [-1, 1, 3, 4, 9] }), 'a queued entry first (Play next with nothing current)');
+const cabiQ = { mode: 'cabi', segments: [1, 1, 1, 2], phases: ['', '', '', '', '♾️', ''], steps: [0, 30, 60, -1, 81, 82] };
+check(JSON.stringify(restoredWalk(cabiQ, six, six)) === JSON.stringify(cabiQ), 'CABI with a queued entry: segments count the walk entries');
+check(restoredWalk({ ...cabiQ, segments: [1, 1, 1, 3] }, six, six) === null, 'segments counting the queued entry too');
+check(restoredWalk({ ...cabiQ, phases: ['', '', '', '♾️', '', ''] }, six, six) === null, 'a queued entry with a phase');
+check(restoredWalk({ ...ascentQ, steps: [0, -1, 3, 1, 4, 9] }, six, six) === null, 'walk positions decreasing around a queued entry');
+check(restoredWalk({ ...ascentQ, steps: [0, -1, 1, 1.5, 4, 9] }, six, six) === null, 'a fractional step beside a queued entry');
+check(restoredWalk({ ...ascentQ, steps: [-1, -1, -1, -1, -1, -1] }, six, six) === null, 'only queued entries: no walk');
+check(restoredWalk({ mode: 'combined', segments: [2, 2, 1], phases: null, steps: [0, -1, 5, 27, -1, 40, 60] }, ids(7), ids(7)) !== null, 'CAB with two queued entries');
 
 // Segments.
 check(restoredWalk({ ...cab, segments: [2, 2, 2] }, five, five) === null, 'segments that do not add up to the order');

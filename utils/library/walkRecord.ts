@@ -6,6 +6,9 @@
 // exactly consistent with the play order that came back: every saved id restored (a track whose audio is gone ends the
 // walk, as a delete does today), and each array the order's length with sane values. A record without a walk (any
 // release before v15.9) restores no walk, as before. Pure; checked by walkRecord.check.ts (check:playlists).
+// v16.0: queued tracks are entries of the walk's play order with step -1 and phase '' (utils/queue/queueModel.ts), so a
+// walk with a queue survives a reload: the walk positions (the steps >= 0) strictly increase, and the segments count
+// the walk entries only.
 
 import { LO_SHU_WALKS } from '../../constants.ts';
 import type { LoShuWalkMode } from '../../constants.ts';
@@ -29,8 +32,9 @@ export function walkToSave(mode: LoShuWalkMode | null, segments: number[] | null
 
 /**
  * The stored walk, validated against the restored play order, or null.
- * (v14.18's queue will splice entries into a walk with step -1: its rule then becomes "the non-negative steps strictly
- * increasing", and this check changes with it.)
+ * v16.0 (the queue): a step is an integer, either -1 (a queued entry) or a walk position; the walk positions strictly
+ * increase and stay in range; with steps, the segments sum to the walk entries (steps >= 0), and a queued entry's
+ * phase is ''. (v15.9 dropped any walk holding a -1 step; rolling back to it drops such a walk, keeping the order.)
  * @param raw          the record's `walk` field (anything: it comes from storage)
  * @param savedIds     the record's play order, as saved
  * @param restoredIds  the play order as restored (tracks whose audio is gone are missing from it)
@@ -45,26 +49,34 @@ export function restoredWalk(raw: unknown, savedIds: readonly string[], restored
   for (let i = 0; i < n; i++) if (restoredIds[i] !== savedIds[i]) return null;
 
   let steps: number[] | null = null;
+  // The walk's own entries (steps >= 0): all of them without steps.
+  let walkEntries = n;
   if (w.steps != null) {
     if (!Array.isArray(w.steps) || w.steps.length !== n) return null;
     const len = LO_SHU_WALKS[mode].length;
     let last = -1;
+    walkEntries = 0;
     for (const s of w.steps) {
-      if (!isInt(s) || s <= last || s >= len) return null;
+      if (!isInt(s)) return null;
+      if (s === -1) continue; // a queued entry
+      if (s <= last || s >= len) return null;
       last = s;
+      walkEntries++;
     }
+    if (walkEntries === 0) return null;
     steps = (w.steps as number[]).slice();
   }
   let phases: string[] | null = null;
   if (w.phases != null) {
     if (!Array.isArray(w.phases) || w.phases.length !== n || !w.phases.every((p) => typeof p === 'string' && p.length <= 8)) return null;
+    if (steps && steps.some((s, i) => s === -1 && (w.phases as string[])[i] !== '')) return null; // a queued entry has no phase
     phases = (w.phases as string[]).slice();
   }
   let segments: number[] | null = null;
   if (w.segments != null) {
     if (!Array.isArray(w.segments) || w.segments.length !== SEGMENT_COUNT[mode]) return null;
     if (!w.segments.every((c) => isInt(c) && c >= 0)) return null;
-    if ((w.segments as number[]).reduce((a, b) => a + b, 0) !== n) return null;
+    if ((w.segments as number[]).reduce((a, b) => a + b, 0) !== walkEntries) return null;
     segments = (w.segments as number[]).slice();
   }
   return { mode, segments, phases, steps };

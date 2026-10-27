@@ -5,7 +5,7 @@
   },
   "autoDistribute reference in App › useLayoutEffect(no deps)": {
     "count": 1,
-    "sha": "12d71804cc71e352"
+    "sha": "445a95c07e689de6"
   },
   "clearEntirePlaylist reference in App › <ViewBoundary render> › <ClearPlaylistButton onClear>": {
     "count": 1,
@@ -33,7 +33,7 @@
   },
   "deleteTracksFromCache call in App › settleOrphans": {
     "count": 1,
-    "sha": "9acf5db406642cfd"
+    "sha": "ea710045e12cc443"
   },
   "deleteTracksFromCache call in tools/cache-check.ts: (module)": {
     "count": 5,
@@ -45,7 +45,7 @@
   },
   "discardOrphans reference in App › useLayoutEffect(no deps)": {
     "count": 1,
-    "sha": "12d71804cc71e352"
+    "sha": "445a95c07e689de6"
   },
   "flushAndReload reference in App › <ViewBoundary render> › <button onClick>": {
     "count": 1,
@@ -61,7 +61,7 @@
   },
   "handleFileUpload reference in App › useLayoutEffect(no deps)": {
     "count": 1,
-    "sha": "12d71804cc71e352"
+    "sha": "445a95c07e689de6"
   },
   "libraryRef.current = call in App › useEffect([originalPlaylist])": {
     "count": 1,
@@ -73,7 +73,7 @@
   },
   "onAnalyseTap reference in App › useLayoutEffect(no deps)": {
     "count": 1,
-    "sha": "12d71804cc71e352"
+    "sha": "445a95c07e689de6"
   },
   "recoverOrphans reference in App › <ViewBoundary render> › <button onClick>": {
     "count": 1,
@@ -81,7 +81,7 @@
   },
   "recoverOrphans reference in App › useLayoutEffect(no deps)": {
     "count": 1,
-    "sha": "12d71804cc71e352"
+    "sha": "445a95c07e689de6"
   },
   "scanLibrary reference in App › <ViewBoundary render> › <button onClick>": {
     "count": 1,
@@ -89,7 +89,7 @@
   },
   "scanLibrary reference in App › useLayoutEffect(no deps)": {
     "count": 1,
-    "sha": "12d71804cc71e352"
+    "sha": "445a95c07e689de6"
   },
   "setOriginalPlaylist call in App › autoDistribute": {
     "count": 1,
@@ -105,7 +105,7 @@
   },
   "setOriginalPlaylist call in App › flushAndReload": {
     "count": 1,
-    "sha": "0e47f78f03dc808e"
+    "sha": "c021185ef6828774"
   },
   "setOriginalPlaylist call in App › handleFileUpload": {
     "count": 1,
@@ -117,7 +117,7 @@
   },
   "setOriginalPlaylist call in App › settleOrphans": {
     "count": 1,
-    "sha": "9acf5db406642cfd"
+    "sha": "ea710045e12cc443"
   },
   "setOriginalPlaylist call in App › startAnalysePass › apply": {
     "count": 1,
@@ -125,7 +125,7 @@
   },
   "setOriginalPlaylist call in App › useEffect([])": {
     "count": 2,
-    "sha": "8354b6aa3ce208bd"
+    "sha": "d6ec38b334fdba2f"
   },
   "setOriginalPlaylist call in App › useEffect([pendingDurationAnalysis]) › processNextBatch": {
     "count": 1,

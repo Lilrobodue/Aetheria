@@ -323,8 +323,8 @@ test.describe('style foundation (v15.3)', () => {
     await page.getByTestId('new-shell').waitFor();
     await census('new layout, now playing');
 
-    // Each sheet, the menu.
-    for (const [open, title] of [['chip-crystal', 'Crystal'], ['np-output', 'Sound'], ['np-walks', 'Walks']] as const) {
+    // Each sheet, the menu. (v16.0: the Up next sheet, from Now Playing's line.)
+    for (const [open, title] of [['chip-crystal', 'Crystal'], ['np-output', 'Sound'], ['np-walks', 'Walks'], ['np-upnext', 'Up next']] as const) {
       await page.getByTestId(open).click();
       await page.getByRole('dialog', { name: title, exact: true }).waitFor();
       await census(`sheet ${title}`);

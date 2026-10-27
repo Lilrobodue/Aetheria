@@ -10,6 +10,7 @@
 // v15.6 adds TuningContext (the Layers tab's slow settings), Zen's state on ShellValue and the tab's actions.
 // v15.7 adds LibraryListContext (the library itself) and LibraryStatusContext (the passes' and imports' state) for the
 // Library tab, where it was left (ShellValue.libraryViewRef), and the tab's actions.
+// v16.0 adds QueueContext (what plays next, the queue; never the clock) and the queue's actions.
 //
 // Each reader throws a clear error without its provider; the ViewBoundary around the view then catches it.
 // No @types/react here: React is `any` to tsc, so these interfaces document the values rather than enforce them.
@@ -205,6 +206,52 @@ export interface LibraryStatusValue {
   analyseMobile: boolean;
 }
 
+/** v16.0: one row of the Up next sheet: a play-order entry (its index, for an edit that checks its id when it applies). */
+export interface QueueRowValue {
+  /** `${id}#${occurrence}`: the play order can hold a track twice. */
+  key: string;
+  index: number;
+  song: Song;
+}
+
+/** v16.0: one run of the sheet's list, in the order of play (queueModel.upcomingRuns). */
+export interface QueueRunValue {
+  queued: boolean;
+  rows: QueueRowValue[];
+}
+
+/**
+ * v16.0, the queue (Up next): what plays next, in order, and how many wait. Built in App from the play order, its marks
+ * and the cursor (never the clock), only while the new layout shows: the sheet, the Now Playing line, the desktop
+ * button, the row menu's lines and the Library's marks read it.
+ */
+export interface QueueValue {
+  /** The sequence ahead, as runs of queued and of the play order's own entries (≤ 100 queued, ≤ 50 own). */
+  runs: QueueRunValue[];
+  /** Tracks waiting in the queue. */
+  waiting: number;
+  /** The play order's own entries ahead not listed, and what follows the last row (queueViewModel.endLine). */
+  more: number;
+  end: 'stop' | 'loop' | 'reshuffle' | 'more';
+  /** The track that plays next (queued or not), or null at the end. */
+  nextTitle: string | null;
+  /** Where the play order comes from (the sheet's words). */
+  source: { kind: 'library' } | { kind: 'walk'; name: string } | { kind: 'order' };
+  /** No track is loaded: Play starts with the queue. */
+  nothingCurrent: boolean;
+  loop: boolean;
+  shuffle: boolean;
+  /** A waiting track's first place in the queue (1-based), by id: the Library rows' marks. */
+  positions: ReadonlyMap<string, number>;
+}
+
+/** v16.0: an edit of the Up next sheet (App's editQueue): a queued entry, by its index and id (checked when it applies). */
+export type QueueEdit =
+  | { remove: { index: number; id: string } }
+  | { move: { index: number; id: string; to: number } }
+  | { toTop: { index: number; id: string } }
+  | { clear: true };
+
 /** One object for the app's lifetime: every member calls App's latest function (no view re-renders for a handler). */
 export interface ShellActions {
   playPause: () => void;
@@ -275,6 +322,13 @@ export interface ShellActions {
   openImport: (focus?: 'recover' | null) => void;
   /** The list element, the delete Dialog's focus fallback. */
   setLibraryFocusTarget: (el: HTMLElement | null) => void;
+  // v16.0, the queue (references to App's queueTracks, editQueue, undoQueue: the queue's one writer, never the library).
+  /** Play next / Add to queue: library tracks by id. */
+  queueTracks: (ids: readonly string[], mode: 'next' | 'queue') => void;
+  editQueue: (op: QueueEdit) => void;
+  undoQueue: () => void;
+  /** The Up next sheet (the desktop's panel); a second call closes it. */
+  toggleQueue: () => void;
 }
 
 export const PlayerContext = createContext(null);
@@ -288,6 +342,7 @@ export const ShellContext = createContext(null);
 export const TuningContext = createContext(null);
 export const LibraryListContext = createContext(null);
 export const LibraryStatusContext = createContext(null);
+export const QueueContext = createContext(null);
 
 function read<T>(ctx: unknown, name: string): T {
   const v = useContext(ctx);
@@ -306,3 +361,4 @@ export const useShell = (): ShellValue => read<ShellValue>(ShellContext, 'ShellC
 export const useTuning = (): TuningValue => read<TuningValue>(TuningContext, 'TuningContext');
 export const useLibraryList = (): LibraryListValue => read<LibraryListValue>(LibraryListContext, 'LibraryListContext');
 export const useLibraryStatus = (): LibraryStatusValue => read<LibraryStatusValue>(LibraryStatusContext, 'LibraryStatusContext');
+export const useQueue = (): QueueValue => read<QueueValue>(QueueContext, 'QueueContext');

@@ -39,7 +39,7 @@ import {
 } from './utils/library/listOps';
 import { countCommit, reportPassWork } from './utils/perfHud';
 // v15.8: the mix recipes (pure; selection copied verbatim from here) and the crystal data they share.
-import { gutAlignment, heartAlignment, headAlignment, fullAlignment, crystalSetMix, goldenRatioMix, sequence111, sourceField, ultimateAlignment, loShuWalk, walkStepAt } from './utils/mix/recipes';
+import { gutAlignment, heartAlignment, headAlignment, fullAlignment, crystalSetMix, goldenRatioMix, sequence111, sourceField, ultimateAlignment, loShuWalk } from './utils/mix/recipes';
 import type { MixInput, MixResult } from './utils/mix/recipes';
 import { planAssign, assignDoneText, assignNothingText, deepScanQueue, crystalOrigin } from './utils/mix/distribution';
 import { getHarmonicSolfeggio, PRESETS } from './utils/crystalData';
@@ -47,6 +47,37 @@ import { getHarmonicSolfeggio, PRESETS } from './utils/crystalData';
 import { mixStartText } from './utils/mix/catalog';
 import type { MixId } from './utils/mix/catalog';
 import { walkToSave } from './utils/library/walkRecord';
+// v16.0: the queue. Its pure model (every write returns the new state and a remap App applies in ONE batch) and its words.
+import {
+  insertEntries,
+  removeEntriesRemap,
+  moveWaitingAfter,
+  editableWaiting,
+  settleMarks,
+  gatherShuffled,
+  gatherSequentialRemap,
+  reconcileMarks,
+  rebuildMarks,
+  waitingIndices,
+  anchorFor,
+  shuffleValid,
+  queueInPlace,
+  queueToSave,
+  upcoming,
+  upcomingRuns,
+  peekNext,
+  baseIndex,
+  baseCount,
+  baseIds,
+  queueRun,
+  nextBaseAhead,
+  walkProgress,
+  cubeStep,
+  SAME,
+  BASE,
+} from './utils/queue/queueModel';
+import type { Mark, PlayState, Remap, StartState, Anchor } from './utils/queue/queueModel';
+import { queuedToast, removedToast, clearedToast, STILL_STARTING_TEXT, QUEUE_CHANGED_TEXT, undoStartedText, carryText, editMissedText } from './components/shell/queue/queueViewModel';
 import {
   analyzeFractalFrequencies,
   assessFrequencySafety,
@@ -149,16 +180,16 @@ import AppShell from './components/shell/AppShell';
 import VisualsPause from './components/shell/VisualsPause';
 import PeekPill from './components/shell/PeekPill';
 import { useMediaQuery } from './components/shell/useMediaQuery';
-import { LAYOUT_KEY, parseLayoutPref, sourceLine, walkSegment, newLayoutNotice } from './components/shell/shellModel';
+import { LAYOUT_KEY, parseLayoutPref, sourceLine, walkSegment, newLayoutNotice, queueSourceLine, queueThen, queueSourceShort } from './components/shell/shellModel';
 import type { LayoutPref, ShellTab, ShellSheet, PeekPanel } from './components/shell/shellModel';
 import { zenActive } from './components/shell/zenModel';
 import { useShellZen } from './components/shell/useShellZen';
 import { CRYSTAL_FILTER_KEY, parseCrystalFilter, toneLoweredText } from './components/shell/layers/layersModel';
 import type { LayersSection } from './components/shell/layers/layersModel';
 // v15.7: the Library tab (new layout). The row tap's pure rules; App's renders are counted in dev builds only.
-import { libraryOrderFor, rebuildOrder, stillTapOrder, sameIdSet, libraryTapText, UNDO_CHANGED_TEXT, TAP_GONE_TEXT } from './components/shell/library/libraryModel';
+import { libraryOrderFor, rebuildOrder, stillTapOrder, sameIdSet, sameIds, libraryTapText, UNDO_CHANGED_TEXT, TAP_GONE_TEXT } from './components/shell/library/libraryModel';
 import type { LastImport } from './components/shell/library/libraryModel';
-import type { LibraryViewState } from './components/shell/contexts';
+import type { LibraryViewState, QueueEdit } from './components/shell/contexts';
 import { countRender } from './components/shell/devRenders';
 
 // --- Helpers ---
@@ -1015,7 +1046,26 @@ interface PlayOrderSnapshot {
   /** v15.9: a mix started it (else a Library row). Only taps of one kind chain: a row tapped while a mix's toast shows
    *  gets its own Undo, back to the mix (and the reverse). */
   mix: boolean;
+  /** v16.0: the queue's marks over `ids` (null: none), so the Undo brings the earlier order back with its queue. */
+  marks: Mark[] | null;
 }
+
+/** v16.0: a queue write, applied once the play state is settled (the anchor rule), else retried every 150 ms for 15 s. */
+type QueueOp =
+  | { kind: 'add'; ids: string[]; mode: 'next' | 'queue' }
+  | { kind: 'remove'; index: number; id: string }
+  | { kind: 'move'; index: number; id: string; to: number }
+  | { kind: 'clear' }
+  | { kind: 'undo'; token: number }
+  | { kind: 'gather' };
+
+/** v16.0: what the latest queue toast's Undo reverses. `after`: the waiting tracks' ids just after the write (the
+ *  ones a later edit may touch, in queue order): the Undo acts only while the queue is still that, less what has played
+ *  from its front since. */
+type QueueUndo =
+  | { token: number; kind: 'add'; after: string[]; mine: number[]; names: string[] }
+  | { token: number; kind: 'remove'; after: string[]; id: string; pos: number }
+  | { token: number; kind: 'clear'; after: string[]; ids: string[] };
 
 const App: React.FC = () => {
   countRender('App');
@@ -1053,6 +1103,12 @@ const App: React.FC = () => {
   const playHistoryRef = useRef<Record<string, number>>({});
   const recordPlay = (songId: string) => {
     playHistoryRef.current[songId] = Date.now();
+    // v16.0: a play recorded before its cursor commits (both callers set the cursor in the same batch): until the commit
+    // that holds it acknowledges it (queuePlayAck), the queue's anchor knows a start is landing. A request that had not
+    // started yet is a playTrack's last step; else the gapless swap.
+    const wasPending = startedRequestRef.current !== playRequestSeqRef.current;
+    queueLandingRef.current = { seq: queueLandingRef.current.seq + 1, kind: wasPending ? 'start' : 'swap' };
+    setQueuePlayAck(queueLandingRef.current.seq);
     // v15.9: the play request that has started (playTrack and the gapless swap call this once the track plays):
     // Restore Library tells a start still in flight from one that has landed by it.
     startedRequestRef.current = playRequestSeqRef.current;
@@ -1496,6 +1552,19 @@ const App: React.FC = () => {
   // v15.8: parallel to the walk's play order: the position in LO_SHU_WALKS[mode] each entry fills (a crystal with no
   // track is skipped), so the cube's step follows the track, not the cursor. Null: the cursor (no walk, or an older one).
   const [loShuWalkSteps, setLoShuWalkSteps] = useState<number[] | null>(null);
+  // v16.0: the queue's marks (utils/queue/queueModel.ts: 0 the play order's own entry, 1 waiting, 2 played), with the
+  // play order they were written for. Queued tracks are real entries of the play order (and of the shuffle order, and of
+  // a walk with step -1), so the pinned advance code plays them with no change; the marks only label them. Another
+  // writer changing the play order (a delete, an import, the by-id refresh) leaves them one commit behind: `queueMarks`
+  // below is always aligned with `playlist` (reconcileMarks), and the reconcile effect stores that.
+  const [queueState, setQueueState] = useState<{ order: Song[]; marks: Mark[] } | null>(null);
+  const queueMarks: Mark[] | null = useMemo(() => {
+    if (!queueState) return null;
+    if (queueState.order === playlist) return queueState.marks;
+    return reconcileMarks(queueState.order.map((s: Song) => s.id), queueState.marks, playlist.map((s: Song) => s.id));
+  }, [queueState, playlist]);
+  // The last shuffle order the queue itself wrote or accepted (the gather effect leaves those alone).
+  const queueShuffledRef: { current: number[] | null } = useRef(null);
   // Local UI state — controls whether the toolbar walk popover is open.
   const [showLoShuWalkMenu, setShowLoShuWalkMenu] = useState(false);
 
@@ -2009,6 +2078,31 @@ const App: React.FC = () => {
   useEffect(() => {
     stateRef.current = { playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos };
   }, [playlist, currentSongIndex, isShuffle, isLoop, shuffledIndices, shufflePos]);
+  // v16.0: the queue's half of the play state, synced in the same commit as stateRef (this effect runs right after the
+  // pinned one): a queue write reads the six pinned fields from stateRef (what the swap reads) and the marks and the
+  // walk's arrays from here, and checks the two belong to the same play order.
+  const queueMirrorRef: { current: { playlist: Song[]; marks: Mark[] | null; walk: LoShuWalkMode | null; steps: number[] | null; phases: string[] | null } } =
+    useRef({ playlist, marks: null, walk: null, steps: null, phases: null });
+  useEffect(() => {
+    queueMirrorRef.current = { playlist, marks: queueMarks, walk: loShuWalkMode, steps: loShuWalkSteps, phases: loShuWalkPhases };
+  }, [playlist, queueMarks, loShuWalkMode, loShuWalkSteps, loShuWalkPhases]);
+  // The last queue write whose commit has run its effects (so stateRef and the mirror above hold it): each write sets
+  // its number in its own batch (commitQueue), and this effect, after the two syncs, acknowledges it in that commit. A
+  // queue write waits until the queue's previous write is acknowledged, or it would compute from the play state before
+  // it and undo it. Any other commit (the clock's, an unrelated one flushed first) acknowledges nothing.
+  const [queueAck, setQueueAck] = useState<number>(0);
+  const queueAckRef: { current: number } = useRef(0);
+  useEffect(() => {
+    queueAckRef.current = queueAck;
+  }, [queueAck]);
+  // The same for a recorded play (recordPlay): the play and its cursor write are one batch, so until this commit's
+  // effect has run, the element plays a start whose cursor stateRef doesn't hold yet (the swap's ~31 ms).
+  const queueLandingRef: { current: { seq: number; kind: 'swap' | 'start' } } = useRef({ seq: 0, kind: 'swap' });
+  const [queuePlayAck, setQueuePlayAck] = useState<number>(0);
+  const queuePlayAckRef: { current: number } = useRef(0);
+  useEffect(() => {
+    queuePlayAckRef.current = queuePlayAck;
+  }, [queuePlayAck]);
 
   // The latest library, for async loops (Deep Scan) and handlers that must not
   // read a stale render's originalPlaylist. (Annotated: this project has no
@@ -2039,11 +2133,14 @@ const App: React.FC = () => {
     () => walkToSave(loShuWalkMode, loShuWalkSegments, loShuWalkPhases, loShuWalkSteps),
     [loShuWalkMode, loShuWalkSegments, loShuWalkPhases, loShuWalkSteps]
   );
+  // v16.0: the queue as it is saved with the play order (the waiting and played entries' indices): a new object only when
+  // the marks change.
+  const savedQueue = useMemo(() => queueToSave(queueMarks), [queueMarks]);
   // Session values for handlers created once (the update banner's Reload).
-  const sessionRef = useRef({ loShuWalkMode, walk: savedWalk, selectedSolfeggio, isScanning });
+  const sessionRef = useRef({ loShuWalkMode, walk: savedWalk, queue: savedQueue, selectedSolfeggio, isScanning });
   useEffect(() => {
-    sessionRef.current = { loShuWalkMode, walk: savedWalk, selectedSolfeggio, isScanning };
-  }, [loShuWalkMode, savedWalk, selectedSolfeggio, isScanning]);
+    sessionRef.current = { loShuWalkMode, walk: savedWalk, queue: savedQueue, selectedSolfeggio, isScanning };
+  }, [loShuWalkMode, savedWalk, savedQueue, selectedSolfeggio, isScanning]);
 
   // Reload for a new version without losing in-memory work. Saves are
   // debounced (metadata is held back while Deep Scan runs), and a reload
@@ -2104,7 +2201,9 @@ const App: React.FC = () => {
           saveLibrary,
           cursor,
           sessionRef.current.walk,
-          sessionRef.current.selectedSolfeggio
+          sessionRef.current.selectedSolfeggio,
+          undefined,
+          sessionRef.current.queue // v16.0: the queue, with the order it indexes
         );
       }
     };
@@ -2222,7 +2321,7 @@ const App: React.FC = () => {
           const lib = libraryRef.current;
           if (!order.length && !lib.length) return;
           saveBlobsNow(order, lib, 0);
-          debouncedSaveMeta(order, lib, cursor, sessionRef.current.walk, sessionRef.current.selectedSolfeggio, 0);
+          debouncedSaveMeta(order, lib, cursor, sessionRef.current.walk, sessionRef.current.selectedSolfeggio, 0, sessionRef.current.queue);
         });
       }
       setOrphanOffer(unconfirmed.length ? unconfirmed : null);
@@ -2261,7 +2360,11 @@ const App: React.FC = () => {
   };
 
   // Search functionality effect
+  // v16.0: only while classic shows (its drawer is the only list that reads it): in the new layout a play-order change
+  // (a queue edit, a Library tap) is then one App commit, not two. A peek or the switch back runs it (a dependency).
+  const classicListShown = !(layout === 'new' && !classicPeek);
   useEffect(() => {
+    if (!classicListShown) return;
     if (searchTerm.trim() === '') {
       setFilteredPlaylist(playlist);
     } else {
@@ -2270,7 +2373,7 @@ const App: React.FC = () => {
       );
       setFilteredPlaylist(filtered);
     }
-  }, [searchTerm, playlist]);
+  }, [searchTerm, playlist, classicListShown]);
 
   // Restore the cached playlist on mount, before any user interaction. If
   // IndexedDB holds a saved library, repopulate the in-memory state and flash a
@@ -2303,6 +2406,8 @@ const App: React.FC = () => {
           if (playIsLibrary) setPlaylist(prev => appendToLibrary(prev, cached.originalPlaylist));
         } else {
           setPlaylist(cached.playlist);
+          // v16.0: the queue comes back with its play order, only when that came back exactly (restoredQueue).
+          setQueueState(cached.queue ? { order: cached.playlist, marks: cached.queue } : null);
           setOriginalPlaylist(cached.originalPlaylist);
           setCurrentSongIndex(cached.currentSongIndex);
           // v15.9: walks survive a reload. The walk comes back only when it matches the restored order exactly
@@ -2392,9 +2497,11 @@ const App: React.FC = () => {
       originalPlaylist,
       currentSongIndex,
       savedWalk,
-      selectedSolfeggio
+      selectedSolfeggio,
+      undefined,
+      savedQueue
     );
-  }, [playlist, originalPlaylist, currentSongIndex, savedWalk, selectedSolfeggio, isRestoring, isScanning]);
+  }, [playlist, originalPlaylist, currentSongIndex, savedWalk, savedQueue, selectedSolfeggio, isRestoring, isScanning]);
 
   // Precompute song.id -> playlist index once per playlist change. The library
   // list render used to call playlist.findIndex() per row (O(n²) per render);
@@ -2711,7 +2818,14 @@ const App: React.FC = () => {
   }, [uiHidden, insetsEpoch, layout, classicPeek, desktopShell, shellTab, layerOutput, shellZenHidden]);
 
   // Handle Shuffle State Logic
+  // v16.0: with tracks waiting in the queue, a shuffle order made afresh (the switch, or a length change from a delete or
+  // an import) puts them straight after the current track, in queue order (gatherShuffled): the queue stays next with no
+  // window. The switch turned off moves them physically straight after it (gatherSequential, through the queue's writer,
+  // a no-op in the usual case). With no queue, exactly as before.
+  const shuffleWasOnRef: { current: boolean } = useRef(isShuffle);
   useEffect(() => {
+    const wasOn = shuffleWasOnRef.current;
+    shuffleWasOnRef.current = isShuffle;
     if (isShuffle && playlist.length > 0) {
         // If we just toggled shuffle or playlist changed size
         if (shuffledIndices.length !== playlist.length) {
@@ -2720,6 +2834,15 @@ const App: React.FC = () => {
             // the whole library before any song repeats, instead of letting
             // chance favour the same handful of tracks.
             const newIndices = getLruShuffledIndices(playlist, playHistoryRef.current);
+            const waiting = waitingIndices({ marks: queueMarks });
+            if (waiting.length > 0) {
+              const g = gatherShuffled(newIndices, currentSongIndex, waiting);
+              queueShuffledRef.current = g.shuffled;
+              setShuffledIndices(g.shuffled);
+              setShufflePos(g.shufflePos);
+              return;
+            }
+            queueShuffledRef.current = newIndices; // this effect's own order (the gather effect is for the pinned code's)
             setShuffledIndices(newIndices);
             // Try to keep the current song playing without jumping
             const currentIdxInShuffle = newIndices.indexOf(currentSongIndex);
@@ -2729,8 +2852,40 @@ const App: React.FC = () => {
         // Clear shuffle state when disabled
         setShuffledIndices([]);
         setShufflePos(0);
+        if (wasOn && waitingIndices({ marks: queueMarks }).length > 0) queueApiRef.current?.run({ kind: 'gather' });
     }
   }, [isShuffle, playlist.length]);
+
+  // v16.0: the queue's marks follow another writer's change of the play order (a delete filters them, an import appends,
+  // the by-id refresh keeps them; anything else is a new play order and drops them): queueMarks is that already, stored
+  // here so it is not worked out again. The marks never drive playback.
+  useEffect(() => {
+    if (queueState && queueState.order !== playlist) setQueueState(queueMarks ? { order: playlist, marks: queueMarks } : null);
+  }, [queueState, playlist, queueMarks]);
+  // v16.0: a waiting entry at or behind the cursor in play sequence has played (or was passed): it is marked so (2), and
+  // the current one too (a queued track that starts is consumed). Only when the cursor moves or the marks change.
+  useEffect(() => {
+    if (!queueMarks) return;
+    const settled = settleMarks({ order: playlist, cursor: currentSongIndex, shuffle: isShuffle, shuffled: shuffledIndices, shufflePos, marks: queueMarks, walk: null });
+    if (settled !== queueMarks) setQueueState(settled ? { order: playlist, marks: settled } : null);
+  }, [currentSongIndex, queueMarks]);
+  // v16.0: the pinned code makes a shuffle order afresh at a track start (playTrack's rule for a pick, handlePrev at the
+  // first position, resolveNext's wrap): once that start has landed, the waiting entries go back straight after the
+  // current track. The queue's own writes, an order it accepted, and any start in flight are left alone; so is a
+  // Previous (it moves the cursor back, not the order: the queue stays after the track it came back from).
+  useEffect(() => {
+    if (!isShuffle || !queueMarks || shuffledIndices === queueShuffledRef.current) return;
+    if (shuffledIndices.length !== playlist.length || queueStartInFlight()) return;
+    const st: PlayState<Song> = { order: playlist, cursor: currentSongIndex, shuffle: true, shuffled: shuffledIndices, shufflePos, marks: queueMarks, walk: null };
+    if (queueInPlace(st)) {
+      queueShuffledRef.current = shuffledIndices;
+      return;
+    }
+    const g = gatherShuffled(shuffledIndices, currentSongIndex, waitingIndices(st));
+    queueShuffledRef.current = g.shuffled;
+    setShuffledIndices(g.shuffled);
+    setShufflePos(g.shufflePos);
+  }, [shuffledIndices, currentSongIndex, isShuffle, queueMarks]);
 
   const playTrackRef = useRef<(index: number, list?: Song[]) => Promise<void>>(async () => {});
   const playNextRef = useRef<() => void>(() => {});
@@ -2740,6 +2895,14 @@ const App: React.FC = () => {
   const playRequestSeqRef: { current: number } = useRef(0);
   // v15.9: the last request that started playing (recordPlay). Any other value of playRequestSeqRef: a start in flight.
   const startedRequestRef: { current: number } = useRef(0);
+  // v16.0: the entry a start issued outside the pinned advance code plays (a Library row, a mix, Undo, Restore Library,
+  // classic's list), with its request number and the order it indexes: a queue write during its decode or play()
+  // anchors on it (queueModel.anchorFor). playTrack takes its request number synchronously, before any await, so the
+  // number after the call is that start's (unchanged: it returned at once and started nothing).
+  const queueStartTargetRef: { current: { seq: number; index: number; order: Song[] } | null } = useRef(null);
+  const noteQueueStart = (before: number, index: number, order: Song[]) => {
+    if (playRequestSeqRef.current !== before) queueStartTargetRef.current = { seq: playRequestSeqRef.current, index, order };
+  };
 
   // Guards the pre-end auto-advance so it fires at most once per track. We swap
   // to the next track a hair BEFORE the element reaches its natural `ended`
@@ -5233,7 +5396,11 @@ Run Deep Scan to analyse this track.
               }
               // That track starts again at its library place, through the normal path: the new request supersedes the
               // one in flight (it returns at its next await, writing nothing), and its cursor is the library's.
-              if (starting && at >= 0) playTrackRef.current(at, originalPlaylist);
+              if (starting && at >= 0) {
+                const before = playRequestSeqRef.current;
+                playTrackRef.current(at, originalPlaylist);
+                noteQueueStart(before, at, originalPlaylist); // v16.0: the queue's anchor knows where it lands
+              }
           }
           setUseChakraOrder(false);
           setSearchTerm(''); // Clear search when restoring library
@@ -6633,12 +6800,30 @@ registerProcessor('wav-capture', WavCapture);
   // v15.9: every mix starts through here too (applyMix). opts.walk: the walk the order is (its snapshot first, then the
   // mode, segments, phases and steps, so the snapshot effect keeps it); opts.mix: a mix started it, so only taps of one
   // kind chain, and a chained mix's toast says what it started (a Library row's chain keeps the first tap's words).
-  const startPlayOrder = (order: Song[], index: number, toast: string, opts?: { walk?: PlayOrderSnapshot['walk']; mix?: boolean }) => {
+  // v16.0 (decision 2 A): a new play order CARRIES the queue: the started track, then the tracks waiting in the queue, in
+  // queue order (a walk gives them step -1 and phase ''; under shuffle the explicit order puts them right after it), then
+  // the rest; the toast says so. "The same play order" is the play order's own entries (its marks 0), so a tap on the
+  // playing row still resumes rather than restarts, queue or not; with queue entries in the order every other tap
+  // rebuilds it (the old same-order path replays an index of the order as it is). The Undo's snapshot keeps the marks.
+  const startPlayOrder = (orderIn: Song[], index: number, toastIn: string, opts?: { walk?: PlayOrderSnapshot['walk']; mix?: boolean }) => {
     const st = stateRef.current;                       // the latest commit (the pinned sync effect)
     const el = mainAudioRef.current;
-    if (index < 0 || index >= order.length) return;
-    const walk = opts?.walk ?? null;
+    if (index < 0 || index >= orderIn.length) return;
+    const walkIn = opts?.walk ?? null;
     const mix = !!opts?.mix;
+    // The queue's marks over the play order as it is (the mirror of the same commit), and the tracks waiting in it.
+    const qm = queueMirrorRef.current.playlist === st.playlist ? queueMirrorRef.current.marks : null;
+    // Picking a queued track plays it (as a pick does under shuffle: gatherShuffled): its first waiting copy is not
+    // carried, or it would play twice in a row.
+    const waitingAll = qm ? waitingIndices({ marks: qm }).filter((i: number) => i !== st.currentSongIndex) : [];
+    const pickedCopy = waitingAll.findIndex((i: number) => st.playlist[i]?.id === orderIn[index].id);
+    const waitingSongs = waitingAll.filter((_: number, j: number) => j !== pickedCopy).map((i: number) => st.playlist[i]);
+    const carried = waitingSongs.length
+      ? insertEntries({ order: orderIn, cursor: index, shuffle: false, shuffled: [], shufflePos: 0, marks: null, walk: walkIn ? { steps: walkIn.steps, phases: walkIn.phases } : null }, waitingSongs, 'next').state
+      : null;
+    const order = carried ? carried.order : orderIn;
+    const walk = carried && walkIn && carried.walk ? { ...walkIn, steps: carried.walk.steps, phases: carried.walk.phases } : walkIn;
+    const toast = carried ? `${toastIn} ${carryText(waitingSongs.length)}` : toastIn;
     const setWalk = (w: NonNullable<PlayOrderSnapshot['walk']>) => {
       loShuWalkSnapshotRef.current = order.map((s: Song) => s.id).join('|');   // before the mode: the effect keeps it
       setLoShuWalkMode(w.mode);
@@ -6646,9 +6831,15 @@ registerProcessor('wav-capture', WavCapture);
       setLoShuWalkPhases(w.phases);
       setLoShuWalkSteps(w.steps);
     };
-    const same = sameIdOrder(st.playlist, order);
-    if (same && st.currentSongIndex === index) {       // the current track: resume it if paused, never restart it
-      if (walk) setWalk(walk);
+    // With no queue entry in the order, exactly v15.9's rules.
+    const same = !qm && sameIdOrder(st.playlist, orderIn);
+    const baseSame = qm ? sameIds(orderIn, baseIds(st.playlist, qm)) : same;
+    const onTrack = qm
+      ? baseIndex(qm, st.currentSongIndex) === index ||
+        (st.currentSongIndex >= 0 && qm[st.currentSongIndex] !== BASE && st.playlist[st.currentSongIndex]?.id === orderIn[index].id)
+      : st.currentSongIndex === index;
+    if (baseSame && onTrack && (!qm || !walkIn || loShuWalkMode === walkIn.mode)) { // the current track: resume it if paused, never restart it
+      if (walk && !qm) setWalk(walk);
       if (!isPlaying) resumePlayback();
       return;
     }
@@ -6677,22 +6868,33 @@ registerProcessor('wav-capture', WavCapture);
       toast,
       toastSeq: -1,
       mix,
+      marks: qm,
     };
+    const before = playRequestSeqRef.current;
     if (same) {
       if (walk) setWalk(walk);
       playTrackRef.current(index);                     // playTrack's own shuffle rule: this track first, position 0
+      noteQueueStart(before, index, st.playlist);
     } else {
       setPlaylist(order);
+      setQueueState(carried && carried.marks ? { order, marks: carried.marks } : null); // v16.0: the carried queue
       clearLoShuWalkMode();
       loShuWalkSnapshotRef.current = '';
       if (walk) setWalk(walk);                         // after the clear (one batch: the walk is what commits)
       setCurrentSongIndex(index);                      // eagerly (spec §2.3: the card never names the wrong track)
       if (st.isShuffle) {
         const fresh = getLruShuffledIndices(order, playHistoryRef.current);
-        setShuffledIndices([index, ...fresh.filter((i: number) => i !== index)]);
+        // v16.0: the carried queue (right after the track, physically) stays right after it in the shuffle order.
+        const k = waitingSongs.length;
+        const sh = k
+          ? [index, ...Array.from({ length: k }, (_, j) => index + 1 + j), ...fresh.filter((i: number) => i !== index && !(i > index && i <= index + k))]
+          : [index, ...fresh.filter((i: number) => i !== index)];
+        if (k) queueShuffledRef.current = sh;
+        setShuffledIndices(sh);
         setShufflePos(0);                              // set here: playTrack skips its shuffle rule with an order
       }
       playTrackRef.current(index, order);
+      noteQueueStart(before, index, order);
     }
     lastPlayOrderRef.current = snap;
     if (snap.trackId !== null || !same || chained) {
@@ -6714,7 +6916,11 @@ registerProcessor('wav-capture', WavCapture);
       return;
     }
     const walkName = loShuWalkMode ? (LO_SHU_WALK_INFO[loShuWalkMode]?.shortName ?? 'Lo Shu') : null;
-    startPlayOrder(order, index, libraryTapText(walkName, sameIdSet(stateRef.current.playlist, order)));
+    // v16.0: "from the library" judges the play order's own entries (a queue's entries are not what it was playing from).
+    const st = stateRef.current;
+    const qm = queueMirrorRef.current.playlist === st.playlist ? queueMirrorRef.current.marks : null;
+    const playingFrom = qm ? st.playlist.filter((_: Song, i: number) => qm[i] === BASE) : st.playlist;
+    startPlayOrder(order, index, libraryTapText(walkName, sameIdSet(playingFrom, order)));
   };
 
   /**
@@ -6738,6 +6944,9 @@ registerProcessor('wav-capture', WavCapture);
     }
     const { order, cursor, dropped, removedCurrent } = rebuildOrder(snap.ids, snap.cursor, libraryRef.current);
     setPlaylist(order);
+    // v16.0: the earlier order comes back with its queue (the marks rebuilt exactly as the order is).
+    const marks = rebuildMarks(snap.ids, snap.marks, libraryRef.current);
+    setQueueState(marks ? { order, marks } : null);
     if (snap.walk && !dropped) {
       loShuWalkSnapshotRef.current = order.map((s: Song) => s.id).join('|');
       setLoShuWalkMode(snap.walk.mode);
@@ -6747,13 +6956,25 @@ registerProcessor('wav-capture', WavCapture);
     }
     setCurrentSongIndex(cursor);
     if (stateRef.current.isShuffle && !dropped && snap.shuffled.length === order.length) {
+      if (marks) queueShuffledRef.current = snap.shuffled; // v16.0: the queue's place in it is as it was
       setShuffledIndices(snap.shuffled);
       setShufflePos(snap.shufflePos);
+    } else if (stateRef.current.isShuffle && marks) {
+      // v16.0: shuffle switched on since the tap (or a track gone): the shuffle order on now was made for the other
+      // play order. A fresh one for this order, its queue straight after the current track, in the same batch: the
+      // queue's settle would otherwise judge the queue by the other order's sequence and mark it played.
+      const g = gatherShuffled(getLruShuffledIndices(order, playHistoryRef.current), cursor, waitingIndices({ marks }));
+      queueShuffledRef.current = g.shuffled;
+      setShuffledIndices(g.shuffled);
+      setShufflePos(g.shufflePos);
     }
     if (snap.wasPlaying && cursor >= 0 && !removedCurrent) {
       const wantId = order[cursor].id;
       const at = snap.position;
-      Promise.resolve(playTrackRef.current(cursor, order)).then(() => {
+      const before = playRequestSeqRef.current;
+      const started = playTrackRef.current(cursor, order);
+      noteQueueStart(before, cursor, order);
+      Promise.resolve(started).then(() => {
         const a = mainAudioRef.current;
         const now = stateRef.current;
         if (a && at > 1 && now.playlist[now.currentSongIndex]?.id === wantId && Number.isFinite(a.duration) && at < a.duration - 1) {
@@ -6789,6 +7010,303 @@ registerProcessor('wav-capture', WavCapture);
     const s = libraryRef.current.find((x: Song) => x.id === id);
     if (s) setPendingDelete({ id: s.id, name: s.name });
   };
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // v16.0: the queue (spec §3.3). Queued tracks are INSERTED into the playing list: real entries of the play order, of
+  // the shuffle order (insert and shift, never regenerated) and of a walk (step -1, phase ''), so resolveNext,
+  // tryGaplessAdvance, playNext, handlePrev, the lock-screen and car Next and the gapless swap (all pinned, untouched)
+  // play them as the next entry. One writer, commitQueue, used by every queue write (queueTracks, editQueue, undoQueue,
+  // the switch-off gather): it writes the play order and its companions in ONE batch, never the library.
+  //   The anchor (queueModel.anchorFor): a write goes after the entry the music element plays when a start has not
+  //   landed yet (the swap before its commit, ~31 ms; a Next still decoding), else after the cursor; a start that would
+  //   write its index later under shuffle, or any other start (Previous, a pick), makes it wait. A waiting write is
+  //   retried every 150 ms; after 15 s it is dropped with a toast. A start that failed counts as settled after 1 s.
+  //   The batch: the walk's snapshot FIRST (the snapshot effect keeps the walk: survey E5), the order, the marks, the
+  //   walk's arrays, the shuffle order under shuffle (with the order, or the shuffle effect regenerates it: E3), then the
+  //   cursor and shufflePos as FUNCTIONAL shifts, so the swap's pending write lands first and is shifted (E1).
+  // ---------------------------------------------------------------------------------------------------------------
+  /** What the music element plays (its src through blobUrlsRef: set synchronously by every start, the swap included),
+   *  whether a start is in flight, and that start's entry in the play order as it is, when it was recorded. */
+  const queueStart = (): StartState => {
+    const el = mainAudioRef.current;
+    const src = el ? el.getAttribute('src') : null;
+    const urls = blobUrlsRef.current;
+    const playingId = src ? (Object.keys(urls).find((id: string) => urls[id] === src) ?? null) : null;
+    const t = queueStartTargetRef.current;
+    const target = t && t.seq === playRequestSeqRef.current && t.order === stateRef.current.playlist ? t.index : null;
+    const s = stateRef.current;
+    const curId = s.currentSongIndex >= 0 ? (s.playlist[s.currentSongIndex]?.id ?? null) : null;
+    // A start whose play() was refused never records its play; when Play then resumes the element directly (the pinned
+    // resumePlayback), the cursor's track plays on and nothing is starting: past half a second of it, with no decode
+    // under way, the start is over.
+    const resumed = !!el && !el.paused && el.currentTime > 0.5 && !playStartBusyRef.current && playingId !== null && playingId === curId;
+    const startPending = startedRequestRef.current !== playRequestSeqRef.current && !resumed;
+    const landing = queueLandingRef.current.seq > queuePlayAckRef.current ? queueLandingRef.current.kind : null;
+    return { playingId, startPending, target, landing };
+  };
+  /** A start has not landed yet: the element plays another track than the cursor's. */
+  const queueStartInFlight = (): boolean => {
+    const { playingId } = queueStart();
+    const s = stateRef.current;
+    const curId = s.currentSongIndex >= 0 ? (s.playlist[s.currentSongIndex]?.id ?? null) : null;
+    return playingId !== null && playingId !== curId;
+  };
+  /** The play state a queue write starts from: the pinned stateRef (what the swap reads) and the queue's mirror, when
+   *  both are the same commit's (else null: the write waits). */
+  const queuePlayState = (): PlayState<Song> | null => {
+    const s = stateRef.current;
+    const q = queueMirrorRef.current;
+    if (q.playlist !== s.playlist) return null;
+    return {
+      order: s.playlist,
+      cursor: s.currentSongIndex,
+      shuffle: s.isShuffle,
+      shuffled: s.shuffledIndices,
+      shufflePos: s.shufflePos,
+      marks: q.marks,
+      walk: q.walk ? { steps: q.steps, phases: q.phases } : null,
+    };
+  };
+  const queueFailedSinceRef: { current: number } = useRef(0);
+  const queueAnchor = (st: PlayState<Song>): Anchor => {
+    const start = queueStart();
+    const a = anchorFor(st, stateRef.current.isLoop, start);
+    if (!('wait' in a) || !shuffleValid(st)) {
+      queueFailedSinceRef.current = 0;
+      return a;
+    }
+    // A start that failed (play() refused, nothing decoding) never lands: after 1 s it counts as settled.
+    const el = mainAudioRef.current;
+    if (!(start.startPending && el && el.paused && !playStartBusyRef.current)) {
+      queueFailedSinceRef.current = 0;
+      return a;
+    }
+    const now = Date.now();
+    if (!queueFailedSinceRef.current) queueFailedSinceRef.current = now;
+    return now - queueFailedSinceRef.current > 1000 ? { at: st.cursor, inFlight: false } : a;
+  };
+  /** The one batch (spec §3.3). Never the library: only the play order and its companions. */
+  const commitQueue = (prev: PlayState<Song>, next: PlayState<Song>, remap: Remap) => {
+    // The next write waits for this one: until the commit that holds it has run its effects (stateRef synced), which
+    // that commit's own effect acknowledges (queueAckRef), never any other commit's.
+    const seq = ++queueWriteSeqRef.current;
+    queueWriteRef.current = { seq, at: performance.now() };
+    setQueueAck(seq);
+    // A recorded start in flight keeps its entry (sequential writes never move it; the remap says so).
+    const t = queueStartTargetRef.current;
+    if (t && t.order === prev.order) queueStartTargetRef.current = { ...t, index: remap.index(t.index), order: next.order };
+    if (next.walk) loShuWalkSnapshotRef.current = next.order.map((s: Song) => s.id).join('|'); // first: the walk stays
+    setPlaylist(next.order);
+    setQueueState(next.marks ? { order: next.order, marks: next.marks } : null);
+    if (next.walk) {
+      setLoShuWalkSteps(next.walk.steps);
+      setLoShuWalkPhases(next.walk.phases);
+    }
+    if (prev.shuffle) {
+      queueShuffledRef.current = next.shuffled;
+      setShuffledIndices(next.shuffled);
+    }
+    setCurrentSongIndex((c: number) => remap.index(c)); // FUNCTIONAL: a pending swap's write lands first, then the shift
+    if (prev.shuffle) setShufflePos((k: number) => remap.pos(k));
+  };
+  const queueUndoRef: { current: QueueUndo | null } = useRef(null);
+  const queueTokenRef: { current: number } = useRef(0);
+  const queuePendingRef: { current: { op: QueueOp; since: number }[] } = useRef([]);
+  const queueWriteRef: { current: { seq: number; at: number } | null } = useRef(null);
+  const queueWriteSeqRef: { current: number } = useRef(0);
+  const queueWaitShortRef: { current: boolean } = useRef(false);
+  const queueTimerRef: { current: ReturnType<typeof setTimeout> | null } = useRef(null);
+  useEffect(() => () => {
+    if (queueTimerRef.current) clearTimeout(queueTimerRef.current);
+  }, []);
+  /** The toast of a queue write, with its Undo for 10 s (only the latest write's acts). */
+  const queueToast = (text: string, undo: QueueUndo) => {
+    queueUndoRef.current = undo;
+    const token = undo.token;
+    showStatusToast(text, { actionLabel: 'Undo', onAction: () => queueApiRef.current?.run({ kind: 'undo', token }), durationMs: 10_000 });
+  };
+  const libraryById = (): Map<string, Song> => {
+    const m = new Map<string, Song>();
+    for (const s of libraryRef.current) if (!m.has(s.id)) m.set(s.id, s);
+    return m;
+  };
+  /** Apply a queue write now, if the play state is settled: true when it is done (or has nothing to do). */
+  const applyQueueOp = (op: QueueOp): boolean => {
+    // The queue's previous write not in stateRef yet (its commit's effects have not run): wait a moment, or this write
+    // would start from the play state before it and undo it (two writes in one task, or two pending ones in one retry).
+    const w = queueWriteRef.current;
+    queueWaitShortRef.current = !!w && queueAckRef.current < w.seq && performance.now() - w.at < 1000;
+    if (queueWaitShortRef.current) return false;
+    const st = queuePlayState();
+    if (!st) return false;
+    const a = queueAnchor(st);
+    if ('wait' in a) return false;
+    const anchor = a.at;
+    if (op.kind === 'add') {
+      const byId = libraryById();
+      const songs = op.ids.map((id: string) => byId.get(id)).filter((s: Song | undefined): s is Song => !!s);
+      if (!songs.length) {
+        showStatusToast(TAP_GONE_TEXT);
+        return true;
+      }
+      const r = insertEntries(st, songs, op.mode, anchor);
+      commitQueue(st, r.state, r.remap);
+      const ed = editableWaiting(r.state, r.remap.index(anchor));
+      const mine = ed.map((i: number, q: number) => (i >= r.at && i < r.at + r.count ? q : -1)).filter((q: number) => q >= 0);
+      const text = queuedToast({
+        name: songs.length === 1 ? songs[0].name : `${songs.length} tracks`,
+        mode: op.mode,
+        position: (mine[0] ?? 0) + 1,
+        noCrystal: songs.some((s: Song) => !s.closestSolfeggio),
+        nothingCurrent: st.cursor < 0 && anchor < 0,
+      });
+      queueToast(text, { token: ++queueTokenRef.current, kind: 'add', after: ed.map((i: number) => r.state.order[i].id), mine, names: songs.map((s: Song) => s.name) });
+      return true;
+    }
+    if (op.kind === 'remove' || op.kind === 'move') {
+      const ed = editableWaiting(st, anchor);
+      const from = ed.indexOf(op.index);
+      if (from < 0 || st.order[op.index]?.id !== op.id) {
+        // Gone, moved by another write, or started meanwhile: nothing to do, and said so (never silently).
+        showStatusToast(editMissedText(op.kind), { durationMs: 6000 });
+        return true;
+      }
+      if (op.kind === 'move') {
+        // `to` is a place in the sheet's list: the waiting entries ahead of the cursor, where a start in flight can lead
+        // (it is not editable). The entry at that place, then its place among the editable ones.
+        const shown = editableWaiting(st, st.cursor);
+        const toEntry = shown.length ? shown[Math.max(0, Math.min(op.to, shown.length - 1))] : -1;
+        const to = toEntry >= 0 ? Math.max(0, ed.indexOf(toEntry)) : Math.max(0, Math.min(op.to, ed.length - 1));
+        if (to !== from) commitQueue(st, moveWaitingAfter(st, anchor, from, to), SAME); // its own undo: no toast
+        return true;
+      }
+      const song = st.order[op.index];
+      const r = removeEntriesRemap(st, [op.index]);
+      commitQueue(st, r.state, r.remap);
+      const after = editableWaiting(r.state, r.remap.index(anchor)).map((i: number) => r.state.order[i].id);
+      queueToast(removedToast(song.name), { token: ++queueTokenRef.current, kind: 'remove', after, id: song.id, pos: from });
+      return true;
+    }
+    if (op.kind === 'clear') {
+      const ed = editableWaiting(st, anchor);
+      if (!ed.length) return true;
+      const ids = ed.map((i: number) => st.order[i].id);
+      const r = removeEntriesRemap(st, ed);
+      commitQueue(st, r.state, r.remap);
+      queueToast(clearedToast(ed.length), { token: ++queueTokenRef.current, kind: 'clear', after: [], ids });
+      return true;
+    }
+    if (op.kind === 'gather') {
+      if (st.shuffle) return true; // switched on again meanwhile: the shuffle effect gathers
+      // It moves the waiting entries to after the cursor: a start in flight (its index captured, written later) or one
+      // landing would then name another track. It waits for that start, and gathers after the track it lands on.
+      // (A start that failed, settled by queueAnchor's 1 s rule, writes nothing later: it does not hold the gather.)
+      const sNow = queueStart();
+      const failedSettled = queueFailedSinceRef.current > 0 && Date.now() - queueFailedSinceRef.current > 1000;
+      if (a.inFlight || a.at !== st.cursor || sNow.landing || (sNow.startPending && !failedSettled)) return false;
+      const r = gatherSequentialRemap(st);
+      if (r.state.order !== st.order) commitQueue(st, r.state, r.remap);
+      return true;
+    }
+    // Undo: only the latest write's, and only while the queue is as that write left it (less what played since).
+    const u = queueUndoRef.current;
+    if (!u || u.token !== op.token) return true;
+    queueUndoRef.current = null;
+    dismissStatusToast();
+    const ed = editableWaiting(st, anchor);
+    const played = u.after.length - ed.length;
+    if (played < 0 || u.after.slice(played).some((id: string, j: number) => id !== st.order[ed[j]].id)) {
+      showStatusToast(QUEUE_CHANGED_TEXT, { durationMs: 6000 });
+      return true;
+    }
+    if (u.kind === 'add') {
+      // Its entries still waiting go; one that has started stays, and the toast says so.
+      const still = u.mine.filter((q: number) => q >= played).map((q: number) => ed[q - played]);
+      if (still.length) {
+        const r = removeEntriesRemap(st, still);
+        commitQueue(st, r.state, r.remap);
+      }
+      if (still.length < u.mine.length) showStatusToast(undoStartedText(u.names[0]), { durationMs: 6000 });
+      return true;
+    }
+    const byId = libraryById();
+    if (u.kind === 'remove') {
+      // Back at its place in the queue: in at the end, then moved there (a move shifts nothing).
+      const song = byId.get(u.id);
+      if (!song) {
+        showStatusToast(QUEUE_CHANGED_TEXT, { durationMs: 6000 });
+        return true;
+      }
+      const r = insertEntries(st, [song], 'queue', anchor);
+      const na = r.remap.index(anchor);
+      const n = editableWaiting(r.state, na).length;
+      commitQueue(st, moveWaitingAfter(r.state, na, n - 1, Math.max(0, Math.min(u.pos - played, n - 1))), r.remap);
+      return true;
+    }
+    // Clear: the tracks back in their order, right after the current track.
+    const songs = u.ids.map((id: string) => byId.get(id)).filter((s: Song | undefined): s is Song => !!s);
+    if (songs.length) {
+      const r = insertEntries(st, songs, 'next', anchor);
+      commitQueue(st, r.state, r.remap);
+    }
+    return true;
+  };
+  /** applyQueueOp, never throwing: it runs inside effects (the switch-off gather) and timers, where a throw would take
+   *  the app down. A write the model refuses is dropped (logged), and the play state stays as it was. */
+  const applyQueueOpSafe = (op: QueueOp): boolean => {
+    try {
+      return applyQueueOp(op);
+    } catch (e) {
+      console.error('Queue: a write was dropped', e);
+      return true;
+    }
+  };
+  /** Run a queue write: now if nothing waits before it and the play state is settled, else in turn, retried. */
+  const runQueueOp = (op: QueueOp) => {
+    const pending = queuePendingRef.current;
+    if (pending.length === 0 && applyQueueOpSafe(op)) return;
+    pending.push({ op, since: Date.now() });
+    if (!queueTimerRef.current) queueTimerRef.current = setTimeout(() => queueApiRef.current?.tick(), queueWaitShortRef.current ? 16 : 150);
+  };
+  const queueRetryTick = () => {
+    queueTimerRef.current = null;
+    const pending = queuePendingRef.current;
+    while (pending.length) {
+      const p = pending[0];
+      if (applyQueueOpSafe(p.op)) {
+        pending.shift();
+        continue;
+      }
+      if (Date.now() - p.since > 15_000) {
+        pending.shift();
+        if (p.op.kind !== 'gather') showStatusToast(STILL_STARTING_TEXT, { durationMs: 6000 });
+        continue;
+      }
+      break;
+    }
+    if (pending.length) queueTimerRef.current = setTimeout(() => queueApiRef.current?.tick(), queueWaitShortRef.current ? 16 : 150);
+  };
+  /** Play next / Add to queue: library tracks by id (the library's own objects, as playFromLibrary). */
+  const queueTracks = (ids: readonly string[], mode: 'next' | 'queue') => runQueueOp({ kind: 'add', ids: ids.slice(), mode });
+  /** The Up next sheet's edits: a queued entry (its index in the play order and its id, checked when it applies) removed,
+   *  moved to a place in the queue, or to its top (the row's Play next), and Clear. */
+  const editQueue = (
+    op: { remove: { index: number; id: string } } | { move: { index: number; id: string; to: number } } | { toTop: { index: number; id: string } } | { clear: true }
+  ) => {
+    if ('remove' in op) runQueueOp({ kind: 'remove', index: op.remove.index, id: op.remove.id });
+    else if ('move' in op) runQueueOp({ kind: 'move', index: op.move.index, id: op.move.id, to: op.move.to });
+    else if ('toTop' in op) runQueueOp({ kind: 'move', index: op.toTop.index, id: op.toTop.id, to: 0 });
+    else runQueueOp({ kind: 'clear' });
+  };
+  /** The latest queue toast's Undo (its button passes its token; with none, the latest). */
+  const undoQueue = (token?: number) => {
+    const t = token ?? queueUndoRef.current?.token;
+    if (t !== undefined) runQueueOp({ kind: 'undo', token: t });
+  };
+  const queueApiRef: { current: { run: (op: QueueOp) => void; tick: () => void; queueTracks: typeof queueTracks; editQueue: typeof editQueue; undoQueue: typeof undoQueue } | null } = useRef(null);
+  useLayoutEffect(() => {
+    queueApiRef.current = { run: runQueueOp, tick: queueRetryTick, queueTracks, editQueue, undoQueue };
+  });
 
   /** The layout switch: saved from a tap only. The music, the visualizer and the lock-screen card carry over. */
   const setLayout = (next: LayoutPref) => {
@@ -6847,26 +7365,87 @@ registerProcessor('wav-capture', WavCapture);
   const shellWalkFullName = loShuWalkMode ? (LO_SHU_WALK_INFO[loShuWalkMode]?.fullName ?? null) : null;
   // v15.7: "the library" is the same ids, as many times each, in any order (decision 2 A: a library started from a
   // sorted list still reads "Library · 12 of 440"). The import rule in handleFileUpload keeps sameIdOrder.
-  const playOrderIsLibrary = useMemo(
-    () => (shellOn ? sameIdOrder(playlist, originalPlaylist) || sameIdSet(playlist, originalPlaylist) : true),
-    [shellOn, playlist, originalPlaylist]
+  // v16.0: the play order's OWN entries (marks 0): a queue's entries never make it "a play order" (Library · 13 of 440).
+  const shellBaseOrder = useMemo(
+    () => (shellOn && queueMarks ? playlist.filter((_: Song, i: number) => queueMarks[i] === BASE) : playlist),
+    [shellOn, playlist, queueMarks]
   );
+  const playOrderIsLibrary = useMemo(
+    () => (shellOn ? sameIdOrder(shellBaseOrder, originalPlaylist) || sameIdSet(shellBaseOrder, originalPlaylist) : true),
+    [shellOn, shellBaseOrder, originalPlaylist]
+  );
+  // v16.0: the queue's slice (QueueContext): the sequence ahead in the order of play (queued and own runs), the waiting
+  // count, what plays next, and each waiting track's first place (the Library's marks). O(n) on a change of the play
+  // order, its marks, the cursor, the shuffle order or the walk, never on the clock; only while the new layout shows.
+  const shellQueue = useMemo(() => {
+    const st: PlayState<Song> = { order: playlist, cursor: currentSongIndex, shuffle: isShuffle, shuffled: shuffledIndices, shufflePos: 0, marks: shellOn ? queueMarks : null, walk: null };
+    const u = shellOn ? upcomingRuns(st, isLoop) : { runs: [], more: 0, moreQueued: 0, end: 'stop' as const };
+    const seen = new Map<string, number>();
+    const positions = new Map<string, number>();
+    let waiting = 0;
+    const runs = u.runs.map((r: { queued: boolean; rows: number[] }) => ({
+      queued: r.queued,
+      rows: r.rows.map((i: number) => {
+        const s = playlist[i];
+        const k = (seen.get(s.id) ?? 0) + 1;
+        seen.set(s.id, k);
+        if (r.queued) {
+          waiting++;
+          if (!positions.has(s.id)) positions.set(s.id, waiting);
+        }
+        return { key: `${s.id}#${k}`, index: i, song: s };
+      }),
+    }));
+    const next = shellOn && shuffleValid(st) ? peekNext(st, isLoop) : null;
+    return {
+      runs,
+      waiting: waiting + u.moreQueued,
+      more: u.more,
+      end: u.end,
+      nextTitle: next !== null ? (playlist[next]?.name ?? null) : null,
+      source: shellWalkName ? { kind: 'walk' as const, name: shellWalkName } : playOrderIsLibrary ? { kind: 'library' as const } : { kind: 'order' as const },
+      nothingCurrent: currentSongIndex < 0,
+      loop: isLoop,
+      shuffle: isShuffle,
+      positions,
+    };
+  }, [shellOn, playlist, currentSongIndex, isShuffle, shuffledIndices, isLoop, queueMarks, shellWalkName, playOrderIsLibrary]);
   const libraryTotalSeconds = useMemo(
     () => (shellOn ? originalPlaylist.reduce((sum: number, s: Song) => sum + (s.duration || 0), 0) : 0),
     [shellOn, originalPlaylist]
   );
-  const shellSource = sourceLine(
-    shellWalkName,
-    playOrderIsLibrary,
-    currentSongIndex,
-    playlist.length,
-    walkSegment(loShuWalkMode, loShuWalkSegments, currentSongIndex),
-    loShuWalkMode ? loShuWalkPhases?.[currentSongIndex] || null : null
-  );
-  const shellSourceShort =
-    currentSongIndex >= 0
-      ? `${shellWalkName ?? (playOrderIsLibrary ? 'Library' : 'Play order')} ${currentSongIndex + 1}/${playlist.length}`
-      : `${playlist.length} tracks`;
+  // v16.0: with a queue, a walk's step counts its walk entries (steps >= 0) and the library line the play order's own
+  // entries; on a queued track: "Your queue · 1 of 3 · then Library" (queueSourceLine). With no queue, the numbers are
+  // v15.9's. O(n) only when the order, the marks, the walk or the cursor change (never on the clock), and only while the
+  // new layout shows.
+  const { shellSource, shellSourceShort } = useMemo(() => {
+    if (!shellOn) return { shellSource: '', shellSourceShort: '' };
+    const n = playlist.length;
+    const cur = currentSongIndex;
+    const st: PlayState<Song> = { order: playlist, cursor: cur, shuffle: isShuffle, shuffled: shuffledIndices, shufflePos, marks: queueMarks, walk: null };
+    const run = queueRun(st);
+    const wp = loShuWalkMode && loShuWalkSteps ? walkProgress(loShuWalkSteps, loShuWalkSegments, cur) : null;
+    if (run) {
+      const after = nextBaseAhead(st);
+      const afterWalk = after !== null && loShuWalkMode && loShuWalkSteps ? walkProgress(loShuWalkSteps, loShuWalkSegments, after) : null;
+      const then = queueThen(shellWalkName, playOrderIsLibrary, afterWalk ? afterWalk.at : after !== null ? after + 1 : 0, afterWalk ? afterWalk.count : n, after !== null);
+      return { shellSource: queueSourceLine(run.at, run.of, then), shellSourceShort: queueSourceShort(run.at, run.of) };
+    }
+    // The walk's own position, or the play order's own (both the plain cursor without a queue).
+    const at = wp && !wp.queued ? wp.at - 1 : queueMarks ? baseIndex(queueMarks, cur) : cur;
+    const count = wp && Number.isFinite(wp.count) ? wp.count : queueMarks ? baseCount(queueMarks, n) : n;
+    return {
+      shellSource: sourceLine(
+        shellWalkName,
+        playOrderIsLibrary,
+        at,
+        count,
+        walkSegment(loShuWalkMode, loShuWalkSegments, at),
+        loShuWalkMode ? loShuWalkPhases?.[cur] || null : null
+      ),
+      shellSourceShort: cur >= 0 ? `${shellWalkName ?? (playOrderIsLibrary ? 'Library' : 'Play order')} ${at + 1}/${count}` : `${count} tracks`,
+    };
+  }, [shellOn, playlist, currentSongIndex, isShuffle, shuffledIndices, shufflePos, queueMarks, loShuWalkMode, loShuWalkSteps, loShuWalkSegments, loShuWalkPhases, shellWalkName, playOrderIsLibrary]);
   const shellPlayer = useMemo(
     () => ({
       isPlaying,
@@ -6954,9 +7533,10 @@ registerProcessor('wav-capture', WavCapture);
     }),
     [isAdaptiveBinaural, selectedBinaural.name, shellNowBand, outputRender, v2Active, v2CarFallback, enablePhiMode, phiTimingEnabled, userExperienceLevel, crystalFilter, shellTrackPeakS, shellHeardHz, soundLogOn]
   );
+  // v16.0: the play order's count is its own entries' (a queue's are counted by the queue).
   const shellLibrary = useMemo(
-    () => ({ count: originalPlaylist.length, totalSeconds: libraryTotalSeconds, playOrderIsLibrary, playOrderCount: playlist.length, isScanning }),
-    [originalPlaylist.length, libraryTotalSeconds, playOrderIsLibrary, playlist.length, isScanning]
+    () => ({ count: originalPlaylist.length, totalSeconds: libraryTotalSeconds, playOrderIsLibrary, playOrderCount: shellBaseOrder.length, isScanning }),
+    [originalPlaylist.length, libraryTotalSeconds, playOrderIsLibrary, shellBaseOrder.length, isScanning]
   );
   const shellWalk = useMemo(
     () => ({ mode: loShuWalkMode, name: shellWalkName, fullName: shellWalkFullName, index: currentSongIndex, count: playlist.length }),
@@ -7052,6 +7632,37 @@ registerProcessor('wav-capture', WavCapture);
     };
     return () => { delete w.__aetheriaLibrary; };
   }, []);
+  // v16.0: the queue's tests drive it and read it through this hook (dev builds only; production strips it).
+  useEffect(() => {
+    if (!IS_DEV_BUILD) return;
+    const w = window as unknown as { __aetheriaQueue?: unknown };
+    w.__aetheriaQueue = {
+      add: (ids: string[], mode: 'next' | 'queue') => queueApiRef.current?.queueTracks(ids, mode),
+      edit: (op: unknown) => queueApiRef.current?.editQueue(op as any),
+      undo: () => queueApiRef.current?.undoQueue(),
+      state: () => {
+        const s = stateRef.current;
+        const q = queueMirrorRef.current;
+        const st = queuePlayState();
+        const marks = q.playlist === s.playlist ? q.marks : null;
+        const name = (i: number) => s.playlist[i]?.name ?? null;
+        const up = st && shuffleValid(st) ? upcoming(st, s.isLoop) : null;
+        const a = st ? anchorFor(st, s.isLoop, queueStart()) : null;
+        return {
+          marks,
+          waiting: waitingIndices({ marks }),
+          waitingNames: waitingIndices({ marks }).map(name),
+          upcoming: up ? { queued: up.queued.map(name), more: up.more, next: up.next.map(name), end: up.end } : null,
+          anchor: a ? ('wait' in a ? 'wait' : a) : null,
+          pending: queuePendingRef.current.length,
+          undo: queueUndoRef.current ? queueUndoRef.current.token : null,
+          playingId: queueStart().playingId,
+          aligned: q.playlist === s.playlist,
+        };
+      },
+    };
+    return () => { delete w.__aetheriaQueue; };
+  }, []);
   const shellValue = useMemo(
     () => ({
       tab: shellTab,
@@ -7107,6 +7718,10 @@ registerProcessor('wav-capture', WavCapture);
       handleFileUpload,
       recoverOrphans,
       discardOrphans,
+      // v16.0, the queue.
+      queueTracks,
+      editQueue,
+      undoQueue,
     };
   });
   const shellActions = useMemo(() => {
@@ -7204,6 +7819,14 @@ registerProcessor('wav-capture', WavCapture);
       },
       setLibraryFocusTarget: (el: HTMLElement | null) => {
         libraryFocusTargetRef.current = el;
+      },
+      // v16.0, the queue: references to App's queue functions (its one writer, commitQueue; never the library).
+      queueTracks: (ids: readonly string[], mode: 'next' | 'queue') => A().queueTracks(ids, mode),
+      editQueue: (op: QueueEdit) => A().editQueue(op),
+      undoQueue: () => A().undoQueue(),
+      toggleQueue: () => {
+        setSheetFocus(null);
+        setShellSheet((s: ShellSheet | null) => (s === 'queue' ? null : 'queue'));
       },
     };
   }, []);
@@ -7565,7 +8188,7 @@ registerProcessor('wav-capture', WavCapture);
             settings={vizSettings}
             frequencyColorMode={frequencyColorMode}
             loShuWalkMode={loShuWalkMode}
-            loShuWalkStep={loShuWalkMode ? walkStepAt(loShuWalkSteps, currentSongIndex) : -1}
+            loShuWalkStep={loShuWalkMode ? cubeStep(loShuWalkSteps, currentSongIndex) : -1}
             bandEnvelope={currentSongIndex >= 0 ? (playlist[currentSongIndex]?.bandEnvelope ?? playlist[currentSongIndex]?.visualEnvelope ?? null) : null}
             audioElementRef={mainAudioRef}
             uiInsets={uiInsets}
@@ -7591,6 +8214,7 @@ registerProcessor('wav-capture', WavCapture);
           time={shellTime}
           libraryList={shellLibraryList}
           libraryStatus={shellLibraryStatus}
+          queue={shellQueue}
         >
           <AppShell />
         </ShellProviders>
@@ -7614,7 +8238,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v15.9</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.0</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -8785,7 +9409,7 @@ registerProcessor('wav-capture', WavCapture);
                     <span className="text-xs opacity-50 w-5 text-right">{searchTerm ? displayIdx + 1 : actualIdx + 1}</span>
                     <div 
                       className="flex flex-col truncate flex-1 cursor-pointer"
-                      onClick={() => { playTrack(actualIdx); if(window.innerWidth < 768) setShowSidebar(false); }}
+                      onClick={() => { const before = playRequestSeqRef.current; playTrack(actualIdx); noteQueueStart(before, actualIdx, stateRef.current.playlist); if(window.innerWidth < 768) setShowSidebar(false); }}
                     >
                         <div className="flex justify-between">
                             <span className="truncate font-medium">{song.name}</span>
@@ -10669,8 +11293,13 @@ registerProcessor('wav-capture', WavCapture);
                            // Single walks fall back to a plain "M/total" counter.
                            // For Ouroboros/CABI we also surface ♾️/✕ phase tokens
                            // at the SOURCE crossings via loShuWalkPhases.
-                           const stepIdx = currentSongIndex + 1;
-                           const total = playlist.length;
+                           // v16.0: counted over the walk's own entries (a queued track inside the walk has step -1 and
+                           // is not a step: the chip hides while one plays). With no queue, the cursor and the length.
+                           const wp = walkProgress(loShuWalkSteps, loShuWalkSegments, currentSongIndex);
+                           if (wp?.queued) return null;
+                           const walkIdx = wp && loShuWalkSteps ? wp.at - 1 : currentSongIndex;
+                           const stepIdx = walkIdx + 1;
+                           const total = wp && loShuWalkSteps ? wp.count : playlist.length;
                            const SEGMENT_NAMES: Partial<Record<LoShuWalkMode, string[]>> = {
                              combined: ['Vortex', 'Ascent', 'Pillar'],
                              ouroboros: ['Ouroboros'],
@@ -10682,7 +11311,7 @@ registerProcessor('wav-capture', WavCapture);
                              let accumulated = 0;
                              let segIdx = 0;
                              for (let i = 0; i < loShuWalkSegments.length; i++) {
-                               if (currentSongIndex < accumulated + loShuWalkSegments[i]) {
+                               if (walkIdx < accumulated + loShuWalkSegments[i]) {
                                  segIdx = i;
                                  break;
                                }
@@ -10690,7 +11319,7 @@ registerProcessor('wav-capture', WavCapture);
                              }
                              const segName = segments[segIdx];
                              const segLen = loShuWalkSegments[segIdx];
-                             const segPos = currentSongIndex - accumulated + 1;
+                             const segPos = walkIdx - accumulated + 1;
                              return (
                                <span
                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-emerald-500/5 text-emerald-300/90 border-emerald-500/20 text-[10px] font-mono"
