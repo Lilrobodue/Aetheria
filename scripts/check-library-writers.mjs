@@ -33,6 +33,8 @@
 //      and use no writer and no wrapper.
 //   (v16.1, rule 2: nor utils/playlists, the saved playlists' pure model; and nothing under components/shell/ imports
 //      utils/playlists: App resolves the playlists, the shell gets values.)
+//   (v16.2, rule 2: nor anything under utils/library/, the smart filters' model among them; rule 3: playFiltered, the
+//      one place a filtered set starts playing, is a play-order function.)
 //   6. v16.1, the saved playlists have ONE writer: playlistCache's writePlaylistRecords is used only in
 //      App › commitPlaylists (and tools/cache-check.ts), and its readSavedPlaylists only in App's load effect,
 //      App › useEffect([libraryLoading]) (and tools/cache-check.ts), followed through imports as rule 1 follows the
@@ -59,7 +61,7 @@ const PINS_PATH = join(root, 'scripts', 'library-writers.json');
 const CACHE_FILE = 'utils/playlistCache.ts';
 const CACHE_WRITERS = ['deleteTracksFromCache', 'clearPlaylistCache'];
 const ROOT_COMPONENT = 'App'; // App.tsx's component: its own body is not a wrapper, its inner functions are
-const PLAY_ORDER_FUNCTIONS = ['startPlayOrder', 'playFromLibrary', 'undoPlayOrder', 'applyMix', 'restoreLibrary', 'startMix', 'queueTracks', 'editQueue', 'undoQueue', 'commitQueue', 'applyQueueOp', 'commitPlaylists', 'playPlaylist', 'queuePlaylist', 'undoPlaylistOp', 'savePlaylistFrom']; // v15.8: applyMix, the mixes' one way into App's state; v15.9: restoreLibrary, and the Mixes tab's startMix; v16.0: the queue's handlers and its one writer; v16.1: the saved playlists' one writer and their play, queue, Undo and save
+const PLAY_ORDER_FUNCTIONS = ['startPlayOrder', 'playFromLibrary', 'undoPlayOrder', 'applyMix', 'restoreLibrary', 'startMix', 'queueTracks', 'editQueue', 'undoQueue', 'commitQueue', 'applyQueueOp', 'commitPlaylists', 'playPlaylist', 'queuePlaylist', 'undoPlaylistOp', 'savePlaylistFrom', 'playFiltered']; // v15.8: applyMix, the mixes' one way into App's state; v15.9: restoreLibrary, and the Mixes tab's startMix; v16.0: the queue's handlers and its one writer; v16.1: the saved playlists' one writer and their play, queue, Undo and save; v16.2: the smart filters' play
 // v16.1 (rule 6): the saved playlists' writer and reader, and where alone they may be used.
 const PLAYLIST_IO = {
   writePlaylistRecords: { app: 'App › commitPlaylists', files: ['tools/cache-check.ts'] },
@@ -357,7 +359,8 @@ else {
 // queue's model (pure: App applies its writes).
 // v16.1: nor the saved playlists' pure model (utils/playlists); and the shell never imports that model either (App
 // resolves the playlists against the library; the shell gets values, as for utils/queue).
-const NO_CACHE = (f) => f.startsWith('components/shell/') || f.startsWith('utils/mix/') || f.startsWith('utils/queue/') || f.startsWith('utils/playlists/') || f === 'utils/crystalData.ts';
+// v16.2: nor anything under utils/library/ (the smart filters' model, and listOps, walkRecord, analysePass: pure).
+const NO_CACHE = (f) => f.startsWith('components/shell/') || f.startsWith('utils/mix/') || f.startsWith('utils/queue/') || f.startsWith('utils/playlists/') || f.startsWith('utils/library/') || f === 'utils/crystalData.ts';
 const specOf = (n) =>
   (ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier) ? n.moduleSpecifier.text
   : ts.isCallExpression(n) && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0]) && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === 'require')) ? n.arguments[0].text
@@ -366,7 +369,7 @@ for (const file of files.filter(NO_CACHE)) {
   const sf = parse(file);
   const visit = (n) => {
     const spec = specOf(n);
-    if (spec && resolveImport(file, spec) === CACHE_FILE) problem(`${file}:${lineOf(sf, n)}: imports ${spec} (the shell, the mix recipes, the crystal data and the playlists' model never reach the library's storage)`);
+    if (spec && resolveImport(file, spec) === CACHE_FILE) problem(`${file}:${lineOf(sf, n)}: imports ${spec} (the shell, the mix recipes, the crystal data, the playlists' model and utils/library never reach the library's storage)`);
     if (spec && file.startsWith('components/shell/') && (resolveImport(file, spec) ?? '').startsWith('utils/playlists/')) {
       problem(`${file}:${lineOf(sf, n)}: imports ${spec} (the shell gets the saved playlists as values from App, never their model)`);
     }
@@ -486,7 +489,7 @@ if (problems.size) {
 }
 console.log(
   `check:writers: ${total} uses of the library's writers and their ${wrappers.size} wrappers, in ${places} places across ` +
-    `${files.length} files, as pinned (counts and code); components/shell, utils/mix, utils/queue, utils/playlists and utils/crystalData never import playlistCache, ` +
+    `${files.length} files, as pinned (counts and code); components/shell, utils/mix, utils/queue, utils/playlists, utils/library and utils/crystalData never import playlistCache, ` +
     `nor components/shell utils/playlists; ` +
     `${PLAY_ORDER_FUNCTIONS.join(', ')} use no writer; the saved playlists are written only by App › commitPlaylists and read only by ` +
     `App › useEffect([libraryLoading]) (${playlistIoUses.length} uses), and ${PLAYLIST_STORE_FUNCTIONS.join(', ')} touch only the playlist-state store.`

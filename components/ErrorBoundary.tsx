@@ -30,7 +30,7 @@ import { waitForBlobSaves } from '../utils/playlistCache';
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 /** The version the error log records. Bump it with the header badge (App.tsx); isolation.spec checks the two agree. */
-export const APP_VERSION = 'v16.1';
+export const APP_VERSION = 'v16.2';
 
 export type ViewName =
   | 'visualizer'
@@ -79,7 +79,12 @@ export type ViewName =
   | 'playlists'
   | 'playlist-detail'
   | 'playlist-menu'
-  | 'playlist-add';
+  | 'playlist-add'
+  // v16.2, smart filters: the filter sheet's body, the bar above the list (the count, the picks, the actions), and the
+  // actions' ⋯ sheet.
+  | 'library-filters'
+  | 'library-filter-bar'
+  | 'library-filter-actions';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The error log

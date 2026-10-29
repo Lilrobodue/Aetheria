@@ -225,6 +225,8 @@ import type { LayersSection } from './components/shell/layers/layersModel';
 // v15.7: the Library tab (new layout). The row tap's pure rules; App's renders are counted in dev builds only.
 import { libraryOrderFor, rebuildOrder, stillTapOrder, sameIdSet, sameIds, libraryTapText, UNDO_CHANGED_TEXT, TAP_GONE_TEXT } from './components/shell/library/libraryModel';
 import type { LastImport } from './components/shell/library/libraryModel';
+// v16.2: the smart filters' toasts (a filtered set's start).
+import { filterStartText } from './components/shell/library/filterViewModel';
 import type { LibraryViewState, QueueEdit } from './components/shell/contexts';
 import { countRender } from './components/shell/devRenders';
 
@@ -1075,13 +1077,17 @@ interface PlayOrderSnapshot {
   token: number;
   /** When the latest tap of a chain was made (its toast's 10 s run from here). */
   at: number;
-  /** The chain's toast (the first tap's words: what it stopped). */
+  /** The latest tap's toast: what plays now (v16.2 review: its own words and its own queue sentence, chained or not). */
   toast: string;
+  /** v16.2 review: the toast's words without the queue's carry sentence: a Library row's chain keeps its first tap's
+   *  (what it stopped, which its Undo brings back); every other kind, the latest tap's. */
+  words: string;
   /** statusToastSeqRef once this tap's toast showed (-1: none showed): another toast since ends the chain. */
   toastSeq: number;
-  /** v15.9: a mix started it (else a Library row). Only taps of one kind chain: a row tapped while a mix's toast shows
-   *  gets its own Undo, back to the mix (and the reverse). */
-  mix: boolean;
+  /** v15.9: a mix started it, else a Library row. Only taps of one kind chain: a row tapped while a mix's toast shows
+   *  gets its own Undo, back to the mix (and the reverse). v16.2 review: a row's tap while filtered is a kind of its
+   *  own ('filtered'), so a filtered row's tap and a plain one never chain (each toast names what plays). */
+  kind: 'mix' | 'library' | 'filtered';
   /** v16.0: the queue's marks over `ids` (null: none), so the Undo brings the earlier order back with its queue. */
   marks: Mark[] | null;
   /** v16.1: the shuffle switch before the chain's first tap, and whether a tap of the chain turned it on (a playlist's
@@ -6948,6 +6954,9 @@ registerProcessor('wav-capture', WavCapture);
   // v15.9: every mix starts through here too (applyMix). opts.walk: the walk the order is (its snapshot first, then the
   // mode, segments, phases and steps, so the snapshot effect keeps it); opts.mix: a mix started it, so only taps of one
   // kind chain, and a chained mix's toast says what it started (a Library row's chain keeps the first tap's words).
+  // v16.2 review: opts.filtered: a row's tap while filtered, a third kind (it chains only with its own kind). A chained
+  // tap's toast always says what plays now: its own words (a filtered set's count, a mix's name), its own carry sentence;
+  // a Library row's chain keeps the first tap's words (what the chain stopped) with the latest tap's carry sentence.
   // v16.0 (decision 2 A): a new play order CARRIES the queue: the started track, then the tracks waiting in the queue, in
   // queue order (a walk gives them step -1 and phase ''; under shuffle the explicit order puts them right after it), then
   // the rest; the toast says so. "The same play order" is the play order's own entries (its marks 0), so a tap on the
@@ -6956,12 +6965,12 @@ registerProcessor('wav-capture', WavCapture);
   // v16.1: opts.label names what the order is (a walk's, a mix's or a playlist's name: Save as a playlist's default
   // name, valid while the play order's own ids are these); opts.shuffle (a playlist's Shuffle) turns the transport's
   // shuffle switch on with the order, as every player's Shuffle button does, and the Undo turns it back off.
-  const startPlayOrder = (orderIn: Song[], index: number, toastIn: string, opts?: { walk?: PlayOrderSnapshot['walk']; mix?: boolean; label?: string; shuffle?: boolean }) => {
+  const startPlayOrder = (orderIn: Song[], index: number, toastIn: string, opts?: { walk?: PlayOrderSnapshot['walk']; mix?: boolean; filtered?: boolean; label?: string; shuffle?: boolean }) => {
     const st = stateRef.current;                       // the latest commit (the pinned sync effect)
     const el = mainAudioRef.current;
     if (index < 0 || index >= orderIn.length) return;
     const walkIn = opts?.walk ?? null;
-    const mix = !!opts?.mix;
+    const kind: PlayOrderSnapshot['kind'] = opts?.mix ? 'mix' : opts?.filtered ? 'filtered' : 'library';
     const turnShuffleOn = !!opts?.shuffle && !st.isShuffle; // v16.1: a Shuffle with the switch off is never "the same"
     const shuffleOn = st.isShuffle || !!opts?.shuffle;
     playOrderLabelRef.current = opts?.label ? { ids: orderIn.map((s: Song) => s.id).join('|'), label: opts.label } : null;
@@ -6977,7 +6986,7 @@ registerProcessor('wav-capture', WavCapture);
       : null;
     const order = carried ? carried.order : orderIn;
     const walk = carried && walkIn && carried.walk ? { ...walkIn, steps: carried.walk.steps, phases: carried.walk.phases } : walkIn;
-    const toast = carried ? `${toastIn} ${carryText(waitingSongs.length)}` : toastIn;
+    const carry = carried ? ` ${carryText(waitingSongs.length)}` : '';
     const setWalk = (w: NonNullable<PlayOrderSnapshot['walk']>) => {
       loShuWalkSnapshotRef.current = order.map((s: Song) => s.id).join('|');   // before the mode: the effect keeps it
       setLoShuWalkMode(w.mode);
@@ -7002,9 +7011,12 @@ registerProcessor('wav-capture', WavCapture);
     // (playing or paused).
     const prev = lastPlayOrderRef.current;
     const chained = prev !== null && prev.toastSeq === statusToastSeqRef.current && Date.now() - prev.at < 10_000 &&
-      prev.generation === cacheGeneration() && stillTapOrder(st.playlist, prev.newIds, libraryRef.current) && prev.mix === mix;
+      prev.generation === cacheGeneration() && stillTapOrder(st.playlist, prev.newIds, libraryRef.current) && prev.kind === kind;
+    // v16.2 review: the toast says what plays now, chained or not (its kind, its count, this tap's carry sentence).
+    const words = chained && kind === 'library' ? prev.words : toastIn;
+    const toast = `${words}${carry}`;
     const snap: PlayOrderSnapshot = chained ? {
-      ...prev, newIds: order.map((s: Song) => s.id), token: ++playOrderSeqRef.current, at: Date.now(), toast: mix ? toast : prev.toast,
+      ...prev, newIds: order.map((s: Song) => s.id), token: ++playOrderSeqRef.current, at: Date.now(), toast, words,
     } : {
       ids: st.playlist.map((s: Song) => s.id),
       cursor: st.currentSongIndex,
@@ -7020,8 +7032,9 @@ registerProcessor('wav-capture', WavCapture);
       token: ++playOrderSeqRef.current,
       at: Date.now(),
       toast,
+      words,
       toastSeq: -1,
-      mix,
+      kind,
       marks: qm,
       shuffleWas: st.isShuffle,
       shuffleSet: turnShuffleOn,
@@ -7291,6 +7304,23 @@ registerProcessor('wav-capture', WavCapture);
     const m = new Map<string, Song>();
     for (const s of libraryRef.current) if (!m.has(s.id)) m.set(s.id, s);
     return m;
+  };
+  // v16.2: smart filters' "Play these", Shuffle, and a row's tap while filtering: these library tracks, in this order.
+  // The library's own Song objects by id (an id gone since is skipped); never the library. Undo, the queue's carry and the
+  // chain rule are startPlayOrder's: Play these and Shuffle chain with the mixes and playlists (mix), a row's tap with
+  // other filtered rows' taps (filtered; v16.2 review: not with a plain Library row's, so each toast names what plays).
+  // Shuffle turns the switch on with the order (its Undo turns it back off) and starts with the least recently played
+  // track; a row's tap starts with its track. A play order's label: the filters' name.
+  const playFiltered = (o: { ids: readonly string[]; startId?: string | null; shuffle?: boolean; label: string; row?: boolean }) => {
+    const byId = libraryById();
+    const order = o.ids.map((id: string) => byId.get(id)).filter((s: Song | undefined): s is Song => !!s);
+    const startAt = o.startId ? order.findIndex((s: Song) => s.id === o.startId) : 0;
+    if (!order.length || startAt < 0) {
+      showStatusToast(TAP_GONE_TEXT);
+      return;
+    }
+    const index = o.shuffle && !o.startId ? (getLruShuffledIndices(order, playHistoryRef.current)[0] ?? 0) : startAt;
+    startPlayOrder(order, index, filterStartText(order.length, { row: !!o.row, shuffle: !!o.shuffle }), { mix: !o.row, filtered: !!o.row, label: o.label, shuffle: !!o.shuffle });
   };
   /** Apply a queue write now, if the play state is settled: true when it is done (or has nothing to do). */
   const applyQueueOp = (op: QueueOp): boolean => {
@@ -7801,10 +7831,11 @@ registerProcessor('wav-capture', WavCapture);
   /** Save as a playlist, named (the Dialog's Save; the seams for v16.2's filters and v16.3's builder). */
   const savePlaylistFrom = (o: { ids: readonly string[]; name: string; from: PlaylistFrom }): string | null => createPlaylist(o.name, o.ids, o.from, 'save');
   /** The name Dialog for a save (new layout): its default name and sentence; nothing to save says so. */
-  const openSavePlaylist = (source: 'queue' | 'playing' | { kind: 'ids'; ids: readonly string[]; label: string; from: PlaylistFrom }) => {
+  const openSavePlaylist = (source: 'queue' | 'playing' | { kind: 'ids'; ids: readonly string[]; label: string; from: PlaylistFrom; sentence?: string }) => {
     if (!playlistsGate()) return;
     if (typeof source === 'object') {
-      setPlaylistNaming({ kind: 'save', ids: source.ids.slice(), name: freePlaylistName(source.label, playlistNamesTaken()), from: source.from, sentence: playlistWords.saveShownSentence(source.ids.length) });
+      // v16.2: a caller's own sentence (the smart filters' "a snapshot" words), else the list's.
+      setPlaylistNaming({ kind: 'save', ids: source.ids.slice(), name: freePlaylistName(source.label, playlistNamesTaken()), from: source.from, sentence: source.sentence ?? playlistWords.saveShownSentence(source.ids.length) });
       return;
     }
     const s = playlistSaveSource(source);
@@ -7929,6 +7960,11 @@ registerProcessor('wav-capture', WavCapture);
       counts: () => ({ tracks: storedTrackCount, playlists: playlistsRef.current?.length ?? 0 }),
     };
   });
+  // v16.2, smart filters: App's one function for them (a filtered set's start), in its own one-line effect, as the
+  // playlists' and the Library tools' are (it references no library writer; the pinned shell actions' effect stays as
+  // it is). App holds no filter state: the picks, the sheet and the pass live in the Library's Tracks view.
+  const filterApiRef: { current: { playFiltered: typeof playFiltered } | null } = useRef(null);
+  useLayoutEffect(() => { filterApiRef.current = { playFiltered }; });
   // v16.1 (spec §3.14): the new layout's Library tools (the health card's Clear and Diagnostics). Their own one-line
   // effect: a reference to a library writer (clearEntirePlaylist) is pinned by check:writers, and here no later edit of
   // the shell actions' or the playlists' effects re-pins it.
@@ -7964,6 +8000,28 @@ registerProcessor('wav-capture', WavCapture);
       open: (id: string | null) => P()?.open(id),
     };
     return () => { delete w.__aetheriaPlaylists; };
+  }, []);
+  // v16.2: the smart filters' tests start a filtered set and read the play order through this hook (dev builds only;
+  // production strips it).
+  useEffect(() => {
+    if (!IS_DEV_BUILD) return;
+    const w = window as unknown as { __aetheriaFilters?: unknown };
+    w.__aetheriaFilters = {
+      play: (o: { ids: string[]; startId?: string | null; shuffle?: boolean; label: string; row?: boolean }) => filterApiRef.current?.playFiltered(o),
+      state: () => {
+        const s = stateRef.current;
+        return {
+          ids: s.playlist.map((x: Song) => x.id),
+          cursor: s.currentSongIndex,
+          shuffle: s.isShuffle,
+          shuffled: s.shuffledIndices.slice(),
+          shufflePos: s.shufflePos,
+          label: playOrderLabelRef.current ? playOrderLabelRef.current.label : null,
+          libraryIds: libraryRef.current.map((x: Song) => x.id),
+        };
+      },
+    };
+    return () => { delete w.__aetheriaFilters; };
   }, []);
 
   /** The layout switch: saved from a tap only. The music, the visualizer and the lock-screen card carry over. */
@@ -8567,7 +8625,7 @@ registerProcessor('wav-capture', WavCapture);
         libraryFocusTargetRef.current = el;
       },
       // v16.0, the queue: references to App's queue functions (its one writer, commitQueue; never the library).
-      queueTracks: (ids: readonly string[], mode: 'next' | 'queue') => A().queueTracks(ids, mode),
+      queueTracks: (ids: readonly string[], mode: 'next' | 'queue', from?: string) => A().queueTracks(ids, mode, from), // v16.2: `from` (v16.1's) passed on
       editQueue: (op: QueueEdit) => A().editQueue(op),
       undoQueue: () => A().undoQueue(),
       toggleQueue: () => {
@@ -8595,7 +8653,7 @@ registerProcessor('wav-capture', WavCapture);
       addTracksTo: (playlistId: string) => PL().addFromSheet(playlistId),
       createWithTracks: (name: string) => PL().createFromSheet(name),
       // The sheet (Up next, the ⋯ menu) closes first: a Dialog never sits on a Sheet.
-      savePlaylist: (source: 'queue' | 'playing' | { kind: 'ids'; ids: readonly string[]; label: string; from: PlaylistFrom }) => {
+      savePlaylist: (source: 'queue' | 'playing' | { kind: 'ids'; ids: readonly string[]; label: string; from: PlaylistFrom; sentence?: string }) => {
         setShellSheet(null);
         setSheetFocus(null);
         PL().openSave(source);
@@ -8610,6 +8668,9 @@ registerProcessor('wav-capture', WavCapture);
         Promise.resolve(tools.clear(alsoPlaylists)).then(() => showStatusToast(playlistWords.clearedToast(c.tracks, c.playlists, alsoPlaylists)));
       },
       showDiagnostics: () => libraryToolsRef.current?.diagnostics(),
+      // v16.2, smart filters: a filtered set's start (Play these, Shuffle, a row's tap while filtering), through
+      // filterApiRef (its own layout effect; App's playFiltered, a play-order function: never the library).
+      playFiltered: (o: { ids: readonly string[]; startId?: string | null; shuffle?: boolean; label: string; row?: boolean }) => filterApiRef.current?.playFiltered(o),
     };
   }, []);
 
@@ -9021,7 +9082,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

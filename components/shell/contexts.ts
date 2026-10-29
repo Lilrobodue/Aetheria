@@ -24,6 +24,7 @@ import type { Song } from '../../types';
 import type { LayersSection } from './layers/layersModel';
 import type { LastImport } from './library/libraryModel';
 import type { PassProgress } from '../../utils/library/analysePass';
+import type { Filters } from '../../utils/library/filterModel';
 
 /** The transport's state. Changes on play/pause, a track change, shuffle/repeat, a new play order. */
 export interface PlayerValue {
@@ -179,6 +180,10 @@ export interface LibraryViewState {
   refocus?: 'import' | 'review' | null;
   /** v16.1: the "Tracks · Playlists" switch (decision 1 A; session only). Absent: Tracks. */
   view?: 'tracks' | 'playlists';
+  /** v16.2 review: the smart filters' picks as the latest tap set them, and whether saving them failed (full or blocked
+   *  storage). Library › Tracks remounts on every switch: with `unsaved` (or an unreadable store) these come back, not
+   *  the stored value. Absent: no tap this session. */
+  filters?: { picks: Filters; unsaved: boolean };
 }
 
 /** v15.7: the library itself (App's originalPlaylist, the same array): an import or its duration batches, a delete, a
@@ -411,8 +416,9 @@ export interface ShellActions {
   /** The list element, the delete Dialog's focus fallback. */
   setLibraryFocusTarget: (el: HTMLElement | null) => void;
   // v16.0, the queue (references to App's queueTracks, editQueue, undoQueue: the queue's one writer, never the library).
-  /** Play next / Add to queue: library tracks by id. */
-  queueTracks: (ids: readonly string[], mode: 'next' | 'queue') => void;
+  /** Play next / Add to queue: library tracks by id. v16.2: `from` names where many come from in the toast ("your
+   *  filters"; v16.1's). */
+  queueTracks: (ids: readonly string[], mode: 'next' | 'queue', from?: string) => void;
   editQueue: (op: QueueEdit) => void;
   undoQueue: () => void;
   /** The Up next sheet (the desktop's panel); a second call closes it. */
@@ -439,7 +445,7 @@ export interface ShellActions {
   createWithTracks: (name: string) => void;
   /** Save as a playlist (Up next's, Now Playing's ⋯): the sheet closes, then the name Dialog. The ids form is v16.2's
    *  seam (a filtered list: "Save as playlist", its default name and its source). */
-  savePlaylist: (source: 'queue' | 'playing' | { kind: 'ids'; ids: readonly string[]; label: string; from: { kind: 'filter' | 'builder'; label?: string } }) => void;
+  savePlaylist: (source: 'queue' | 'playing' | { kind: 'ids'; ids: readonly string[]; label: string; from: { kind: 'filter' | 'builder'; label?: string }; sentence?: string }) => void;
   /** What Save as a playlist would save from what's playing (Now Playing's ⋯ line), or null with nothing playing. */
   saveSourceInfo: () => { label: string | null; count: number } | null;
   /** navigator.storage.persisted() (the list's storage note), or null when the browser can't say. */
@@ -447,6 +453,10 @@ export interface ShellActions {
   /** The health card's Library tools: Clear (the box's value: the playlists too), and classic's diagnostics readout. */
   clearLibrary: (alsoPlaylists: boolean) => void;
   showDiagnostics: () => void;
+  // v16.2, smart filters (a reference to App's playFiltered: a play-order function, never the library).
+  /** These library tracks, in this order, as the play order (the Tracks list's filtered rows): from the first, from
+   *  `startId` (a row's tap: `row`), or shuffled (the switch turns on). `label` is the filters' name. */
+  playFiltered: (o: { ids: readonly string[]; startId?: string | null; shuffle?: boolean; label: string; row?: boolean }) => void;
 }
 
 export const PlayerContext = createContext(null);

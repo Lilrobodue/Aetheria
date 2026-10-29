@@ -717,6 +717,88 @@ test.describe('style foundation (v15.3)', () => {
     expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
   });
 
+  test('h. smart filters (v16.2): every class on screen has a rule; no blur and no endless animation, in each of their states', async ({ page }) => {
+    test.setTimeout(240_000);
+    const seen = new Map<string, string>();
+    const effects = new Set<string>();
+    const census = async (state: string) => {
+      await page.waitForTimeout(250);
+      await collectClasses(page, state, seen);
+      const found = await page.evaluate(() => {
+        const roots = Array.from(document.querySelectorAll('[data-testid="new-shell"], [role="dialog"], [role="alertdialog"], [data-testid="notices"]'));
+        const out: string[] = [];
+        for (const root of roots) {
+          for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+            const cs = getComputedStyle(el);
+            const tag = `${el.tagName.toLowerCase()}.${(el.getAttribute('class') || '').split(/\s+/).slice(0, 3).join('.')}`;
+            if (cs.backdropFilter && cs.backdropFilter !== 'none') out.push(`backdrop-filter ${cs.backdropFilter} on ${tag}`);
+            if (cs.animationName && cs.animationName !== 'none' && /infinite/.test(cs.animationIterationCount)) out.push(`infinite animation ${cs.animationName} on ${tag}`);
+          }
+        }
+        return out;
+      });
+      for (const f of found) effects.add(`${f} (${state})`);
+    };
+    await page.setViewportSize({ width: 411, height: 752 });
+    await openNewLayout(page, { engine: 'v2', output: 'headphones' });
+    await seedLibraryRecords(page, 30, { crystals: 'some', keys: true, envelopes: true });
+    await page.goto('/');
+    await page.getByTestId('new-shell').waitFor();
+    await page.getByTestId('tab-library-button').click();
+    await page.getByTestId('library-list').waitFor();
+    await census('library, the Filters button');
+    const sheet = page.getByRole('dialog', { name: 'Filters', exact: true });
+    const chip = (facet: string, value: string) => sheet.locator(`button[data-facet="${facet}"][data-value="${value}"]`);
+    await page.getByTestId('library-filters-button').click();
+    await sheet.getByTestId('library-filters-body').waitFor();
+    await census('filter sheet, top');
+    await chip('crystal', '528').click();
+    await chip('crystal', '639').click();
+    await chip('crystal', '5274').scrollIntoViewIfNeeded();
+    await census('filter sheet, picked (a regime mixed), a quiet chip');
+    await chip('confidence', 'partial').scrollIntoViewIfNeeded();
+    await census('filter sheet, the key groups');
+    await sheet.getByTestId('filters-show').click();
+    await page.getByTestId('library-filter-bar').waitFor();
+    await census('library, filtered');
+    await page.getByTestId('library-filter-more').click();
+    await page.getByTestId('library-filter-actions-body').waitFor();
+    await census('the filters’ ⋯ sheet');
+    await page.getByTestId('filter-action-save').click();
+    await page.getByRole('dialog', { name: 'Save as a playlist' }).waitFor();
+    await census('save as a playlist, from the filters');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('library-filters-button').click();
+    await chip('length', 'ge10').click();
+    await chip('crystal', '528').click();
+    await chip('crystal', '639').click();
+    await chip('crystal', '174').click();
+    await sheet.getByTestId('filters-show').click();
+    await page.getByTestId('library-search').fill('nothing like this');
+    await page.getByTestId('library-filter-empty').waitFor();
+    await census('library, no filter results, with a search');
+    await page.getByTestId('library-search').fill('');
+    await crash(page, 'library-filter-bar');
+    await page.getByTestId('library-filter-bar-fallback').waitFor();
+    await census('filter bar fallback');
+    await page.getByTestId('library-filter-bar-fallback').getByRole('button', { name: 'Reload panel', exact: true }).click();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.getByTestId('desktop-panel').waitFor();
+    await census('desktop, the library panel filtered');
+    await page.getByTestId('library-filters-button').click();
+    await sheet.getByTestId('library-filters-body').waitFor();
+    await census('desktop, the filter sheet');
+
+    const styled = await stylesheetClasses(page);
+    const unstyled = [...seen]
+      .filter(([t]) => !styled.has(t) && !LUCIDE.test(t) && !INERT.has(t))
+      .map(([t, state]) => `${t} (${state})`)
+      .sort();
+    expect(seen.size, 'the walk saw the filters').toBeGreaterThan(100);
+    expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
+    expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
+  });
+
   test('d. the --ae-* CSS variables equal the tailwind.config.js tokens', async ({ page }) => {
     // The config is ESM (the root package is "type": "module"); imported through a data: URL so the test runner's
     // own loader never transforms it.

@@ -44,6 +44,7 @@ import type { LibSong, HealthInput } from './libraryModel.ts';
 import { countAnalysable, capsFor, passButtonText, passEta, passEtaMinutes, PASS_IDLE } from '../../../utils/library/analysePass.ts';
 import { removeIdsWithCursor } from '../../../utils/library/listOps.ts';
 import { planAssign, needsDeepScan, deepScanQueue, ALL_CRYSTALS } from '../../../utils/mix/distribution.ts';
+import { buildFacetIndex, filterPass, NO_FILTERS } from '../../../utils/library/filterModel.ts';
 
 let passed = 0;
 const failures: string[] = [];
@@ -437,6 +438,36 @@ for (const n of BAD_NUMBERS) check(!/NaN|Infinity|-\d/.test(JSON.stringify(lastI
 eq(recoverWords(7, 0), { head: '7 stored tracks are not in your library', body: 'Their audio is still on this device, from an earlier version.', extra: null, recover: 'Recover 7' }, 'recover');
 eq(recoverWords(7, 2).extra, '2 more are copies of tracks you have and will be removed.', 'recover + copies');
 eq(recoverWords(0, 1).recover, 'Remove copies', 'copies only');
+
+// --- v16.2: the smart filters' text IS this search -------------------------------------------------------------
+// filterPass with no chips, over the sorted list, returns exactly filterLibrary's rows (the same objects, in order) for
+// random libraries, every sort and awkward queries (case, spaces, accents, dotted capitals, nothing matching). A drift
+// of either rule fails here.
+{
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 4294967296);
+  const NAMES = ['tone-0001', 'Tone-0002 Deep', 'tone 3', 'ÄRIA tone', '', 'tone-0010', 'TONE-0100', 'deep focus', 'İstanbul tone'];
+  const SORTS = LIBRARY_SORTS.map((s) => s.id);
+  const QUERIES = ['', 'tone', ' TONE ', 'deep', '1', 'ä', 'i̇', 'zzz', '-00'];
+  let same = 0;
+  let rounds = 0;
+  for (let r = 0; r < 2000; r++) {
+    const n = 1 + Math.floor(rnd() * 40);
+    const songs: LibSong[] = Array.from({ length: n }, (_, i) => ({
+      id: `id${Math.floor(rnd() * n)}`,
+      name: NAMES[Math.floor(rnd() * NAMES.length)] + (rnd() < 0.5 ? ` ${i}` : ''),
+      duration: rnd() * 600,
+      closestSolfeggio: [0, 528, 639][i % 3],
+    }));
+    const sorted = sortLibrary(songs, SORTS[r % SORTS.length]);
+    const q = QUERIES[Math.floor(rnd() * QUERIES.length)];
+    const a = filterLibrary(sorted, q);
+    const b = filterPass(buildFacetIndex(sorted), NO_FILTERS, q).results;
+    rounds++;
+    if (a.length === b.length && a.every((s, i) => s === b[i])) same++;
+  }
+  eq(same, rounds, 'the filters’ text equals the search on 2,000 random libraries, sorts and queries');
+}
 
 if (failures.length) {
   console.error(`libraryModel: ${failures.length} of ${passed + failures.length} checks FAILED`);

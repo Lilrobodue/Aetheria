@@ -10,6 +10,8 @@
 //          ("one Escape, one overlay"), and v15.0's output question keeps its own Escape while it shows.
 // No animation (no enter slide, nothing infinite: I13). The header is an h2, a one-line subtitle and Close; `headerless`
 // keeps the h2 for the name but shows only the handle (the menu).
+// v16.2 (additive; absent, the markup is as before): `footer`, a row after the scrolling body that never scrolls (the
+// filter sheet's Clear all / Show N tracks); `subtitleLive`, the subtitle announced politely as it changes (a live count).
 
 import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
@@ -31,6 +33,10 @@ interface SheetProps {
   headerless?: boolean;
   /** The scrolling body, for a caller that scrolls a group into view. */
   bodyRef?: { current: HTMLDivElement | null };
+  /** v16.2: a row after the scrolling body, outside it (it never scrolls). */
+  footer?: ReactNode;
+  /** v16.2: the subtitle is a live region (aria-live="polite"), for a count that changes while the sheet is open. */
+  subtitleLive?: boolean;
   'data-testid'?: string;
 }
 
@@ -46,6 +52,8 @@ const Sheet = ({
   initialFocusRef,
   headerless = false,
   bodyRef,
+  footer,
+  subtitleLive = false,
   'data-testid': testId,
 }: SheetProps) => {
   const modal = presentation === 'sheet';
@@ -105,7 +113,15 @@ const Sheet = ({
         <h2 id={titleId} ref={headingRef} tabIndex={-1} className="text-lg font-semibold text-ink-strong outline-none">
           {title}
         </h2>
-        {subtitle ? <p className="text-xs text-ink-muted">{subtitle}</p> : null}
+        {subtitle ? (
+          subtitleLive ? (
+            <p aria-live="polite" className="text-xs text-ink-muted tabular-nums">
+              {subtitle}
+            </p>
+          ) : (
+            <p className="text-xs text-ink-muted">{subtitle}</p>
+          )
+        ) : null}
       </div>
       <IconButton label={modal ? 'Close' : 'Close panel'} icon={<X size={22} />} onClick={onClose} className="-mr-2 shrink-0" />
     </div>
@@ -124,6 +140,7 @@ const Sheet = ({
         <div ref={bodyRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
           {children}
         </div>
+        {footer ? <div className="shrink-0 px-4 pt-3 pb-2 border-t border-line">{footer}</div> : null}
       </aside>
     );
   }
@@ -144,6 +161,7 @@ const Sheet = ({
         <div ref={bodyRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
           {children}
         </div>
+        {footer ? <div className="shrink-0 px-4 pt-3 pb-2 border-t border-line">{footer}</div> : null}
       </div>
     </div>,
     document.body

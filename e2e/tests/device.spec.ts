@@ -10,7 +10,7 @@ import { adb, mediaSession, chromeSessions } from './adb';
 // (v15.4: the panel-crash one after the lock-screen one, the root crash last;
 // v15.5: the new layout's one before the lock-screen one; v15.6: the new layout in Zen after it; v15.7: the Library
 // tab's row tap after that; v15.8: the walk after Assign after that; v15.9: a mix from the Mixes tab after that; v16.0:
-// the queue after that; v16.1: a saved playlist after that).
+// the queue after that; v16.1: a saved playlist after that; v16.2: a filtered set after that).
 // While Playwright is connected, Chrome on Android keeps every tab visible: no test here ever sees a real hide. The
 // tests that need one (v16.0.1's D1-D3, the hide flush; v16.1's D-PL1, a playlist made just before a background kill)
 // are in device-hide.spec.ts, run on their own with E2E_HIDE=1.
@@ -674,6 +674,172 @@ test('v16.1: a saved playlist plays in its own order with the screen off: Play b
       const line = await page.evaluate(() => document.querySelector('[data-testid="np-source"]')?.textContent ?? null);
       return c >= 3 && line === `Playlist · Evening · ${c + 1} of 8`;
     }, { message: 'the source line names the playlist and the cursor', timeout: 10_000 })
+    .toBe(true);
+  expect(dialogs).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// v16.2, smart filters (spec §5.10). 528 Hz on tone-0004, -0011, -0014, -0024 and 639 Hz on tone-0008, -0018, -0021,
+// -0028: eight tones, no two next to each other in the library (tone-0005/-0006 keep other crystals). Eight, not six
+// (the v16.2 device fix): the screen-off test below needs two of them left after its third advance (see there).
+// ---------------------------------------------------------------------------------------------------------------
+const FILTER_PATCH = [
+  { index: 4, crystal: 174 }, { index: 5, crystal: 285 },
+  { index: 3, crystal: 528 }, { index: 10, crystal: 528 }, { index: 13, crystal: 528 }, { index: 23, crystal: 528 },
+  { index: 7, crystal: 639 }, { index: 17, crystal: 639 }, { index: 20, crystal: 639 }, { index: 27, crystal: 639 },
+];
+const FILTER_SET = [3, 7, 10, 13, 17, 20, 23, 27];
+const filterChip = (page: Page, value: string) => page.getByTestId('library-filters').locator(`button[data-facet="crystal"][data-value="${value}"]`);
+
+/** By finger: Library › Filters › 528 Hz, 639 Hz › Show 8 tracks. */
+async function filterByFinger(page: Page, at: (t: Locator, what: string) => Promise<void>): Promise<void> {
+  await at(page.getByTestId('tab-library-button'), 'the Library tab');
+  await expect(page.getByTestId('library-filters-button')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('library-filters-button'), 'Filters');
+  await expect(page.getByTestId('library-filters-body')).toBeVisible({ timeout: 5_000 });
+  await at(filterChip(page, '528'), '528 Hz');
+  await expect(filterChip(page, '528')).toHaveAttribute('aria-pressed', 'true', { timeout: 5_000 });
+  await at(filterChip(page, '639'), '639 Hz');
+  await expect(filterChip(page, '639')).toHaveAttribute('aria-pressed', 'true', { timeout: 5_000 });
+  await at(page.getByTestId('filters-show'), 'Show 8 tracks');
+  await expect(page.getByTestId('library-filters-body')).toHaveCount(0, { timeout: 5_000 });
+  await expect(page.getByTestId('library-filter-count')).toHaveText(/^8 of 30 tracks/, { timeout: 5_000 });
+}
+
+test('v16.2 D-F1: by finger, filter to 528 and 639 Hz, Play these, then ⋯ › Add to queue; a reload brings the chips and "8 of 30" back, and the play order and its 8 queued; the phone’s cost', async ({ page }) => {
+  // Screen on (the android project). The cost lines are this phone's baseline, recorded with its battery temperature.
+  test.setTimeout(180_000);
+  const temp = Number(/temperature: (\d+)/.exec(adb('shell', 'dumpsys', 'battery'))?.[1] ?? NaN) / 10;
+  const dialogs = await openSeededNewLayout(page, 30, { real: 30, seconds: 40, patch: FILTER_PATCH });
+  await page.setViewportSize(PHONE_VIEWPORT);
+  const lib = await libraryState(page);
+  const setIds = FILTER_SET.map((k) => lib.libraryIds[k]);
+  const { at } = await playlistPhone(page);
+  // A chip tap's commit, the app's own work: from the click's dispatch (performance.now() in a capture listener on the
+  // document, which runs before React's listener at the root) to the chip's aria-pressed change (a MutationObserver,
+  // after React's commit). v16.2 device fix: not from the click's e.timeStamp. On the phone that stamp is the TOUCH
+  // time (4-7 ms after touchstart), and Chrome dispatches the click about 290 ms after the touch (its gesture handling
+  // under the tests' setViewportSize emulation; see tapAt), so it measured Chrome's tap delay: 328-347 ms a tap, where
+  // the app's own work was 44 and 57 ms on the phone's dev build. touchstart → click is recorded beside it
+  // (touchToClick, in the annotation only; not gated).
+  await page.evaluate(() => {
+    const w = window as any;
+    const onChip = (e: Event) => !!(e.target as HTMLElement)?.closest?.('button[data-facet]');
+    w.__touchAt = 0;
+    w.__handlerAt = 0;
+    w.__touchToClick = [] as number[];
+    w.__commitMs = [] as number[];
+    document.addEventListener('touchstart', (e) => { if (onChip(e)) w.__touchAt = performance.now(); }, { capture: true, passive: true });
+    document.addEventListener('click', (e) => {
+      if (!onChip(e)) return;
+      w.__handlerAt = performance.now();
+      if (w.__touchAt) { w.__touchToClick.push(w.__handlerAt - w.__touchAt); w.__touchAt = 0; }
+    }, true);
+    new MutationObserver((ms) => {
+      for (const m of ms) if (m.attributeName === 'aria-pressed' && w.__handlerAt) { w.__commitMs.push(performance.now() - w.__handlerAt); w.__handlerAt = 0; }
+    }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['aria-pressed'] });
+    w.__longTasks = [] as number[];
+    new PerformanceObserver((l) => { for (const e of l.getEntries()) w.__longTasks.push(Math.round(e.duration)); }).observe({ type: 'longtask' });
+  });
+  await filterByFinger(page, at);
+  const { commits, touchToClick } = await page.evaluate(() => ({ commits: (window as any).__commitMs as number[], touchToClick: (window as any).__touchToClick as number[] }));
+  await at(page.getByTestId('library-play-these'), 'Play these');
+  await expect.poll(async () => (await libraryState(page)).ids, { timeout: 15_000, message: 'the eight, in the list’s order' }).toEqual(setIds);
+  await at(page.getByTestId('library-filter-more'), '⋯');
+  await expect(page.getByTestId('library-filter-actions-body')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('filter-action-queue'), 'Add to queue');
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__aetheriaQueue.state())).waiting.length, { timeout: 15_000, message: '8 queued' }).toBe(8);
+  // Typing 5 keys with the filters on: no long task over 100 ms.
+  await page.evaluate(() => { (window as any).__longTasks.length = 0; });
+  const field = page.getByTestId('library-search');
+  await field.evaluate((el) => (el as HTMLInputElement).focus());
+  for (const ch of 'tone-') {
+    await page.keyboard.type(ch);
+    await page.waitForTimeout(400);
+  }
+  const typing: number[] = await page.evaluate(() => (window as any).__longTasks.slice());
+  await page.waitForTimeout(2600); // the play order's debounced save
+  await page.reload();
+  await acceptDisclaimerNew(page);
+  await expect.poll(async () => (await libraryState(page)).libraryIds.length, { timeout: 60_000 }).toBe(30);
+  await expect.poll(async () => { const s = await libraryState(page); return s.ids.filter((id) => setIds.includes(id)).length >= 8; }, { timeout: 20_000, message: 'the play order is back' }).toBe(true);
+  await at(page.getByTestId('tab-library-button'), 'the Library tab');
+  await expect(page.getByTestId('library-filter-count')).toHaveText(/^8 of 30 tracks/, { timeout: 10_000 });
+  await expect(page.getByTestId('library-search')).toHaveValue('');
+  expect(await page.getByTestId('library-active-chips').locator('button').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')))).toEqual(['Remove 528 Hz', 'Remove 639 Hz']);
+  const q = await page.evaluate(() => (window as any).__aetheriaQueue.state());
+  const s = await libraryState(page);
+  expect(s.ids.filter((_, i) => !q.waiting.includes(i)), 'the play order’s own entries: the eight, in order').toEqual(setIds);
+  expect(q.waiting.length, 'eight queued').toBe(8);
+  test.info().annotations.push({ type: 'D-F1 cost (the phone’s baseline)', description: JSON.stringify({ batteryC: temp, chipCommitMs: commits.map((c) => Math.round(c)), touchToClickMs: touchToClick.map((c) => Math.round(c)), typingLongTasksMs: typing }) });
+  // The gate: the app's own work for a chip tap, at most 150 ms on the phone's dev build (about 3× the 44 and 57 ms
+  // measured there; a production build is several times faster). Both taps measured, so it never passes empty.
+  expect(commits, 'both chip taps measured (528 Hz, 639 Hz)').toHaveLength(2);
+  expect(Math.max(...commits), 'a chip tap’s commit, click handler → aria-pressed (ms)').toBeLessThanOrEqual(150);
+  expect(Math.max(0, ...typing), 'no long task over 100 ms while typing').toBeLessThanOrEqual(100);
+  expect(dialogs).toEqual([]);
+});
+
+test('v16.2: a filtered set plays in its own order with the screen off: Play these by finger, then the card follows three gapless advances through the eight (never their library neighbours); after the wake the source line and the cursor @device', async ({ page }) => {
+  // v16.2 (spec §5.10 step 4): a filtered set is a play order, so the gapless swap and the media session follow it. 30
+  // seeded tones of 4 s with crystals; by finger, Library › Filters › 528 Hz, 639 Hz › Show 8 tracks › Play these, then
+  // Now Playing. Turns the screen off; a phone with a secure lock stays locked after the test (unlock it by hand). LAST of
+  // the v16.2 tests (its own unlock).
+  const dialogs = await openSeededNewLayout(page, 30, { real: 30, seconds: 4, patch: FILTER_PATCH });
+  await page.setViewportSize(PHONE_VIEWPORT);
+  const lib = await libraryState(page);
+  const setIds = FILTER_SET.map((k) => lib.libraryIds[k]);
+  const names = FILTER_SET.map((k) => `tone-${String(k + 1).padStart(4, '0')}`);
+  const { at } = await playlistPhone(page);
+  await filterByFinger(page, at);
+  await at(page.getByTestId('library-play-these'), 'Play these');
+  await expect.poll(() => mediaSession(), { timeout: 15_000, message: `${names[0]} on the card` }).toEqual({ state: 'playing', title: names[0] });
+  await at(page.getByTestId('tab-now-button'), 'Now Playing');
+  await expect(page.getByTestId('np-source')).toHaveText(/^Play order · [12] of 8$/, { timeout: 5_000 });
+  const pausesBefore = await pauseCount(page);
+  const first = mediaSession()!.title;
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  const titles: string[] = [];
+  try {
+    await expect
+      .poll(
+        () => {
+          const s = mediaSession();
+          if (s && s.state === 'playing' && s.title !== first && !titles.includes(s.title)) titles.push(s.title);
+          return titles.length;
+        },
+        { timeout: 45_000, intervals: [500], message: 'three gapless advances on the PLAYING card, in the filtered order' }
+      )
+      .toBeGreaterThanOrEqual(3);
+    expect(mediaSession()?.state, 'the card still says playing').toBe('playing');
+    expect(chromeSessions().filter((s) => s.state === 'playing').length, 'one PLAYING Chrome card: none stranded').toBe(1);
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  test.info().annotations.push({ type: 'card titles with the screen off, a filtered set', description: [first, ...titles].join(' → ') });
+  // v16.2 review: `first` is read a moment after the card showed names[0] (the Now Playing tap and its checks come
+  // between), and with 4 s tones an advance can land in that moment. So the titles are a window of the filtered order
+  // from wherever `first` sits in it (early enough for three more): each advance the next of the eight, never a library
+  // neighbour, never a skip.
+  // v16.2 device fix: and early enough that two of the set remain after the third advance. With six, `first` at 2 put
+  // the third advance on the last track: the order ended one 4 s tone later, the silent anchor's pause() counted, and the
+  // reads after the poll (up to 0.5 s of it, then three adb calls: 2-3.5 s on the Note 20) could outlast that tone,
+  // failing "the gapless swap never pauses" with nothing wrong. `first` sits at 0-2 (the source line said 1 or 2 of 8,
+  // and one more advance may land before it is read), so from any of those the eight leave two tones (8 s) after the
+  // third advance.
+  const from = names.indexOf(first);
+  expect(from, `${first} is one of the eight, early enough for three advances and two tracks after them`).toBeGreaterThanOrEqual(0);
+  expect(from, `${first} is one of the eight, early enough for three advances and two tracks after them`).toBeLessThanOrEqual(names.length - 6);
+  expect([first, ...titles.slice(0, 3)], 'the filtered order, never a library neighbour').toEqual(names.slice(from, from + 4));
+  // After the wake, DOM and state reads only (no click or tap: Chrome draws no frames behind the keyguard).
+  expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
+  expect((await libraryState(page)).ids, 'the play order is the eight').toEqual(setIds);
+  await expect
+    .poll(async () => {
+      const c = (await libraryState(page)).cursor;
+      const line = await page.evaluate(() => document.querySelector('[data-testid="np-source"]')?.textContent ?? null);
+      return c >= 3 && line === `Play order · ${c + 1} of 8`;
+    }, { message: 'the source line names the play order and the cursor', timeout: 10_000 })
     .toBe(true);
   expect(dialogs).toEqual([]);
 });

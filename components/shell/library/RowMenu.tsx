@@ -2,7 +2,8 @@
 //
 // A row's ⋯: a kit Sheet, modal on both shells (centred on the desktop), named by the track's title. Its header shows
 // the tile, the title and the facts line; then 64 px rows, data-driven so v14.18 and v14.19 add Play next, Add to queue
-// and Add to playlist as items: Play from here (the same call as a row tap), Track info, and Delete from library… (v15.4's
+// and Add to playlist as items: Play from here (the whole library from this track, as its subtitle says; v16.2: even
+// while filters are on, when a row's tap plays only the filtered tracks), Track info, and Delete from library… (v15.4's
 // confirmation Dialog, through App's existing delete); Cancel below. Each item closes the sheet first, so a Dialog never
 // sits on a Sheet (v15.5's rule); focus goes back to the ⋯ (the overlay stack). The body is the `library-menu` region.
 // v16.0 (mockup rowmenu-phone): Play next and Add to queue, after Play from here; their lines say where the track goes

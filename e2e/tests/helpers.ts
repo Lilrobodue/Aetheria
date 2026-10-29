@@ -1060,7 +1060,9 @@ export type CrashView =
   // v16.0, the queue (the Up next sheet's body).
   | 'queue'
   // v16.1, saved playlists.
-  | 'playlists' | 'playlist-detail' | 'playlist-menu' | 'playlist-add';
+  | 'playlists' | 'playlist-detail' | 'playlist-menu' | 'playlist-add'
+  // v16.2, smart filters: the filter sheet's body, the bar above the list, the actions' ⋯ sheet.
+  | 'library-filters' | 'library-filter-bar' | 'library-filter-actions';
 
 /**
  * Make a region throw on its next render, through the app's dev hook window.__aetheriaCrash (ErrorBoundary.tsx; dev

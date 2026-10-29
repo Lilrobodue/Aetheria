@@ -14,13 +14,25 @@
 // v16.0: the row menu's Play next and Add to queue (App's queueTracks; the sheet closes first, the tab stays, the toast
 // confirms), and the rows' queue marks (QueueContext: never the clock).
 // v16.1: the row menu's "Add to playlist…" (the Add to playlist sheet, after this menu closes).
+// v16.2, smart filters (decisions 1 A and 2 A; mockups tracks-A-phone, tracks-filtered-phone, filter-empty-phone): the
+// picks are local state here, read once from aetheria.libraryFilters.v1 and saved from a tap only (a chip, a chip's ×,
+// Clear, the empty card's Remove); App never renders for one. Each tap also leaves them in App's libraryViewRef, so a
+// full or blocked storage keeps them for the session across this view's remounts (review fix). The list is one pass
+// over the library's index (the filters' model: the picks AND the search, OR within a facet), memoised on the sorted
+// list, the picks and the deferred query. While a chip is on, the top of the list is the filter bar ("N of M", Clear filters, the picks, what a tap
+// plays, Play these / Shuffle / ⋯) and a row's tap plays the shown tracks from that one (App's playFiltered); with no
+// chip on, a search and a row's tap are v15.7's. The row menu's Play from here stays "your library" (its own words). The
+// health card hides while filtered, as while searching. Filters narrow only what this list shows: the library, the
+// play order (until an action's tap), the switch's count and every other view see every track.
 
 import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { SearchX } from 'lucide-react';
 import EmptyState from '../../ui/EmptyState';
 import { PanelFallback, ViewBoundary } from '../../ErrorBoundary';
 import type { FallbackApi } from '../../ErrorBoundary';
 import type { Song } from '../../../types';
 import { useActions, useLibraryList, useLibrarySummary, usePlayer, useQueue, useShell, useWalk } from '../contexts';
+import type { LibraryViewState } from '../contexts';
 import { addToQueueLine, playNextLine } from '../queue/queueViewModel';
 import { countRender } from '../devRenders';
 import SearchSortRow from './SearchSortRow';
@@ -29,11 +41,31 @@ import RowMenu from './RowMenu';
 import type { RowMenuAction } from './RowMenu';
 import TrackInfoDialog from './TrackInfoDialog';
 import HealthCard from './HealthCard';
+import FilterSheet from './FilterSheet';
+import ActiveChips from './ActiveChips';
+import FilterActionsSheet from './FilterActionsSheet';
+import type { FilterAction } from './FilterActionsSheet';
+import { FROM_FILTERS, emptyHintLine, emptyTitle, removeFacetText, saveSentence } from './filterViewModel';
+import {
+  LIBRARY_FILTERS_KEY,
+  NO_FILTERS,
+  activeChips,
+  buildFacetIndex,
+  emptyHint,
+  filterName,
+  filterPass,
+  filtersOn,
+  parseFilters,
+  serializeFilters,
+  toggleRegime,
+  toggleValue,
+  withFacet,
+} from '../../../utils/library/filterModel';
+import type { FilterSong, Filters } from '../../../utils/library/filterModel';
 import {
   FORMATS_LINE,
   LIBRARY_SORT_KEY,
   SEARCH_HINT,
-  filterLibrary,
   matchCountText,
   parseLibrarySort,
   playingFromText,
@@ -50,6 +82,19 @@ interface LibraryTracksProps {
 }
 
 const SUMMARY_ID = 'library-summary-line';
+
+/** v16.2: the saved picks, read once at mount; anything unreadable is no filters (never an error, never a write).
+ *  Review fix: this view remounts on every tab and Tracks ⇄ Playlists switch, so the session's picks (App's
+ *  libraryViewRef, set by every tap) come back instead when their save failed (full or blocked storage: the stored
+ *  value is stale) or the read fails; "a full or blocked storage keeps the filters for the session". */
+function readFilters(session: LibraryViewState['filters']): Filters {
+  if (session?.unsaved) return session.picks;
+  try {
+    return parseFilters(typeof localStorage !== 'undefined' ? localStorage.getItem(LIBRARY_FILTERS_KEY) : null);
+  } catch {
+    return session ? session.picks : NO_FILTERS;
+  }
+}
 
 function readSort(): LibrarySort {
   try {
@@ -84,7 +129,27 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
   const [sort, setSortState] = useState<LibrarySort>(readSort);
   const sorted = useMemo(() => sortLibrary(songs, sort), [songs, sort]);
   const total = sorted.length;
-  const view = useMemo(() => filterLibrary(sorted, deferredQuery), [sorted, deferredQuery]);
+  // v16.2: the picks, the index (once per library or sort change) and the pass (the list AND every chip's count).
+  const [filters, setFiltersState] = useState<Filters>(() => readFilters(libraryViewRef.current.filters));
+  const filtersRef: { current: Filters } = useRef(filters);
+  filtersRef.current = filters;
+  const index = useMemo(() => buildFacetIndex(sorted as FilterSong[]), [sorted]);
+  const pass = useMemo(() => filterPass(index, filters, deferredQuery), [index, filters, deferredQuery]);
+  const view = pass.results as Song[];
+  // What a row's tap, Play these, Shuffle and the ⋯ items act on: the list as COMMITTED (review fix). Set after the
+  // commit, never during the render: `view` follows the deferred query, whose background render can be interrupted or
+  // thrown away, so a render-time write could hand a tap a list the screen doesn't show (yet, or ever). No test pins
+  // this (an interrupted background render can't be made to happen on cue), so no mutation of it is caught.
+  const viewRef: { current: Song[] } = useRef(view);
+  useLayoutEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+  const on = filtersOn(filters);
+  const chips = useMemo(() => activeChips(filters), [filters]);
+  const filtersKey = useMemo(() => serializeFilters(filters), [filters]);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const filtersButtonRef: { current: HTMLButtonElement | null } = useRef(null);
   const sortedRef: { current: Song[] } = useRef(sorted);
   sortedRef.current = sorted;
   const sortRef: { current: LibrarySort } = useRef(sort);
@@ -108,9 +173,37 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
       localStorage.setItem(LIBRARY_SORT_KEY, s);
     } catch {}
   }, []);
+  /** v16.2: a tap's new picks, saved (removed when none is left). Only taps call this; a full or blocked storage keeps
+   *  the picks for the session (review fix: in App's libraryViewRef too, which outlives this view, with whether the
+   *  save failed, so a remount brings these back rather than the stale stored value). */
+  const setFilters = useCallback((next: Filters) => {
+    filtersRef.current = next;
+    setFiltersState(next);
+    let unsaved = false;
+    try {
+      if (filtersOn(next)) localStorage.setItem(LIBRARY_FILTERS_KEY, serializeFilters(next));
+      else localStorage.removeItem(LIBRARY_FILTERS_KEY);
+    } catch {
+      unsaved = true;
+    }
+    libraryViewRef.current.filters = { picks: next, unsaved };
+  }, []);
+  const onToggle = useCallback((facet: string, value: string) => {
+    const f = filtersRef.current;
+    setFilters(facet === 'regime' ? toggleRegime(f, value as 'gut' | 'heart' | 'head') : toggleValue(f, facet, value));
+  }, []);
+  const clearFilters = useCallback(() => {
+    if (filtersOn(filtersRef.current)) setFilters(NO_FILTERS);
+  }, []);
+  const openFilters = useCallback(() => {
+    filtersButtonRef.current?.focus(); // the sheet gives the focus back to what had it
+    setFilterSheetOpen(true);
+  }, []);
+  const closeFilters = useCallback(() => setFilterSheetOpen(false), []);
+  const filtersProp = useMemo(() => ({ on: chips.length, onOpen: openFilters, buttonRef: filtersButtonRef }), [chips.length]);
 
   // A new query or sort starts at the top of the list (LibraryList scrolls before it computes its range).
-  const resetKey = `${sort}|${deferredQuery}`;
+  const resetKey = `${sort}|${deferredQuery}|${filtersKey}`;
   const onReset = useCallback(() => {
     libraryViewRef.current.top = 0;
   }, []);
@@ -149,9 +242,38 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
   useEffect(() => () => actions.setLibraryFocusTarget(null), []);
 
   // A row's tap: the whole library, in the list's sort (the library's own order: null), from that track.
-  const onPlay = useCallback((id: string) => {
+  const playLibraryFrom = useCallback((id: string) => {
     actions.playFromLibrary(id, sortRef.current === 'library' ? null : sortedRef.current.map((s: Song) => s.id));
   }, []);
+  // v16.2 (decision 1 A): with a chip on, the shown tracks from that one (the picks AND the search, in the list's order).
+  const onPlay = useCallback((id: string) => {
+    const f = filtersRef.current;
+    if (filtersOn(f)) actions.playFiltered({ ids: viewRef.current.map((s: Song) => s.id), startId: id, label: filterName(f), row: true });
+    else playLibraryFrom(id);
+  }, []);
+  // v16.2: Play these and Shuffle (the shown tracks, from the first; or shuffled, the switch on).
+  const onPlayThese = useCallback(() => {
+    actions.playFiltered({ ids: viewRef.current.map((s: Song) => s.id), label: filterName(filtersRef.current) });
+  }, []);
+  const onShuffleThese = useCallback(() => {
+    actions.playFiltered({ ids: viewRef.current.map((s: Song) => s.id), label: filterName(filtersRef.current), shuffle: true });
+  }, []);
+  const onMore = useCallback((opener: HTMLElement) => {
+    opener.focus();
+    setActionsOpen(true);
+  }, []);
+  // The ⋯ sheet's items: it closes first (a Dialog never sits on a Sheet), then acts on the shown tracks, in order.
+  const onFilterAction = useCallback((a: FilterAction) => {
+    setActionsOpen(false);
+    const ids = viewRef.current.map((s: Song) => s.id);
+    if (!ids.length) return;
+    const name = filterName(filtersRef.current);
+    if (a === 'next' || a === 'queue') actions.queueTracks(ids, a, FROM_FILTERS);
+    else if (a === 'playlist') actions.addToPlaylist(ids);
+    else actions.savePlaylist({ kind: 'ids', ids, label: name, from: { kind: 'filter', label: name }, sentence: saveSentence(ids.length) });
+  }, []);
+  const closeActions = useCallback(() => setActionsOpen(false), []);
+  const removeFacet = useCallback((facet: string) => setFilters(withFacet(filtersRef.current, facet, [])), []);
   const onMenu = useCallback((id: string, opener: HTMLElement) => {
     opener.focus();
     setMenuId(id);
@@ -162,11 +284,18 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
     if (menuId !== null && !menuSong) setMenuId(null);
     if (infoId !== null && !infoSong) setInfoId(null);
   }, [menuId, menuSong, infoId, infoSong]);
+  // Review fix: a sheet whose content went (the shown set emptied under the ⋯ sheet; the library under Filters) is
+  // closed for good, not just hidden, so it never opens again by itself when the set or the library comes back.
+  const actionsShown = on && view.length > 0;
+  useEffect(() => {
+    if (actionsOpen && !actionsShown) setActionsOpen(false);
+    if (filterSheetOpen && total === 0) setFilterSheetOpen(false);
+  }, [actionsOpen, actionsShown, filterSheetOpen, total]);
   const onMenuAction = (a: RowMenuAction) => {
     const id = menuId;
     setMenuId(null); // the sheet closes first: a Dialog never sits on a Sheet
     if (id === null) return;
-    if (a === 'play') onPlay(id);
+    if (a === 'play') playLibraryFrom(id); // "Your library, starting with this track" (its words), filtered or not
     else if (a === 'next' || a === 'queue') actions.queueTracks([id], a);
     else if (a === 'playlist') actions.addToPlaylist([id]); // v16.1: the Add to playlist sheet
     else if (a === 'info') setInfoId(id);
@@ -174,6 +303,7 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
   };
 
   const searching = deferredQuery.trim() !== '';
+  const hint = on && view.length === 0 ? emptyHint(pass, filters) : null;
   const summary = searching
     ? `${matchCountText(view.length, total)} · ${SEARCH_HINT}`
     : summaryText(total, lib.totalSeconds, playingFromText({ hasTrack, walkName: walk.name, sameIds: lib.playOrderIsLibrary, orderCount: lib.playOrderCount, scanning: lib.isScanning }));
@@ -181,7 +311,7 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
   return (
     <>
       {total > 0 ? (
-        <SearchSortRow query={query} onQuery={setQuery} sort={sort} onSort={setSort} total={total} describedBy={SUMMARY_ID} inputRef={inputRef} />
+        <SearchSortRow query={query} onQuery={setQuery} sort={sort} onSort={setSort} total={total} describedBy={SUMMARY_ID} inputRef={inputRef} filters={filtersProp} />
       ) : null}
       <div
         ref={scrollRef}
@@ -193,10 +323,32 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
       >
         {total > 0 ? (
           <div data-testid="library-content">
-            <p id={SUMMARY_ID} data-testid="library-summary" className="px-4 pt-3 pb-2 text-sm text-ink-muted">
-              {summary}
-            </p>
-            {!searching ? (
+            {on ? (
+              <ViewBoundary
+                name="library-filter-bar"
+                fallback={(api) => <RegionCrash api={api} text="The filters bar hit a problem. Your tracks and their stored audio are safe." testId="library-filter-bar-fallback" />}
+                render={() => (
+                  <ActiveChips
+                    summaryId={SUMMARY_ID}
+                    shown={view.length}
+                    total={total}
+                    seconds={pass.seconds}
+                    chips={chips}
+                    onRemove={onToggle}
+                    onClear={clearFilters}
+                    onPlay={onPlayThese}
+                    onShuffle={onShuffleThese}
+                    onMore={onMore}
+                    filtersButtonRef={filtersButtonRef}
+                  />
+                )}
+              />
+            ) : (
+              <p id={SUMMARY_ID} data-testid="library-summary" className="px-4 pt-3 pb-2 text-sm text-ink-muted">
+                {summary}
+              </p>
+            )}
+            {!searching && !on ? (
               <ViewBoundary
                 name="library-health"
                 fallback={(api) => <RegionCrash api={api} text="The library health card hit a problem." testId="library-health-fallback" />}
@@ -221,6 +373,51 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
                     onReset={onReset}
                     marks={queue.positions}
                   />
+                ) : on ? (
+                  <div data-testid="library-filter-empty" className="mx-4 mt-3 mb-6 p-4 rounded-card border border-dashed border-line-strong">
+                    <p className="flex items-center gap-2 text-sm font-semibold text-ink-strong">
+                      <SearchX size={16} className="shrink-0 text-ink-muted" aria-hidden="true" />
+                      {emptyTitle(deferredQuery)}
+                    </p>
+                    {hint ? <p className="mt-1 text-sm text-ink-muted">{emptyHintLine(hint.label, hint.count)}</p> : null}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {hint ? (
+                        <button
+                          type="button"
+                          data-testid="library-filter-remove"
+                          onClick={() => {
+                            filtersButtonRef.current?.focus(); // review fix: the card goes with the facet (as Clear filters)
+                            removeFacet(hint.facet);
+                          }}
+                          className="min-h-touch px-3 rounded-control border border-line-strong bg-surface-raised text-sm text-ink hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+                        >
+                          {removeFacetText(hint.label)}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          filtersButtonRef.current?.focus(); // the card and the bar go with the picks
+                          clearFilters();
+                        }}
+                        className="min-h-touch px-3 rounded-control text-sm text-ink-muted underline underline-offset-2 hover:text-ink-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+                      >
+                        Clear filters
+                      </button>
+                      {!hint && searching ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuery('');
+                            inputRef.current?.focus();
+                          }}
+                          className="min-h-touch px-3 rounded-control text-sm text-ink-muted underline underline-offset-2 hover:text-ink-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+                        >
+                          Clear search
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
                 ) : (
                   <div data-testid="library-no-results" className="px-4 pt-2 pb-6 text-sm text-ink-muted">
                     <p>No tracks match ‘{deferredQuery.trim()}’</p>
@@ -255,6 +452,12 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
       </div>
       {menuSong ? <RowMenu song={menuSong} lines={menuLines} onAction={onMenuAction} onClose={() => setMenuId(null)} /> : null}
       {infoSong ? <TrackInfoDialog song={infoSong} onClose={() => setInfoId(null)} /> : null}
+      {filterSheetOpen && total > 0 ? (
+        <FilterSheet index={index} filters={filters} result={pass} onToggle={onToggle} onClear={clearFilters} onClose={closeFilters} />
+      ) : null}
+      {actionsOpen && actionsShown ? (
+        <FilterActionsSheet shown={view.length} seconds={pass.seconds} name={filterName(filters)} onAction={onFilterAction} onClose={closeActions} />
+      ) : null}
     </>
   );
 };

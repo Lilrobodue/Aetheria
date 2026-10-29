@@ -1,7 +1,7 @@
 {
-  "name": "v16.1-aetheria:-harmonic-resonance-player",
+  "name": "v16.2-aetheria:-harmonic-resonance-player",
   "private": true,
-  "version": "16.1.0",
+  "version": "16.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,8 @@
     "build:analyze": "vite build --mode analyze",
     "preview": "vite preview",
     "deploy": "npm run build",
-    "check:playlists": "node utils/library/listOps.check.ts && node utils/library/walkRecord.check.ts && node utils/playlists/model.check.ts",
+    "check:playlists": "node utils/library/listOps.check.ts && node utils/library/walkRecord.check.ts && node utils/playlists/model.check.ts && node utils/library/filterModel.check.ts",
+    "check:filters": "node utils/library/filterModel.check.ts",
     "check:critical": "node scripts/check-critical.mjs",
     "check:dialogs": "node scripts/check-dialogs.mjs",
     "check:hex": "node utils/hexWander.smoke.ts",
@@ -17,7 +18,7 @@
     "check:sound": "node utils/soundV2/check_vectors.ts && node utils/soundV2/layerSchedule.check.ts && node utils/soundV2/layerPlayer.check.ts && node utils/soundV2/layerHost.check.ts && node utils/soundV2/soundLog.check.ts && node utils/soundV2/keyFit.check.ts",
     "check:chroma": "node utils/soundV2/chroma.check.ts && node utils/soundV2/keyAnalysis.check.ts",
     "check:analyse": "node utils/library/analysePass.check.ts",
-    "check:shell": "node components/shell/shellModel.check.ts && node components/shell/zenModel.check.ts && node components/shell/layers/layersModel.check.ts && node components/shell/layers/soundModel.check.ts && node components/shell/library/libraryModel.check.ts && node components/shell/mixes/mixesModel.check.ts && node components/shell/queue/queueViewModel.check.ts && node components/shell/playlists/playlistsViewModel.check.ts",
+    "check:shell": "node components/shell/shellModel.check.ts && node components/shell/zenModel.check.ts && node components/shell/layers/layersModel.check.ts && node components/shell/layers/soundModel.check.ts && node components/shell/library/libraryModel.check.ts && node components/shell/library/filterViewModel.check.ts && node components/shell/mixes/mixesModel.check.ts && node components/shell/queue/queueViewModel.check.ts && node components/shell/playlists/playlistsViewModel.check.ts",
     "check:writers": "node scripts/check-library-writers.mjs",
     "check:queue": "node utils/queue/queueModel.check.ts",
     "check:mix": "node utils/mix/mix.check.ts && node utils/mix/distribution.check.ts && node scripts/check-mix-golden.mjs",
