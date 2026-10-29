@@ -556,6 +556,167 @@ test.describe('style foundation (v15.3)', () => {
     expect([...effects], 'backdrop-filter or an endless animation in the Library tab').toEqual([]);
   });
 
+  test('g. saved playlists (v16.1): every class on screen has a rule; no blur and no endless animation, in each of their states', async ({ page }) => {
+    test.setTimeout(240_000);
+    const seen = new Map<string, string>();
+    const effects = new Set<string>();
+    const census = async (state: string) => {
+      await page.waitForTimeout(250);
+      await collectClasses(page, state, seen);
+      const found = await page.evaluate(() => {
+        const roots = Array.from(document.querySelectorAll('[data-testid="new-shell"], [role="dialog"], [role="alertdialog"], [data-testid="notices"]'));
+        const out: string[] = [];
+        for (const root of roots) {
+          for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+            const cs = getComputedStyle(el);
+            const tag = `${el.tagName.toLowerCase()}.${(el.getAttribute('class') || '').split(/\s+/).slice(0, 3).join('.')}`;
+            if (cs.backdropFilter && cs.backdropFilter !== 'none') out.push(`backdrop-filter ${cs.backdropFilter} on ${tag}`);
+            if (cs.animationName && cs.animationName !== 'none' && /infinite/.test(cs.animationIterationCount)) out.push(`infinite animation ${cs.animationName} on ${tag}`);
+          }
+        }
+        return out;
+      });
+      for (const f of found) effects.add(`${f} (${state})`);
+    };
+    // The storage note shows only when the browser says the storage isn't persistent.
+    await page.addInitScript(() => {
+      (navigator.storage as any).persisted = async () => false;
+    });
+    await page.setViewportSize({ width: 411, height: 752 });
+    await openNewLayout(page, { engine: 'v2', output: 'headphones' });
+    await page.getByTestId('tab-library-button').click();
+    await page.getByTestId('library-view-playlists').click();
+    await page.getByTestId('playlists-empty').waitFor();
+    await census('playlists, empty, with the storage note');
+    await seedLibraryRecords(page, 30, { crystals: 'some', keys: true });
+    // Two playlists (one with a missing entry) and one record that can't be read.
+    await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((resolve, reject) => { const r = indexedDB.open('aetheria-db'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+      const st: any = await new Promise((resolve) => { const q = db.transaction('playlist-state').objectStore('playlist-state').get('current'); q.onsuccess = () => resolve(q.result); });
+      const ids: string[] = st.originalOrder;
+      const e = (i: number) => ({ id: ids[i], name: `tone-${String(i + 1).padStart(4, '0')}`, file: `tone-${String(i + 1).padStart(4, '0')}.wav`, size: 1 });
+      const tx = db.transaction('playlist-state', 'readwrite');
+      tx.objectStore('playlist-state').put({ key: 'pl:pevening1', v: 1, id: 'pevening1', name: 'Evening', createdAt: 2, updatedAt: 2, entries: [e(0), e(1), { id: 'gone', name: 'tone-0203', file: 'tone-0203.wav', size: 9 }, e(3), e(4), e(5)], from: { kind: 'queue' } });
+      tx.objectStore('playlist-state').put({ key: 'pl:pfocus001', v: 1, id: 'pfocus001', name: 'Focus', createdAt: 1, updatedAt: 1, entries: [e(6), e(7)] });
+      tx.objectStore('playlist-state').put({ key: 'pl:pbroken01', v: 2, id: 'pbroken01', name: 'Broken', createdAt: 1, updatedAt: 1, entries: [] });
+      await new Promise((r) => (tx.oncomplete = r));
+      db.close();
+    });
+    await page.goto('/');
+    await page.getByTestId('new-shell').waitFor();
+    await page.getByTestId('tab-library-button').click();
+    await page.getByTestId('library-view-tracks').waitFor();
+    await page.getByTestId('library-list').waitFor();
+    await census('library, tracks, the switch');
+    await page.getByTestId('library-view-playlists').click();
+    await page.getByTestId('playlists-list').waitFor();
+    await census('playlists, the list, unreadable');
+    await page.locator('[data-playlist-id="pevening1"]').getByRole('button', { name: 'Play Evening', exact: true }).click();
+    await page.getByTestId('notices').getByRole('button', { name: 'Undo', exact: true }).waitFor();
+    await census('playlists, playing, its toast');
+    await page.locator('[data-playlist-id="pfocus001"]').getByTestId('playlist-row-menu').click();
+    await page.getByTestId('playlist-menu-body').waitFor();
+    await census('a playlist\'s menu');
+    await page.getByTestId('playlist-menu-rename').click();
+    await page.getByTestId('playlist-name-dialog').waitFor();
+    await census('the name Dialog, rename');
+    await page.keyboard.press('Escape');
+    await page.locator('[data-playlist-id="pevening1"] [data-testid="playlist-row-open"]').click();
+    await page.getByTestId('playlist-title').waitFor();
+    await census('a playlist\'s view, playing, a missing entry');
+    await page.locator('[data-testid="playlist-track"][data-index="1"] [data-row-menu]').first().click();
+    await page.getByTestId('playlist-row-menu-body').waitFor();
+    await census('an entry\'s menu');
+    await page.getByTestId('playlist-row-menu-playlist').click();
+    await page.getByTestId('playlist-add-body').waitFor();
+    await census('Add to playlist');
+    await page.getByTestId('playlist-add-new').click();
+    await page.getByTestId('playlist-add-name').waitFor();
+    await census('Add to playlist, New playlist inline');
+    await page.keyboard.press('Escape');
+    await page.locator('[data-testid="playlist-track"][data-missing]').locator('[data-row-menu]').click();
+    await page.getByTestId('playlist-row-menu-body').waitFor();
+    await census('a missing entry\'s menu');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('playlist-edit').click();
+    await census('edit mode');
+    await page.locator('[data-testid="playlist-track"][data-index="3"] [data-testid="playlist-handle"]').focus();
+    await page.keyboard.press('Space');
+    await page.keyboard.press('ArrowUp');
+    await census('edit mode, a row lifted');
+    await page.keyboard.press('Escape');
+    await page.locator('[data-testid="playlist-track"][data-index="2"] [data-row-menu]').first().click();
+    await page.getByTestId('playlist-row-menu-body').waitFor();
+    await census('edit mode, an entry\'s menu');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('playlist-done').click();
+    await crash(page, 'playlist-detail');
+    await page.getByTestId('playlist-detail-fallback').waitFor();
+    await census('a playlist\'s view, fallback');
+    await page.getByRole('button', { name: 'Reload panel', exact: true }).click();
+    await page.getByTestId('playlist-back').click();
+    await crash(page, 'playlists');
+    await page.getByTestId('playlists-fallback').waitFor();
+    await census('the list, fallback');
+    await page.getByRole('button', { name: 'Reload panel', exact: true }).click();
+    // The health card's Library tools and the new Clear.
+    await page.getByTestId('library-view-tracks').click();
+    const toggle = page.getByTestId('library-health-toggle');
+    if (await toggle.isVisible().catch(() => false)) await toggle.click();
+    await page.getByTestId('library-tools').waitFor();
+    await census('the Library tools');
+    await page.getByTestId('library-tools-clear').click();
+    await page.getByTestId('clear-library-dialog').waitFor();
+    await census('the Clear dialog');
+    await page.getByTestId('clear-library-also').click();
+    await census('the Clear dialog, ticked');
+    await page.keyboard.press('Escape');
+    // Now Playing's ⋯ and Up next with a queue (Save as playlist), and the save Dialog.
+    await page.getByTestId('tab-now-button').click();
+    await page.getByTestId('np-menu-button').click();
+    await page.getByTestId('menu-save-playlist').waitFor();
+    await census('Now Playing\'s ⋯, the two rows');
+    await page.getByTestId('menu-save-playlist').click();
+    await page.getByTestId('playlist-name-dialog').waitFor();
+    await census('the name Dialog, save');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => {
+      const s = (window as any).__aetheriaLibrary.state();
+      (window as any).__aetheriaQueue.add([s.libraryIds[20], s.libraryIds[21]], 'queue');
+    });
+    await page.getByTestId('np-upnext').click();
+    await page.getByTestId('queue-save').waitFor();
+    await census('Up next, Save as playlist');
+    await page.keyboard.press('Escape');
+    // The desktop panel: the list and a playlist's view.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.getByTestId('nav-library').click();
+    await page.getByTestId('library-view-playlists').click();
+    await page.getByTestId('playlists-list').waitFor();
+    await census('desktop, the list');
+    await page.locator('[data-playlist-id="pevening1"] [data-testid="playlist-row-open"]').click();
+    await page.getByTestId('playlist-title').waitFor();
+    await census('desktop, a playlist\'s view');
+    // Classic: Clear's tickbox (only with playlists), armed and ticked.
+    await page.setViewportSize({ width: 411, height: 752 });
+    await page.goto('/?layout=classic');
+    await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
+    const clear = page.getByRole('button', { name: 'Clear library and cache', exact: true });
+    await clear.scrollIntoViewIfNeeded();
+    await page.getByTestId('clear-also-playlists').click();
+    await clear.click();
+    await census('classic Clear, armed, ticked');
+
+    const styled = await stylesheetClasses(page);
+    const unstyled = [...seen]
+      .filter(([t]) => !styled.has(t) && !LUCIDE.test(t) && !INERT.has(t))
+      .map(([t, state]) => `${t} (${state})`)
+      .sort();
+    expect(seen.size, 'the walk saw the playlists').toBeGreaterThan(100);
+    expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
+    expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
+  });
+
   test('d. the --ae-* CSS variables equal the tailwind.config.js tokens', async ({ page }) => {
     // The config is ESM (the root package is "type": "module"); imported through a data: URL so the test runner's
     // own loader never transforms it.

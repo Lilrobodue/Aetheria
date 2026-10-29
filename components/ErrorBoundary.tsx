@@ -30,7 +30,7 @@ import { waitForBlobSaves } from '../utils/playlistCache';
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 /** The version the error log records. Bump it with the header badge (App.tsx); isolation.spec checks the two agree. */
-export const APP_VERSION = 'v16.0.1';
+export const APP_VERSION = 'v16.1';
 
 export type ViewName =
   | 'visualizer'
@@ -74,7 +74,12 @@ export type ViewName =
   | 'mixes-lists'
   | 'mixes-experimental'
   // v16.0, the queue: the Up next sheet's body (the phone's sheet, the desktop's panel).
-  | 'queue';
+  | 'queue'
+  // v16.1, saved playlists: the list, a playlist's view, the row and playlist menus, the Add to playlist sheet.
+  | 'playlists'
+  | 'playlist-detail'
+  | 'playlist-menu'
+  | 'playlist-add';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The error log

@@ -763,7 +763,7 @@ test.describe('phone, the row menu', () => {
     await expect(menu.getByTestId('library-menu-next')).toContainText('Play next');
     await expect(menu.getByTestId('library-menu-next')).toContainText('First when you press Play');
     await expect(menu.getByTestId('library-menu-queue')).toContainText('Add to queue');
-    await expect(menu.getByRole('button')).toHaveText([/Play from here/, /Play next/, /Add to queue/, /Track info/, /Delete from library…/, /Cancel/]);
+    await expect(menu.getByRole('button')).toHaveText([/Play from here/, /Play next/, /Add to queue/, /Add to playlist…/, /Track info/, /Delete from library…/, /Cancel/]); // v16.1: Add to playlist…
     await expect(menu.getByTestId('library-menu-info')).toContainText('Track info');
     await expect(menu.getByTestId('library-menu-delete')).toContainText('Delete from library…');
     await expect(menu.getByTestId('library-menu-delete')).toContainText('The original file is not touched.');

@@ -679,8 +679,8 @@ export function healthModel(i: HealthInput): HealthModel {
   return { lines, status, toDo, autoOpen, folded };
 }
 
-/** The card's footer (the classic peek). */
-export const HEALTH_FOOTER = 'Clear and the diagnostics are in the classic library.';
+/** The card's footer (the classic peek). v16.1: Clear and the diagnostics are the card's own Library tools now. */
+export const HEALTH_FOOTER = 'The classic library view is one tap away.';
 
 /** Assign's confirmation (v15.8: from the plan, asked only when crystals tracks already have would change). */
 export { assignConfirmText, assignNeedsConfirm } from '../../../utils/mix/distribution.ts';

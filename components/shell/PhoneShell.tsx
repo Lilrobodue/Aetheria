@@ -25,6 +25,7 @@ import MoreStub from './tabs/MoreStub';
 import LayersTab from './layers/LayersTab';
 import LibraryTab from './library/LibraryTab';
 import SheetHost from './SheetHost';
+import PlaylistDialogs from './playlists/PlaylistDialogs';
 import { NowPlayingCrash, TabCrash, TransportCrash } from './fallbacks';
 
 export function focusViewHeading(): void {
@@ -97,6 +98,7 @@ const PhoneShell = () => {
         <TabBar />
       </div>
       {sheet ? <SheetHost presentation="sheet" /> : null}
+      <PlaylistDialogs />
     </div>
   );
 };

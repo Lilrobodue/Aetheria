@@ -9,10 +9,18 @@ export const LAYOUT_KEY = 'aetheria.layout.v1';
 
 export type LayoutPref = 'classic' | 'new';
 export type ShellTab = 'now' | 'library' | 'mixes' | 'layers' | 'more';
-/** v15.7 adds the Import sheet; v16.0 the Up next sheet (the queue). */
-export type ShellSheet = 'sound' | 'crystal' | 'walks' | 'menu' | 'import' | 'queue';
+/** v15.7 adds the Import sheet; v16.0 the Up next sheet (the queue); v16.1 the Add to playlist sheet (modal on both
+ *  shells, as the ⋯ menu). */
+export type ShellSheet = 'sound' | 'crystal' | 'walks' | 'menu' | 'import' | 'queue' | 'playlist-add';
 /** The classic panel a stub "peeks" into (decision 4). */
 export type PeekPanel = 'library' | 'sound'; // v15.9: no 'mixes' (the Mixes tab replaced its stub's peek)
+
+/**
+ * v16.1: where the saved playlists live (decision 1, PROVISIONAL until the user has seen the review page): A, the Library
+ * tab, behind its "Tracks · Playlists" switch. The one place that says so: App opens a playlist in this tab, and the
+ * Library tab shows the switch only when it is this tab. Option B would mount the same views in the Mixes tab.
+ */
+export const PLAYLISTS_HOME: ShellTab = 'library';
 
 export function isLayoutPref(v: unknown): v is LayoutPref {
   return v === 'new' || v === 'classic';

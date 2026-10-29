@@ -15,6 +15,10 @@
 // first on window) reaches the sheet's onClose, which asks `cancelRef` first; the panel's (a document listener) is
 // stopped by this hook's own capture listener on window. The rows must be the list's direct children, in order, all of
 // one height while lifted (the caller closes any open row actions first).
+// v16.1 (a saved playlist's edit mode, a virtualized list): three additive options. rowAt(i) finds the mounted row for
+// place i (the list's children are only the rows in view, absolutely placed), slotTopOf(i) gives its slot's top (i × 64),
+// and rowHeight fixes the height. Left out, the queue sheet's behaviour is exactly v16.0's (children[i], offsetTop, the
+// measured height).
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
@@ -50,6 +54,12 @@ interface Options {
   announce: (kind: 'moving' | 'dropped' | 'cancelled' | 'gone', key: string, at: number) => void;
   /** Set to a function that puts a lifted row back (true) or does nothing (false): the sheet's close asks it first. */
   cancelRef?: { current: (() => boolean) | null };
+  /** v16.1: the mounted row for place i (default: the list's i-th child). */
+  rowAt?: (i: number) => HTMLElement | null;
+  /** v16.1: the top of place i's slot in the list's layout (default: that row's offsetTop). */
+  slotTopOf?: (i: number) => number;
+  /** v16.1: every row's height (default: the lifted row's, measured). */
+  rowHeight?: number;
 }
 
 const LIFT_MS = 150;
@@ -86,8 +96,12 @@ export function useSortable(o: Options) {
   };
 
   const placeOf = (key: string): number => optsRef.current.keys.indexOf(key);
-  const rowEl = (i: number): HTMLElement | null => (i >= 0 ? ((optsRef.current.listRef.current?.children[i] as HTMLElement | undefined) ?? null) : null);
-  const rowHeight = (i: number): number => rowEl(i)?.getBoundingClientRect().height ?? 64;
+  const rowEl = (i: number): HTMLElement | null => {
+    if (i < 0) return null;
+    const at = optsRef.current.rowAt;
+    return at ? at(i) : ((optsRef.current.listRef.current?.children[i] as HTMLElement | undefined) ?? null);
+  };
+  const rowHeight = (i: number): number => optsRef.current.rowHeight ?? rowEl(i)?.getBoundingClientRect().height ?? 64;
   const clampPlace = (i: number) => Math.max(0, Math.min(optsRef.current.keys.length - 1, i));
 
   /** Ends a lift (or a press not yet lifted): its transform, timer, frame and capture. The lifted key and its steps. */
@@ -340,7 +354,7 @@ export function useSortable(o: Options) {
   };
 
   /** Where the dropped row will sit (the placeholder): the target row's place in the list's layout. */
-  const slotTop = (i: number): number => rowEl(i)?.offsetTop ?? 0;
+  const slotTop = (i: number): number => (optsRef.current.slotTopOf ? optsRef.current.slotTopOf(i) : (rowEl(i)?.offsetTop ?? 0));
 
   return { lifted, handleProps, offsetOf, rowH, slotTop };
 }

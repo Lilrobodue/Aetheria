@@ -11,13 +11,17 @@
     "count": 1,
     "sha": "6e710798b6e8f677"
   },
+  "clearEntirePlaylist reference in App › useLayoutEffect(no deps)": {
+    "count": 1,
+    "sha": "ada759c1715f4869"
+  },
   "clearPlaylistCache call in App › clearEntirePlaylist": {
     "count": 1,
-    "sha": "f181799c19efd307"
+    "sha": "3fda4156894741a5"
   },
   "clearPlaylistCache call in tools/cache-check.ts: (module)": {
-    "count": 5,
-    "sha": "4790d08271442e3c"
+    "count": 8,
+    "sha": "6b15e9fa5b138b53"
   },
   "confirmPendingDelete reference in App › <ViewBoundary render> › <Dialog actions> › <Button onClick>": {
     "count": 1,
@@ -36,8 +40,8 @@
     "sha": "ea710045e12cc443"
   },
   "deleteTracksFromCache call in tools/cache-check.ts: (module)": {
-    "count": 6,
-    "sha": "4790d08271442e3c"
+    "count": 7,
+    "sha": "6b15e9fa5b138b53"
   },
   "discardOrphans reference in App › <ViewBoundary render> › <button onClick>": {
     "count": 1,
@@ -97,7 +101,7 @@
   },
   "setOriginalPlaylist call in App › clearEntirePlaylist": {
     "count": 1,
-    "sha": "f181799c19efd307"
+    "sha": "3fda4156894741a5"
   },
   "setOriginalPlaylist call in App › deleteSong": {
     "count": 1,

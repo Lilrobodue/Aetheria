@@ -183,11 +183,14 @@ export async function stubStorageFull(page: Page): Promise<void> {
  * a full device (their transaction aborts) while window.__failStateSaves is
  * true (it starts false), and every cache report is recorded in
  * window.__cacheEvents as { type: 'cache-error' | 'cache-ok', what, seq, ... }.
+ * v16.1: only the library's own saves (meta, and the 'current' state record); a saved playlist's write ('pl:<id>') fails
+ * only while window.__failPlaylistSaves is true (it starts false).
  */
 export async function controlStateSaves(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as any;
     w.__failStateSaves = false;
+    w.__failPlaylistSaves = false;
     w.__cacheEvents = [];
     for (const type of ['aetheria:cache-error', 'aetheria:cache-ok']) {
       window.addEventListener(type, (e) =>
@@ -197,7 +200,10 @@ export async function controlStateSaves(page: Page): Promise<void> {
     const put = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: unknown[]) {
       const request = (put as any).apply(this, args);
-      if (w.__failStateSaves && (this.name === 'meta' || this.name === 'playlist-state')) this.transaction.abort();
+      const key = (args[0] as any)?.key;
+      const isPlaylist = this.name === 'playlist-state' && typeof key === 'string' && key.startsWith('pl:');
+      if (w.__failStateSaves && (this.name === 'meta' || (this.name === 'playlist-state' && key === 'current'))) this.transaction.abort();
+      else if (w.__failPlaylistSaves && isPlaylist) this.transaction.abort();
       return request;
     } as typeof put;
   });
@@ -1052,7 +1058,9 @@ export type CrashView =
   // v15.9, the Mixes tab.
   | 'mixes-walks' | 'mixes-lists' | 'mixes-experimental'
   // v16.0, the queue (the Up next sheet's body).
-  | 'queue';
+  | 'queue'
+  // v16.1, saved playlists.
+  | 'playlists' | 'playlist-detail' | 'playlist-menu' | 'playlist-add';
 
 /**
  * Make a region throw on its next render, through the app's dev hook window.__aetheriaCrash (ErrorBoundary.tsx; dev
@@ -1682,23 +1690,27 @@ export async function countLibraryDeletes(page: Page): Promise<void> {
 // The hide flush (v16.0.1): save-flush.spec.ts, and device.spec.ts's D1 and D2
 // ---------------------------------------------------------------------------------------------------------------
 
-/** From the next page load on, count every put on the 'playlist-state' store in window.__statePuts: one per metadata +
- *  state save (the 'current' record), the hide flush's included. statePuts reads it; statePutLibraries reads the
- *  library each put named; window.__statePutTimes holds when each was made (Date.now()). */
+/** From the next page load on, count every put of the 'current' record on the 'playlist-state' store in
+ *  window.__statePuts: one per metadata + state save, the hide flush's included. statePuts reads it; statePutLibraries
+ *  reads the library each put named; window.__statePutTimes holds when each was made (Date.now()). v16.1: a saved
+ *  playlist's put ('pl:<id>', the same store) is counted apart, in window.__plPuts (plPuts). */
 export async function countStatePuts(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as any;
     w.__statePuts = 0;
     w.__statePutLibraries = [];
     w.__statePutTimes = [];
+    w.__plPuts = 0;
     const put = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: unknown[]) {
-      if (this.name === 'playlist-state') {
+      const key = (args[0] as any)?.key;
+      if (this.name === 'playlist-state' && key === 'current') {
         w.__statePuts++;
         w.__statePutTimes.push(Date.now());
         const order = (args[0] as { originalOrder?: unknown } | undefined)?.originalOrder;
         w.__statePutLibraries.push(Array.isArray(order) ? order.length : null);
       }
+      if (this.name === 'playlist-state' && typeof key === 'string' && key.startsWith('pl:')) w.__plPuts++;
       return (put as any).apply(this, args);
     } as typeof put;
   });
@@ -1708,9 +1720,14 @@ export async function statePuts(page: Page): Promise<number> {
   return page.evaluate(() => (window as any).__statePuts as number);
 }
 
-/** The library size (originalOrder's length) of every 'playlist-state' put this page made, in order (countStatePuts). */
+/** The library size (originalOrder's length) of every 'current' put this page made, in order (countStatePuts). */
 export async function statePutLibraries(page: Page): Promise<(number | null)[]> {
   return page.evaluate(() => (window as any).__statePutLibraries as (number | null)[]);
+}
+
+/** v16.1: the saved playlists' puts counted so far (countStatePuts). */
+export async function plPuts(page: Page): Promise<number> {
+  return page.evaluate(() => (window as any).__plPuts as number);
 }
 
 /** One page-lifecycle event: what, when (Date.now()), the visibility then, pagehide/pageshow's persisted, and the

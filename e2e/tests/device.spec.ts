@@ -1,4 +1,6 @@
+import { type Locator, type Page } from '@playwright/test';
 import { test, expect, ON_DEVICE } from './fixtures';
+import { acceptDisclaimerNew, seedToneLibrary, LAYER_ENGINE_KEY, LAYOUT_KEY } from './helpers';
 import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY, crash, optInNewLayout, layoutPref, tapAt, shellHidden, PHONE_VIEWPORT, openSeededNewLayout, openLibraryTab, libraryState, startWalk, libraryRowButton, rowMenu, type LibraryState } from './helpers';
 import { adb, mediaSession, chromeSessions } from './adb';
 
@@ -8,9 +10,10 @@ import { adb, mediaSession, chromeSessions } from './adb';
 // (v15.4: the panel-crash one after the lock-screen one, the root crash last;
 // v15.5: the new layout's one before the lock-screen one; v15.6: the new layout in Zen after it; v15.7: the Library
 // tab's row tap after that; v15.8: the walk after Assign after that; v15.9: a mix from the Mixes tab after that; v16.0:
-// the queue after that).
+// the queue after that; v16.1: a saved playlist after that).
 // While Playwright is connected, Chrome on Android keeps every tab visible: no test here ever sees a real hide. The
-// tests that need one (v16.0.1's D1-D3, the hide flush) are in device-hide.spec.ts, run on their own with E2E_HIDE=1.
+// tests that need one (v16.0.1's D1-D3, the hide flush; v16.1's D-PL1, a playlist made just before a background kill)
+// are in device-hide.spec.ts, run on their own with E2E_HIDE=1.
 test.skip(!ON_DEVICE, 'needs an Android device (npm run test:device)');
 
 // Android sends the media keys to a card that is PLAYING, so a card left over
@@ -501,6 +504,176 @@ test('v16.0: by finger, Play next tone-0020 then Add to queue tone-0025 from the
   // (4 s tones advance on their own: the card and the state are compared as one polled pair.)
   await expect
     .poll(async () => (await libraryState(page)).current === (mediaSession()?.title ?? '-'), { message: 'the card names the track playing', timeout: 10_000 })
+    .toBe(true);
+  expect(dialogs).toEqual([]);
+});
+
+/**
+ * v16.1 (spec §5.10): a saved playlist on the phone. D-PL2: Clear (the new layout's Library tools) keeps a playlist, its
+ * tracks missing, with the screen on (the android project); then the screen-off test below. (D-PL1, a playlist made just
+ * before a background kill, needs a real hide: it is in device-hide.spec.ts.) Every tap is a finger's (tapAt, spaced
+ * past Android's double-tap window), and every outcome is polled (a tap's click lands after tapAt returns).
+ */
+async function playlistPhone(page: Page): Promise<{ at: (t: Locator, what: string) => Promise<void> }> {
+  const at = async (target: Locator, what: string) => {
+    await target.evaluate((el) => el.scrollIntoView({ block: 'center' })); // a DOM scroll; the tap itself is a finger's
+    await page.waitForTimeout(300);
+    const box = await target.boundingBox();
+    expect(box, what).toBeTruthy();
+    await tapAt(page, box!.x + box!.width / 2, box!.y + box!.height / 2);
+  };
+  return { at };
+}
+const playlistsState = (p: Page) => p.evaluate(() => (window as any).__aetheriaPlaylists?.state() ?? null).catch(() => null);
+
+test('v16.1 D-PL2: Clear by finger (the Library tools, unticked, after 600 ms) keeps the playlist, its tracks missing', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.addInitScript(({ keys }) => {
+    try {
+      localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
+      localStorage.setItem(keys.engine, 'classic');
+      localStorage.setItem(keys.layout, 'new');
+    } catch {
+      // No storage here.
+    }
+  }, { keys: { engine: LAYER_ENGINE_KEY, layout: LAYOUT_KEY } });
+  const ids = await seedToneLibrary(page, { n: 30, cursor: -1 });
+  // Evening, seeded beside the library (a record as the app writes it).
+  const e = (k: number) => ({ id: ids[k - 1], name: `tone-${String(k).padStart(2, '0')}`, file: `tone-${String(k).padStart(2, '0')}.wav`, size: 1 });
+  const evening = { key: 'pl:pevening1', v: 1, id: 'pevening1', name: 'Evening', createdAt: 1, updatedAt: 1, entries: [e(2), e(5), e(8)] };
+  await page.evaluate(async (evening) => {
+    const db: IDBDatabase = await new Promise((resolve, reject) => { const r = indexedDB.open('aetheria-db'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+    const tx = db.transaction('playlist-state', 'readwrite');
+    tx.objectStore('playlist-state').put(evening);
+    await new Promise((r) => (tx.oncomplete = r));
+    db.close();
+  }, evening);
+  /** On disk, read in the page (a raw IndexedDB open, no app code): whether the play state is there, how many tracks'
+   *  audio, and every 'pl:' record of the playlist-state store. */
+  const disk = () =>
+    page
+      .evaluate(async () => {
+        const db: IDBDatabase = await new Promise((resolve, reject) => { const r = indexedDB.open('aetheria-db'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+        const req = <T,>(r: IDBRequest<T>) => new Promise<T>((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+        try {
+          const tx = db.transaction(['blobs', 'playlist-state'], 'readonly');
+          const st = tx.objectStore('playlist-state');
+          const current = (await req(st.get('current'))) !== undefined;
+          const blobs = await req(tx.objectStore('blobs').count());
+          const pl = ((await req(st.getAll())) as { key: string }[]).filter((r) => typeof r.key === 'string' && r.key.startsWith('pl:'));
+          return { current, blobs, pl };
+        } finally {
+          db.close();
+        }
+      })
+      .catch(() => null);
+  const before = await disk();
+  expect([before?.current, before?.blobs, before?.pl], 'seeded: the play state, 30 tracks’ audio, Evening').toEqual([true, 30, [evening]]);
+  await page.setViewportSize(PHONE_VIEWPORT);
+  await page.goto('/');
+  await acceptDisclaimerNew(page);
+  await expect.poll(async () => (await libraryState(page)).libraryIds.length, { message: 'the seeded library restores', timeout: 60_000 }).toBe(30);
+  await expect.poll(async () => (await playlistsState(page))?.status, { message: 'the playlists are read back', timeout: 20_000 }).toBe('ready');
+  const { at } = await playlistPhone(page);
+  await at(page.getByTestId('tab-library-button'), 'the Library tab');
+  await expect(page.getByTestId('tab-library')).toBeVisible({ timeout: 5_000 });
+  const toggle = page.getByTestId('library-health-toggle');
+  if (await toggle.isVisible().catch(() => false)) await at(toggle, 'the health card');
+  await expect(page.getByTestId('library-tools-clear')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('library-tools-clear'), 'Clear library…');
+  const d = page.getByRole('alertdialog', { name: 'Clear your library?' });
+  await expect(d).toBeVisible({ timeout: 5_000 });
+  await expect(d.getByRole('checkbox', { name: 'Also delete my playlist' })).not.toBeChecked();
+  await page.waitForTimeout(700); // past the 600 ms guard
+  await at(d.getByTestId('clear-library-confirm'), 'Delete 30 tracks');
+  await expect.poll(async () => (await libraryState(page)).libraryIds.length, { timeout: 20_000, message: 'the library is cleared' }).toBe(0);
+  // On disk: the Clear has committed (one transaction: the play state and the audio gone) and Evening's record is still
+  // there, byte for byte, its three entries in order. Polled: the Clear's transaction commits after the tap's task.
+  await expect
+    .poll(disk, { timeout: 20_000, message: 'on disk: the Clear committed (no play state, no audio), Evening kept with its entries' })
+    .toEqual({ current: false, blobs: 0, pl: [evening] });
+  await expect.poll(async () => (await playlistsState(page))?.lists?.map((l: { name: string; present: number; missing: number }) => [l.name, l.present, l.missing]), { timeout: 10_000, message: 'Evening kept, its 3 tracks missing' }).toEqual([['Evening', 0, 3]]);
+  await at(page.getByTestId('library-view-playlists'), 'Playlists');
+  await expect(page.getByTestId('playlist-row').first().locator('[data-row-facts]')).toHaveText('3 tracks · 3 missing', { timeout: 5_000 });
+});
+
+test('v16.1: a saved playlist plays in its own order with the screen off: Play by finger, then the card follows three gapless advances through the playlist (not the library); after the wake the source line and the cursor @device', async ({ page }) => {
+  // v16.1 (spec §5.10 step 5): a playlist is a play order, so the gapless swap and the media session follow it. 30
+  // seeded tones of 4 s with crystals, the new layout on the phone; Evening (8 tracks, an order other than the
+  // library's) made through the hook, then its ▶ by finger, and Now Playing. Turns the screen off; a phone with a secure
+  // lock stays locked after the test (unlock it by hand). LAST of the v16.1 tests (its own unlock).
+  // v16.1 re-review: the card is read from the moment it shows Evening's first track, before the taps that follow (a
+  // 4 s track can advance during them), and again after each; every title it shows must be the playlist's next one.
+  const dialogs = await openSeededNewLayout(page, 30, { real: 30, seconds: 4 });
+  await page.setViewportSize(PHONE_VIEWPORT);
+  await expect.poll(async () => (await playlistsState(page))?.status, { message: 'the playlists are read back', timeout: 20_000 }).toBe('ready');
+  const lib = await libraryState(page);
+  const ks = [10, 3, 7, 1, 5, 12, 2, 9];
+  const order = ks.map((k) => lib.libraryIds[k - 1]);
+  const names = ks.map((k) => `tone-${String(k).padStart(4, '0')}`);
+  const id = await page.evaluate((order) => {
+    let out: string | null = null;
+    const b = document.createElement('button');
+    b.addEventListener('click', () => { out = (window as any).__aetheriaPlaylists.create('Evening', order); });
+    document.body.appendChild(b);
+    b.click();
+    b.remove();
+    return out;
+  }, order);
+  expect(id).toBeTruthy();
+  const { at } = await playlistPhone(page);
+  await at(page.getByTestId('tab-library-button'), 'the Library tab');
+  await expect(page.getByTestId('tab-library')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('library-view-playlists'), 'Playlists');
+  await expect(page.getByTestId('playlist-row').first()).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('playlist-row').first().getByTestId('playlist-row-play'), 'Play Evening');
+  await expect.poll(() => mediaSession(), { timeout: 15_000, message: 'tone-0010 on the card' }).toEqual({ state: 'playing', title: names[0] });
+  // Every title the PLAYING card shows, in order, from Evening's first (just read off the card): read now, before the
+  // taps below, and after each of them, then every 500 ms with the screen off.
+  const seen: string[] = [names[0]];
+  const look = () => {
+    const s = mediaSession();
+    if (s && s.state === 'playing' && !seen.includes(s.title)) seen.push(s.title);
+    return s;
+  };
+  await at(page.getByTestId('tab-now-button'), 'Now Playing');
+  look();
+  await expect(page.getByTestId('np-source')).toHaveText(/^Playlist · Evening · [1-3] of 8$/, { timeout: 5_000 });
+  look();
+  const pausesBefore = await pauseCount(page);
+  look();
+  const beforeSleep = seen.length;
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  try {
+    await expect
+      .poll(
+        () => {
+          look();
+          return seen.length - beforeSleep;
+        },
+        { timeout: 45_000, intervals: [500], message: 'three gapless advances on the PLAYING card with the screen off' }
+      )
+      .toBeGreaterThanOrEqual(3);
+    expect(look()?.state, 'the card still says playing').toBe('playing');
+    expect(chromeSessions().filter((s) => s.state === 'playing').length, 'one PLAYING Chrome card: none stranded').toBe(1);
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  test.info().annotations.push({ type: 'card titles, a playlist (| the screen off)', description: `${seen.slice(0, beforeSleep).join(' → ')} | ${seen.slice(beforeSleep).join(' → ')}` });
+  // A window over the playlist's order: each title the card showed is the playlist's next track (never a library
+  // neighbour, never a skip), however many advanced before the screen went off.
+  expect(seen, 'the playlist’s own order, not the library’s, from its first track').toEqual(names.slice(0, seen.length));
+  // After the wake, DOM and state reads only (no click or tap: Chrome draws no frames behind the keyguard).
+  expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
+  const s = await libraryState(page);
+  expect(s.ids, 'the play order is the playlist').toEqual(order);
+  // (4 s tones advance on their own: the line and the cursor are compared as one polled pair.)
+  await expect
+    .poll(async () => {
+      const c = (await libraryState(page)).cursor;
+      const line = await page.evaluate(() => document.querySelector('[data-testid="np-source"]')?.textContent ?? null);
+      return c >= 3 && line === `Playlist · Evening · ${c + 1} of 8`;
+    }, { message: 'the source line names the playlist and the cursor', timeout: 10_000 })
     .toBe(true);
   expect(dialogs).toEqual([]);
 });

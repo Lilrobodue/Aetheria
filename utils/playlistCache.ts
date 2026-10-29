@@ -38,6 +38,10 @@
 // tombstoned for the session so a save scheduled before the delete can't
 // write them back, and Clear bumps an epoch so a pending or running save from
 // before it writes nothing.
+//
+// SAVED PLAYLISTS (v16.1) live beside the 'current' record in the playlist-state store, one record per playlist under
+// the key 'pl:<id>' (DB_VERSION stays 2). Their writer (writePlaylistRecords) writes ONLY those keys: never 'current',
+// never blobs or meta. Clear keeps them unless asked (clearPlaylistCache({ playlists: true })).
 
 import type { Song } from '../types';
 import type { LoShuWalkMode } from '../constants';
@@ -144,6 +148,10 @@ function __setCacheDbNameForTests(name: string): void {
   dbName = name;
   // v16.0.1: the flush connection belongs to the previous database.
   if (flushDb) { flushDb.close(); flushDb = null; }
+  // v16.1: so do the playlists' load gate and their pending writes.
+  playlistsReadable = false;
+  pendingPl.clear();
+  plKnown.clear();
 }
 
 // Session tombstones: ids removed by deleteTracksFromCache. A save that was
@@ -776,24 +784,51 @@ async function readSavedPlaylist(): Promise<RestoredPlaylist | null> {
 // Clear
 // ----------------------------------------------------------------------------
 
-async function clearPlaylistCache(): Promise<void> {
+/** Clear: every track's audio and metadata, and the play state. v16.1: the saved playlists ('pl:' records) stay unless
+ *  `playlists` is true (Clear's "Also delete my playlists" box); kept, their entries show as missing until the files are
+ *  imported again (fingerprints). One transaction either way. With the box ticked it deletes exactly the playlists App
+ *  has read back and those written since, deleted ones included (plKnown, as at the tap): a record App couldn't read,
+ *  which it counts as "left as it was", stays. */
+async function clearPlaylistCache(opts: { playlists?: boolean } = {}): Promise<void> {
   // Pending debounced saves still hold the lists from before the Clear; drop
   // them, and make any save already running write nothing.
   cancelPendingSaves();
   cacheEpoch++;
+  const alsoPlaylists = opts.playlists === true;
+  // v16.1: deleting the playlists too: what is waiting to be written goes, and what is written meanwhile waits until
+  // the Clear has committed (then it lands after it: a playlist made after the tap survives).
+  let cleared: () => void = () => {};
+  const deleting = alsoPlaylists ? [...plKnown] : [];
+  if (alsoPlaylists) {
+    pendingPl.clear();
+    plKnown.clear();
+    plClearing = new Promise<void>((resolve) => { cleared = resolve; });
+  }
   let db: IDBDatabase | null = null;
   try {
     db = await openDB();
     const tx = db.transaction([BLOBS_STORE, META_STORE, STATE_STORE], 'readwrite');
     tx.objectStore(BLOBS_STORE).clear();
     tx.objectStore(META_STORE).clear();
-    tx.objectStore(STATE_STORE).clear();
+    const state = tx.objectStore(STATE_STORE);
+    // Every key but the playlists': below 'pl:' ('current'), and from 'pl;' up.
+    state.delete(IDBKeyRange.upperBound(PL_PREFIX, true));
+    state.delete(IDBKeyRange.lowerBound(PL_END));
+    // With the box ticked, the playlists App knows, one by one (never the whole 'pl:' range).
+    for (const key of deleting) state.delete(key);
     await txDone(tx);
-    console.log('[PlaylistCache] Cache cleared');
+    console.log(`[PlaylistCache] Cache cleared${alsoPlaylists ? `, the saved playlists too (${deleting.length} known, deleted ones included)` : '; saved playlists kept'}`);
   } catch (err) {
     console.warn('[PlaylistCache] Clear failed:', err);
+    // Nothing was deleted: App still has those records (a later Clear with the box ticked deletes them).
+    for (const key of deleting) plKnown.add(key);
   } finally {
     db?.close();
+    if (alsoPlaylists) {
+      plClearing = null;
+      cleared();
+      drainPlaylists();
+    }
   }
 }
 
@@ -859,25 +894,29 @@ function cancelPendingSaves(which: 'all' | 'meta' = 'all'): void {
 
 let pendingMeta: MetaSave | null = null;
 let flushDb: IDBDatabase | null = null;
-let flushDbOpening = false;
+let flushDbOpening: Promise<IDBDatabase | null> | null = null;
 let hideFlushInstalled = false;
 
 /** The connection the flush writes through: opened when a save is first scheduled, kept for the page's life. It
  *  closes for a version change or a delete from anywhere, so it never blocks one. */
-function openFlushConnection(): void {
-  if (flushDb || flushDbOpening || typeof indexedDB === 'undefined') return;
-  flushDbOpening = true;
+function openFlushConnection(): Promise<IDBDatabase | null> {
+  if (flushDb) return Promise.resolve(flushDb);
+  if (flushDbOpening) return flushDbOpening;
+  if (typeof indexedDB === 'undefined') return Promise.resolve(null);
   const name = dbName;
-  openDB().then(
+  flushDbOpening = openDB().then(
     (db) => {
-      flushDbOpening = false;
-      if (name !== dbName) { db.close(); return; }
+      flushDbOpening = null;
+      if (name !== dbName) { db.close(); return null; }
       db.onversionchange = () => { db.close(); if (flushDb === db) flushDb = null; };
       db.onclose = () => { if (flushDb === db) flushDb = null; };
       flushDb = db;
+      drainPlaylists(true); // v16.1: playlist writes that waited for a connection go now (on this one connection)
+      return db;
     },
-    () => { flushDbOpening = false; }
+    () => { flushDbOpening = null; return null; }
   );
+  return flushDbOpening;
 }
 
 /** Run the waiting metadata + state save now. Returns whether it ran: nothing waiting, or the saved library not read
@@ -915,9 +954,142 @@ function flushPendingSave(): boolean {
 function installHideFlush(): void {
   if (hideFlushInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
   hideFlushInstalled = true;
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushPendingSave(); });
-  window.addEventListener('pagehide', () => { flushPendingSave(); });
-  document.addEventListener('freeze', () => { flushPendingSave(); });
+  // v16.1: and the playlists' writes waiting for a connection (normally none: they go in the tap's own task).
+  const flushAll = () => { flushPendingSave(); drainPlaylists(); };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushAll(); });
+  window.addEventListener('pagehide', flushAll);
+  document.addEventListener('freeze', flushAll);
+}
+
+// ----------------------------------------------------------------------------
+// v16.1: saved playlists. One record per playlist, 'pl:<id>', in the playlist-state store beside 'current'
+// (DB_VERSION stays 2; App validates every record before it reaches state: utils/playlists/model.ts parseAll).
+// Their own writer, writePlaylistRecords: it puts or deletes ONLY 'pl:<id>' keys of that one store (never 'current',
+// never blobs or meta), at once, in the caller's own task (a tap), through the connection the hide flush keeps open,
+// committed explicitly; nothing holds it back (not a Deep Scan, not the library's debounce). The load gate: nothing is
+// written before the stored playlists have been read back, and a read that failed keeps it shut (never write over what
+// couldn't be read). There is no "save all": every write names its records, so an empty list in memory can never write
+// over stored ones. A write that finds no open connection waits in pendingPl (per key, the latest wins), and goes when
+// the connection opens or the page is hidden or goes away (the v16.0.1 listeners).
+// ----------------------------------------------------------------------------
+
+const PL_PREFIX = 'pl:';
+const PL_END = 'pl;'; // ';' follows ':', so every key that starts 'pl:' sorts in [PL_PREFIX, PL_END)
+const PL_KEY_RE = /^pl:p[a-z0-9]{6,30}$/;
+const isPlaylistKey = (key: unknown): key is string => typeof key === 'string' && PL_KEY_RE.test(key);
+
+let playlistsReadable = false;
+const pendingPl = new Map<string, { key: string } | null>(); // key: the record to put, or null to delete
+let plClearing: Promise<void> | null = null;
+let plDrain: Promise<boolean> = Promise.resolve(true);
+// Why the latest playlist write failed, for App's words ('storage-full': a QuotaExceededError), or null once one lands.
+let plFailure: 'storage-full' | 'failed' | null = null;
+// The 'pl:' keys of the playlists App has had (the ones it read back and could read: notePlaylistsRead; and every one
+// written since, the deleted ones too: their delete may have failed or still be waiting). A Clear with "Also delete my
+// playlists" ticked deletes exactly these, so a record App couldn't read stays on disk, as App says it does.
+const plKnown = new Set<string>();
+
+/** Why the latest playlist write failed ('storage-full': this device's storage is full), or null after one landed. */
+function playlistWriteFailure(): 'storage-full' | 'failed' | null {
+  return plFailure;
+}
+
+/** The stored playlists, raw, for App to validate (null: the read failed, and the gate stays shut). It opens the hide
+ *  flush's kept connection and reads through it, so every playlist write after this goes out at once. */
+async function readSavedPlaylists(): Promise<unknown[] | null> {
+  installHideFlush();
+  let own: IDBDatabase | null = null;
+  try {
+    const db = (await openFlushConnection()) ?? (own = await openDB());
+    const all = await reqDone(db.transaction(STATE_STORE, 'readonly').objectStore(STATE_STORE).getAll(IDBKeyRange.bound(PL_PREFIX, PL_END, false, true)));
+    playlistsReadable = true;
+    drainPlaylists();
+    return all as unknown[];
+  } catch (err) {
+    console.warn('[PlaylistCache] Could not read the saved playlists (nothing will be written to them):', err);
+    return null;
+  } finally {
+    own?.close();
+  }
+}
+
+/** App's read, validated: the keys of the stored playlists it could read (and shows). Only these, and the ones written
+ *  since, are deleted by a Clear with the playlists box ticked; a record it couldn't read is left as it was. */
+function notePlaylistsRead(keys: readonly string[]): void {
+  for (const k of keys) if (isPlaylistKey(k)) plKnown.add(k);
+}
+
+/** Put (records) and delete (keys) saved playlists. Refused (false, nothing written) before readSavedPlaylists has
+ *  read them, or for any key that is not 'pl:<id>'. Resolves true once written, false if the write failed (App says so
+ *  and offers Retry). */
+function writePlaylistRecords(puts: readonly { key: string }[], deletes: readonly string[] = []): Promise<boolean> {
+  if (!playlistsReadable) return Promise.resolve(false);
+  if (!puts.every((r) => !!r && isPlaylistKey(r.key)) || !deletes.every(isPlaylistKey)) return Promise.resolve(false);
+  for (const r of puts) plKnown.add(r.key);
+  // v16.1 re-review: a delete leaves its key known. The delete may still fail (App keeps the playlist hidden, with
+  // Retry) or still be waiting when a Clear drops the pending writes; a ticked Clear then deletes it anyway. Deleting
+  // a key that is already gone does nothing, and ids are random, so nothing else can be deleted by it.
+  for (const r of puts) pendingPl.set(r.key, r);
+  for (const k of deletes) pendingPl.set(k, null);
+  return drainPlaylists();
+}
+
+/** Write every pending playlist record now, in one transaction on the playlist-state store through the kept
+ *  connection, committed explicitly. Without a connection (not opened yet, or closed by another tab's version change)
+ *  it opens one and they go then; during a Clear that deletes playlists, they go after it. */
+function drainPlaylists(reopened = false): Promise<boolean> {
+  if (!pendingPl.size || !playlistsReadable) return plDrain;
+  if (plClearing) return plClearing.then(() => drainPlaylists());
+  const db = flushDb;
+  if (!db) return openFlushConnection().then((d) => (d ? drainPlaylists(true) : false));
+  const batch = new Map(pendingPl);
+  pendingPl.clear();
+  let tx: IDBTransaction;
+  try {
+    tx = db.transaction(STATE_STORE, 'readwrite');
+  } catch (err) {
+    // A connection that is closing (InvalidStateError from transaction()): the batch waits again (anything newer for a
+    // key wins) for ONE new connection. Anything else drops the batch: false, App says so.
+    if ((err as DOMException)?.name !== 'InvalidStateError' || reopened) {
+      console.warn('[PlaylistCache] Saving a playlist failed:', err);
+      plFailure = isQuotaError(err) ? 'storage-full' : 'failed';
+      plDrain = Promise.resolve(false);
+      return plDrain;
+    }
+    for (const [k, r] of batch) if (!pendingPl.has(k)) pendingPl.set(k, r);
+    if (flushDb === db) flushDb = null;
+    return openFlushConnection().then((d) => (d ? drainPlaylists(true) : false));
+  }
+  try {
+    const store = tx.objectStore(STATE_STORE);
+    for (const [key, rec] of batch) {
+      if (rec === null) store.delete(key);
+      else store.put(rec);
+    }
+    if (typeof tx.commit === 'function') tx.commit();
+  } catch (err) {
+    // A record that can't be stored (DataCloneError at put), or a transaction aborted under it (commit then throws
+    // InvalidStateError): the batch is dropped, never retried in a loop: false, App says so (Retry writes it again).
+    console.warn('[PlaylistCache] Saving a playlist failed:', err);
+    plFailure = isQuotaError(err) ? 'storage-full' : 'failed';
+    try { tx.abort(); } catch { /* already aborted */ }
+    plDrain = Promise.resolve(false);
+    return plDrain;
+  }
+  plDrain = txDone(tx).then(
+    () => { plFailure = null; requestPersistentStorageOnce(); return true; },
+    (err) => { console.warn('[PlaylistCache] Saving a playlist failed:', err); plFailure = isQuotaError(err) ? 'storage-full' : 'failed'; return false; }
+  );
+  return plDrain;
+}
+
+/** Whether this site's storage is persistent (navigator.storage.persisted), or null when the browser can't say. */
+async function storagePersisted(): Promise<boolean | null> {
+  try {
+    return typeof navigator !== 'undefined' && navigator.storage?.persisted ? await navigator.storage.persisted() : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Resolve once every blob save already writing has finished. (One still
@@ -1002,5 +1174,13 @@ export {
   flushPendingSave,
   // v16.0.1: read-only. False until the saved library has been read back (flushAndReload must not save over it).
   loadGateOpen as isLoadGateOpen,
+  // v16.1: saved playlists.
+  readSavedPlaylists,
+  notePlaylistsRead,
+  writePlaylistRecords,
+  drainPlaylists,
+  playlistWriteFailure,
+  storagePersisted,
+  requestPersistentStorageOnce,
   __setCacheDbNameForTests,
 };

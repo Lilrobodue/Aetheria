@@ -4,6 +4,7 @@
 // as modal bottom sheets; the desktop shell shows Sound, Crystal and Walks in its panel, and the ⋯ menu as a modal.
 // v15.7: the Import sheet (the Library tab), in the panel on the desktop too. v16.0: the Up next sheet (the queue), in the
 // panel on the desktop too.
+// v16.1: the Add to playlist sheet, modal on both shells (with the menu on the desktop).
 
 import React from 'react';
 import { useShell } from './contexts';
@@ -13,6 +14,7 @@ import CrystalSheet from './sheets/CrystalSheet';
 import WalksSheet from './sheets/WalksSheet';
 import ImportSheet from './sheets/ImportSheet';
 import QueueSheet from './queue/QueueSheet';
+import AddToPlaylistSheet from './playlists/AddToPlaylistSheet';
 
 interface SheetHostProps {
   presentation: 'sheet' | 'panel';
@@ -30,6 +32,7 @@ const SheetHost = ({ presentation, only = 'all' }: SheetHostProps) => {
       {sheet === 'walks' && only !== 'menu' ? <WalksSheet presentation={presentation} /> : null}
       {sheet === 'import' && only !== 'menu' ? <ImportSheet presentation={presentation} /> : null}
       {sheet === 'queue' && only !== 'menu' ? <QueueSheet presentation={presentation} /> : null}
+      {sheet === 'playlist-add' && only !== 'panel' ? <AddToPlaylistSheet /> : null}
     </>
   );
 };

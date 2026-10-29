@@ -19,6 +19,10 @@ import {
   cancelPendingSaves,
   waitForBlobSaves,
   flushPendingSave,
+  // v16.1: saved playlists (V1-V12).
+  readSavedPlaylists,
+  writePlaylistRecords,
+  playlistWriteFailure,
 } from '../utils/playlistCache';
 
 const RUN = `aetheria-cache-check-${Date.now()}`;
@@ -34,12 +38,21 @@ function useDb(suffix: string): void {
 // the way a real quota error does: its whole transaction aborts, taking any
 // other write in that transaction with it.
 const writes: string[] = [];
+// v16.1: the same writes with their keys ('playlist-state.put(pl:p…)', 'playlist-state.delete(range(..pl:))').
+const keyedWrites: string[] = [];
+const keyOfWrite = (method: string, args: unknown[]): string => {
+  const a = args[0] as any;
+  if (method === 'clear') return '*';
+  if (method === 'delete') return a instanceof IDBKeyRange ? `range(${a.lower ?? ''}..${a.upper ?? ''})` : String(a);
+  return String(a?.key ?? a?.id ?? '?');
+};
 const failing = new Set<string>();
 for (const method of ['put', 'add', 'delete', 'clear'] as const) {
   const original = (IDBObjectStore.prototype as any)[method];
   (IDBObjectStore.prototype as any)[method] = function (this: IDBObjectStore, ...args: unknown[]) {
     const name = `${this.name}.${method}`;
     writes.push(name);
+    keyedWrites.push(`${name}(${keyOfWrite(method, args)})`);
     const request = original.apply(this, args);
     if (failing.has(name)) this.transaction.abort();
     return request;
@@ -826,6 +839,202 @@ test('U9. The flush’s own state write fails after it was issued: the record is
   await sleep(300);
   const after = await stateRecord();
   expect(after?.selectedSolfeggio === 852, `the rewrite yielded to the newer record (saw ${after?.selectedSolfeggio})`);
+});
+
+// --- v16.1: saved playlists ('pl:<id>' records beside 'current'; the spec's V1-V12) --------------------------
+// Their writer writes only 'pl:' keys of the playlist-state store, never before they were read back (the load gate);
+// Clear keeps them unless asked. Fresh track ids (vNN): the tombstones of the tests above persist on this page.
+
+/** A playlist record as App stores it (utils/playlists/model.ts PlaylistRecord), with `n` entries. */
+function plRec(id: string, n = 2): { key: string } & Record<string, unknown> {
+  return {
+    key: 'pl:' + id, v: 1, id, name: 'P ' + id, createdAt: 1, updatedAt: 2,
+    entries: Array.from({ length: n }, (_, i) => ({ id: `vt${i}`, name: `tone-${i}`, file: `tone-${i}.wav`, size: 100 + i })),
+  };
+}
+/** A playlist-state record of the database in use, by key, or null. */
+async function stateKey(key: string): Promise<any | null> {
+  const db = await openDB();
+  const r = await req(db.transaction('playlist-state', 'readonly').objectStore('playlist-state').get(key));
+  db.close();
+  return r ?? null;
+}
+/** Three stored tracks (`prefix`0..2) with their state record, and four other playlist-state keys around 'pl:'. */
+async function seedPlaylistLibrary(prefix: string): Promise<string[]> {
+  const ids = [0, 1, 2].map((n) => `${prefix}${n}`);
+  const db = await openDB();
+  const tx = db.transaction(['blobs', 'meta', 'playlist-state'], 'readwrite');
+  ids.forEach((id, n) => {
+    tx.objectStore('blobs').put({ id, fileBlob: new Blob([new Uint8Array(100 + n)]), fileName: `${id}.wav`, fileType: 'audio/wav' });
+    tx.objectStore('meta').put({ id, name: `Track ${id}`, duration: 10 });
+  });
+  tx.objectStore('playlist-state').put({ key: 'current', playlistOrder: ids, originalOrder: ids, currentSongIndex: 0, loShuWalkMode: null, selectedSolfeggio: 528, savedAt: 1 });
+  for (const k of ['queue', 'pl', 'pl;x', 'zzz']) tx.objectStore('playlist-state').put({ key: k });
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+  return ids;
+}
+const plWrites = () => keyedWrites.filter((w) => w.includes('pl:') || w.startsWith('playlist-state.clear'));
+
+test('V1. The load gate: a playlist write before the read is refused and writes nothing; the read writes nothing and opens it', async () => {
+  useDb('v1-gate');
+  keyedWrites.length = 0;
+  const early = await writePlaylistRecords([plRec('pgate0001')]);
+  expect(early === false, `the early write is refused (got ${early})`);
+  expect(keyedWrites.length === 0, `nothing written before the read (saw ${keyedWrites.join(' ')})`);
+  const raw = await readSavedPlaylists();
+  expect(Array.isArray(raw) && raw.length === 0, `the read returns [] for an empty store (saw ${JSON.stringify(raw)})`);
+  expect(keyedWrites.length === 0, `the read wrote nothing (saw ${keyedWrites.join(' ')})`);
+  expect((await stateKey('pl:pgate0001')) === null, 'the refused record is not stored');
+});
+
+test('V2. A playlist write is exactly one put of its own pl: key on playlist-state', async () => {
+  useDb('v2-write');
+  await readSavedPlaylists();
+  keyedWrites.length = 0;
+  const ok = await writePlaylistRecords([plRec('paaaaaaaa')]);
+  expect(ok === true, `the write lands (got ${ok})`);
+  expect(keyedWrites.join(' ') === 'playlist-state.put(pl:paaaaaaaa)', `one put of pl:paaaaaaaa, nothing else (saw ${keyedWrites.join(' ')})`);
+  expect((await stateKey('pl:paaaaaaaa'))?.entries?.length === 2, 'the record is stored whole');
+});
+
+test('V3. Keys other than pl:<id> are refused, a batch with one bad key too: nothing written', async () => {
+  useDb('v3-keys');
+  await readSavedPlaylists();
+  keyedWrites.length = 0;
+  const got = await Promise.all([
+    writePlaylistRecords([{ key: 'current' }]),
+    writePlaylistRecords([{ key: 'pl:' }]),
+    writePlaylistRecords([{ key: 'pl:__proto__' }]),
+    writePlaylistRecords([], ['current']),
+    writePlaylistRecords([plRec('pokokokok'), { key: 'meta' }]),
+  ]);
+  expect(got.every((x) => x === false), `every one refused (got ${got.join()})`);
+  expect(keyedWrites.length === 0, `nothing written (saw ${keyedWrites.join(' ')})`);
+  expect((await stateKey('pl:pokokokok')) === null, 'not even the good record of the bad batch');
+});
+
+test('V4. Clear keeps exactly the pl: records (two range deletes, no clear() of playlist-state) and clears blobs and meta', async () => {
+  useDb('v4-clear-keeps');
+  await readSavedPlaylists();
+  await seedPlaylistLibrary('v4');
+  expect(await writePlaylistRecords([plRec('paaaaaaaa'), plRec('pbbbbbbbb')]), 'two playlists written');
+  keyedWrites.length = 0;
+  await clearPlaylistCache();
+  const kept = await keys('playlist-state');
+  expect(kept.join() === 'pl:paaaaaaaa,pl:pbbbbbbbb', `only the pl: keys stay (saw ${kept.join()})`);
+  expect((await keys('blobs')).length === 0 && (await keys('meta')).length === 0, 'blobs and meta cleared');
+  const ranges = keyedWrites.filter((w) => w.startsWith('playlist-state.delete(range'));
+  expect(!keyedWrites.includes('playlist-state.clear(*)') && ranges.length === 2,
+    `two range deletes and no clear() on playlist-state (saw ${keyedWrites.join(' ')})`);
+});
+
+test('V5. Clear with { playlists: true } empties the playlist-state store, the playlists too', async () => {
+  useDb('v5-clear-all');
+  await readSavedPlaylists();
+  await seedPlaylistLibrary('v5');
+  expect(await writePlaylistRecords([plRec('paaaaaaaa')]), 'a playlist written');
+  await clearPlaylistCache({ playlists: true });
+  const left = await keys('playlist-state');
+  expect(left.length === 0, `nothing left (saw ${left.join()})`);
+});
+
+test('V6. A playlist written during a Clear that deletes the playlists lands after it; the one from before is gone', async () => {
+  useDb('v6-during');
+  await readSavedPlaylists();
+  expect(await writePlaylistRecords([plRec('pold00000')]), 'the older playlist written');
+  const clearing = clearPlaylistCache({ playlists: true });
+  const during = writePlaylistRecords([plRec('pnew00000')]);
+  await clearing;
+  const landed = await during;
+  const left = await keys('playlist-state');
+  expect(landed === true && left.join() === 'pl:pnew00000', `only the one made after the tap (got ${landed}; saw ${left.join()})`);
+});
+
+test('V7. The restore, a metadata + state save and a delete leave a playlist byte for byte', async () => {
+  useDb('v7-untouched');
+  await readSavedPlaylists();
+  const ids = await seedPlaylistLibrary('v7');
+  expect(await writePlaylistRecords([plRec('pcccccccc', 5)]), 'a playlist written');
+  const before = JSON.stringify(await stateKey('pl:pcccccccc'));
+  const restored = await restorePlaylist();
+  expect(restored?.originalPlaylist.length === 3 && restored.orphans.length === 0,
+    `the restore is unchanged by the playlists (saw ${restored?.originalPlaylist.length} tracks, ${restored?.orphans.length} orphans)`);
+  await saveMetaAndState(restored!.originalPlaylist, restored!.originalPlaylist, 1, null, 528);
+  await deleteTracksFromCache([ids[1]]);
+  expect(JSON.stringify(await stateKey('pl:pcccccccc')) === before, 'the playlist record is byte for byte the same');
+});
+
+test('V8. Another page deleting the database is never blocked by the kept connection; the next write reopens and lands', async () => {
+  useDb('v8-reopen');
+  const name = dbNames[dbNames.length - 1];
+  await readSavedPlaylists();
+  let blocked = false;
+  await new Promise<void>((resolve) => {
+    const r = indexedDB.deleteDatabase(name);
+    r.onblocked = () => { blocked = true; };
+    r.onsuccess = r.onerror = () => resolve();
+  });
+  expect(!blocked, 'the delete was not blocked');
+  const ok = await writePlaylistRecords([plRec('pdddddddd')]);
+  expect(ok === true && !!(await stateKey('pl:pdddddddd')), `the next write reopened and landed (got ${ok})`);
+});
+
+test('V9. The read returns the pl: range only', async () => {
+  useDb('v9-range');
+  await seedPlaylistLibrary('v9');
+  const db = await openDB();
+  await new Promise<void>((resolve) => {
+    const tx = db.transaction('playlist-state', 'readwrite');
+    tx.objectStore('playlist-state').put(plRec('peeeeeeee'));
+    tx.objectStore('playlist-state').put({ key: 'pl:', v: 1 });
+    tx.oncomplete = () => resolve();
+  });
+  db.close();
+  const raw = (await readSavedPlaylists()) as { key: string }[];
+  expect(raw?.map((x) => x.key).join() === 'pl:,pl:peeeeeeee', `only pl: keys (saw ${raw?.map((x) => x.key).join()})`);
+});
+
+test('V10. A switch of database shuts the load gate again', async () => {
+  useDb('v10-first');
+  await readSavedPlaylists();
+  expect(await writePlaylistRecords([plRec('pffffffff')]), 'the gate is open on the first database');
+  useDb('v10-second');
+  keyedWrites.length = 0;
+  const after = await writePlaylistRecords([plRec('pffffffff')]);
+  expect(after === false && plWrites().length === 0, `refused until the new database is read (got ${after}; saw ${keyedWrites.join(' ')})`);
+});
+
+test('V11. An unstorable record: false after one attempt, no retry loop; the next write works', async () => {
+  useDb('v11-unstorable');
+  await readSavedPlaylists();
+  keyedWrites.length = 0;
+  const bad = await writePlaylistRecords([{ key: 'pl:pgggggggg', f: () => 1 } as { key: string }]);
+  await sleep(300);
+  const tries = keyedWrites.filter((w) => w.includes('pl:pgggggggg')).length;
+  expect(bad === false && tries <= 1, `false, at most one attempt (got ${bad}; ${tries} attempts)`);
+  expect(playlistWriteFailure() === 'failed', `the failure is a plain one, not storage-full (got ${playlistWriteFailure()})`);
+  const good = await writePlaylistRecords([plRec('phhhhhhhh')]);
+  expect(good === true && playlistWriteFailure() === null, `the next write works (got ${good}, ${playlistWriteFailure()})`);
+});
+
+test('V12. A hide or pagehide with nothing pending writes nothing; a delete lands', async () => {
+  useDb('v12-hide');
+  await readSavedPlaylists();
+  expect(await writePlaylistRecords([plRec('phhhhhhhh')]), 'a playlist written');
+  cancelPendingSaves();
+  keyedWrites.length = 0;
+  setHidden(true);
+  setHidden(false);
+  window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
+  document.dispatchEvent(new Event('freeze'));
+  await sleep(200);
+  expect(keyedWrites.length === 0, `nothing written (saw ${keyedWrites.join(' ')})`);
+  const ok = await writePlaylistRecords([], ['pl:phhhhhhhh']);
+  expect(ok === true && (await stateKey('pl:phhhhhhhh')) === null, `the delete landed (got ${ok})`);
 });
 
 // --- runner ------------------------------------------------------------------

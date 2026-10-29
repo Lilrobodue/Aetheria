@@ -53,6 +53,13 @@ eq(queuedToast({ name: 'tone-0117', mode: 'next', position: 1, noCrystal: false,
 eq(queuedToast({ name: 'tone-0117', mode: 'queue', position: 1, noCrystal: false, nothingCurrent: true }), 'Queued: tone-0117. Play starts with it.', 'nothing loaded (Add to queue)');
 eq(queuedToast({ name: 'tone-0118', mode: 'queue', position: 2, noCrystal: false, nothingCurrent: true }), 'Added to your queue: tone-0118 is 2nd.', 'nothing loaded, one already waiting: its place, not "Play starts with it"');
 eq(queuedToast({ name: 'tone-0118', mode: 'queue', position: 3, noCrystal: true, nothingCurrent: true }), `Added to your queue: tone-0118 is 3rd. ${NO_CRYSTAL_NOTE}`, 'nothing loaded, two waiting, no crystal');
+// v16.1 (spec §2.8): many tracks at once (a playlist's Play next / Add to queue) say how many, and from where.
+eq(queuedToast({ name: '12 tracks', count: 12, from: 'Evening', mode: 'next', position: 1, noCrystal: false, nothingCurrent: false }), 'Playing next: 12 tracks from Evening.', 'many, Play next');
+eq(queuedToast({ name: '12 tracks', count: 12, from: 'Evening', mode: 'queue', position: 4, noCrystal: false, nothingCurrent: false }), 'Added 12 tracks from Evening to your queue.', 'many, Add to queue');
+eq(queuedToast({ name: '12 tracks', count: 12, from: 'Evening', mode: 'queue', position: 1, noCrystal: false, nothingCurrent: true }), 'Queued: 12 tracks from Evening. Play starts with them.', 'many, nothing loaded');
+eq(queuedToast({ name: '12 tracks', count: 12, from: 'Evening', mode: 'next', position: 1, noCrystal: true, nothingCurrent: false }), 'Playing next: 12 tracks from Evening. Some have no crystal yet, so on a locked phone the music may stop there.', 'many, some with no crystal');
+eq(queuedToast({ name: '3 tracks', count: 3, mode: 'queue', position: 2, noCrystal: false, nothingCurrent: false }), 'Added 3 tracks to your queue.', 'many, no source');
+eq(queuedToast({ name: 'tone-0117', count: 1, from: 'Evening', mode: 'next', position: 1, noCrystal: false, nothingCurrent: false }), 'Playing next: tone-0117.', 'one track: as v16.0');
 eq(removedToast('tone-0203'), 'Removed tone-0203 from your queue.', 'Remove');
 eq(clearedToast(3), 'Cleared 3 queued tracks.', 'Clear, 3');
 eq(clearedToast(1), 'Cleared 1 queued track.', 'Clear, 1');
@@ -76,6 +83,8 @@ const lib = { kind: 'library' } as const;
 const walk = { kind: 'walk', name: 'Vortex' } as const;
 const order = { kind: 'order' } as const;
 eq([sourceName(lib), sourceName(walk), sourceName(order)], ['Library', 'the Vortex walk', 'your play order'], 'Next from …');
+// v16.1: a saved playlist playing: "Next from Evening", "3 queued · then Evening".
+eq([sourceName({ kind: 'playlist', name: 'Evening' }), sourcePhrase({ kind: 'playlist', name: 'Evening' }), sheetSubtitle(3, { kind: 'playlist', name: 'Evening' })], ['Evening', 'Evening', '3 queued · then Evening'], 'Next from a playlist');
 eq([sourcePhrase(lib), sourcePhrase(walk), sourcePhrase(order)], ['your library', 'the Vortex walk', 'your play order'], 'in a sentence');
 eq(sheetSubtitle(3, lib), '3 queued · then your library', 'subtitle, 3 queued');
 eq(sheetSubtitle(0, lib), 'Nothing queued · your library plays on', 'subtitle, none');

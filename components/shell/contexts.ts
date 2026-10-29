@@ -11,6 +11,8 @@
 // v15.7 adds LibraryListContext (the library itself) and LibraryStatusContext (the passes' and imports' state) for the
 // Library tab, where it was left (ShellValue.libraryViewRef), and the tab's actions.
 // v16.0 adds QueueContext (what plays next, the queue; never the clock) and the queue's actions.
+// v16.1 adds PlaylistsContext (the saved playlists, resolved against the library; never the clock), the playlists' and
+// the Library tools' actions, and LibraryViewState.view (the "Tracks · Playlists" switch).
 //
 // Each reader throws a clear error without its provider; the ViewBoundary around the view then catches it.
 // No @types/react here: React is `any` to tsc, so these interfaces document the values rather than enforce them.
@@ -175,6 +177,8 @@ export interface LibraryViewState {
   healthOpen: boolean | null;
   /** Desktop: the button that opened the Import panel, to focus when the tab comes back. */
   refocus?: 'import' | 'review' | null;
+  /** v16.1: the "Tracks · Playlists" switch (decision 1 A; session only). Absent: Tracks. */
+  view?: 'tracks' | 'playlists';
 }
 
 /** v15.7: the library itself (App's originalPlaylist, the same array): an import or its duration batches, a delete, a
@@ -204,7 +208,91 @@ export interface LibraryStatusValue {
   lastImport: LastImport | null;
   /** Analyse tracks treats this device as a phone. */
   analyseMobile: boolean;
+  /** v16.1: what Clear deletes (the library plus stored tracks on the Recover offer: classic's own count), and the
+   *  saved playlists (the new layout's Clear dialog: "Also delete my 5 playlists"). */
+  storedTrackCount: number;
+  playlistCount: number;
 }
+
+/** v16.1: one row of the saved playlists' list (resolved against the library as it is now). */
+export interface PlaylistSummaryValue {
+  id: string;
+  name: string;
+  /** Entries, present and missing (a playlist can hold a track twice). */
+  count: number;
+  present: number;
+  missing: number;
+  /** The present tracks' known lengths. */
+  seconds: number;
+  updatedAt: number;
+  /** The play order is this playlist (derived: its present tracks, in order). */
+  playing: boolean;
+  /** It holds the Add to playlist sheet's one track ("Has this track"). */
+  has: boolean;
+}
+
+/** v16.1: one entry of the open playlist's view. */
+export interface PlaylistEntryValue {
+  /** `${id}#${occurrence}` (as the edits check it). */
+  key: string;
+  index: number;
+  /** The entry's stored name and file (what a missing entry shows). */
+  name: string;
+  file: string;
+  /** The library track it plays (by id, else by its file's name and size), or null: missing. */
+  song: Song | null;
+  /** Its place among the present tracks (a row's tap plays from it), or -1. */
+  presentIndex: number;
+}
+
+/** v16.1: the open playlist (its view in the Library tab). */
+export interface PlaylistOpenValue {
+  id: string;
+  name: string;
+  count: number;
+  present: number;
+  missing: number;
+  seconds: number;
+  /** "Saved from Up next · changed Oct 27". */
+  fromLine: string;
+  rows: PlaylistEntryValue[];
+  /** The entry playing now (this playlist plays and its cursor is on it), or -1. */
+  current: number;
+}
+
+/** v16.1: the name Dialog (Save as a playlist, New playlist, Rename). */
+export type PlaylistNamingValue =
+  | { kind: 'save'; name: string; sentence: string }
+  | { kind: 'new'; name: string }
+  | { kind: 'rename'; id: string; name: string };
+
+/**
+ * v16.1, the saved playlists (PlaylistsContext): the list's rows, the open playlist's view, the name Dialog and the Add
+ * sheet's tracks. Built in App only while the new layout shows, from the playlists, the library, the open id and what
+ * plays (never the clock).
+ */
+export interface PlaylistsValue {
+  status: 'loading' | 'ready' | 'error';
+  /** Stored records that couldn't be read (left on disk as they were). */
+  unreadable: number;
+  lists: PlaylistSummaryValue[];
+  totalSeconds: number;
+  playingId: string | null;
+  open: PlaylistOpenValue | null;
+  /** The open id asked for (a playlist gone since: open is null). */
+  openId: string | null;
+  naming: PlaylistNamingValue | null;
+  /** The Add to playlist sheet's tracks (library ids) and its subtitle, or null. */
+  add: { ids: string[]; title: string } | null;
+  /** The New playlist… row's default name in the Add sheet. */
+  newName: string;
+}
+
+/** v16.1: a saved playlist's own edit (App's editPlaylist): an entry by its index and row key, checked when it applies. */
+export type PlaylistEdit =
+  | { move: { from: number; to: number; key: string } }
+  | { remove: { index: number; key: string } }
+  | { removeMissing: true };
 
 /** v16.0: one row of the Up next sheet: a play-order entry (its index, for an edit that checks its id when it applies). */
 export interface QueueRowValue {
@@ -235,8 +323,8 @@ export interface QueueValue {
   end: 'stop' | 'loop' | 'reshuffle' | 'more';
   /** The track that plays next (queued or not), or null at the end. */
   nextTitle: string | null;
-  /** Where the play order comes from (the sheet's words). */
-  source: { kind: 'library' } | { kind: 'walk'; name: string } | { kind: 'order' };
+  /** Where the play order comes from (the sheet's words). v16.1: a saved playlist ("Next from Evening"). */
+  source: { kind: 'library' } | { kind: 'walk'; name: string } | { kind: 'order' } | { kind: 'playlist'; name: string };
   /** No track is loaded: Play starts with the queue. */
   nothingCurrent: boolean;
   loop: boolean;
@@ -329,6 +417,36 @@ export interface ShellActions {
   undoQueue: () => void;
   /** The Up next sheet (the desktop's panel); a second call closes it. */
   toggleQueue: () => void;
+  // v16.1, saved playlists (references to App's playlist functions: their one writer, commitPlaylists; never the
+  // library) and the Library tools (the health card's Clear and Diagnostics).
+  /** A playlist's view (Library › Playlists › it), or the list with null. */
+  openPlaylist: (id: string | null) => void;
+  /** The name Dialog: a new playlist (its view opens once it is made), a rename. */
+  newPlaylist: () => void;
+  renamePlaylist: (id: string) => void;
+  /** The name Dialog's Save (the name as typed), and its Cancel. */
+  namePlaylist: (name: string) => void;
+  closeNaming: () => void;
+  duplicatePlaylist: (id: string) => void;
+  deletePlaylist: (id: string) => void;
+  playPlaylist: (id: string, opts?: { shuffle?: boolean; startAt?: number }) => void;
+  queuePlaylist: (id: string, mode: 'next' | 'queue') => void;
+  editPlaylist: (id: string, op: PlaylistEdit) => void;
+  /** The Add to playlist sheet, for these library tracks (the calling sheet closes first). */
+  addToPlaylist: (ids: readonly string[]) => void;
+  /** The Add sheet's row: add its tracks to that playlist; its "Create and add": a new one with them. The sheet closes. */
+  addTracksTo: (playlistId: string) => void;
+  createWithTracks: (name: string) => void;
+  /** Save as a playlist (Up next's, Now Playing's ⋯): the sheet closes, then the name Dialog. The ids form is v16.2's
+   *  seam (a filtered list: "Save as playlist", its default name and its source). */
+  savePlaylist: (source: 'queue' | 'playing' | { kind: 'ids'; ids: readonly string[]; label: string; from: { kind: 'filter' | 'builder'; label?: string } }) => void;
+  /** What Save as a playlist would save from what's playing (Now Playing's ⋯ line), or null with nothing playing. */
+  saveSourceInfo: () => { label: string | null; count: number } | null;
+  /** navigator.storage.persisted() (the list's storage note), or null when the browser can't say. */
+  storagePersisted: () => Promise<boolean | null>;
+  /** The health card's Library tools: Clear (the box's value: the playlists too), and classic's diagnostics readout. */
+  clearLibrary: (alsoPlaylists: boolean) => void;
+  showDiagnostics: () => void;
 }
 
 export const PlayerContext = createContext(null);
@@ -343,6 +461,7 @@ export const TuningContext = createContext(null);
 export const LibraryListContext = createContext(null);
 export const LibraryStatusContext = createContext(null);
 export const QueueContext = createContext(null);
+export const PlaylistsContext = createContext(null);
 
 function read<T>(ctx: unknown, name: string): T {
   const v = useContext(ctx);
@@ -362,3 +481,4 @@ export const useTuning = (): TuningValue => read<TuningValue>(TuningContext, 'Tu
 export const useLibraryList = (): LibraryListValue => read<LibraryListValue>(LibraryListContext, 'LibraryListContext');
 export const useLibraryStatus = (): LibraryStatusValue => read<LibraryStatusValue>(LibraryStatusContext, 'LibraryStatusContext');
 export const useQueue = (): QueueValue => read<QueueValue>(QueueContext, 'QueueContext');
+export const usePlaylists = (): PlaylistsValue => read<PlaylistsValue>(PlaylistsContext, 'PlaylistsContext');

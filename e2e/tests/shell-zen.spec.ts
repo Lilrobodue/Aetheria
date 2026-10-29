@@ -448,7 +448,8 @@ test.describe('phone, touch', () => {
     test.info().annotations.push({ type: 'notice top through the reveal', description: `${sampled.frames.length} frames: ${[...new Set(sampled.frames)].join(', ')}; style changes: ${sampled.styles.join(', ') || 'none'}` });
     expect(sampled.frames.length, 'frames sampled through the reveal').toBeGreaterThan(10);
     expect([...new Set(sampled.frames)], 'the notice’s top in every frame of the reveal').toEqual([noticeTop]);
-    expect(sampled.styles.filter((t) => t !== `${noticeTop}px`), 'no other slot, even for one commit').toEqual([]);
+    // Compared as numbers (a px value within 0.01 of the slot): the serialised top's digits differ by browser.
+    expect(sampled.styles.filter((t) => !(/^-?\d+(?:\.\d+)?(?:e-?\d+)?px$/.test(t) && Math.abs(parseFloat(t) - noticeTop) < 0.01)), 'no other slot, even for one commit').toEqual([]);
     expect(await notices.evaluate((el) => el.getBoundingClientRect().top), 'and shown').toBe(noticeTop);
     expect(dialogs).toEqual([]);
   });

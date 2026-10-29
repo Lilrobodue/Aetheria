@@ -80,7 +80,7 @@ const INIT = () => {
   w.__statePuts = 0;
   const put = IDBObjectStore.prototype.put;
   IDBObjectStore.prototype.put = function (...a) {
-    if (this.name === 'playlist-state') w.__statePuts++;
+    if (this.name === 'playlist-state' && a[0]?.key === 'current') w.__statePuts++; // v16.1: not the saved playlists' 'pl:' puts
     return put.apply(this, a);
   };
   const F = (w.__fib = { on: false, skip: 1, commits: 0, perCommit: [], app: new WeakSet(), appCommits: 0, total: 0 });

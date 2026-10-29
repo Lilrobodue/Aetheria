@@ -3,23 +3,27 @@
 // The ⋯ menu (mockup menu-phone): Stop all sound, Track info, Stop recording (while one runs), Back to classic, and
 // Cancel. 64 px rows. v15.6: "Hide the controls (Zen)" / "Leave Zen" first (mockup zen-menu-phone). Always a modal sheet, on the desktop shell too. Track info closes the menu first, so the readout
 // Dialog never sits on a Sheet.
+// v16.1 (mockup np-menu-phone): "Add to playlist…" (the playing track; hidden with none) and "Save as a playlist…" (what's
+// playing; hidden with nothing), after Track info. Each closes the menu first (the Add sheet, the name Dialog).
 
 import React from 'react';
-import { ArrowLeftRight, Circle, Eye, EyeOff, Info, OctagonX } from 'lucide-react';
+import { ArrowLeftRight, Circle, Eye, EyeOff, Info, ListPlus, OctagonX, Save } from 'lucide-react';
 import Sheet from '../../ui/Sheet';
 import ListRow from '../../ui/ListRow';
 import { ViewBoundary } from '../../ErrorBoundary';
 import { useActions, usePlayer, useShell } from '../contexts';
 import { zenMenuRow } from '../zenModel';
+import { addRowLine, saveRowLine } from '../playlists/playlistsViewModel';
 import { countRender } from '../devRenders';
 import { sheetFallback } from './sheetFallback';
 
 const MenuBody = () => {
   countRender('MenuBody');
   const actions = useActions();
-  const { isRecording } = usePlayer();
+  const { isRecording, hasTrack, trackId, title } = usePlayer();
   const { zen } = useShell();
   const zenRow = zenMenuRow(zen.on);
+  const saving = actions.saveSourceInfo(); // v16.1: what Save as a playlist would save (read as the menu opens)
   return (
     <div data-testid="menu-body" className="pb-2">
       {/* v15.6: Zen first (decision 1). The menu closes; with Zen on, the controls hide 3 s later. */}
@@ -44,6 +48,27 @@ const MenuBody = () => {
         data-testid="menu-stop-all"
       />
       <ListRow title="Track info" subtitle="Crystal, key and scan details for this track" icon={<Info size={20} />} onClick={actions.trackInfo} data-testid="menu-track-info" />
+      {hasTrack && trackId ? (
+        <ListRow
+          title="Add to playlist…"
+          subtitle={addRowLine(title)}
+          icon={<ListPlus size={20} />}
+          onClick={() => {
+            actions.closeSheet();
+            actions.addToPlaylist([trackId]);
+          }}
+          data-testid="menu-add-to-playlist"
+        />
+      ) : null}
+      {saving ? (
+        <ListRow
+          title="Save as a playlist…"
+          subtitle={saveRowLine(saving.label, saving.count)}
+          icon={<Save size={20} />}
+          onClick={() => actions.savePlaylist('playing')}
+          data-testid="menu-save-playlist"
+        />
+      ) : null}
       {isRecording ? (
         <ListRow
           title="Stop recording"

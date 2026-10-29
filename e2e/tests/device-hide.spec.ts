@@ -47,8 +47,8 @@ import { RawCdp } from './rawCdp';
 // 'hidden' and visibilitychange, through the raw session), the return is nothing, and the lock-screen card is read from
 // the page (what it plays) instead of adb.
 //
-// Order (each locking test needs its own unlock first, so run them one at a time, -g): D1 (screen on), D3 (locks), D2
-// (locks; last).
+// Order (each locking test needs its own unlock first, so run them one at a time, -g): D1 (screen on), v16.1's D-PL1
+// (screen on), D3 (locks), D2 (locks; last).
 
 const DRY = !ON_DEVICE;
 const DEVTOOLS = ON_DEVICE ? 'http://localhost:9222' : `http://localhost:${TEST_PORT + 6000}`;
@@ -345,6 +345,222 @@ test('v16.0.1 D1: backgrounded, then killed (a real hide: Playwright detached): 
   // Screen on. Sends Chrome to the background with the home key (no tab of the user's is touched) and brings it back
   // with am start.
   await killedInBackground('home', { screenshot, trace, video });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// v16.1 D-PL1: a saved playlist made by finger just before a background kill comes back whole.
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * v16.1 (spec §5.10 step 3), D1's pattern. 30 seeded tones, the new layout on the phone. By finger: Library › Playlists ›
+ * New playlist "Evening" (its view opens); Go to Tracks; a row's ⋯ › Add to playlist › Evening for tone-07 and tone-03;
+ * Playlists › Evening's ▶ and the mini-player's Pause (NOTHING PLAYING at the kill, so no media card can be stranded);
+ * back to Tracks. Then the third Add to playlist (tone-09), the LAST tap, and, as in D1, at once: Playwright detached, the
+ * home key, the hide read over the raw session, and 500 ms later the tab's renderer killed. A playlist is written at the
+ * tap, so nothing of it may wait for a timer: the gap from the third add's tap to the kill (the page's clock, read just
+ * before the crash goes out) must be under 2 s, so a 2 s debounce (the M4 and M4h mutants) would lose that add; both
+ * gaps, tap → hide and tap → kill, are printed. Then, from a new tab: the records (Evening's three entries in
+ * order; the play order is what was played, Evening's first two, the cursor on the first), and the app restored:
+ * Evening with its three tracks, and the play order its first two (decision 4: an edit while it plays applies on the
+ * next Play), so the source line no longer names it (as PL16): "Play order · 1 of 2".
+ */
+test('v16.1 D-PL1: a playlist made by finger (New playlist, two Add to playlist, Play, Pause, then a third Add to playlist), then at once the home key and the tab’s renderer killed (a real hide: Playwright detached): it comes back with its three tracks in order, and the play order is what was played', async ({ screenshot, trace, video }) => {
+  // Screen on. Sends Chrome to the background with the home key and brings it back with am start, as D1.
+  test.setTimeout(240_000);
+  if (ON_DEVICE) {
+    assertNoDeviceArtifacts({ screenshot, trace, video });
+    assertUnlocked();
+  }
+  const TITLE = `aetheria-e2e-hide-playlist-${Date.now()}`;
+  let dryChrome: Browser | null = null;
+  let conn: { browser: Browser; context: BrowserContext } | null = null;
+  let raw: RawCdp | null = null;
+  let ours: { targetId: string; sid: string } | null = null;
+  let tab: Page | null = null;
+  let setupTab: Page | null = null; // until the raw session takes over: torn down through Playwright on a failure
+  const playlists = (p: Page) => p.evaluate(() => (window as any).__aetheriaPlaylists?.state() ?? null).catch(() => null);
+  try {
+    dryChrome = await dryRunChrome();
+    conn = await connect();
+    expect(otherLocalPages(conn.context), 'no other local origin open in Chrome (the crash guard refuses: it could share the renderer); close it first').toEqual([]);
+    const page = await openTab(conn.context, true);
+    setupTab = page;
+    const setUp = async (p: Page) => {
+      await p.addInitScript(({ keys }) => {
+        try {
+          localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
+          localStorage.setItem(keys.engine, 'classic');
+          localStorage.setItem(keys.layout, 'new');
+        } catch {
+          // No storage here (about:blank): nothing to seed.
+        }
+      }, { keys: { engine: LAYER_ENGINE_KEY, layout: LAYOUT_KEY } });
+      await countStatePuts(p);
+      await recordLifecycle(p);
+    };
+    await setUp(page);
+    const ids = await seedToneLibrary(page, { n: 30, cursor: -1 });
+    await page.setViewportSize(PHONE_VIEWPORT);
+    await page.goto('/');
+    await acceptDisclaimerNew(page);
+    await expect.poll(async () => (await libraryState(page)).libraryIds.length, { message: 'the seeded library restores', timeout: 60_000 }).toBe(30);
+    await expect.poll(async () => (await playlists(page))?.status, { message: 'the playlists are read back', timeout: 20_000 }).toBe('ready');
+
+    // By finger; every outcome polled (a tap lands after tapAt). `at` scrolls its target into view first.
+    const at = async (target: Locator, what: string) => {
+      await target.evaluate((el) => el.scrollIntoView({ block: 'center' })); // a DOM scroll; the tap itself is a finger's
+      await page.waitForTimeout(300);
+      await tap(page, target, what);
+    };
+    const add = async (k: number) => {
+      const tone = `tone-${String(k).padStart(2, '0')}`;
+      // Bring the row of the virtualized list into the DOM (a DOM scroll), so its ⋯ can be tapped.
+      await page.getByTestId('library-scroll').evaluate((sc, top) => { sc.scrollTop = top; }, Math.max(0, (k - 4) * 64));
+      await page.waitForTimeout(300);
+      await at(rowMenu(page, tone), `the ⋯ of ${tone}`);
+      await expect(page.getByRole('dialog', { name: tone, exact: true })).toBeVisible({ timeout: 5_000 });
+      await at(page.getByTestId('library-menu-playlist'), 'Add to playlist…');
+      await expect(page.getByRole('dialog', { name: 'Add to playlist' })).toBeVisible({ timeout: 5_000 });
+      await at(page.getByTestId('playlist-add-row').filter({ hasText: 'Evening' }), 'Evening');
+      await expect.poll(async () => (await playlists(page))?.lists?.[0]?.names, { timeout: 10_000, intervals: [50, 100], message: `${tone} added by finger` }).toContain(tone);
+    };
+    // Library › Playlists › New playlist "Evening" (its view opens).
+    await at(page.getByTestId('tab-library-button'), 'the Library tab');
+    await expect(page.getByTestId('tab-library')).toBeVisible({ timeout: 5_000 });
+    await at(page.getByTestId('library-view-playlists'), 'Playlists');
+    await expect(page.getByTestId('playlists-new')).toBeVisible({ timeout: 5_000 });
+    await at(page.getByTestId('playlists-new'), 'New playlist');
+    const name = page.getByRole('dialog', { name: 'New playlist' }).getByLabel('Name');
+    await expect(name).toBeVisible({ timeout: 5_000 });
+    await name.fill('Evening');
+    await at(page.getByTestId('playlist-name-save'), 'Save');
+    await expect(page.getByTestId('playlist-title')).toHaveText('Evening', { timeout: 10_000 });
+    // Tracks › a row's ⋯ › Add to playlist › Evening: tone-07, tone-03.
+    await at(page.getByTestId('playlist-go-tracks'), 'Go to Tracks');
+    await expect(page.getByTestId('library-list')).toBeVisible({ timeout: 5_000 });
+    await add(7);
+    await add(3);
+    const secondAddAt = Date.now();
+    // Playlists › Evening's ▶, then Pause (the segment, the row and the mini-player are in view: no scroll), then back
+    // to Tracks: all before the third add, so that add is the last tap before the key.
+    await tap(page, page.getByTestId('library-view-playlists'), 'Playlists');
+    await expect(page.getByTestId('playlist-row').first()).toBeVisible({ timeout: 5_000 });
+    await tap(page, page.getByTestId('playlist-row').first().getByTestId('playlist-row-play'), 'Play Evening');
+    await expect.poll(async () => (await libraryState(page)).names, { timeout: 15_000, message: 'Evening plays, in its order: its two tracks' }).toEqual(['tone-07', 'tone-03']);
+    await tap(page, page.getByTestId('mini-player').getByRole('button', { name: 'Pause', exact: true }), 'Pause');
+    await expect.poll(async () => (await libraryState(page)).playing, { timeout: 10_000, message: 'paused: nothing plays at the kill' }).toBe(false);
+    await tap(page, page.getByTestId('library-view-tracks'), 'Tracks');
+    await expect(page.getByTestId('library-list')).toBeVisible({ timeout: 5_000 });
+
+    // The raw side, attached now so nothing stands between the third add and the key: our tab by its unique title and
+    // the test origin.
+    await page.evaluate((t) => { document.title = t; }, TITLE);
+    raw = await RawCdp.connect(DEVTOOLS);
+    const target = await raw.ourPage(TITLE);
+    ours = { targetId: target.targetId, sid: await raw.attach(target.targetId) };
+
+    // No write of the earlier adds may still be on a timer when the third is made: a 2 s delay of the second add's write
+    // would otherwise carry the third along with it before the kill (a mutant with a timer per write passed so in the
+    // desktop dry run, where Play and Pause take under 2 s; on the phone they take longer, and this waits nothing).
+    const settle = 2_500 - (Date.now() - secondAddAt);
+    if (settle > 0) await page.waitForTimeout(settle);
+    // The third add, the last tap: its time is the page's own, taken as the tap's click arrives (on the phone a tap
+    // lands about 300 ms after tapAt returns).
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__lastClickAt = 0;
+      document.addEventListener('click', () => { w.__lastClickAt = Date.now(); }, true);
+    });
+    await add(9);
+    const addedAt = await page.evaluate(() => (window as any).__lastClickAt as number);
+    expect(addedAt, 'the third add’s tap was seen').toBeGreaterThan(0);
+
+    // Playwright off the phone (while attached it keeps the tab visible), then at once the home key.
+    await conn.browser.close();
+    conn = null;
+    setupTab = null;
+    await sendKey('home', raw, ours.sid);
+    let hidden: LifecycleEvent | undefined;
+    let killAt = 0; // the page's Date.now() as the kill goes out
+    try {
+      const until = Date.now() + 10_000;
+      while (!hidden && Date.now() < until) {
+        hidden = (await raw.evaluate<LifecycleEvent[]>(ours.sid, READ_LOG)).find((x) => x.e === 'visibilitychange' && x.vis === 'hidden' && x.t >= addedAt);
+        if (!hidden) await sleep(100);
+      }
+      expect(hidden, 'the page says it is hidden (the home key), read over the raw session').toBeTruthy();
+      await sleep(500);
+      // The crash guard over every tab's URL, then Page.crash (sent, not awaited); resolves on Chrome's crash report.
+      // The page's own clock is read over the raw session last before the crash goes out (after the guard's target
+      // listing): the tap → kill gap ends at the kill, not at the hide.
+      const sid = ours.sid;
+      await raw.crash(ours.targetId, sid, async () => { killAt = await raw!.evaluate<number>(sid, 'Date.now()'); });
+      // Our crashed tab, closed by its id (its URL checked first) BEFORE Chrome comes back (it would reload it).
+      await closeOurTab(raw, ours.targetId);
+      ours = null;
+    } finally {
+      comeBack('home');
+    }
+    const toHidden = hidden!.t - addedAt;
+    const toKill = killAt - addedAt;
+    test.info().annotations.push({
+      type: `v16.1 D-PL1${DRY ? ', desktop dry run' : ''}: the third add’s tap → the hide, → the kill`,
+      description: `${toHidden} ms, ${toKill} ms (a 2 s debounce would lose the add when the kill comes under 2 s)`,
+    });
+    // On stdout too: the device run's list reporter shows no annotations.
+    console.log(`D-PL1 gaps: tap→hidden ${toHidden} ms, tap→kill ${toKill} ms${DRY ? ' (desktop dry run)' : ''}`);
+
+    // Playwright again, for the checks, in a new tab (the storage kept).
+    conn = await connect();
+    tab = await openTab(conn.context, false);
+    await setUp(tab);
+    await tab.setViewportSize(PHONE_VIEWPORT);
+    // The records first, from a page with no app on it.
+    await tab.goto(appUrl('/manifest.json'), { waitUntil: 'commit' });
+    const stored = () =>
+      tab!.evaluate(async () => {
+        const db: IDBDatabase = await new Promise((resolve, reject) => {
+          const r = indexedDB.open('aetheria-db');
+          r.onsuccess = () => resolve(r.result);
+          r.onerror = () => reject(r.error);
+        });
+        try {
+          const st = db.transaction('playlist-state', 'readonly').objectStore('playlist-state');
+          const all: any[] = await new Promise((resolve, reject) => {
+            const r = st.getAll(IDBKeyRange.bound('pl:', 'pl;', false, true));
+            r.onsuccess = () => resolve(r.result);
+            r.onerror = () => reject(r.error);
+          });
+          return all.map((x) => ({ name: x.name, names: x.entries.map((e: { name: string }) => e.name) }));
+        } finally {
+          db.close();
+        }
+      });
+    await expect.poll(() => stored().catch(() => null), { timeout: 15_000, message: 'Evening on disk: its three entries, in order' }).toEqual([{ name: 'Evening', names: ['tone-07', 'tone-03', 'tone-09'] }]);
+    const st = await savedState(tab);
+    expect([st?.playlistOrder, st?.currentSongIndex], 'the play order on disk is what was played: Evening’s first two, the cursor on the first').toEqual([[ids[6], ids[2]], 0]);
+    // Then the app, in the same new tab: a new renderer, and the restore.
+    await tab.goto(appUrl('/'), { waitUntil: 'commit' });
+    await expect.poll(async () => (await playlists(tab!))?.status ?? null, { timeout: 60_000, message: 'the app restores in the new tab' }).toBe('ready');
+    const s = await playlists(tab);
+    expect(s.lists.map((l: { name: string; ids: string[] }) => [l.name, l.ids]), 'Evening, its three tracks in order').toEqual([['Evening', [ids[6], ids[2], ids[8]]]]);
+    await expect.poll(async () => { const L = await libraryState(tab!).catch(() => null); return L ? [L.names, L.cursor] : null; }, { timeout: 15_000, message: 'the play order restored: Evening’s first two, the cursor on the first' }).toEqual([['tone-07', 'tone-03'], 0]);
+    // Decision 4: the edit made while Evening played applies on its next Play, so the play order is no longer Evening
+    // (its present tracks are three now) and the source line says so, as PL16.
+    expect(s.playing, 'the play order is not Evening any more').toBe(null);
+    await expect.poll(() => tab!.getByTestId('np-source').textContent().catch(() => null), { timeout: 15_000, message: 'the source line: the play order, 1 of 2' }).toBe('Play order · 1 of 2');
+    // Written at the tap: the kill came before any 2 s timer started by that tap could have written it. (Last, so that
+    // on a slow phone a long gap still shows whether the data came back.)
+    expect(killAt, 'the kill’s time was read').toBeGreaterThan(0);
+    expect(toKill, 'the third add’s tap → the kill under 2 s (so a 2 s debounce would lose that add)').toBeLessThan(2_000);
+  } finally {
+    if (setupTab && conn && !ours) await pwTeardown(setupTab); // a failure before the raw session took over
+    if (tab) await closeSecondTab(tab);
+    if (raw && ours) await rawTeardown(raw, ours.sid, ours.targetId).catch(() => {}); // a failure while detached
+    raw?.close();
+    if (conn) await conn.browser.close();
+    if (dryChrome) await dryChrome.close();
+  }
 });
 
 // ---------------------------------------------------------------------------------------------------------------

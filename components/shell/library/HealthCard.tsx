@@ -8,14 +8,17 @@
 // function says why in a toast. Nothing new runs: the card reads existing state and calls existing functions.
 // Open while there is something to do or a pass runs; one line ("All set · Deep Scan optional") otherwise, which a tap
 // opens for the session (App's libraryViewRef). The footer peeks into classic for Clear and the diagnostics.
+// v16.1 (spec §3.14): the footer's Library tools, inside the fold: Diagnostics (classic's readout) and Clear library…
+// (ClearLibraryDialog: the saved playlists stay unless its box is ticked); the peek stays, reworded.
 // Assign asks first only when crystals tracks already have would change (v15.8: the plan, computed on the tap).
 // React.memo with no props; it reads the library and the passes' state, never the time.
 
 import React, { useMemo, useState } from 'react';
-import { Check, ChevronDown } from 'lucide-react';
+import { Activity, Check, ChevronDown, Trash2 } from 'lucide-react';
 import { useActions, useLibraryList, useLibraryStatus, useShell } from '../contexts';
 import { countRender } from '../devRenders';
 import AssignCrystalsDialog from './AssignCrystalsDialog';
+import ClearLibraryDialog from './ClearLibraryDialog';
 import { HEALTH_FOOTER, assignNeedsConfirm, healthModel, libraryHealth } from './libraryModel';
 import { planAssign } from '../../../utils/mix/distribution';
 import type { AssignPlan } from '../../../utils/mix/distribution';
@@ -45,6 +48,7 @@ const HealthCard = () => {
   const [openPref, setOpenPref] = useState<boolean | null>(libraryViewRef.current.healthOpen);
   const open = openPref ?? model.autoOpen;
   const [confirming, setConfirming] = useState<AssignPlan | null>(null);
+  const [clearing, setClearing] = useState(false);
 
   const run = (line: HealthLine) => {
     const a = line.action;
@@ -132,7 +136,33 @@ const HealthCard = () => {
           </React.Fragment>
         ))}
       </div>
-      <div className="border-t border-line py-2 flex items-center justify-between gap-2 text-xs text-ink-faint">
+      {/* v16.1 (spec §3.14): the Library tools, inside the card's fold: classic's diagnostics readout, and the new
+          layout's own Clear (its dialog asks about the saved playlists). Then the classic peek, reworded. */}
+      <div data-testid="library-tools" className="border-t border-line pt-3">
+        <h3 className="text-caption font-semibold uppercase tracking-widest text-ink-faint">Library tools</h3>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            data-testid="library-tools-diagnostics"
+            onClick={actions.showDiagnostics}
+            className="min-h-touch px-3 rounded-control bg-surface-raised border border-line-strong text-sm text-ink flex items-center justify-center gap-2 hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+          >
+            <Activity size={16} className="text-ink-muted" aria-hidden="true" />
+            Diagnostics
+          </button>
+          <button
+            type="button"
+            data-testid="library-tools-clear"
+            aria-haspopup="dialog"
+            onClick={() => setClearing(true)}
+            className="min-h-touch px-3 rounded-control bg-surface-raised border border-line-strong text-sm text-ink flex items-center justify-center gap-2 hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+          >
+            <Trash2 size={16} className="stroke-status-error" aria-hidden="true" />
+            Clear library…
+          </button>
+        </div>
+      </div>
+      <div className="py-2 flex items-center justify-between gap-2 text-xs text-ink-faint">
         <span>{HEALTH_FOOTER}</span>
         <button
           type="button"
@@ -144,6 +174,17 @@ const HealthCard = () => {
           Open
         </button>
       </div>
+      {clearing ? (
+        <ClearLibraryDialog
+          tracks={st.storedTrackCount}
+          playlists={st.playlistCount}
+          onCancel={() => setClearing(false)}
+          onClear={(also: boolean) => {
+            setClearing(false); // the dialog closes first
+            actions.clearLibrary(also);
+          }}
+        />
+      ) : null}
       {confirming ? (
         <AssignCrystalsDialog
           plan={confirming}

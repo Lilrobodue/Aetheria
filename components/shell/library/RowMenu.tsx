@@ -7,10 +7,11 @@
 // sits on a Sheet (v15.5's rule); focus goes back to the ⋯ (the overlay stack). The body is the `library-menu` region.
 // v16.0 (mockup rowmenu-phone): Play next and Add to queue, after Play from here; their lines say where the track goes
 // (queueViewModel: right after the track that's playing, after the tracks waiting, or first when Play is pressed).
+// v16.1: "Add to playlist…" after Add to queue (the Add to playlist sheet, once this one has closed).
 
 import React from 'react';
 import type { ReactNode } from 'react';
-import { Info, ListEnd, ListStart, Play, Trash2 } from 'lucide-react';
+import { Info, ListEnd, ListPlus, ListStart, Play, Trash2 } from 'lucide-react';
 import Sheet from '../../ui/Sheet';
 import ListRow from '../../ui/ListRow';
 import { ViewBoundary } from '../../ErrorBoundary';
@@ -20,7 +21,7 @@ import { REGIME_DOT } from '../shellModel';
 import { sheetFallback } from '../sheets/sheetFallback';
 import { rowFacts, rowRegime } from './libraryModel';
 
-export type RowMenuAction = 'play' | 'next' | 'queue' | 'info' | 'delete';
+export type RowMenuAction = 'play' | 'next' | 'queue' | 'playlist' | 'info' | 'delete';
 
 interface MenuItem {
   id: RowMenuAction;
@@ -34,6 +35,7 @@ const items = (lines: { next: string; queue: string }): readonly MenuItem[] => [
   { id: 'play', title: 'Play from here', subtitle: 'Your library, starting with this track', icon: <Play size={20} /> },
   { id: 'next', title: 'Play next', subtitle: lines.next, icon: <ListStart size={20} /> },
   { id: 'queue', title: 'Add to queue', subtitle: lines.queue, icon: <ListEnd size={20} /> },
+  { id: 'playlist', title: 'Add to playlist…', subtitle: 'One of your playlists, or a new one', icon: <ListPlus size={20} /> },
   { id: 'info', title: 'Track info', subtitle: 'Length, crystal, key, visual sync and the file', icon: <Info size={20} /> },
   {
     id: 'delete',

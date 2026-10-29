@@ -17,6 +17,8 @@ interface ButtonProps {
   buttonRef?: { current: HTMLButtonElement | null };
   className?: string;
   'data-testid'?: string;
+  /** v16.1 (the name Dialog's Save): set only where it can be off; left out, the markup is v15.4's. */
+  disabled?: boolean;
 }
 
 const BASE =
@@ -29,13 +31,14 @@ const VARIANTS: Record<ButtonVariant, string> = {
   ghost: 'text-ink-muted hover:text-ink-strong',
 };
 
-const Button = ({ children, onClick, variant = 'secondary', buttonRef, className, 'data-testid': testId }: ButtonProps) => (
+const Button = ({ children, onClick, variant = 'secondary', buttonRef, className, 'data-testid': testId, disabled }: ButtonProps) => (
   <button
     type="button"
     ref={buttonRef}
     onClick={onClick}
     data-testid={testId}
-    className={`${BASE} ${VARIANTS[variant]}${className ? ` ${className}` : ''}`}
+    disabled={disabled}
+    className={`${BASE} ${VARIANTS[variant]}${className ? ` ${className}` : ''}${disabled === undefined ? '' : ' disabled:opacity-40 disabled:cursor-not-allowed'}`}
   >
     {children}
   </button>

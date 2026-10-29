@@ -26,10 +26,25 @@ export function placeWord(n: number): string {
 /** A track with no crystal can't be swapped in gaplessly: on a locked phone the playTrack fallback drops the card. */
 export const NO_CRYSTAL_NOTE = 'It has no crystal yet, so on a locked phone the music may stop there.';
 
+/** v16.1: the note when some of many queued tracks have no crystal. */
+export const SOME_NO_CRYSTAL_NOTE = 'Some have no crystal yet, so on a locked phone the music may stop there.';
+
 /** The toast after Play next / Add to queue. `position`: the track's place in the queue (1-based); `nothingCurrent`:
  *  no track is loaded, so Play starts with the first queued track (only that one is told "Play starts with it"; one
- *  added after others waiting gets its place). */
-export function queuedToast(o: { name: string; mode: 'next' | 'queue'; position: number; noCrystal: boolean; nothingCurrent: boolean }): string {
+ *  added after others waiting gets its place). v16.1 (spec §2.8): many tracks at once (`count` > 1, a playlist's Play
+ *  next or Add to queue) say how many and, with `from`, where from: "Playing next: 12 tracks from Evening.", "Added 12
+ *  tracks from Evening to your queue.", "Queued: 12 tracks from Evening. Play starts with them." One track: as v16.0. */
+export function queuedToast(o: { name: string; mode: 'next' | 'queue'; position: number; noCrystal: boolean; nothingCurrent: boolean; count?: number; from?: string | null }): string {
+  const n = o.count ?? 1;
+  if (n > 1) {
+    const what = `${count(n)} tracks${o.from ? ` from ${o.from}` : ''}`;
+    const head = o.nothingCurrent && o.position <= 1
+      ? `Queued: ${what}. Play starts with them.`
+      : o.mode === 'next'
+        ? `Playing next: ${what}.`
+        : `Added ${what} to your queue.`;
+    return o.noCrystal ? `${head} ${SOME_NO_CRYSTAL_NOTE}` : head;
+  }
   const head = o.nothingCurrent && o.position <= 1
     ? `Queued: ${o.name}. Play starts with it.`
     : o.mode === 'next'
@@ -81,17 +96,18 @@ export function addToQueueLine(waiting: number, nothingCurrent: boolean): string
 // The Up next sheet
 // ---------------------------------------------------------------------------------------------------------------
 
-/** Where the play order comes from, as the sheet says it: the library, a walk, or another play order (a mix). */
-export type QueueSource = { kind: 'library' } | { kind: 'walk'; name: string } | { kind: 'order' };
+/** Where the play order comes from, as the sheet says it: the library, a walk, another play order (a mix), or v16.1 a
+ *  saved playlist. */
+export type QueueSource = { kind: 'library' } | { kind: 'walk'; name: string } | { kind: 'order' } | { kind: 'playlist'; name: string };
 
-/** "Library", "the Vortex walk", "your play order" (the section "Next from …"). */
+/** "Library", "the Vortex walk", "your play order", "Evening" (the section "Next from …"). */
 export function sourceName(s: QueueSource): string {
-  return s.kind === 'library' ? 'Library' : s.kind === 'walk' ? `the ${s.name} walk` : 'your play order';
+  return s.kind === 'library' ? 'Library' : s.kind === 'walk' ? `the ${s.name} walk` : s.kind === 'playlist' ? s.name : 'your play order';
 }
 
-/** "your library", "the Vortex walk", "your play order" (inside a sentence). */
+/** "your library", "the Vortex walk", "your play order", "Evening" (inside a sentence). */
 export function sourcePhrase(s: QueueSource): string {
-  return s.kind === 'library' ? 'your library' : s.kind === 'walk' ? `the ${s.name} walk` : 'your play order';
+  return s.kind === 'library' ? 'your library' : s.kind === 'walk' ? `the ${s.name} walk` : s.kind === 'playlist' ? s.name : 'your play order';
 }
 
 /** The sheet's subtitle: "3 queued · then your library", "Nothing queued · your library plays on". */

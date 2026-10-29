@@ -18,6 +18,7 @@ import { countRender } from './devRenders';
 import SideNav from './SideNav';
 import DesktopTransport from './DesktopTransport';
 import SheetHost from './SheetHost';
+import PlaylistDialogs from './playlists/PlaylistDialogs';
 import MixesTab from './mixes/MixesTab';
 import MoreStub from './tabs/MoreStub';
 import LayersTab from './layers/LayersTab';
@@ -30,7 +31,8 @@ const DesktopShell = () => {
   const { tab, sheet, zen, rootRef } = useShell();
   const reduced = usePrefersReducedMotion();
   const actions = useActions();
-  const panelSheet = sheet && sheet !== 'menu' ? sheet : null;
+  // v16.1: the Add to playlist sheet is modal, as the menu (the panel keeps showing what it showed).
+  const panelSheet = sheet && sheet !== 'menu' && sheet !== 'playlist-add' ? sheet : null;
   const stubOpen = !panelSheet && tab !== 'now';
 
   // Escape closes a section's panel (a sheet's panel closes itself: components/ui/Sheet.tsx).
@@ -105,7 +107,8 @@ const DesktopShell = () => {
         fallback={(api) => <TransportCrash api={api} what="The player bar" slot={false} />}
         render={() => <DesktopTransport />}
       />
-      {sheet === 'menu' ? <SheetHost presentation="sheet" only="menu" /> : null}
+      {sheet === 'menu' || sheet === 'playlist-add' ? <SheetHost presentation="sheet" only="menu" /> : null}
+      <PlaylistDialogs />
     </div>
   );
 };

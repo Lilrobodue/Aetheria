@@ -28,7 +28,42 @@ import {
   storedTrackIds,
   cacheGeneration,
   isLoadGateOpen,
+  // v16.1: the saved playlists' one reader (the load effect) and one writer (commitPlaylists): check:writers rule 6.
+  readSavedPlaylists,
+  notePlaylistsRead,
+  writePlaylistRecords,
+  playlistWriteFailure,
+  storagePersisted,
 } from './utils/playlistCache';
+// v16.1: saved playlists. The pure model (records, validation, edits, fingerprints, resolution against the library) and
+// their words (the shell's view model, shared with classic's two texts).
+import {
+  parseAll as parsePlaylists,
+  sortLists as sortPlaylists,
+  keyOf as playlistKeyOf,
+  newPlaylistId,
+  cleanName as cleanPlaylistName,
+  freeName as freePlaylistName,
+  indexLibrary,
+  resolvePlaylist,
+  presentTracks,
+  summaries as playlistSummaries,
+  playlistsWith,
+  playlistPlaying,
+  createPlaylist as makePlaylistRecord,
+  renamePlaylist as renamedRecord,
+  duplicatePlaylist as duplicatedRecord,
+  addTracks as addedRecord,
+  removeAt as removedRecord,
+  moveEntry as movedRecord,
+  missingIndices,
+  undoApplies,
+  resolveEntry,
+  PLAYLISTS_MAX,
+  ENTRIES_MAX,
+} from './utils/playlists/model';
+import type { PlaylistRecord, PlaylistFrom, LibraryIndex } from './utils/playlists/model';
+import * as playlistWords from './components/shell/playlists/playlistsViewModel';
 import {
   dedupeById,
   sameIdOrder,
@@ -181,7 +216,7 @@ import AppShell from './components/shell/AppShell';
 import VisualsPause from './components/shell/VisualsPause';
 import PeekPill from './components/shell/PeekPill';
 import { useMediaQuery } from './components/shell/useMediaQuery';
-import { LAYOUT_KEY, parseLayoutPref, sourceLine, walkSegment, newLayoutNotice, queueSourceLine, queueThen, queueSourceShort } from './components/shell/shellModel';
+import { LAYOUT_KEY, parseLayoutPref, sourceLine, walkSegment, newLayoutNotice, queueSourceLine, queueThen, queueSourceShort, PLAYLISTS_HOME } from './components/shell/shellModel';
 import type { LayoutPref, ShellTab, ShellSheet, PeekPanel } from './components/shell/shellModel';
 import { zenActive } from './components/shell/zenModel';
 import { useShellZen } from './components/shell/useShellZen';
@@ -1049,11 +1084,15 @@ interface PlayOrderSnapshot {
   mix: boolean;
   /** v16.0: the queue's marks over `ids` (null: none), so the Undo brings the earlier order back with its queue. */
   marks: Mark[] | null;
+  /** v16.1: the shuffle switch before the chain's first tap, and whether a tap of the chain turned it on (a playlist's
+   *  Shuffle): then the Undo turns it back off. A switch turned on by hand since is left as it is. */
+  shuffleWas: boolean;
+  shuffleSet: boolean;
 }
 
 /** v16.0: a queue write, applied once the play state is settled (the anchor rule), else retried every 150 ms for 15 s. */
 type QueueOp =
-  | { kind: 'add'; ids: string[]; mode: 'next' | 'queue' }
+  | { kind: 'add'; ids: string[]; mode: 'next' | 'queue'; from?: string } // v16.1: from (a playlist's name, for the toast)
   | { kind: 'remove'; index: number; id: string }
   | { kind: 'move'; index: number; id: string; to: number }
   | { kind: 'clear' }
@@ -1067,6 +1106,22 @@ type QueueUndo =
   | { token: number; kind: 'add'; after: string[]; mine: number[]; names: string[] }
   | { token: number; kind: 'remove'; after: string[]; id: string; pos: number }
   | { token: number; kind: 'clear'; after: string[]; ids: string[] };
+
+/** v16.1: what a playlist op's Undo puts back: each record it touched as it was (null: the op made it) and the record
+ *  the op left (null: it deleted it). The Undo acts only while every current record is still the very one the op left
+ *  (utils/playlists/model.ts undoApplies), and never after a Clear that deleted the playlists. */
+interface PlaylistUndo {
+  token: number;
+  name: string;
+  records: { id: string; before: PlaylistRecord | null; after: PlaylistRecord | null }[];
+  clears: number;
+}
+
+/** v16.1: the name Dialog (new layout): Save as a playlist (its tracks and default name), New playlist, or Rename. */
+type PlaylistNaming =
+  | { kind: 'save'; ids: string[]; name: string; from: PlaylistFrom; sentence: string }
+  | { kind: 'new'; name: string; addIds: string[] | null }
+  | { kind: 'rename'; id: string; name: string };
 
 const App: React.FC = () => {
   countRender('App');
@@ -1566,6 +1621,30 @@ const App: React.FC = () => {
   }, [queueState, playlist]);
   // The last shuffle order the queue itself wrote or accepted (the gather effect leaves those alone).
   const queueShuffledRef: { current: number[] | null } = useRef(null);
+  // v16.1: saved playlists (utils/playlists/model.ts records, 'pl:<id>' in the playlist-state store). null until the
+  // load effect has read them back (the load gate: the one writer, commitPlaylists, refuses until then, and for good
+  // when the read failed: nothing is ever written over what couldn't be read). playlistsRef follows every commit
+  // synchronously (the writer sets both), for the handlers. Never the library: playlists name tracks by id and by their
+  // file's name and size, and resolve against the library as it is.
+  const [savedPlaylists, setSavedPlaylists] = useState<PlaylistRecord[] | null>(null);
+  const [playlistsStatus, setPlaylistsStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [playlistsUnreadable, setPlaylistsUnreadable] = useState(0);
+  const playlistsRef: { current: PlaylistRecord[] | null } = useRef(null);
+  const savedPlaylistsRequestedRef: { current: boolean } = useRef(false);
+  // The new layout's open playlist (its view in the Library tab; session only), what the Add to playlist sheet adds, and
+  // the name Dialog's source (Save / New / Rename), or null.
+  const [shellPlaylistOpen, setShellPlaylistOpen] = useState<string | null>(null);
+  const [playlistAddIds, setPlaylistAddIds] = useState<string[] | null>(null);
+  const [playlistNaming, setPlaylistNaming] = useState<PlaylistNaming | null>(null);
+  // The playlist started last this session (it wins a tie when two playlists hold the same tracks), the label of the
+  // play order a walk, a mix or a playlist started (Save as a playlist's default name; valid while the play order's own
+  // ids are still the ones it started), the latest playlist op's Undo, and how many Clears deleted the playlists (an
+  // Undo from before one does nothing).
+  const lastPlaylistStartedRef: { current: string | null } = useRef(null);
+  const playOrderLabelRef: { current: { ids: string; label: string } | null } = useRef(null);
+  const playlistUndoRef: { current: PlaylistUndo | null } = useRef(null);
+  const playlistTokenRef: { current: number } = useRef(0);
+  const playlistsClearsRef: { current: number } = useRef(0);
   // Local UI state — controls whether the toolbar walk popover is open.
   const [showLoShuWalkMenu, setShowLoShuWalkMenu] = useState(false);
 
@@ -2464,6 +2543,54 @@ const App: React.FC = () => {
     const id = window.setTimeout(() => setLibraryLoading(false), LIBRARY_LOADING_MAX_MS);
     return () => window.clearTimeout(id);
   }, [libraryLoading, originalPlaylist.length > 0]);
+
+  // v16.1: the saved playlists are read back once, after the library's restore has settled (so the read never competes
+  // with the restore's audio read). The read opens the load gate in the store; one that fails keeps it shut, and App's
+  // own gate (savedPlaylists stays null) refuses every playlist action: nothing is ever written over what couldn't be
+  // read. Every record is validated (parseAll) before it reaches state; one that doesn't hold together is left on disk,
+  // untouched, and counted. A read writes nothing, so StrictMode's second run is harmless.
+  // v16.1 review: libraryLoading also goes false when a track is imported while the restore runs, or after
+  // LIBRARY_LOADING_MAX_MS, so the read waits for the restore itself to settle (succeeded or failed: v16.0.1's load
+  // gate, isLoadGateOpen), checked every 200 ms in that window only. Until then the Playlists view shows its loading
+  // state, so no entry shows as "Not in your library", and none can be removed as missing, before the restored library
+  // is there. The store tells which records App could read (notePlaylistsRead): a Clear with the box ticked deletes only
+  // those.
+  useEffect(() => {
+    if (libraryLoading || savedPlaylistsRequestedRef.current) return;
+    let cancelled = false;
+    let waiting = 0;
+    const landed = (raws: unknown[] | null) => {
+      if (cancelled) return;
+      if (raws === null) {
+        setPlaylistsStatus('error');
+        return;
+      }
+      const { lists, unreadable } = parsePlaylists(raws);
+      notePlaylistsRead(lists.map((p: PlaylistRecord) => p.key));
+      playlistsRef.current = lists;
+      setSavedPlaylists(lists);
+      setPlaylistsUnreadable(unreadable);
+      setPlaylistsStatus('ready');
+    };
+    const read = () => {
+      savedPlaylistsRequestedRef.current = true;
+      readSavedPlaylists().then(landed);
+    };
+    if (isLoadGateOpen()) read();
+    else {
+      waiting = window.setInterval(() => {
+        if (!isLoadGateOpen()) return;
+        window.clearInterval(waiting);
+        waiting = 0;
+        read();
+      }, 200);
+    }
+    return () => {
+      cancelled = true;
+      if (waiting) window.clearInterval(waiting);
+      savedPlaylistsRequestedRef.current = false;
+    };
+  }, [libraryLoading]);
 
   // The set of cached track ids, as a stable string key. Audio blobs are heavy
   // but only need (re)writing when this set changes — i.e. on import or delete,
@@ -4820,7 +4947,7 @@ const App: React.FC = () => {
     const order = r.order;
     const sp = r.segmentsAndPhases;
     const walk = r.walk ? { mode: r.walk.mode, segments: sp ? sp.segments : null, phases: sp ? sp.phases : null, steps: r.walk.steps } : null;
-    startPlayOrder(order, 0, mixStartText(name, order.length, positions && r.walk ? r.walk.mode : null), { walk, mix: true });
+    startPlayOrder(order, 0, mixStartText(name, order.length, positions && r.walk ? r.walk.mode : null), { walk, mix: true, label: name }); // v16.1: label (Save as a playlist's default name)
     setUseChakraOrder(r.chakraOrder);
     setSearchTerm('');
     if (r.closeWalkMenu) setShowLoShuWalkMenu(false);
@@ -4894,7 +5021,10 @@ const App: React.FC = () => {
   // playback, tear down the current audio source + object URLs, wipe all
   // in-memory playlist state, and clear the IndexedDB cache so nothing is
   // restored on the next load.
-  const clearEntirePlaylist = useCallback(async () => {
+  // v16.1: the saved playlists stay (their tracks show as missing until the same files are imported again) unless
+  // `alsoPlaylists` (Clear's "Also delete my playlists" box, classic's and the new layout's): then they go too, any
+  // playlist view closes, and no playlist Undo from before acts.
+  const clearEntirePlaylist = useCallback(async (alsoPlaylists: boolean = false) => {
     // Stop a running Deep Scan: it would go on analysing the cleared tracks
     // (quietly: no end-of-scan summary for a library that is gone).
     (window as any).cancelAetheriaAnalysis?.({ quiet: true });
@@ -4940,8 +5070,20 @@ const App: React.FC = () => {
     statusToastTimerRef.current = null;
     setStatusToast(null);
 
+    // v16.1: the saved playlists too, when asked (in memory with the Clear's tap; on disk in its one transaction).
+    const deletingPlaylists = alsoPlaylists === true;
+    if (deletingPlaylists) {
+      playlistsClearsRef.current++;
+      playlistUndoRef.current = null;
+      if (playlistsRef.current !== null) {
+        playlistsRef.current = [];
+        setSavedPlaylists([]);
+      }
+      setShellPlaylistOpen(null);
+    }
+
     // Wipe the on-disk cache.
-    await clearPlaylistCache();
+    await clearPlaylistCache({ playlists: deletingPlaylists });
 
     console.log('[Aetheria] Playlist and cache cleared');
   }, []);
@@ -6811,12 +6953,18 @@ registerProcessor('wav-capture', WavCapture);
   // the rest; the toast says so. "The same play order" is the play order's own entries (its marks 0), so a tap on the
   // playing row still resumes rather than restarts, queue or not; with queue entries in the order every other tap
   // rebuilds it (the old same-order path replays an index of the order as it is). The Undo's snapshot keeps the marks.
-  const startPlayOrder = (orderIn: Song[], index: number, toastIn: string, opts?: { walk?: PlayOrderSnapshot['walk']; mix?: boolean }) => {
+  // v16.1: opts.label names what the order is (a walk's, a mix's or a playlist's name: Save as a playlist's default
+  // name, valid while the play order's own ids are these); opts.shuffle (a playlist's Shuffle) turns the transport's
+  // shuffle switch on with the order, as every player's Shuffle button does, and the Undo turns it back off.
+  const startPlayOrder = (orderIn: Song[], index: number, toastIn: string, opts?: { walk?: PlayOrderSnapshot['walk']; mix?: boolean; label?: string; shuffle?: boolean }) => {
     const st = stateRef.current;                       // the latest commit (the pinned sync effect)
     const el = mainAudioRef.current;
     if (index < 0 || index >= orderIn.length) return;
     const walkIn = opts?.walk ?? null;
     const mix = !!opts?.mix;
+    const turnShuffleOn = !!opts?.shuffle && !st.isShuffle; // v16.1: a Shuffle with the switch off is never "the same"
+    const shuffleOn = st.isShuffle || !!opts?.shuffle;
+    playOrderLabelRef.current = opts?.label ? { ids: orderIn.map((s: Song) => s.id).join('|'), label: opts.label } : null;
     // The queue's marks over the play order as it is (the mirror of the same commit), and the tracks waiting in it.
     const qm = queueMirrorRef.current.playlist === st.playlist ? queueMirrorRef.current.marks : null;
     // Picking a queued track plays it (as a pick does under shuffle: gatherShuffled): its first waiting copy is not
@@ -6838,8 +6986,8 @@ registerProcessor('wav-capture', WavCapture);
       setLoShuWalkSteps(w.steps);
     };
     // With no queue entry in the order, exactly v15.9's rules.
-    const same = !qm && sameIdOrder(st.playlist, orderIn);
-    const baseSame = qm ? sameIds(orderIn, baseIds(st.playlist, qm)) : same;
+    const same = !turnShuffleOn && !qm && sameIdOrder(st.playlist, orderIn);
+    const baseSame = !turnShuffleOn && (qm ? sameIds(orderIn, baseIds(st.playlist, qm)) : same);
     const onTrack = qm
       ? baseIndex(qm, st.currentSongIndex) === index ||
         (st.currentSongIndex >= 0 && qm[st.currentSongIndex] !== BASE && st.playlist[st.currentSongIndex]?.id === orderIn[index].id)
@@ -6875,7 +7023,10 @@ registerProcessor('wav-capture', WavCapture);
       toastSeq: -1,
       mix,
       marks: qm,
+      shuffleWas: st.isShuffle,
+      shuffleSet: turnShuffleOn,
     };
+    if (chained && turnShuffleOn) snap.shuffleSet = true;
     const before = playRequestSeqRef.current;
     if (same) {
       if (walk) setWalk(walk);
@@ -6888,7 +7039,8 @@ registerProcessor('wav-capture', WavCapture);
       loShuWalkSnapshotRef.current = '';
       if (walk) setWalk(walk);                         // after the clear (one batch: the walk is what commits)
       setCurrentSongIndex(index);                      // eagerly (spec §2.3: the card never names the wrong track)
-      if (st.isShuffle) {
+      if (turnShuffleOn) setIsShuffle(true);           // v16.1: with its order, in this batch (equal lengths: no regeneration)
+      if (shuffleOn) {
         const fresh = getLruShuffledIndices(order, playHistoryRef.current);
         // v16.0: the carried queue (right after the track, physically) stays right after it in the shuffle order.
         const k = waitingSongs.length;
@@ -6961,7 +7113,11 @@ registerProcessor('wav-capture', WavCapture);
       setLoShuWalkSteps(snap.walk.steps);
     }
     setCurrentSongIndex(cursor);
-    if (stateRef.current.isShuffle && !dropped && snap.shuffled.length === order.length) {
+    if (stateRef.current.isShuffle && snap.shuffleSet && !snap.shuffleWas) {
+      // v16.1: a playlist's Shuffle turned the switch on: off again, as it was (the shuffle effect clears its order, and
+      // gathers a queue back after the current track).
+      setIsShuffle(false);
+    } else if (stateRef.current.isShuffle && !dropped && snap.shuffled.length === order.length) {
       if (marks) queueShuffledRef.current = snap.shuffled; // v16.0: the queue's place in it is as it was
       setShuffledIndices(snap.shuffled);
       setShufflePos(snap.shufflePos);
@@ -7165,6 +7321,8 @@ registerProcessor('wav-capture', WavCapture);
         position: (mine[0] ?? 0) + 1,
         noCrystal: songs.some((s: Song) => !s.closestSolfeggio),
         nothingCurrent: st.cursor < 0 && anchor < 0,
+        count: songs.length, // v16.1: many tracks say how many, and where from
+        from: op.from ?? null,
       });
       queueToast(text, { token: ++queueTokenRef.current, kind: 'add', after: ed.map((i: number) => r.state.order[i].id), mine, names: songs.map((s: Song) => s.name) });
       return true;
@@ -7292,8 +7450,9 @@ registerProcessor('wav-capture', WavCapture);
     }
     if (pending.length) queueTimerRef.current = setTimeout(() => queueApiRef.current?.tick(), queueWaitShortRef.current ? 16 : 150);
   };
-  /** Play next / Add to queue: library tracks by id (the library's own objects, as playFromLibrary). */
-  const queueTracks = (ids: readonly string[], mode: 'next' | 'queue') => runQueueOp({ kind: 'add', ids: ids.slice(), mode });
+  /** Play next / Add to queue: library tracks by id (the library's own objects, as playFromLibrary). v16.1: `from`, a
+   *  playlist's name, for the toast. */
+  const queueTracks = (ids: readonly string[], mode: 'next' | 'queue', from?: string) => runQueueOp({ kind: 'add', ids: ids.slice(), mode, from });
   /** The Up next sheet's edits: a queued entry (its index in the play order and its id, checked when it applies) removed,
    *  moved to a place in the queue, or to its top (the row's Play next), and Clear. */
   const editQueue = (
@@ -7313,6 +7472,499 @@ registerProcessor('wav-capture', WavCapture);
   useLayoutEffect(() => {
     queueApiRef.current = { run: runQueueOp, tick: queueRetryTick, queueTracks, editQueue, undoQueue };
   });
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // v16.1: saved playlists (spec §3.4-§3.8). Each playlist is one record ('pl:<id>', utils/playlists/model.ts), kept in
+  // savedPlaylists and written by ONE writer, commitPlaylists, at once in the tap's own task (writePlaylistRecords:
+  // through the kept connection, committed explicitly), never on a debounce. It never touches the library, the audio or
+  // the metadata (check:writers rules 3, 6, 7). A playlist names its tracks by id and by their file's name and size:
+  // it resolves against the library as it is now (by id, else the first track with the same fingerprint, else
+  // missing), so a deleted or cleared track keeps its place as "missing" and the same file imported again is back.
+  // Every op's toast carries its Undo for 10 s (only the latest op's acts, and only over the record it left).
+  // ---------------------------------------------------------------------------------------------------------------
+  const playlistById = (id: string): PlaylistRecord | null => playlistsRef.current?.find((p: PlaylistRecord) => p.id === id) ?? null;
+  /** The library's index for the playlists (by id, and by fingerprint: the first copy in library order). O(n). */
+  const libraryIndex = (): LibraryIndex<Song> => indexLibrary<Song>(libraryRef.current);
+  /** The playlists, or null with the refusal said (still loading; or the read failed: nothing is written then). */
+  const playlistsGate = (): PlaylistRecord[] | null => {
+    // v16.1 review, belt and braces: nothing acts on the playlists before the library's restore has settled (the read
+    // waits for it too): every entry would resolve against a library still coming, and Remove missing would remove it.
+    if (!isLoadGateOpen()) {
+      showStatusToast(playlistWords.NOT_READY_TOAST, { durationMs: 6000 });
+      return null;
+    }
+    const lists = playlistsRef.current;
+    if (lists === null) showStatusToast(playlistsStatus === 'error' ? playlistWords.UNREADABLE_TOAST : playlistWords.NOT_READY_TOAST, { durationMs: 6000 });
+    return lists;
+  };
+  /** The row key of the entry at `index` (`${id}#${occurrence}`, as resolvePlaylist's), to check an edit still names it. */
+  const playlistEntryKey = (pl: PlaylistRecord, index: number): string | null => {
+    const e = pl.entries[index];
+    if (!e) return null;
+    let n = 0;
+    for (let j = 0; j <= index; j++) if (pl.entries[j].id === e.id) n++;
+    return `${e.id}#${n}`;
+  };
+  /** A playlist id no record has. */
+  const freshPlaylistId = (): string => {
+    const taken = new Set((playlistsRef.current ?? []).map((p: PlaylistRecord) => p.id));
+    let id = newPlaylistId(Date.now());
+    while (taken.has(id)) id = newPlaylistId(Date.now());
+    return id;
+  };
+  const playlistNamesTaken = (): string[] => (playlistsRef.current ?? []).map((p: PlaylistRecord) => p.name);
+
+  /**
+   * The saved playlists' ONE writer (check:writers rules 3 and 6). In the caller's own task: state and playlistsRef
+   * (sorted, newest change first), then the store write, synchronously, for exactly these records (put) and ids
+   * (deleted): never a "save all". A failed write keeps the change on screen and says so, sticky, with Retry (which
+   * writes the records as they are then). With `undo`, the toast's Undo (10 s) puts back the records as they were.
+   * Refused, with its toast, until the playlists are read back, and for good when the read failed. Never the library.
+   */
+  const commitPlaylists = (
+    put: PlaylistRecord[],
+    del: string[],
+    o: { name: string; toast?: string; undo?: PlaylistUndo['records']; action?: { label: string; run: () => void } }
+  ): boolean => {
+    const lists = playlistsGate();
+    if (lists === null) return false;
+    const byId = new Map<string, PlaylistRecord>();
+    for (const p of lists) byId.set(p.id, p);
+    for (const id of del) byId.delete(id);
+    for (const r of put) byId.set(r.id, r);
+    const next = sortPlaylists([...byId.values()]);
+    playlistsRef.current = next;
+    setSavedPlaylists(next);
+    if (del.length) setShellPlaylistOpen((open: string | null) => (open !== null && del.includes(open) ? null : open));
+    const ids = [...put.map((r: PlaylistRecord) => r.id), ...del];
+    const save = (records: PlaylistRecord[], gone: string[]) => {
+      writePlaylistRecords(records, gone.map(playlistKeyOf)).then((ok: boolean) => {
+        if (ok) return;
+        const full = playlistWriteFailure() === 'storage-full';
+        showStatusToast(playlistWords.writeFailedToast(o.name, full), {
+          sticky: true,
+          actionLabel: 'Retry',
+          onAction: () => {
+            dismissStatusToast();
+            const now = playlistsRef.current;
+            if (!now) return;
+            const live = new Map(now.map((p: PlaylistRecord) => [p.id, p]));
+            save(ids.map((id: string) => live.get(id)).filter((p: PlaylistRecord | undefined): p is PlaylistRecord => !!p), ids.filter((id: string) => !live.has(id)));
+          },
+        });
+      });
+    };
+    save(put, del);
+    if (o.undo) {
+      const token = ++playlistTokenRef.current;
+      playlistUndoRef.current = { token, name: o.name, records: o.undo, clears: playlistsClearsRef.current };
+      showStatusToast(o.toast ?? '', { actionLabel: 'Undo', onAction: () => playlistApiRef.current?.undo(token), durationMs: 10_000 });
+    } else if (o.toast) {
+      showStatusToast(o.toast, o.action ? { actionLabel: o.action.label, onAction: o.action.run, durationMs: 10_000 } : { durationMs: 6000 });
+    }
+    return true;
+  };
+
+  /** A new playlist with these library tracks (by id; gone ones skipped), named as typed (or "New playlist"). `how`:
+   *  'new' (the list's New playlist, the Add sheet's: "Made …" with Undo) or 'save' (Save as a playlist: "Saved …" with
+   *  Open). Returns its id. */
+  const createPlaylist = (name: string, trackIds: readonly string[], from?: PlaylistFrom, how: 'new' | 'save' = 'new'): string | null => {
+    const lists = playlistsGate();
+    if (lists === null) return null;
+    if (lists.length >= PLAYLISTS_MAX) {
+      showStatusToast(playlistWords.TOO_MANY_TOAST, { durationMs: 8000 });
+      return null;
+    }
+    const byId = libraryById();
+    const tracks = trackIds.map((id: string) => byId.get(id)).filter((s: Song | undefined): s is Song => !!s);
+    if (tracks.length > ENTRIES_MAX) {
+      showStatusToast(playlistWords.FULL_TOAST, { durationMs: 8000 });
+      return null;
+    }
+    const typed = cleanPlaylistName(name) ?? freePlaylistName(playlistWords.NEW_PLAYLIST_NAME, playlistNamesTaken());
+    const rec = makePlaylistRecord({ id: freshPlaylistId(), name: typed, tracks, now: Date.now(), from });
+    if (!rec) return null;
+    if (how === 'save') {
+      const id = rec.id;
+      commitPlaylists([rec], [], { name: rec.name, toast: playlistWords.savedToast(rec.name, tracks.length), action: { label: 'Open', run: () => { dismissStatusToast(); playlistApiRef.current?.open(id); } } });
+    } else {
+      const what = tracks.length ? { name: tracks.length === 1 ? tracks[0].name : null, count: tracks.length } : null;
+      commitPlaylists([rec], [], { name: rec.name, toast: playlistWords.madeToast(rec.name, what), undo: [{ id: rec.id, before: null, after: rec }] });
+    }
+    return rec.id;
+  };
+  const renamePlaylist = (id: string, name: string): boolean => {
+    if (!playlistsGate()) return false;
+    const pl = playlistById(id);
+    if (!pl) {
+      showStatusToast(playlistWords.PLAYLIST_GONE_TOAST);
+      return false;
+    }
+    const rec = renamedRecord(pl, name, Date.now());
+    if (!rec || rec === pl) return false;
+    return commitPlaylists([rec], [], { name: rec.name, toast: playlistWords.renamedToast(pl.name, rec.name), undo: [{ id, before: pl, after: rec }] });
+  };
+  const duplicatePlaylist = (id: string): string | null => {
+    const lists = playlistsGate();
+    if (lists === null) return null;
+    const pl = playlistById(id);
+    if (!pl) {
+      showStatusToast(playlistWords.PLAYLIST_GONE_TOAST);
+      return null;
+    }
+    if (lists.length >= PLAYLISTS_MAX) {
+      showStatusToast(playlistWords.TOO_MANY_TOAST, { durationMs: 8000 });
+      return null;
+    }
+    const copy = duplicatedRecord(pl, { id: freshPlaylistId(), name: freePlaylistName(playlistWords.copyName(pl.name), playlistNamesTaken()), now: Date.now() });
+    if (!copy) return null;
+    commitPlaylists([copy], [], { name: copy.name, toast: playlistWords.duplicatedToast(pl.name, copy.name), undo: [{ id: copy.id, before: null, after: copy }] });
+    return copy.id;
+  };
+  const deletePlaylist = (id: string): boolean => {
+    if (!playlistsGate()) return false;
+    const pl = playlistById(id);
+    if (!pl) return false;
+    return commitPlaylists([], [id], { name: pl.name, toast: playlistWords.deletedToast(pl.name, pl.entries.length), undo: [{ id, before: pl, after: null }] });
+  };
+  /** Add library tracks (by id) at the end of a playlist (duplicates allowed: the toast says so). */
+  const addToPlaylist = (id: string, trackIds: readonly string[]): boolean => {
+    if (!playlistsGate()) return false;
+    const pl = playlistById(id);
+    if (!pl) {
+      showStatusToast(playlistWords.PLAYLIST_GONE_TOAST);
+      return false;
+    }
+    const byId = libraryById();
+    const tracks = trackIds.map((t: string) => byId.get(t)).filter((s: Song | undefined): s is Song => !!s);
+    if (!tracks.length) {
+      showStatusToast(TAP_GONE_TEXT);
+      return false;
+    }
+    const idx = libraryIndex();
+    const rec = addedRecord(pl, tracks, Date.now(), idx);
+    if (!rec) {
+      showStatusToast(playlistWords.FULL_TOAST, { durationMs: 8000 });
+      return false;
+    }
+    const one = tracks.length === 1 ? tracks[0] : null;
+    const times = one ? rec.entries.reduce((n: number, e) => (resolveEntry(e, idx)?.id === one.id ? n + 1 : n), 0) : 1;
+    return commitPlaylists([rec], [], {
+      name: pl.name,
+      toast: playlistWords.addedToast({ name: one ? one.name : null, count: tracks.length }, pl.name, times),
+      undo: [{ id, before: pl, after: rec }],
+    });
+  };
+  /** A playlist's own edits: a move (its own undo: no toast), a remove, or Remove missing (each with Undo). Each names
+   *  its entry by index and row key, checked when it applies: a mismatch changes nothing and says so. */
+  const editPlaylist = (
+    id: string,
+    op: { move: { from: number; to: number; key: string } } | { remove: { index: number; key: string } } | { removeMissing: true }
+  ): boolean => {
+    if (!playlistsGate()) return false;
+    const pl = playlistById(id);
+    if (!pl) {
+      showStatusToast(playlistWords.PLAYLIST_GONE_TOAST);
+      return false;
+    }
+    const idx = libraryIndex();
+    const now = Date.now();
+    if ('move' in op) {
+      if (playlistEntryKey(pl, op.move.from) !== op.move.key) {
+        showStatusToast(playlistWords.EDIT_MISSED_TOAST, { durationMs: 6000 });
+        return false;
+      }
+      const rec = movedRecord(pl, op.move.from, op.move.to, now, idx);
+      return rec !== pl && commitPlaylists([rec], [], { name: pl.name });
+    }
+    if ('remove' in op) {
+      if (playlistEntryKey(pl, op.remove.index) !== op.remove.key) {
+        showStatusToast(playlistWords.EDIT_MISSED_TOAST, { durationMs: 6000 });
+        return false;
+      }
+      const e = pl.entries[op.remove.index];
+      const shown = resolveEntry(e, idx)?.name ?? e.name;
+      const rec = removedRecord(pl, [op.remove.index], now, idx);
+      return commitPlaylists([rec], [], { name: pl.name, toast: playlistWords.removedToast(shown, pl.name), undo: [{ id, before: pl, after: rec }] });
+    }
+    const gone = missingIndices(pl, idx);
+    if (!gone.length) return false;
+    const rec = removedRecord(pl, gone, now, idx);
+    return commitPlaylists([rec], [], { name: pl.name, toast: playlistWords.removedMissingToast(gone.length, pl.name), undo: [{ id, before: pl, after: rec }] });
+  };
+  /** The latest playlist op's Undo (its toast's button passes its token). It puts the records back only while they are
+   *  still the very ones the op left; after a Clear that deleted the playlists it does nothing. */
+  const undoPlaylistOp = (token?: number) => {
+    const u = playlistUndoRef.current;
+    if (!u || (token !== undefined && token !== u.token)) return;
+    playlistUndoRef.current = null;
+    dismissStatusToast();
+    const lists = playlistsRef.current;
+    if (!lists || u.clears !== playlistsClearsRef.current) return;
+    const byId = new Map(lists.map((p: PlaylistRecord) => [p.id, p]));
+    if (!u.records.every((r) => undoApplies(byId.get(r.id), r.after))) {
+      showStatusToast(playlistWords.undoChangedToast(u.name), { durationMs: 6000 });
+      return;
+    }
+    const put = u.records.filter((r) => r.before !== null).map((r) => r.before as PlaylistRecord);
+    const del = u.records.filter((r) => r.before === null).map((r) => r.id);
+    commitPlaylists(put, del, { name: u.name });
+  };
+  /** Play (from `startAt`, an index among the present tracks) or Shuffle a playlist: its present tracks, the library's
+   *  own objects, as a play order (startPlayOrder: the eager cursor, the queue carried, the 10 s Undo chain with the
+   *  mixes). Missing tracks are skipped, and the toast says so. */
+  const playPlaylist = (id: string, opts?: { shuffle?: boolean; startAt?: number }) => {
+    const pl = playlistById(id);
+    if (!pl) {
+      showStatusToast(playlistWords.PLAYLIST_GONE_TOAST);
+      return;
+    }
+    const order = presentTracks<Song>(pl, libraryIndex());
+    if (!order.length) {
+      showStatusToast(pl.entries.length ? playlistWords.allMissingToast(pl.name) : playlistWords.EMPTY_PLAYLIST_TOAST, { durationMs: 8000 });
+      return;
+    }
+    const shuffle = !!opts?.shuffle;
+    const index = shuffle
+      ? (getLruShuffledIndices(order, playHistoryRef.current)[0] ?? 0)
+      : Math.max(0, Math.min(order.length - 1, Math.trunc(opts?.startAt ?? 0)));
+    lastPlaylistStartedRef.current = id;
+    startPlayOrder(order, index, playlistWords.playToast(pl.name, order.length, pl.entries.length - order.length, shuffle), { mix: true, label: pl.name, shuffle });
+  };
+  /** Play next / Add to queue: the playlist's present tracks, in its order, through the queue (its toast and Undo). */
+  const queuePlaylist = (id: string, mode: 'next' | 'queue') => {
+    const pl = playlistById(id);
+    if (!pl) {
+      showStatusToast(playlistWords.PLAYLIST_GONE_TOAST);
+      return;
+    }
+    const order = presentTracks<Song>(pl, libraryIndex());
+    if (!order.length) {
+      showStatusToast(pl.entries.length ? playlistWords.allMissingToast(pl.name) : playlistWords.EMPTY_PLAYLIST_TOAST, { durationMs: 8000 });
+      return;
+    }
+    queueTracks(order.map((s: Song) => s.id), mode, pl.name);
+  };
+  /** The playlist the play order is (its own entries, the queue's left out), or null: a playlist whose present tracks
+   *  are exactly those, in order (the one started last wins a tie). The library in its own order reads as the library
+   *  unless that playlist was the one started. A walk is a walk. Derived, never stored: it survives a reload. */
+  const playingPlaylistOf = (ownIds: readonly string[], lists: readonly PlaylistRecord[] | null, idx: LibraryIndex<Song>, library: readonly Song[]): PlaylistRecord | null => {
+    if (!lists || !lists.length || !ownIds.length || loShuWalkMode) return null;
+    const id = playlistPlaying(ownIds, lists, idx, lastPlaylistStartedRef.current);
+    if (!id) return null;
+    if (id !== lastPlaylistStartedRef.current && ownIds.length === library.length && ownIds.every((x: string, i: number) => library[i].id === x)) return null;
+    return lists.find((p: PlaylistRecord) => p.id === id) ?? null;
+  };
+  /** What Save as a playlist saves (spec §3.8): the queue's waiting tracks in queue order, or the play order's own
+   *  entries (a mix, a walk with its repeats, a playlist, the library), with the default name, its source and the
+   *  Dialog's sentence. Null with nothing to save. */
+  const playlistSaveSource = (kind: 'queue' | 'playing'): { ids: string[]; name: string; from: PlaylistFrom; sentence: string; label: string | null } | null => {
+    const s = stateRef.current;
+    const q = queueMirrorRef.current;
+    const marks = q.playlist === s.playlist ? q.marks : null;
+    const now = Date.now();
+    const taken = playlistNamesTaken();
+    const waiting = waitingIndices({ marks });
+    if (kind === 'queue') {
+      const ids = waiting.map((i: number) => s.playlist[i]?.id).filter((x: string | undefined): x is string => !!x);
+      if (!ids.length) return null;
+      return { ids, name: freePlaylistName(playlistWords.queueDefaultName(now), taken), from: { kind: 'queue' }, sentence: playlistWords.saveQueueSentence(ids.length), label: null };
+    }
+    const ids = baseIds(s.playlist, marks);
+    if (!ids.length) return null;
+    const library = libraryRef.current;
+    const playing = playingPlaylistOf(ids, playlistsRef.current, libraryIndex(), library);
+    const labelled = playOrderLabelRef.current && playOrderLabelRef.current.ids === ids.join('|') ? playOrderLabelRef.current.label : null;
+    const isLibrary = ids.length === library.length && ids.every((x: string, i: number) => library[i].id === x);
+    let name: string;
+    let from: PlaylistFrom;
+    let label: string | null;
+    if (playing) {
+      label = playing.name;
+      name = freePlaylistName(playlistWords.copyName(playing.name), taken);
+      from = { kind: 'duplicate', label: playing.name };
+    } else if (labelled) {
+      label = labelled;
+      name = freePlaylistName(labelled, taken);
+      from = { kind: 'playing', label: labelled };
+    } else if (isLibrary) {
+      label = 'Library';
+      name = freePlaylistName(playlistWords.libraryDefaultName(now), taken);
+      from = { kind: 'playing', label: 'Library' };
+    } else {
+      label = null;
+      name = freePlaylistName(playlistWords.orderDefaultName(now), taken);
+      from = { kind: 'playing' };
+    }
+    return { ids, name, from, sentence: playlistWords.savePlayingSentence(ids.length, label, waiting.length), label };
+  };
+  /** Save as a playlist, named (the Dialog's Save; the seams for v16.2's filters and v16.3's builder). */
+  const savePlaylistFrom = (o: { ids: readonly string[]; name: string; from: PlaylistFrom }): string | null => createPlaylist(o.name, o.ids, o.from, 'save');
+  /** The name Dialog for a save (new layout): its default name and sentence; nothing to save says so. */
+  const openSavePlaylist = (source: 'queue' | 'playing' | { kind: 'ids'; ids: readonly string[]; label: string; from: PlaylistFrom }) => {
+    if (!playlistsGate()) return;
+    if (typeof source === 'object') {
+      setPlaylistNaming({ kind: 'save', ids: source.ids.slice(), name: freePlaylistName(source.label, playlistNamesTaken()), from: source.from, sentence: playlistWords.saveShownSentence(source.ids.length) });
+      return;
+    }
+    const s = playlistSaveSource(source);
+    if (!s) {
+      showStatusToast(source === 'queue' ? playlistWords.NOTHING_QUEUED_TOAST : playlistWords.NOTHING_PLAYING_TOAST);
+      return;
+    }
+    setPlaylistNaming({ kind: 'save', ids: s.ids, name: s.name, from: s.from, sentence: s.sentence });
+  };
+  /** The name Dialog (new layout): New playlist (its default name), Rename (the name as it is). */
+  const openPlaylistNaming = (o: { kind: 'new' } | { kind: 'rename'; id: string }) => {
+    if (!playlistsGate()) return;
+    if (o.kind === 'new') {
+      setPlaylistNaming({ kind: 'new', name: freePlaylistName(playlistWords.NEW_PLAYLIST_NAME, playlistNamesTaken()), addIds: null });
+      return;
+    }
+    const pl = playlistById(o.id);
+    if (pl) setPlaylistNaming({ kind: 'rename', id: o.id, name: pl.name });
+  };
+  /** The name Dialog's Save: the save, the new playlist (its view opens), or the rename. */
+  const confirmPlaylistNaming = (name: string) => {
+    const n = playlistNaming;
+    setPlaylistNaming(null);
+    if (!n) return;
+    if (n.kind === 'save') savePlaylistFrom({ ids: n.ids, name, from: n.from });
+    else if (n.kind === 'new') {
+      const id = createPlaylist(name, n.addIds ?? [], { kind: 'new' });
+      if (id) openPlaylist(id);
+    } else renamePlaylist(n.id, name);
+  };
+  /** The Add to playlist sheet: its tracks into that playlist, or into a new one ("Create and add"); it closes. */
+  const addFromSheet = (playlistId: string) => {
+    const ids = playlistAddIds;
+    setShellSheet(null);
+    setSheetFocus(null);
+    setPlaylistAddIds(null);
+    if (ids && ids.length) addToPlaylist(playlistId, ids);
+  };
+  const createFromSheet = (name: string) => {
+    const ids = playlistAddIds;
+    setShellSheet(null);
+    setSheetFocus(null);
+    setPlaylistAddIds(null);
+    createPlaylist(name, ids ?? [], { kind: 'new' });
+  };
+  /** Now Playing's ⋯ line for Save as a playlist: what's playing, named, and how many. */
+  const playlistSaveInfo = (): { label: string | null; count: number } | null => {
+    const s = playlistSaveSource('playing');
+    return s ? { label: s.label, count: s.ids.length } : null;
+  };
+  /** The present tracks of a playlist, in order (the library's own objects): v16.3's builder's input. */
+  const playlistTracks = (id: string): Song[] => {
+    const pl = playlistById(id);
+    return pl ? presentTracks<Song>(pl, libraryIndex()) : [];
+  };
+  /** Open a playlist's view (Library › Playlists › it): its home is the Library tab (decision 1 A: PLAYLISTS_HOME). */
+  const openPlaylist = (id: string | null) => {
+    // Opening one shows the Playlists side; closing one (Back, "Go to Tracks") leaves the side to the caller (v16.1
+    // review: "Go to Tracks" set Tracks first, and this put Playlists back, so the tab reopened on Playlists).
+    if (id !== null) libraryViewRef.current.view = 'playlists';
+    setShellPlaylistOpen(id);
+    setShellSheet(null);
+    setSheetFocus(null);
+    setShellTab(PLAYLISTS_HOME);
+  };
+  /** The dev hook's and the shell's view of the playlists (resolved against the library as it is now). */
+  const playlistsState = () => {
+    const lists = playlistsRef.current;
+    const idx = libraryIndex();
+    const s = stateRef.current;
+    const q = queueMirrorRef.current;
+    const marks = q.playlist === s.playlist ? q.marks : null;
+    const playing = playingPlaylistOf(baseIds(s.playlist, marks), lists, idx, libraryRef.current);
+    return {
+      status: playlistsStatus,
+      unreadable: playlistsUnreadable,
+      playing: playing ? playing.id : null,
+      open: shellPlaylistOpen,
+      undo: playlistUndoRef.current ? playlistUndoRef.current.token : null,
+      lists: (lists ?? []).map((p: PlaylistRecord) => {
+        const r = resolvePlaylist<Song>(p, idx);
+        return {
+          id: p.id,
+          name: p.name,
+          ids: p.entries.map((e) => e.id),
+          names: p.entries.map((e) => e.name),
+          tracks: r.rows.map((x) => (x.track ? x.track.id : null)),
+          present: r.present,
+          missing: r.missing,
+          from: p.from ?? null,
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+        };
+      }),
+    };
+  };
+  const playlistApiRef: { current: any } = useRef(null);
+  useLayoutEffect(() => {
+    playlistApiRef.current = {
+      create: createPlaylist,
+      rename: renamePlaylist,
+      duplicate: duplicatePlaylist,
+      remove: deletePlaylist,
+      add: addToPlaylist,
+      edit: editPlaylist,
+      undo: undoPlaylistOp,
+      play: playPlaylist,
+      queue: queuePlaylist,
+      saveFrom: savePlaylistFrom,
+      saveSource: playlistSaveSource,
+      openSave: openSavePlaylist,
+      tracks: playlistTracks,
+      open: openPlaylist,
+      state: playlistsState,
+      // The new layout's (shell actions call these).
+      gate: () => playlistsGate() !== null,
+      naming: openPlaylistNaming,
+      confirmNaming: confirmPlaylistNaming,
+      addFromSheet,
+      createFromSheet,
+      saveInfo: playlistSaveInfo,
+      counts: () => ({ tracks: storedTrackCount, playlists: playlistsRef.current?.length ?? 0 }),
+    };
+  });
+  // v16.1 (spec §3.14): the new layout's Library tools (the health card's Clear and Diagnostics). Their own one-line
+  // effect: a reference to a library writer (clearEntirePlaylist) is pinned by check:writers, and here no later edit of
+  // the shell actions' or the playlists' effects re-pins it.
+  const libraryToolsRef: { current: { clear: (alsoPlaylists: boolean) => Promise<void>; diagnostics: () => void } | null } = useRef(null);
+  useLayoutEffect(() => { libraryToolsRef.current = { clear: clearEntirePlaylist, diagnostics: showPlaylistDiagnostics }; });
+  // v16.1: the playlists' tests drive them and read them through this hook (dev builds only; production strips it).
+  useEffect(() => {
+    if (!IS_DEV_BUILD) return;
+    const w = window as unknown as { __aetheriaPlaylists?: unknown };
+    const P = () => playlistApiRef.current;
+    w.__aetheriaPlaylists = {
+      state: () => P()?.state(),
+      create: (name: string, ids: string[] = [], from?: PlaylistFrom) => P()?.create(name, ids, from),
+      rename: (id: string, name: string) => P()?.rename(id, name),
+      duplicate: (id: string) => P()?.duplicate(id),
+      remove: (id: string) => P()?.remove(id),
+      add: (id: string, ids: string[]) => P()?.add(id, ids),
+      edit: (id: string, op: unknown) => P()?.edit(id, op),
+      undo: () => P()?.undo(),
+      play: (id: string, opts?: { shuffle?: boolean; startAt?: number }) => P()?.play(id, opts),
+      queue: (id: string, mode: 'next' | 'queue') => P()?.queue(id, mode),
+      /** Save as a playlist without the Dialog: the queue's waiting tracks, or what's playing (its default name, or `name`). */
+      saveQueue: (name?: string) => {
+        const s = P()?.saveSource('queue');
+        return s ? P()?.saveFrom({ ids: s.ids, name: name ?? s.name, from: s.from }) : null;
+      },
+      savePlaying: (name?: string) => {
+        const s = P()?.saveSource('playing');
+        return s ? P()?.saveFrom({ ids: s.ids, name: name ?? s.name, from: s.from }) : null;
+      },
+      saveSource: (kind: 'queue' | 'playing') => P()?.saveSource(kind),
+      tracks: (id: string) => (P()?.tracks(id) ?? []).map((s: Song) => s.id),
+      open: (id: string | null) => P()?.open(id),
+    };
+    return () => { delete w.__aetheriaPlaylists; };
+  }, []);
 
   /** The layout switch: saved from a tap only. The music, the visualizer and the lock-screen card carry over. */
   const setLayout = (next: LayoutPref) => {
@@ -7380,6 +8032,18 @@ registerProcessor('wav-capture', WavCapture);
     () => (shellOn ? sameIdOrder(shellBaseOrder, originalPlaylist) || sameIdSet(shellBaseOrder, originalPlaylist) : true),
     [shellOn, shellBaseOrder, originalPlaylist]
   );
+  // v16.1: the saved playlist the play order is (its own entries, in order: playingPlaylistOf), derived, so it survives
+  // a reload with no new persistence; an edit of it reads "Play order" until it is played again. O(library + entries)
+  // when the order, its marks, the playlists or the library change (never the clock), only while the new layout shows.
+  const shellPlaylistIndex: LibraryIndex<Song> | null = useMemo(
+    () => (shellOn && savedPlaylists && savedPlaylists.length ? indexLibrary<Song>(originalPlaylist) : null),
+    [shellOn, savedPlaylists, originalPlaylist]
+  );
+  const shellPlayingPlaylist = useMemo(
+    () => (shellPlaylistIndex ? playingPlaylistOf(shellBaseOrder.map((s: Song) => s.id), savedPlaylists, shellPlaylistIndex, originalPlaylist) : null),
+    [shellPlaylistIndex, shellBaseOrder, savedPlaylists, originalPlaylist, loShuWalkMode]
+  );
+  const shellPlayingPlaylistName: string | null = shellPlayingPlaylist ? shellPlayingPlaylist.name : null;
   // v16.0: the queue's slice (QueueContext): the sequence ahead in the order of play (queued and own runs), the waiting
   // count, what plays next, and each waiting track's first place (the Library's marks). O(n) on a change of the play
   // order, its marks, the cursor, the shuffle order or the walk, never on the clock; only while the new layout shows.
@@ -7409,13 +8073,17 @@ registerProcessor('wav-capture', WavCapture);
       more: u.more,
       end: u.end,
       nextTitle: next !== null ? (playlist[next]?.name ?? null) : null,
-      source: shellWalkName ? { kind: 'walk' as const, name: shellWalkName } : playOrderIsLibrary ? { kind: 'library' as const } : { kind: 'order' as const },
+      source: shellWalkName
+        ? { kind: 'walk' as const, name: shellWalkName }
+        : shellPlayingPlaylistName
+          ? { kind: 'playlist' as const, name: shellPlayingPlaylistName }
+          : playOrderIsLibrary ? { kind: 'library' as const } : { kind: 'order' as const },
       nothingCurrent: currentSongIndex < 0,
       loop: isLoop,
       shuffle: isShuffle,
       positions,
     };
-  }, [shellOn, playlist, currentSongIndex, isShuffle, shuffledIndices, isLoop, queueMarks, shellWalkName, playOrderIsLibrary]);
+  }, [shellOn, playlist, currentSongIndex, isShuffle, shuffledIndices, isLoop, queueMarks, shellWalkName, playOrderIsLibrary, shellPlayingPlaylistName]);
   const libraryTotalSeconds = useMemo(
     () => (shellOn ? originalPlaylist.reduce((sum: number, s: Song) => sum + (s.duration || 0), 0) : 0),
     [shellOn, originalPlaylist]
@@ -7434,12 +8102,21 @@ registerProcessor('wav-capture', WavCapture);
     if (run) {
       const after = nextBaseAhead(st);
       const afterWalk = after !== null && loShuWalkMode && loShuWalkSteps ? walkProgress(loShuWalkSteps, loShuWalkSegments, after) : null;
-      const then = queueThen(shellWalkName, playOrderIsLibrary, afterWalk ? afterWalk.at : after !== null ? after + 1 : 0, afterWalk ? afterWalk.count : n, after !== null);
+      const then = !shellWalkName && shellPlayingPlaylistName
+        ? (after !== null ? shellPlayingPlaylistName : null) // v16.1: "then Evening"
+        : queueThen(shellWalkName, playOrderIsLibrary, afterWalk ? afterWalk.at : after !== null ? after + 1 : 0, afterWalk ? afterWalk.count : n, after !== null);
       return { shellSource: queueSourceLine(run.at, run.of, then), shellSourceShort: queueSourceShort(run.at, run.of) };
     }
     // The walk's own position, or the play order's own (both the plain cursor without a queue).
     const at = wp && !wp.queued ? wp.at - 1 : queueMarks ? baseIndex(queueMarks, cur) : cur;
     const count = wp && Number.isFinite(wp.count) ? wp.count : queueMarks ? baseCount(queueMarks, n) : n;
+    // v16.1: a saved playlist playing: "Playlist · Evening · 3 of 12", the mini-player's "Evening 3/12".
+    if (!shellWalkName && shellPlayingPlaylistName) {
+      return {
+        shellSource: playlistWords.playlistSourceLine(shellPlayingPlaylistName, at, count),
+        shellSourceShort: playlistWords.playlistSourceShort(shellPlayingPlaylistName, cur >= 0 ? at : -1, count),
+      };
+    }
     return {
       shellSource: sourceLine(
         shellWalkName,
@@ -7451,7 +8128,7 @@ registerProcessor('wav-capture', WavCapture);
       ),
       shellSourceShort: cur >= 0 ? `${shellWalkName ?? (playOrderIsLibrary ? 'Library' : 'Play order')} ${at + 1}/${count}` : `${count} tracks`,
     };
-  }, [shellOn, playlist, currentSongIndex, isShuffle, shuffledIndices, shufflePos, queueMarks, loShuWalkMode, loShuWalkSteps, loShuWalkSegments, loShuWalkPhases, shellWalkName, playOrderIsLibrary]);
+  }, [shellOn, playlist, currentSongIndex, isShuffle, shuffledIndices, shufflePos, queueMarks, loShuWalkMode, loShuWalkSteps, loShuWalkSegments, loShuWalkPhases, shellWalkName, playOrderIsLibrary, shellPlayingPlaylistName]);
   const shellPlayer = useMemo(
     () => ({
       isPlaying,
@@ -7570,9 +8247,60 @@ registerProcessor('wav-capture', WavCapture);
       discardArmed,
       lastImport,
       analyseMobile: ANALYSE_MOBILE,
+      storedTrackCount, // v16.1: the new layout's Clear dialog
+      playlistCount: savedPlaylists ? savedPlaylists.length : 0,
     }),
-    [isScanning, scanProgress, pass, analyseCounts, isRestoring, pendingDurationAnalysis.length, shellOrphans, orphanBusy, discardArmed, lastImport]
+    [isScanning, scanProgress, pass, analyseCounts, isRestoring, pendingDurationAnalysis.length, shellOrphans, orphanBusy, discardArmed, lastImport, storedTrackCount, savedPlaylists]
   );
+  // v16.1: the saved playlists' slice (PlaylistsContext): the list's rows (summaries, O(total entries)), the open
+  // playlist's resolved rows, the name Dialog and the Add sheet. Only while the new layout shows; never the clock (the
+  // cursor counts only to mark the open playlist's playing row).
+  const shellPlaylists = useMemo(() => {
+    const lists: PlaylistRecord[] = shellOn && savedPlaylists ? savedPlaylists : [];
+    const idx = shellPlaylistIndex;
+    const playingId = shellPlayingPlaylist ? shellPlayingPlaylist.id : null;
+    const addOne = playlistAddIds && playlistAddIds.length === 1 ? playlistAddIds[0] : null;
+    const rows = idx
+      ? playlistSummaries<Song>(lists, idx).map((s) => ({
+          ...s,
+          playing: s.id === playingId,
+          has: addOne !== null && (lists.find((p: PlaylistRecord) => p.id === s.id)?.entries.some((e) => resolveEntry(e, idx)?.id === addOne) ?? false),
+        }))
+      : [];
+    const pl = shellOn && shellPlaylistOpen ? (lists.find((p: PlaylistRecord) => p.id === shellPlaylistOpen) ?? null) : null;
+    let open = null;
+    if (pl) {
+      const r = resolvePlaylist<Song>(pl, idx ?? indexLibrary<Song>(originalPlaylist));
+      let k = 0;
+      const entries = r.rows.map((x) => ({ key: x.key, index: x.index, name: x.entry.name, file: x.entry.file, song: x.track, presentIndex: x.track ? k++ : -1 }));
+      // The playing row: this playlist plays and the cursor is on one of its own entries (not a queued track).
+      const own = currentSongIndex >= 0 && (!queueMarks || queueMarks[currentSongIndex] === BASE) ? (queueMarks ? baseIndex(queueMarks, currentSongIndex) : currentSongIndex) : -1;
+      const current = playingId === pl.id && own >= 0 ? (entries.find((e: { presentIndex: number }) => e.presentIndex === own)?.index ?? -1) : -1;
+      open = { id: pl.id, name: pl.name, count: pl.entries.length, present: r.present, missing: r.missing, seconds: r.seconds, fromLine: playlistWords.fromLine(pl.from, pl.updatedAt), rows: entries, current };
+    }
+    const naming = playlistNaming
+      ? playlistNaming.kind === 'save'
+        ? { kind: 'save' as const, name: playlistNaming.name, sentence: playlistNaming.sentence }
+        : playlistNaming.kind === 'new'
+          ? { kind: 'new' as const, name: playlistNaming.name }
+          : { kind: 'rename' as const, id: playlistNaming.id, name: playlistNaming.name }
+      : null;
+    const addTitle = playlistAddIds
+      ? playlistWords.addSheetSubtitle(playlistAddIds.length === 1 ? (originalPlaylist.find((s: Song) => s.id === playlistAddIds[0])?.name ?? null) : null, playlistAddIds.length)
+      : '';
+    return {
+      status: playlistsStatus,
+      unreadable: playlistsUnreadable,
+      lists: rows,
+      totalSeconds: rows.reduce((t: number, s: { seconds: number }) => t + s.seconds, 0),
+      playingId,
+      open,
+      openId: shellPlaylistOpen,
+      naming,
+      add: playlistAddIds ? { ids: playlistAddIds, title: addTitle } : null,
+      newName: freePlaylistName(playlistWords.NEW_PLAYLIST_NAME, lists.map((p: PlaylistRecord) => p.name)),
+    };
+  }, [shellOn, savedPlaylists, playlistsStatus, playlistsUnreadable, shellPlaylistIndex, shellPlayingPlaylist, shellPlaylistOpen, playlistNaming, playlistAddIds, originalPlaylist, currentSongIndex, queueMarks]);
   // v15.7: classic's blue "Analysis Status" notice is not shown in the new layout: an import's summary is the Import
   // sheet's and Deep Scan's progress the health card's (newLayoutNotice: 'mute'); any other message goes to the status
   // toast, once per message.
@@ -7595,6 +8323,17 @@ registerProcessor('wav-capture', WavCapture);
       : (loShuWalkMode || !playOrderIsLibrary) && playlist.some((s: Song) => s.id === pendingDelete.id)
         ? " It also comes out of the list that's playing."
         : '';
+  // v16.1 (decision 2 A), in both layouts: the saved playlists that hold the track keep a place for it (it shows as
+  // missing; the same file imported again is back there). Only when one does, so classic's text is otherwise byte for
+  // byte v16.0's. Counted when the Dialog opens: one index of the library and one pass over the playlists.
+  const deletePlaylistsNote = useMemo(() => {
+    const lists = savedPlaylists;
+    if (!pendingDelete || !lists || lists.length === 0) return '';
+    const holding = playlistsWith(pendingDelete.id, lists, indexLibrary(originalPlaylist));
+    if (!holding.length) return '';
+    const byId = new Map<string, string>(lists.map((p: PlaylistRecord): [string, string] => [p.id, p.name]));
+    return playlistWords.deleteSentence(holding.map((id: string) => byId.get(id) ?? ''));
+  }, [pendingDelete, savedPlaylists, originalPlaylist]);
   // v15.7: the Library tab's tests read the play order's exact state through this hook (dev builds only; production
   // strips it, as it does __aetheriaAnalyse).
   const libraryHookRef: { current: { walk: LoShuWalkMode | null; segments: number[] | null; phases: string[] | null; steps: number[] | null; playing: boolean } } =
@@ -7732,6 +8471,7 @@ registerProcessor('wav-capture', WavCapture);
   });
   const shellActions = useMemo(() => {
     const A = () => shellActionsRef.current;
+    const PL = () => playlistApiRef.current; // v16.1
     return {
       playPause: () => A().handlePlayPause(),
       next: () => A().handleNext(),
@@ -7834,6 +8574,42 @@ registerProcessor('wav-capture', WavCapture);
         setSheetFocus(null);
         setShellSheet((s: ShellSheet | null) => (s === 'queue' ? null : 'queue'));
       },
+      // v16.1, saved playlists: references to App's playlist functions (playlistApiRef, their own layout effect; their
+      // one writer, commitPlaylists, never the library), and the Library tools (libraryToolsRef: Clear, Diagnostics).
+      openPlaylist: (id: string | null) => PL().open(id),
+      newPlaylist: () => PL().naming({ kind: 'new' }),
+      renamePlaylist: (id: string) => PL().naming({ kind: 'rename', id }),
+      namePlaylist: (name: string) => PL().confirmNaming(name),
+      closeNaming: () => setPlaylistNaming(null),
+      duplicatePlaylist: (id: string) => PL().duplicate(id),
+      deletePlaylist: (id: string) => PL().remove(id),
+      playPlaylist: (id: string, opts?: { shuffle?: boolean; startAt?: number }) => PL().play(id, opts),
+      queuePlaylist: (id: string, mode: 'next' | 'queue') => PL().queue(id, mode),
+      editPlaylist: (id: string, op: unknown) => PL().edit(id, op),
+      addToPlaylist: (ids: readonly string[]) => {
+        if (!PL().gate() || !ids.length) return;
+        setPlaylistAddIds(ids.slice());
+        setSheetFocus(null);
+        setShellSheet('playlist-add');
+      },
+      addTracksTo: (playlistId: string) => PL().addFromSheet(playlistId),
+      createWithTracks: (name: string) => PL().createFromSheet(name),
+      // The sheet (Up next, the ⋯ menu) closes first: a Dialog never sits on a Sheet.
+      savePlaylist: (source: 'queue' | 'playing' | { kind: 'ids'; ids: readonly string[]; label: string; from: PlaylistFrom }) => {
+        setShellSheet(null);
+        setSheetFocus(null);
+        PL().openSave(source);
+      },
+      saveSourceInfo: () => PL().saveInfo(),
+      storagePersisted: () => storagePersisted(),
+      // The new layout's Clear (its dialog closed first): Clear wipes the toasts, so its own toast follows it.
+      clearLibrary: (alsoPlaylists: boolean) => {
+        const tools = libraryToolsRef.current;
+        if (!tools) return;
+        const c = PL().counts();
+        Promise.resolve(tools.clear(alsoPlaylists)).then(() => showStatusToast(playlistWords.clearedToast(c.tracks, c.playlists, alsoPlaylists)));
+      },
+      showDiagnostics: () => libraryToolsRef.current?.diagnostics(),
     };
   }, []);
 
@@ -8112,7 +8888,7 @@ registerProcessor('wav-capture', WavCapture);
               </>
             }
           >
-            {`"${pendingDelete?.name ?? ''}" will be removed from your library, and the copy stored on this device deleted. The original file is not touched.${deleteNote}`}
+            {`"${pendingDelete?.name ?? ''}" will be removed from your library, and the copy stored on this device deleted. The original file is not touched.${deleteNote}${deletePlaylistsNote}`}
           </Dialog>
 
           {/* v2's output question (v14.9): a non-blocking sheet, v2 only, between the header and the player bar
@@ -8221,6 +8997,7 @@ registerProcessor('wav-capture', WavCapture);
           libraryList={shellLibraryList}
           libraryStatus={shellLibraryStatus}
           queue={shellQueue}
+          playlists={shellPlaylists}
         >
           <AppShell />
         </ShellProviders>
@@ -8244,7 +9021,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.0.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -9502,6 +10279,7 @@ registerProcessor('wav-capture', WavCapture);
                 <ClearPlaylistButton
                   onClear={clearEntirePlaylist}
                   libraryCount={storedTrackCount}
+                  playlistCount={savedPlaylists ? savedPlaylists.length : 0}
                 />
               </div>
             )}

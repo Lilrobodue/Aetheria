@@ -129,11 +129,14 @@ export class RawCdp {
   /** Kill our tab's renderer (Page.crash, sent and not awaited) after assertCrashable; resolves once Chrome reports
    *  the crash (Target.targetCrashed, or Inspector.targetCrashed on the session) or the session loses its renderer
    *  (Inspector.detached, "Render process gone."). With Chrome in the background, Android Chrome reports only the
-   *  last until it is brought back (then it reloads the tab and reports the crash; measured on the Note 20). */
-  async crash(targetId: string, sessionId: string): Promise<void> {
+   *  last until it is brought back (then it reloads the tab and reports the crash; measured on the Note 20).
+   *  `beforeFire` (v16.1 D-PL1) runs last before Page.crash goes out, after the guard: a read of the page's clock there
+   *  times the kill itself. */
+  async crash(targetId: string, sessionId: string, beforeFire?: () => Promise<void>): Promise<void> {
     await this.assertCrashable(targetId);
     await this.send('Target.setDiscoverTargets', { discover: true });
     await this.send('Inspector.enable', {}, sessionId).catch(() => {});
+    if (beforeFire) await beforeFire();
     const crashed = this.waitForEvent(
       (m) =>
         (m.method === 'Target.targetCrashed' && m.params?.targetId === targetId) ||

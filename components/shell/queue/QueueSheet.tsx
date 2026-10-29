@@ -13,6 +13,8 @@
 // next run). The phone shows it as the kit's modal Sheet (≤ 85 % of the height); the desktop in its 420 px panel
 // (non-modal: the transport stays live; Escape closes it). The body is the `queue` region: a crash there keeps the
 // music and the rest of the shell. Every edit is one editQueue (one App commit); a drag writes only on its drop.
+// v16.1 (mockup save-upnext-phone): "Save as playlist" before Clear in the first "Queued · n" heading: the waiting
+// tracks in queue order (the sheet closes, then the name Dialog).
 // Nothing here reads the clock.
 
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -275,14 +277,24 @@ const QueueBody = ({ scrollRef, cancelRef }: { scrollRef: { current: HTMLDivElem
               {first ? `Queued · ${q.waiting}` : 'Queued'}
             </h3>
             {first ? (
-              <button
-                type="button"
-                data-testid="queue-clear"
-                onClick={() => actions.editQueue({ clear: true })}
-                className="shrink-0 -mr-2 min-h-touch px-3 rounded-control text-sm text-ink-muted underline underline-offset-2 hover:text-ink-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
-              >
-                Clear
-              </button>
+              <span className="shrink-0 -mr-2 flex items-center">
+                <button
+                  type="button"
+                  data-testid="queue-save"
+                  onClick={() => actions.savePlaylist('queue')}
+                  className="shrink-0 min-h-touch px-3 rounded-control text-sm text-ink-muted underline underline-offset-2 hover:text-ink-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+                >
+                  Save as playlist
+                </button>
+                <button
+                  type="button"
+                  data-testid="queue-clear"
+                  onClick={() => actions.editQueue({ clear: true })}
+                  className="shrink-0 min-h-touch px-3 rounded-control text-sm text-ink-muted underline underline-offset-2 hover:text-ink-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+                >
+                  Clear
+                </button>
+              </span>
             ) : null}
           </div>
           <QueueList

@@ -28,8 +28,18 @@
 //   2. Nothing under components/shell/ imports utils/playlistCache (v15.8: nor utils/mix and utils/crystalData; v16.0:
 //      nor utils/queue).
 //   3. The play-order functions (startPlayOrder, playFromLibrary, undoPlayOrder, …; v16.0: the queue's queueTracks,
-//      editQueue, undoQueue, and its one writer commitQueue and applyQueueOp) exist once each in App.tsx and use no
-//      writer and no wrapper.
+//      editQueue, undoQueue, and its one writer commitQueue and applyQueueOp; v16.1: the saved playlists' one writer
+//      commitPlaylists, and playPlaylist, queuePlaylist, undoPlaylistOp, savePlaylistFrom) exist once each in App.tsx
+//      and use no writer and no wrapper.
+//   (v16.1, rule 2: nor utils/playlists, the saved playlists' pure model; and nothing under components/shell/ imports
+//      utils/playlists: App resolves the playlists, the shell gets values.)
+//   6. v16.1, the saved playlists have ONE writer: playlistCache's writePlaylistRecords is used only in
+//      App › commitPlaylists (and tools/cache-check.ts), and its readSavedPlaylists only in App's load effect,
+//      App › useEffect([libraryLoading]) (and tools/cache-check.ts), followed through imports as rule 1 follows the
+//      writers (by name, renamed, through a namespace).
+//   7. v16.1, their own store: in utils/playlistCache.ts the bodies of readSavedPlaylists, writePlaylistRecords and
+//      drainPlaylists name neither BLOBS_STORE nor META_STORE (nor a 'blobs' or 'meta' literal), and every
+//      .transaction( call in them has STATE_STORE, alone, as its first argument.
 //
 //   node scripts/check-library-writers.mjs            compare against scripts/library-writers.json
 //   node scripts/check-library-writers.mjs --update   rewrite the table (only for an intended change; list it)
@@ -49,7 +59,14 @@ const PINS_PATH = join(root, 'scripts', 'library-writers.json');
 const CACHE_FILE = 'utils/playlistCache.ts';
 const CACHE_WRITERS = ['deleteTracksFromCache', 'clearPlaylistCache'];
 const ROOT_COMPONENT = 'App'; // App.tsx's component: its own body is not a wrapper, its inner functions are
-const PLAY_ORDER_FUNCTIONS = ['startPlayOrder', 'playFromLibrary', 'undoPlayOrder', 'applyMix', 'restoreLibrary', 'startMix', 'queueTracks', 'editQueue', 'undoQueue', 'commitQueue', 'applyQueueOp']; // v15.8: applyMix, the mixes' one way into App's state; v15.9: restoreLibrary, and the Mixes tab's startMix; v16.0: the queue's handlers and its one writer
+const PLAY_ORDER_FUNCTIONS = ['startPlayOrder', 'playFromLibrary', 'undoPlayOrder', 'applyMix', 'restoreLibrary', 'startMix', 'queueTracks', 'editQueue', 'undoQueue', 'commitQueue', 'applyQueueOp', 'commitPlaylists', 'playPlaylist', 'queuePlaylist', 'undoPlaylistOp', 'savePlaylistFrom']; // v15.8: applyMix, the mixes' one way into App's state; v15.9: restoreLibrary, and the Mixes tab's startMix; v16.0: the queue's handlers and its one writer; v16.1: the saved playlists' one writer and their play, queue, Undo and save
+// v16.1 (rule 6): the saved playlists' writer and reader, and where alone they may be used.
+const PLAYLIST_IO = {
+  writePlaylistRecords: { app: 'App › commitPlaylists', files: ['tools/cache-check.ts'] },
+  readSavedPlaylists: { app: 'App › useEffect([libraryLoading])', files: ['tools/cache-check.ts'] },
+};
+// v16.1 (rule 7): the functions of utils/playlistCache.ts that touch the saved playlists, and the stores they never name.
+const PLAYLIST_STORE_FUNCTIONS = ['readSavedPlaylists', 'writePlaylistRecords', 'drainPlaylists'];
 const MUTATORS = new Set(['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin']);
 
 const lf = (s) => s.replace(/^﻿/, '').replace(/\r\n?/g, '\n');
@@ -338,15 +355,21 @@ else {
 // ---------------------------------------------------------------------------------------------------------------
 // v15.8: nor do the mix recipes and the crystal data (pure modules: they return data, App applies it). v16.0: nor the
 // queue's model (pure: App applies its writes).
-const NO_CACHE = (f) => f.startsWith('components/shell/') || f.startsWith('utils/mix/') || f.startsWith('utils/queue/') || f === 'utils/crystalData.ts';
+// v16.1: nor the saved playlists' pure model (utils/playlists); and the shell never imports that model either (App
+// resolves the playlists against the library; the shell gets values, as for utils/queue).
+const NO_CACHE = (f) => f.startsWith('components/shell/') || f.startsWith('utils/mix/') || f.startsWith('utils/queue/') || f.startsWith('utils/playlists/') || f === 'utils/crystalData.ts';
+const specOf = (n) =>
+  (ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier) ? n.moduleSpecifier.text
+  : ts.isCallExpression(n) && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0]) && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === 'require')) ? n.arguments[0].text
+  : null;
 for (const file of files.filter(NO_CACHE)) {
   const sf = parse(file);
   const visit = (n) => {
-    const spec =
-      (ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier) ? n.moduleSpecifier.text
-      : ts.isCallExpression(n) && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0]) && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === 'require')) ? n.arguments[0].text
-      : null;
-    if (spec && resolveImport(file, spec) === CACHE_FILE) problem(`${file}:${lineOf(sf, n)}: imports ${spec} (the shell, the mix recipes and the crystal data never reach the library's storage)`);
+    const spec = specOf(n);
+    if (spec && resolveImport(file, spec) === CACHE_FILE) problem(`${file}:${lineOf(sf, n)}: imports ${spec} (the shell, the mix recipes, the crystal data and the playlists' model never reach the library's storage)`);
+    if (spec && file.startsWith('components/shell/') && (resolveImport(file, spec) ?? '').startsWith('utils/playlists/')) {
+      problem(`${file}:${lineOf(sf, n)}: imports ${spec} (the shell gets the saved playlists as values from App, never their model)`);
+    }
     ts.forEachChild(n, visit);
   };
   visit(sf);
@@ -372,6 +395,87 @@ if (existsSync(join(root, 'App.tsx'))) {
   }
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Rule 6 (v16.1): the saved playlists' one writer and one reader, used only where pinned
+// ---------------------------------------------------------------------------------------------------------------
+const playlistIoUses = [];
+for (const file of files) {
+  if (file === CACHE_FILE) continue;
+  const sf = parse(file);
+  const names = new Map(); // local → which
+  const namespaces = new Set();
+  const collect = (n) => {
+    if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier) && resolveImport(file, n.moduleSpecifier.text) === CACHE_FILE) {
+      const b = n.importClause?.namedBindings;
+      if (b && ts.isNamespaceImport(b)) namespaces.add(b.name.text);
+      if (b && ts.isNamedImports(b)) for (const el of b.elements) {
+        const imported = (el.propertyName ?? el.name).text;
+        if (PLAYLIST_IO[imported]) names.set(el.name.text, imported);
+      }
+    }
+    ts.forEachChild(n, collect);
+  };
+  collect(sf);
+  if (!names.size && !namespaces.size) continue;
+  const visit = (n) => {
+    if (ts.isIdentifier(n) && !isDeclarationName(n)) {
+      let which = names.get(n.text) ?? null;
+      let at = n;
+      if (!which && namespaces.has(n.text)) {
+        const p = n.parent;
+        const member =
+          ts.isPropertyAccessExpression(p) && p.expression === n ? p.name.text
+          : ts.isElementAccessExpression(p) && p.expression === n && ts.isStringLiteralLike(p.argumentExpression) ? p.argumentExpression.text
+          : null;
+        if (member && PLAYLIST_IO[member]) {
+          which = member;
+          at = p;
+        }
+      }
+      if (which) playlistIoUses.push({ file, which, line: lineOf(sf, at), path: where(at, sf).path });
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+}
+for (const [which, allowed] of Object.entries(PLAYLIST_IO)) {
+  const uses = playlistIoUses.filter((u) => u.which === which);
+  for (const u of uses) {
+    const ok = allowed.files.includes(u.file) || (u.file === 'App.tsx' && (u.path === allowed.app || u.path.startsWith(`${allowed.app} › `)));
+    if (!ok) problem(`${u.file}:${u.line}: ${which} used in ${u.path} (the saved playlists' ${which === 'writePlaylistRecords' ? 'one writer is App › commitPlaylists' : 'one read is App’s load effect'})`);
+  }
+  if (existsSync(join(root, 'App.tsx')) && !uses.some((u) => u.file === 'App.tsx')) problem(`App.tsx: ${which} is not used in ${allowed.app}`);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Rule 7 (v16.1): the saved playlists' functions touch only the playlist-state store
+// ---------------------------------------------------------------------------------------------------------------
+if (existsSync(join(root, CACHE_FILE))) {
+  const sf = parse(CACHE_FILE);
+  for (const name of PLAYLIST_STORE_FUNCTIONS) {
+    const decls = [];
+    const find = (n) => {
+      if (ts.isFunctionDeclaration(n) && n.name?.text === name && n.body) decls.push(n);
+      ts.forEachChild(n, find);
+    };
+    find(sf);
+    if (decls.length !== 1) {
+      problem(`${CACHE_FILE}: expected exactly one \`function ${name}\`, found ${decls.length}`);
+      continue;
+    }
+    const visit = (n) => {
+      if (ts.isIdentifier(n) && (n.text === 'BLOBS_STORE' || n.text === 'META_STORE')) problem(`${CACHE_FILE}:${lineOf(sf, n)}: ${name} names ${n.text} (the saved playlists touch only the playlist-state store)`);
+      if (ts.isStringLiteralLike(n) && (n.text === 'blobs' || n.text === 'meta')) problem(`${CACHE_FILE}:${lineOf(sf, n)}: ${name} names the '${n.text}' store`);
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'transaction') {
+        const first = n.arguments[0];
+        if (!first || !ts.isIdentifier(first) || first.text !== 'STATE_STORE') problem(`${CACHE_FILE}:${lineOf(sf, n)}: ${name} opens a transaction on ${first ? first.getText(sf) : 'nothing'} (only STATE_STORE, alone)`);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(decls[0].body);
+  }
+}
+
 const places = Object.keys(current).length;
 const total = Object.values(current).reduce((a, b) => a + b.count, 0);
 if (problems.size) {
@@ -382,6 +486,8 @@ if (problems.size) {
 }
 console.log(
   `check:writers: ${total} uses of the library's writers and their ${wrappers.size} wrappers, in ${places} places across ` +
-    `${files.length} files, as pinned (counts and code); components/shell, utils/mix, utils/queue and utils/crystalData never import playlistCache; ` +
-    `${PLAY_ORDER_FUNCTIONS.join(', ')} use no writer.`
+    `${files.length} files, as pinned (counts and code); components/shell, utils/mix, utils/queue, utils/playlists and utils/crystalData never import playlistCache, ` +
+    `nor components/shell utils/playlists; ` +
+    `${PLAY_ORDER_FUNCTIONS.join(', ')} use no writer; the saved playlists are written only by App › commitPlaylists and read only by ` +
+    `App › useEffect([libraryLoading]) (${playlistIoUses.length} uses), and ${PLAYLIST_STORE_FUNCTIONS.join(', ')} touch only the playlist-state store.`
 );
