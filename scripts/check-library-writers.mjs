@@ -35,6 +35,8 @@
 //      utils/playlists: App resolves the playlists, the shell gets values.)
 //   (v16.2, rule 2: nor anything under utils/library/, the smart filters' model among them; rule 3: playFiltered, the
 //      one place a filtered set starts playing, is a play-order function.)
+//   (v16.3, rule 3: startBuilt, Create a mix's Play / Play next / Add to queue / Save, and queueMix, a Mixes-tab mix's
+//      whole-mix queueing, are play-order functions: the play order, the queue or a saved playlist, never the library.)
 //   6. v16.1, the saved playlists have ONE writer: playlistCache's writePlaylistRecords is used only in
 //      App › commitPlaylists (and tools/cache-check.ts), and its readSavedPlaylists only in App's load effect,
 //      App › useEffect([libraryLoading]) (and tools/cache-check.ts), followed through imports as rule 1 follows the
@@ -61,7 +63,7 @@ const PINS_PATH = join(root, 'scripts', 'library-writers.json');
 const CACHE_FILE = 'utils/playlistCache.ts';
 const CACHE_WRITERS = ['deleteTracksFromCache', 'clearPlaylistCache'];
 const ROOT_COMPONENT = 'App'; // App.tsx's component: its own body is not a wrapper, its inner functions are
-const PLAY_ORDER_FUNCTIONS = ['startPlayOrder', 'playFromLibrary', 'undoPlayOrder', 'applyMix', 'restoreLibrary', 'startMix', 'queueTracks', 'editQueue', 'undoQueue', 'commitQueue', 'applyQueueOp', 'commitPlaylists', 'playPlaylist', 'queuePlaylist', 'undoPlaylistOp', 'savePlaylistFrom', 'playFiltered']; // v15.8: applyMix, the mixes' one way into App's state; v15.9: restoreLibrary, and the Mixes tab's startMix; v16.0: the queue's handlers and its one writer; v16.1: the saved playlists' one writer and their play, queue, Undo and save; v16.2: the smart filters' play
+const PLAY_ORDER_FUNCTIONS = ['startPlayOrder', 'playFromLibrary', 'undoPlayOrder', 'applyMix', 'restoreLibrary', 'startMix', 'queueTracks', 'editQueue', 'undoQueue', 'commitQueue', 'applyQueueOp', 'commitPlaylists', 'playPlaylist', 'queuePlaylist', 'undoPlaylistOp', 'savePlaylistFrom', 'playFiltered', 'startBuilt', 'queueMix']; // v15.8: applyMix, the mixes' one way into App's state; v15.9: restoreLibrary, and the Mixes tab's startMix; v16.0: the queue's handlers and its one writer; v16.1: the saved playlists' one writer and their play, queue, Undo and save; v16.2: the smart filters' play; v16.3: Create a mix's play, queue and save (startBuilt) and the Mixes tab's whole-mix queueing (queueMix)
 // v16.1 (rule 6): the saved playlists' writer and reader, and where alone they may be used.
 const PLAYLIST_IO = {
   writePlaylistRecords: { app: 'App › commitPlaylists', files: ['tools/cache-check.ts'] },

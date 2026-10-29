@@ -799,6 +799,89 @@ test.describe('style foundation (v15.3)', () => {
     expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
   });
 
+  test('i. Create a mix and the ⋯ (v16.3): every class on screen has a rule; no blur and no endless animation, in each of their states', async ({ page }) => {
+    test.setTimeout(240_000);
+    const seen = new Map<string, string>();
+    const effects = new Set<string>();
+    const census = async (state: string) => {
+      await page.waitForTimeout(250);
+      await collectClasses(page, state, seen);
+      const found = await page.evaluate(() => {
+        const roots = Array.from(document.querySelectorAll('[data-testid="new-shell"], [role="dialog"], [role="alertdialog"], [data-testid="notices"]'));
+        const out: string[] = [];
+        for (const root of roots) {
+          for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+            const cs = getComputedStyle(el);
+            const tag = `${el.tagName.toLowerCase()}.${(el.getAttribute('class') || '').split(/\s+/).slice(0, 3).join('.')}`;
+            if (cs.backdropFilter && cs.backdropFilter !== 'none') out.push(`backdrop-filter ${cs.backdropFilter} on ${tag}`);
+            if (cs.animationName && cs.animationName !== 'none' && /infinite/.test(cs.animationIterationCount)) out.push(`infinite animation ${cs.animationName} on ${tag}`);
+          }
+        }
+        return out;
+      });
+      for (const f of found) effects.add(`${f} (${state})`);
+    };
+    await page.setViewportSize({ width: 411, height: 752 });
+    await openNewLayout(page, { engine: 'v2', output: 'headphones' });
+    await seedLibraryRecords(page, 30, { crystals: 'some', keys: true, envelopes: true, patch: [{ index: 0, scanned: true }, { index: 3, scanned: true }] });
+    await page.goto('/');
+    await page.getByTestId('new-shell').waitFor();
+    await page.getByTestId('tab-mixes-button').click();
+    await page.getByTestId('mixes-create').waitFor();
+    await census('mixes, Create a mix and the ⋯');
+    await page.getByTestId('mix-more-preset:qi').click();
+    await page.getByTestId('mix-menu-body').waitFor();
+    await census('a mix’s ⋯ sheet');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('mixes-create').click();
+    await page.getByTestId('mix-builder').waitFor();
+    await census('create a mix, a crystal set');
+    await page.getByTestId('builder-set-custom').click();
+    await page.getByTestId('builder-crystal-528').click();
+    await census('create a mix, custom crystals');
+    await page.getByTestId('builder-follow-walk').click();
+    await page.getByTestId('builder-walk-C').click();
+    await page.getByTestId('builder-order-list').getByText('Shuffle, least recently played first', { exact: true }).click();
+    await census('create a mix, a walk reordered');
+    await page.getByTestId('builder-follow-exp').click();
+    await page.getByTestId('builder-exp-seq111').click();
+    await census('create a mix, experimental');
+    await page.getByTestId('builder-follow-any').click();
+    await page.getByTestId('builder-filters-button').click();
+    await page.getByTestId('builder-filters-experimental-toggle').click();
+    await page.locator('button[data-facet="length"][data-value="ge10"]').click();
+    await census('the builder’s filter sheet, the scores open');
+    await page.getByTestId('builder-filters-done').click();
+    await census('create a mix, a filter on, no track (0)');
+    await page.getByTestId('builder-start-over').click();
+    await page.getByTestId('builder-more').click();
+    await page.getByTestId('builder-more-body').waitFor();
+    await census('the footer’s ⋯');
+    await page.getByTestId('builder-action-save').click();
+    await page.getByRole('dialog', { name: 'Save as a playlist' }).waitFor();
+    await census('save as a playlist, from a mix');
+    await page.keyboard.press('Escape');
+    await crash(page, 'mix-builder');
+    await page.getByTestId('mix-builder-fallback').waitFor();
+    await census('create a mix fallback');
+    await page.getByTestId('mix-builder-fallback').getByRole('button', { name: 'Reload panel', exact: true }).click();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.getByTestId('mix-builder').waitFor();
+    await census('desktop, create a mix in the panel');
+    await page.getByTestId('builder-source-playlist').count();
+    await page.getByTestId('builder-filters-button').click();
+    await census('desktop, the builder’s filter sheet');
+
+    const styled = await stylesheetClasses(page);
+    const unstyled = [...seen]
+      .filter(([t]) => !styled.has(t) && !LUCIDE.test(t) && !INERT.has(t))
+      .map(([t, state]) => `${t} (${state})`)
+      .sort();
+    expect(seen.size, 'the walk saw the builder').toBeGreaterThan(100);
+    expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
+    expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
+  });
+
   test('d. the --ae-* CSS variables equal the tailwind.config.js tokens', async ({ page }) => {
     // The config is ESM (the root package is "type": "module"); imported through a data: URL so the test runner's
     // own loader never transforms it.

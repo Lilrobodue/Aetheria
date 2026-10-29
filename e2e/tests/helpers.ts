@@ -1062,7 +1062,12 @@ export type CrashView =
   // v16.1, saved playlists.
   | 'playlists' | 'playlist-detail' | 'playlist-menu' | 'playlist-add'
   // v16.2, smart filters: the filter sheet's body, the bar above the list, the actions' ⋯ sheet.
-  | 'library-filters' | 'library-filter-bar' | 'library-filter-actions';
+  | 'library-filters' | 'library-filter-bar' | 'library-filter-actions'
+  // v16.3, Create a mix: its sections, its footer, and the ⋯ sheets (a mix's, the footer's).
+  | 'mix-builder' | 'mix-builder-footer' | 'mix-menu'
+  // v16.3 review: the whole builder, the Start from and Filters sheets' bodies, and a drill inside the builder's model
+  // work (not a region: it throws from the summary's memo, under mix-builder-view).
+  | 'mix-builder-view' | 'mix-builder-source' | 'mix-builder-filters' | 'mix-builder-model';
 
 /**
  * Make a region throw on its next render, through the app's dev hook window.__aetheriaCrash (ErrorBoundary.tsx; dev

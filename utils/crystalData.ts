@@ -31,7 +31,8 @@ export const PRESETS: readonly PresetDef[] = [
 /** A preset's recipe as its sub-line: "174 · 285 · 396 · 417 Hz" (the Mixes tab); classic's drawer shows "174·285·396·417". */
 export const presetRecipe = (p: { crystals: readonly number[] }, sep: string = ' · ', unit: string = ' Hz'): string => p.crystals.join(sep) + unit;
 
-export const getHarmonicSolfeggio = (detectedFreq: number): number => {
+// v16.3: `quiet` skips the per-call console lines (Assign crystals asks once per placed track); the answer is the same.
+export const getHarmonicSolfeggio = (detectedFreq: number, quiet: boolean = false): number => {
     if (detectedFreq <= 0) return 396; 
 
     // Define the 3-regime frequency sets for prioritized matching
@@ -42,7 +43,7 @@ export const getHarmonicSolfeggio = (detectedFreq: number): number => {
     let bestMatch = 396;
     let minScore = Infinity;
 
-    console.log(`Analyzing frequency: ${detectedFreq.toFixed(1)}Hz for solfeggio matching`);
+    if (!quiet) console.log(`Analyzing frequency: ${detectedFreq.toFixed(1)}Hz for solfeggio matching`);
 
     // Enhanced harmonic matching with extended octave range checking
     SOLFEGGIO_INFO.forEach(s => {
@@ -68,7 +69,7 @@ export const getHarmonicSolfeggio = (detectedFreq: number): number => {
         if (directDiff <= tolerance && directDiff < minScore) {
             minScore = directDiff;
             bestMatch = sFreq;
-            console.log(`Direct match found: ${detectedFreq.toFixed(1)}Hz ≈ ${sFreq}Hz (diff: ${directDiff.toFixed(1)}Hz)`);
+            if (!quiet) console.log(`Direct match found: ${detectedFreq.toFixed(1)}Hz ≈ ${sFreq}Hz (diff: ${directDiff.toFixed(1)}Hz)`);
         }
 
         // Extended harmonic matching with comprehensive octave checking
@@ -113,7 +114,7 @@ export const getHarmonicSolfeggio = (detectedFreq: number): number => {
                 if (harmonicDiff < minScore) {
                     minScore = harmonicDiff;
                     bestMatch = sFreq;
-                    console.log(`Harmonic match found: ${detectedFreq.toFixed(1)}Hz ≈ ${candidate.toFixed(1)}Hz (${sFreq}Hz harmonic, diff: ${harmonicDiff.toFixed(1)}Hz)`);
+                    if (!quiet) console.log(`Harmonic match found: ${detectedFreq.toFixed(1)}Hz ≈ ${candidate.toFixed(1)}Hz (${sFreq}Hz harmonic, diff: ${harmonicDiff.toFixed(1)}Hz)`);
                 }
             });
         }
@@ -121,7 +122,7 @@ export const getHarmonicSolfeggio = (detectedFreq: number): number => {
 
     // Special case: If detected frequency is very high and no match found, try to find the fundamental
     if (minScore > 100 && detectedFreq > 1000) {
-        console.log(`High frequency detected (${detectedFreq.toFixed(1)}Hz), searching for fundamental...`);
+        if (!quiet) console.log(`High frequency detected (${detectedFreq.toFixed(1)}Hz), searching for fundamental...`);
         
         // Try to find the fundamental by dividing by common harmonic ratios
         const possibleFundamentals = [
@@ -137,17 +138,17 @@ export const getHarmonicSolfeggio = (detectedFreq: number): number => {
         
         for (const fundamental of possibleFundamentals) {
             if (fundamental >= 50 && fundamental <= 1000) {
-                const recursiveMatch = getHarmonicSolfeggio(fundamental);
+                const recursiveMatch = getHarmonicSolfeggio(fundamental, quiet);
                 // Check if this fundamental gives us a better match
                 const fundamentalDiff = Math.abs(fundamental - recursiveMatch);
                 if (fundamentalDiff < minScore * 0.5) { // Significantly better match
-                    console.log(`Found fundamental: ${detectedFreq.toFixed(1)}Hz → ${fundamental.toFixed(1)}Hz → ${recursiveMatch}Hz`);
+                    if (!quiet) console.log(`Found fundamental: ${detectedFreq.toFixed(1)}Hz → ${fundamental.toFixed(1)}Hz → ${recursiveMatch}Hz`);
                     return recursiveMatch;
                 }
             }
         }
     }
 
-    console.log(`Final solfeggio match: ${detectedFreq.toFixed(1)}Hz → ${bestMatch}Hz (deviation: ${minScore.toFixed(1)}Hz)`);
+    if (!quiet) console.log(`Final solfeggio match: ${detectedFreq.toFixed(1)}Hz → ${bestMatch}Hz (deviation: ${minScore.toFixed(1)}Hz)`);
     return bestMatch;
 };

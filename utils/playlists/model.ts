@@ -87,14 +87,51 @@ export function cleanName(raw: unknown): string | null {
   return Array.from(s).slice(0, NAME_MAX).join('');
 }
 
-/** "New playlist", then "New playlist 2", "New playlist 3"… for the first one not taken (case-insensitive). */
+/** A name's characters as a cut may keep or drop them: whole graphemes (an emoji sequence, a flag, a letter with its
+ *  combining marks) where Intl.Segmenter exists, else code points (as before v16.3's re-review). */
+function graphemes(s: string): string[] {
+  const Seg = (Intl as unknown as { Segmenter?: new (locale: string, o: { granularity: 'grapheme' }) => { segment(s: string): Iterable<{ segment: string }> } }).Segmenter;
+  if (typeof Seg === 'function') {
+    try {
+      return Array.from(new Seg('en', { granularity: 'grapheme' }).segment(s), (x) => x.segment);
+    } catch {
+      // fall through to code points
+    }
+  }
+  return Array.from(s);
+}
+
+/** "New playlist", then "New playlist 2", "New playlist 3"… for the first one not taken (case-insensitive).
+ *  v16.3 review: the number always fits. A long name is cut first (and a space it would end on dropped), so
+ *  "<name> 2" is at most NAME_MAX characters and never trimmed back to the taken name itself.
+ *  v16.3 re-review: the cut keeps whole graphemes (a family emoji, a flag, an accent stay whole or go whole), still
+ *  counting NAME_MAX in code points as cleanName does. */
 export function freeName(base: string, taken: Iterable<string>): string {
   const used = new Set<string>();
   for (const t of taken) used.add(t.toLocaleLowerCase('en-US'));
   const b = cleanName(base) ?? 'Playlist';
   if (!used.has(b.toLocaleLowerCase('en-US'))) return b;
+  const parts = graphemes(b);
+  const heads = new Map<number, string>();
+  const headFor = (room: number): string => {
+    let head = heads.get(room);
+    if (head === undefined) {
+      head = '';
+      let size = 0;
+      for (const g of parts) {
+        const len = Array.from(g).length;
+        if (size + len > room) break;
+        head += g;
+        size += len;
+      }
+      head = head.trimEnd();
+      heads.set(room, head);
+    }
+    return head;
+  };
   for (let n = 2; n < 10_000; n++) {
-    const c = cleanName(`${b} ${n}`) as string;
+    const suffix = ` ${n}`;
+    const c = cleanName(`${headFor(NAME_MAX - suffix.length)}${suffix}`) as string;
     if (!used.has(c.toLocaleLowerCase('en-US'))) return c;
   }
   return b;

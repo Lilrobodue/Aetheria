@@ -15,6 +15,7 @@ import {
   saveQueueSentence,
   savePlayingSentence,
   saveShownSentence,
+  saveMixSentence,
   addRowLine,
   saveRowLine,
   addedToast,
@@ -81,6 +82,13 @@ eq(rowFacts({ count: 0, seconds: 0, missing: 0, playing: false }), '0 tracks', '
 eq(shortDate(OCT28), 'Oct 28', 'date');
 eq(fromLine({ kind: 'queue' }, OCT27), 'Saved from Up next · changed Oct 27', 'from: Up next');
 eq(fromLine({ kind: 'duplicate', label: 'Evening' }, OCT27), 'A copy of Evening · changed Oct 27', 'from: a copy');
+// v16.3: a built mix's playlist says where it was saved from (v16.1's "Made in …" read oddly with a mix's name).
+eq(fromLine({ kind: 'builder', label: 'Grounding · 1 per crystal' }, OCT27), 'Saved from a mix: Grounding · 1 per crystal · changed Oct 27', 'from: a mix');
+eq(fromLine({ kind: 'builder' }, OCT27), 'Saved from a mix · changed Oct 27', 'from: a mix, unnamed');
+eq(saveMixSentence(4, false), 'The 4 tracks of this mix, in its order. The playlist keeps them; building the mix again may pick others.', 'save a mix');
+eq(saveMixSentence(26, true), 'The 26 tracks of this mix, in its order. The playlist keeps them; building the mix again may pick others. It plays as a playlist, without the cube’s steps.', 'save a walk');
+eq(saveMixSentence(1, false), 'The track of this mix. The playlist keeps it; building the mix again may pick another.', 'save a one-track mix');
+eq(saveMixSentence(1200, false).startsWith('The 1,200 tracks'), true, 'save: the count grouped');
 eq(fromLine({ kind: 'playing', label: 'Grounding' }, OCT27), 'Saved from Grounding · changed Oct 27', 'from: a mix');
 eq(fromLine({ kind: 'playing' }, OCT27), 'Saved from what was playing · changed Oct 27', 'from: a play order');
 eq(fromLine({ kind: 'new' }, OCT27), 'Made here · changed Oct 27', 'from: new');

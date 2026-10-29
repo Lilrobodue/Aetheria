@@ -7,6 +7,14 @@ import {
   EMPTY_TITLE,
   EXPERIMENTAL_NOTE,
   MIXES_INTRO,
+  MENU_CUSTOMIZE_LINE,
+  isRandomWalk,
+  menuNextLine,
+  menuQueueLine,
+  menuSaveLine,
+  menuSub,
+  moreName,
+  playsAsWalk,
   NO_CRYSTALS_BODY,
   NO_CRYSTALS_TITLE,
   SECTION_TITLES,
@@ -40,7 +48,7 @@ const lib = Array.from({ length: 30 }, (_, i) => song(i, i === 7 ? null : CRY[i 
 const st = mixesStats(lib);
 
 // The words.
-eq(MIXES_INTRO, 'A tap builds a play order from your library and starts it. Undo for 10 s.', 'the intro');
+eq(MIXES_INTRO, 'A tap builds a play order from your library and starts it. ⋯ queues it, saves it or changes it.', 'the intro (v16.3: the ⋯)');
 eq([SECTION_TITLES.walks, SECTION_TITLES.journeys, SECTION_TITLES.sets, SECTION_TITLES.experimental], ['Lo Shu walks', 'Journeys', 'Crystal sets', 'Experimental'], 'section titles');
 check(EXPERIMENTAL_NOTE.startsWith('These rank tracks by Deep Scan’s experimental scores.') && EXPERIMENTAL_NOTE.endsWith('They need tracks Deep Scan has measured.'), 'the Experimental note');
 eq(SEQ111_LINE.replace(/ /g, ' '), 'Plays each track’s own crystal. For a 111 Hz tone: Layers › Crystal', 'the 111 line');
@@ -91,6 +99,29 @@ check(MIXES.every((m) => { const d = dotsFor(m.id, st.available, false); return 
 
 // Every catalogue entry is shown in exactly one section, in the tab's order.
 eq((['walks', 'journeys', 'sets', 'experimental'] as const).flatMap((s) => mixesIn(s).map((m) => m.id)), MIXES.map((m) => m.id), 'sections cover the catalogue');
+
+// v16.3: a mix's ⋯ (MixMenu).
+const G = MIXES.find((m) => m.id === 'preset:qi')!;
+const CAB = MIXES.find((m) => m.id === 'walk:combined')!;
+eq(moreName(G), 'More for Grounding', "the ⋯'s name");
+eq(moreName(CAB), 'More for Combined Walk — Calling a CAB (C·A·B)', "a walk's ⋯");
+eq(menuSub(G, { enabled: true, text: '62 tracks', label: '' }), '174 · 285 · 396 · 417 Hz · 62 tracks', 'the header line');
+eq(menuSub(CAB, { enabled: true, text: '81 of 81 positions', label: '' }), 'Vortex → Ascent → Pillar · 81 of 81 positions', "a walk's header line");
+const plain = { walk: false, random: false, nothingCurrent: false };
+const cab = { walk: true, random: true, nothingCurrent: false };
+eq(menuNextLine(62, plain), 'All 62, right after the track that’s playing, in the mix’s order.', 'Play next');
+eq(menuNextLine(81, cab), 'All 81, right after the track that’s playing, in the mix’s order. They play as tracks, not as a walk. A new draw.', 'Play next, a random walk');
+eq(menuNextLine(62, { ...plain, nothingCurrent: true }), 'All 62, first when you press Play, in the mix’s order.', 'Play next, nothing loaded');
+eq(menuNextLine(1, plain), 'This track, right after the track that’s playing, in the mix’s order.', 'Play next, one track');
+eq(menuQueueLine(62, 2, plain), 'All 62, after the 2 tracks waiting in your queue.', 'Add to queue');
+eq(menuQueueLine(81, 2, cab), 'All 81, after the 2 tracks waiting in your queue. They play as tracks, not as a walk. A new draw.', 'Add to queue, a random walk');
+eq(menuQueueLine(62, 1, plain), 'All 62, after the track waiting in your queue.', 'Add to queue, one waiting');
+eq(menuQueueLine(62, 0, plain), menuNextLine(62, plain), "Add to queue, none waiting: Play next's place");
+eq(menuQueueLine(1200, 3, plain), 'All 1,200, after the 3 tracks waiting in your queue.', 'counts grouped');
+eq(MENU_CUSTOMIZE_LINE, 'Open it in Create a mix: another source, filters, how many per crystal, the order', 'Customize…');
+eq([menuSaveLine(62, false), menuSaveLine(81, true), menuSaveLine(1, false)], ['A new playlist of these 62, in the mix’s order', 'A new playlist of this draw, in the mix’s order', 'A new playlist of this track'], 'Save');
+eq(MIXES.filter((m) => isRandomWalk(m.id)).map((m) => m.id), ['walk:combined', 'walk:ouroboros', 'walk:cabi'], 'the random walks');
+eq(MIXES.filter((m) => playsAsWalk(m.id)).map((m) => m.id), ['walk:A', 'walk:B', 'walk:C', 'walk:combined', 'walk:ouroboros', 'walk:cabi', 'gut'], "the mixes that play as a walk (GUT Alignment's cube)");
 
 if (failures.length) {
   console.error(`mixesModel.check: ${failures.length} failed of ${passed + failures.length}:\n  - ${failures.join('\n  - ')}`);

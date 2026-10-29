@@ -6,8 +6,10 @@ import {
   acceptDisclaimerNew,
   addFiles,
   confirmDelete,
+  countConsole,
   libraryState,
   libraryRowButton,
+  metaRecords,
   rowOf,
   openLibraryTab,
   openSeededNewLayout,
@@ -382,6 +384,38 @@ test.describe('a legacy library, after its first Assign', () => {
     await page.getByRole('button', { name: /The Guidebook/ }).click();
     await expect(page.getByText('songs Deep Scan measured keep their frequency, and every other song is given one of the 27 Aetheria frequencies')).toHaveCount(1);
     await expect(page.getByText('the player analyzes your music and assigns each song to its closest Aetheria frequency')).toHaveCount(0);
+    expect(dialogs).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// v16.3 (A1): Assign asks getHarmonicSolfeggio quietly (the plan's "Map" item was v15.8's; the per-track console lines
+// are the rest of the original note). The plan is the same; only the logging goes.
+// ---------------------------------------------------------------------------------------------------------------
+test.describe('v16.3, Assign without the per-track console lines', () => {
+  test.use({ viewport: PHONE_VIEWPORT });
+  test('A1. a first Assign of 60 fresh tones writes no "Analyzing frequency" line, and the page applies planAssign’s plan', async ({ page }) => {
+    test.setTimeout(150_000);
+    const dialogs = await openSeededNewLayout(page, 60, { crystals: 'none' });
+    await phoneSize(page);
+    const before = await libraryState(page);
+    const records = await metaRecords(page);
+    const songs = before.libraryIds.map((id) => {
+      const m = records.find((r) => r.id === id)!;
+      return { id: m.id, name: m.name, duration: m.duration ?? undefined } as any;
+    });
+    const plan = quietly(() => planAssign(songs));
+    expect(plan.patches.size, 'every tone gets a crystal').toBe(60);
+    const lines = countConsole(page, 'Analyzing frequency');
+    const anyLog = countConsole(page, '');
+    await openLibraryTab(page);
+    await page.getByTestId('health-crystals-action').click();
+    await expect.poll(async () => (await libraryState(page)).crystals.every((c) => c !== null), { message: 'every tone has a crystal', timeout: 15_000 }).toBe(true);
+    const after = await libraryState(page);
+    expect(after.crystals, 'the plan the page applied is planAssign’s').toEqual(after.libraryIds.map((id) => plan.patches.get(id)?.closestSolfeggio ?? null));
+    await page.waitForTimeout(500);
+    expect(lines(), 'no "Analyzing frequency" line').toBe(0);
+    test.info().annotations.push({ type: 'console lines during the Assign (all kinds)', description: String(anyLog()) });
     expect(dialogs).toEqual([]);
   });
 });

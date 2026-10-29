@@ -615,12 +615,14 @@ export function sequence111(input: MixInput): MixResult {
 export function sourceField(input: MixInput): MixResult {
   const originalPlaylist = input.library;
     // Strict 2178Hz resonance filter - only the pure 2178Hz frequency
+    // (v16.3 review: the log line reads a deviation only when it is a number; any other stored value logs N/A, as a
+    // missing one does, instead of throwing. Every line it printed before is printed the same.)
     console.log('=== STRICT 2178Hz SOURCE FIELD FILTER ===');
     originalPlaylist.forEach(song => {
       if (song.fractalAnalysis && song.closestSolfeggio === 2178) {
         const geometryScore = song.fractalAnalysis.sacredGeometryAlignment * 100;
         const goldenScore = song.fractalAnalysis.goldenRatioAlignment * 100;
-        console.log(`${song.name}: Geometry=${geometryScore.toFixed(1)}% | Golden=${goldenScore.toFixed(1)}% | 2178Hz=true | Accuracy=${song.harmonicDeviation?.toFixed(1) || 'N/A'}Hz`);
+        console.log(`${song.name}: Geometry=${geometryScore.toFixed(1)}% | Golden=${goldenScore.toFixed(1)}% | 2178Hz=true | Accuracy=${(typeof song.harmonicDeviation === 'number' ? song.harmonicDeviation.toFixed(1) : null) || 'N/A'}Hz`);
       }
     });
 

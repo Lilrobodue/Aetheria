@@ -29,20 +29,25 @@ export const NO_CRYSTAL_NOTE = 'It has no crystal yet, so on a locked phone the 
 /** v16.1: the note when some of many queued tracks have no crystal. */
 export const SOME_NO_CRYSTAL_NOTE = 'Some have no crystal yet, so on a locked phone the music may stop there.';
 
+/** v16.3: a walk queued whole (a Mixes-tab walk's ⋯, Create a mix's Play next): its entries play as plain tracks (the
+ *  queue's model: the playing walk's cube holds, and a walk is never replayed as one from the queue). */
+export const AS_TRACKS_NOTE = 'They play as tracks, not as a walk.';
+
 /** The toast after Play next / Add to queue. `position`: the track's place in the queue (1-based); `nothingCurrent`:
  *  no track is loaded, so Play starts with the first queued track (only that one is told "Play starts with it"; one
  *  added after others waiting gets its place). v16.1 (spec §2.8): many tracks at once (`count` > 1, a playlist's Play
  *  next or Add to queue) say how many and, with `from`, where from: "Playing next: 12 tracks from Evening.", "Added 12
  *  tracks from Evening to your queue.", "Queued: 12 tracks from Evening. Play starts with them." One track: as v16.0. */
-export function queuedToast(o: { name: string; mode: 'next' | 'queue'; position: number; noCrystal: boolean; nothingCurrent: boolean; count?: number; from?: string | null }): string {
+export function queuedToast(o: { name: string; mode: 'next' | 'queue'; position: number; noCrystal: boolean; nothingCurrent: boolean; count?: number; from?: string | null; asTracks?: boolean }): string {
   const n = o.count ?? 1;
   if (n > 1) {
     const what = `${count(n)} tracks${o.from ? ` from ${o.from}` : ''}`;
-    const head = o.nothingCurrent && o.position <= 1
+    const base = o.nothingCurrent && o.position <= 1
       ? `Queued: ${what}. Play starts with them.`
       : o.mode === 'next'
         ? `Playing next: ${what}.`
         : `Added ${what} to your queue.`;
+    const head = o.asTracks ? `${base} ${AS_TRACKS_NOTE}` : base; // v16.3: a walk queued whole
     return o.noCrystal ? `${head} ${SOME_NO_CRYSTAL_NOTE}` : head;
   }
   const head = o.nothingCurrent && o.position <= 1

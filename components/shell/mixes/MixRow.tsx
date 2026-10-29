@@ -5,22 +5,28 @@
 // its description. With no track for it (or the library still loading) it is not a button: a dimmed row whose count
 // says why ("No tracks yet", "Needs Deep Scan"). `extra`: a line under the row that stays live either way (the 111
 // Sequence's pointer to the 111 Hz chip).
+// v16.3: a live row has a ⋯ after its count (44 × 44, "More for Grounding": Play next, Add to queue, Customize…, Save as
+// a playlist…); a disabled row has none. The row's tap is unchanged.
 
 import React from 'react';
+import { EllipsisVertical } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { MixDef, MixId } from '../../../utils/mix/catalog';
 import CrystalDots from './CrystalDots';
 import type { Dots, MixView } from './mixesModel';
+import { moreName } from './mixesModel';
 
 interface MixRowProps {
   def: MixDef;
   view: MixView;
   dots: Dots;
   onStart: (id: MixId) => void;
+  /** v16.3: the ⋯ (its sheet opens). */
+  onMore?: (id: MixId) => void;
   extra?: ReactNode;
 }
 
-const MixRow = ({ def, view, dots, onStart, extra }: MixRowProps) => {
+const MixRow = ({ def, view, dots, onStart, onMore, extra }: MixRowProps) => {
   const subId = `mix-sub-${def.id}`;
   const on = view.enabled;
   const inner = (
@@ -37,7 +43,31 @@ const MixRow = ({ def, view, dots, onStart, extra }: MixRowProps) => {
   );
   return (
     <li className="border-b border-line">
-      {on ? (
+      {on && onMore ? (
+        <div className="flex items-center">
+          <button
+            type="button"
+            data-testid={`mix-${def.id}`}
+            aria-label={view.label}
+            aria-describedby={subId}
+            onClick={() => onStart(def.id)}
+            className="flex-1 min-w-0 h-row pl-4 pr-1 flex items-center gap-3 text-left hover:bg-surface-raised/40 transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold-400"
+          >
+            {inner}
+          </button>
+          <button
+            type="button"
+            data-testid={`mix-more-${def.id}`}
+            aria-label={moreName(def)}
+            aria-haspopup="dialog"
+            title={moreName(def)}
+            onClick={() => onMore(def.id)}
+            className="shrink-0 w-touch h-touch flex items-center justify-center rounded-control text-ink-muted hover:text-ink-strong transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold-400"
+          >
+            <EllipsisVertical size={18} aria-hidden="true" />
+          </button>
+        </div>
+      ) : on ? (
         <button
           type="button"
           data-testid={`mix-${def.id}`}

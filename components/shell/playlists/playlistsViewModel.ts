@@ -46,7 +46,7 @@ export function fromLine(from: { kind: string; label?: string } | null | undefin
     : from.kind === 'playing' ? (from.label ? `Saved from ${from.label}` : 'Saved from what was playing')
     : from.kind === 'duplicate' ? (from.label ? `A copy of ${from.label}` : 'A copy')
     : from.kind === 'filter' ? (from.label ? `Saved from ${from.label}` : 'Saved from a filter')
-    : from.kind === 'builder' ? (from.label ? `Made in ${from.label}` : 'Made in the mix builder')
+    : from.kind === 'builder' ? (from.label ? `Saved from a mix: ${from.label}` : 'Saved from a mix') // v16.3's words (v16.1's read "Made in <label>")
     : 'Made here';
   return `${what} · ${when}`;
 }
@@ -108,6 +108,15 @@ export function savePlayingSentence(n: number, label: string | null, queued: num
 /** A list's tracks (v16.2's filters: "Save as playlist"): "The 12 tracks shown, in their order." */
 export function saveShownSentence(n: number): string {
   return n === 1 ? 'The track shown.' : `The ${count(n)} tracks shown, in their order.`;
+}
+
+/** v16.3, a built mix (Create a mix's Save, a Mixes-tab mix's ⋯ › Save as a playlist…): "The 4 tracks of this mix, in its
+ *  order. The playlist keeps them; building the mix again may pick others." (+ a walk's: it plays without the cube). */
+export function saveMixSentence(n: number, walk: boolean): string {
+  const head = n === 1
+    ? 'The track of this mix. The playlist keeps it; building the mix again may pick another.'
+    : `The ${count(n)} tracks of this mix, in its order. The playlist keeps them; building the mix again may pick others.`;
+  return walk ? `${head} It plays as a playlist, without the cube’s steps.` : head;
 }
 
 export const NEW_SENTENCE ='An empty playlist. In Tracks, a track’s ⋯ has Add to playlist.';

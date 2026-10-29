@@ -93,7 +93,7 @@ test.describe('phone', () => {
     await expect(t.getByRole('heading', { name: 'Mixes', level: 1 })).toBeVisible();
     await expect(t.getByText('Beta', { exact: true })).toBeVisible();
     await expect(page.getByTestId('mixes-summary')).toHaveText('30 tracks · 29 with a crystal');
-    await expect(t.getByText('A tap builds a play order from your library and starts it. Undo for 10 s.')).toBeVisible();
+    await expect(t.getByText('A tap builds a play order from your library and starts it. ⋯ queues it, saves it or changes it.')).toBeVisible();
     await expect(page.getByText('The new Mixes are coming in a later beta')).toHaveCount(0);
     for (const [h2, ids] of [['Lo Shu walks', 6], ['Journeys', 5], ['Crystal sets', 5], ['Experimental', 3]] as const) {
       const list = t.getByRole('list', { name: h2, exact: true });

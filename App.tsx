@@ -83,6 +83,11 @@ import { getHarmonicSolfeggio, PRESETS } from './utils/crystalData';
 import { mixStartText } from './utils/mix/catalog';
 import type { MixId } from './utils/mix/catalog';
 import { walkToSave } from './utils/library/walkRecord';
+// v16.3: Create a mix's pure model (the recipes composed: a source, its filters, a Follow, an order) and its words.
+import { buildMix, builderSummary, leftOut, settingsOf, BUILDER_FACETS } from './utils/mix/builder';
+import type { BuilderSettings, SourceRef } from './utils/mix/builder';
+import { buildFacetIndex } from './utils/library/filterModel';
+import * as builderWords from './components/shell/mixes/builder/builderViewModel';
 // v16.0: the queue. Its pure model (every write returns the new state and a remap App applies in ONE batch) and its words.
 import {
   insertEntries,
@@ -227,7 +232,7 @@ import { libraryOrderFor, rebuildOrder, stillTapOrder, sameIdSet, sameIds, libra
 import type { LastImport } from './components/shell/library/libraryModel';
 // v16.2: the smart filters' toasts (a filtered set's start).
 import { filterStartText } from './components/shell/library/filterViewModel';
-import type { LibraryViewState, QueueEdit } from './components/shell/contexts';
+import type { LibraryViewState, MixesViewState, QueueEdit } from './components/shell/contexts';
 import { countRender } from './components/shell/devRenders';
 
 // --- Helpers ---
@@ -1098,7 +1103,7 @@ interface PlayOrderSnapshot {
 
 /** v16.0: a queue write, applied once the play state is settled (the anchor rule), else retried every 150 ms for 15 s. */
 type QueueOp =
-  | { kind: 'add'; ids: string[]; mode: 'next' | 'queue'; from?: string } // v16.1: from (a playlist's name, for the toast)
+  | { kind: 'add'; ids: string[]; mode: 'next' | 'queue'; from?: string; asTracks?: boolean } // v16.1: from (a playlist's name, for the toast); v16.3: asTracks (a walk queued whole: its toast says it plays as tracks)
   | { kind: 'remove'; index: number; id: string }
   | { kind: 'move'; index: number; id: string; to: number }
   | { kind: 'clear' }
@@ -1233,6 +1238,9 @@ const App: React.FC = () => {
   // query never saved), the last import (the Import sheet's summary), the latest row tap's Undo, and the list element
   // that takes the focus when a deleted row's ⋯ is gone.
   const libraryViewRef: { current: LibraryViewState } = useRef({ query: '', top: 0, healthOpen: null });
+  // v16.3: the Mixes tab as it was left (session only): its list's scroll, and Create a mix open or not, with its settings
+  // as they were (the saved key is the view's, written from its taps only).
+  const mixesViewRef: { current: MixesViewState } = useRef({ top: 0, builder: { open: false, settings: null, top: 0, opener: null } });
   const [lastImport, setLastImport] = useState<LastImport | null>(null);
   const lastPlayOrderRef: { current: PlayOrderSnapshot | null } = useRef(null);
   // v15.9: the latest classic notice a mix showed (in classic, or a classic peek). The new layout never routes it to its
@@ -4939,7 +4947,12 @@ const App: React.FC = () => {
   // list under the playing track and the next advance skipped the mix's first track. A mix never changes the visual
   // settings (decision 2), the tone or the experience level. `name` is the toast's; `positions`: a Lo Shu walk (its
   // toast counts positions; GUT Alignment's 'traditional' walk counts tracks).
-  const applyMix = (r: MixResult, name: string, positions: boolean = false) => {
+  // v16.3 (Create a mix): opts.carry false starts the mix without carrying the queue (a mix built FROM the queue: its
+  // tracks are the mix, so carried they would play twice); opts.note, a sentence after the toast's words. Without opts,
+  // exactly as before (every Mixes-tab mix and classic's generators pass none).
+  // v16.3 review: opts.carry 'unpicked' carries only the queued tracks the mix leaves out, and opts.fromQueue (a mix
+  // built from the queue) always applies: both passed through to startPlayOrder.
+  const applyMix = (r: MixResult, name: string, positions: boolean = false, opts?: { carry?: boolean | 'unpicked'; note?: string; fromQueue?: boolean; carryText?: (n: number) => string }) => {
     if (!r.order) {
       const t = r.toast;
       if (t) {
@@ -4953,7 +4966,8 @@ const App: React.FC = () => {
     const order = r.order;
     const sp = r.segmentsAndPhases;
     const walk = r.walk ? { mode: r.walk.mode, segments: sp ? sp.segments : null, phases: sp ? sp.phases : null, steps: r.walk.steps } : null;
-    startPlayOrder(order, 0, mixStartText(name, order.length, positions && r.walk ? r.walk.mode : null), { walk, mix: true, label: name }); // v16.1: label (Save as a playlist's default name)
+    const startText = mixStartText(name, order.length, positions && r.walk ? r.walk.mode : null);
+    startPlayOrder(order, 0, opts?.note ? `${startText} ${opts.note}` : startText, { walk, mix: true, label: name, carry: opts?.carry ?? true, fromQueue: !!opts?.fromQueue, carryText: opts?.carryText }); // v16.1: label (Save as a playlist's default name)
     setUseChakraOrder(r.chakraOrder);
     setSearchTerm('');
     if (r.closeWalkMenu) setShowLoShuWalkMenu(false);
@@ -6965,7 +6979,15 @@ registerProcessor('wav-capture', WavCapture);
   // v16.1: opts.label names what the order is (a walk's, a mix's or a playlist's name: Save as a playlist's default
   // name, valid while the play order's own ids are these); opts.shuffle (a playlist's Shuffle) turns the transport's
   // shuffle switch on with the order, as every player's Shuffle button does, and the Undo turns it back off.
-  const startPlayOrder = (orderIn: Song[], index: number, toastIn: string, opts?: { walk?: PlayOrderSnapshot['walk']; mix?: boolean; filtered?: boolean; label?: string; shuffle?: boolean }) => {
+  // v16.3: opts.carry false (Create a mix built from the queue): the waiting tracks are not carried into the new order
+  // (they are the order); the snapshot keeps the queue's marks, so the Undo brings the queue back. Default: carried.
+  // v16.3 review: opts.carry 'unpicked' carries only the waiting tracks the new order doesn't hold (Create a mix's
+  // switch builderViewModel QUEUE_UNPICKED = 'keep'); opts.fromQueue, a start built from the queue, always applies (it
+  // consumes the queue, toasts, and has its Undo) even when its order is the play order's own entries with the cursor
+  // on its first: the resume rule below is for every other caller only.
+  // v16.3 re-review: opts.carryText, the toast's sentence for the carried tracks in place of carryText's (Create a mix's
+  // 'keep': "The 7 queued tracks not in it play next.", so the toast counts them once).
+  const startPlayOrder = (orderIn: Song[], index: number, toastIn: string, opts?: { walk?: PlayOrderSnapshot['walk']; mix?: boolean; filtered?: boolean; label?: string; shuffle?: boolean; carry?: boolean | 'unpicked'; fromQueue?: boolean; carryText?: (n: number) => string }) => {
     const st = stateRef.current;                       // the latest commit (the pinned sync effect)
     const el = mainAudioRef.current;
     if (index < 0 || index >= orderIn.length) return;
@@ -6980,13 +7002,15 @@ registerProcessor('wav-capture', WavCapture);
     // carried, or it would play twice in a row.
     const waitingAll = qm ? waitingIndices({ marks: qm }).filter((i: number) => i !== st.currentSongIndex) : [];
     const pickedCopy = waitingAll.findIndex((i: number) => st.playlist[i]?.id === orderIn[index].id);
-    const waitingSongs = waitingAll.filter((_: number, j: number) => j !== pickedCopy).map((i: number) => st.playlist[i]);
+    const waitingSongs = opts?.carry === false ? []
+      : opts?.carry === 'unpicked' ? leftOut(waitingAll.map((i: number) => st.playlist[i]), orderIn)
+        : waitingAll.filter((_: number, j: number) => j !== pickedCopy).map((i: number) => st.playlist[i]);
     const carried = waitingSongs.length
       ? insertEntries({ order: orderIn, cursor: index, shuffle: false, shuffled: [], shufflePos: 0, marks: null, walk: walkIn ? { steps: walkIn.steps, phases: walkIn.phases } : null }, waitingSongs, 'next').state
       : null;
     const order = carried ? carried.order : orderIn;
     const walk = carried && walkIn && carried.walk ? { ...walkIn, steps: carried.walk.steps, phases: carried.walk.phases } : walkIn;
-    const carry = carried ? ` ${carryText(waitingSongs.length)}` : '';
+    const carry = carried ? ` ${(opts?.carryText ?? carryText)(waitingSongs.length)}` : '';
     const setWalk = (w: NonNullable<PlayOrderSnapshot['walk']>) => {
       loShuWalkSnapshotRef.current = order.map((s: Song) => s.id).join('|');   // before the mode: the effect keeps it
       setLoShuWalkMode(w.mode);
@@ -7001,7 +7025,7 @@ registerProcessor('wav-capture', WavCapture);
       ? baseIndex(qm, st.currentSongIndex) === index ||
         (st.currentSongIndex >= 0 && qm[st.currentSongIndex] !== BASE && st.playlist[st.currentSongIndex]?.id === orderIn[index].id)
       : st.currentSongIndex === index;
-    if (baseSame && onTrack && (!qm || !walkIn || loShuWalkMode === walkIn.mode)) { // the current track: resume it if paused, never restart it
+    if (!opts?.fromQueue && baseSame && onTrack && (!qm || !walkIn || loShuWalkMode === walkIn.mode)) { // the current track: resume it if paused, never restart it
       if (walk && !qm) setWalk(walk);
       if (!isPlaying) resumePlayback();
       return;
@@ -7353,6 +7377,7 @@ registerProcessor('wav-capture', WavCapture);
         nothingCurrent: st.cursor < 0 && anchor < 0,
         count: songs.length, // v16.1: many tracks say how many, and where from
         from: op.from ?? null,
+        asTracks: !!op.asTracks, // v16.3: a walk queued whole
       });
       queueToast(text, { token: ++queueTokenRef.current, kind: 'add', after: ed.map((i: number) => r.state.order[i].id), mine, names: songs.map((s: Song) => s.name) });
       return true;
@@ -7481,8 +7506,10 @@ registerProcessor('wav-capture', WavCapture);
     if (pending.length) queueTimerRef.current = setTimeout(() => queueApiRef.current?.tick(), queueWaitShortRef.current ? 16 : 150);
   };
   /** Play next / Add to queue: library tracks by id (the library's own objects, as playFromLibrary). v16.1: `from`, a
-   *  playlist's name, for the toast. */
-  const queueTracks = (ids: readonly string[], mode: 'next' | 'queue', from?: string) => runQueueOp({ kind: 'add', ids: ids.slice(), mode, from });
+   *  playlist's name, for the toast. v16.3: opts.asTracks, a walk queued whole (its entries are plain tracks: the toast
+   *  says so). */
+  const queueTracks = (ids: readonly string[], mode: 'next' | 'queue', from?: string, opts?: { asTracks?: boolean }) =>
+    runQueueOp({ kind: 'add', ids: ids.slice(), mode, from, ...(opts?.asTracks ? { asTracks: true } : {}) });
   /** The Up next sheet's edits: a queued entry (its index in the play order and its id, checked when it applies) removed,
    *  moved to a place in the queue, or to its top (the row's Play next), and Clear. */
   const editQueue = (
@@ -7891,6 +7918,90 @@ registerProcessor('wav-capture', WavCapture);
     const pl = playlistById(id);
     return pl ? presentTracks<Song>(pl, libraryIndex()) : [];
   };
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // v16.3: Create a mix (spec §3.7). The model is utils/mix/builder.ts (pure: it composes the recipes); App resolves a
+  // source to the library's own Song objects and starts, queues or saves what the model builds, through the existing
+  // paths only: applyMix (startPlayOrder: Undo, the chain, the walk, the label), the queue's one writer (queueTracks),
+  // v16.1's name Dialog. None of these writes the library (check:writers rule 3). App holds no builder state: the
+  // settings, the summary and the sheets live in the Mixes tab's view, so a builder tap renders App 0 times.
+  // ---------------------------------------------------------------------------------------------------------------
+  /** A source's tracks: the library, a saved playlist's present tracks (v16.1), or the queue's waiting entries in
+   *  queue order. The library's own objects, by id, in the source's order (repeats kept). */
+  const builderTracks = (source: SourceRef): Song[] => {
+    if (source.kind === 'playlist') return playlistTracks(source.id);
+    if (source.kind === 'queue') {
+      const st = stateRef.current;
+      const qm = queueMirrorRef.current.playlist === st.playlist ? queueMirrorRef.current.marks : null;
+      const byId = libraryById();
+      return waitingIndices({ marks: qm }).map((i: number) => byId.get(st.playlist[i]?.id)).filter((s: Song | undefined): s is Song => !!s);
+    }
+    return libraryRef.current;
+  };
+  /** A source's name in a mix's name and toast: "your library", the playlist's, "your queue". */
+  const builderSourceName = (source: SourceRef): string =>
+    source.kind === 'playlist' ? (playlistById(source.id)?.name ?? builderWords.GONE_PLAYLIST_NAME)
+      : source.kind === 'queue' ? builderWords.QUEUE_SOURCE_NAME : builderWords.LIBRARY_SOURCE_NAME;
+  /**
+   * A built mix, at the tap (Math.random and this session's play history: what plays is what was asked for). Play goes
+   * through applyMix like every mix; from the queue it doesn't carry the queue (its tracks are the mix), and the toast
+   * says the queue is in it. Play next / Add to queue go through the queue's one writer (a walk's entries play as
+   * tracks: the toast says so); Save through v16.1's name Dialog, its default name the mix's. A mix with no tracks: its
+   * recipe's own toast (or the builder's), nothing else. A play-order function: never the library.
+   * v16.3 review: from the queue, Play always applies (startPlayOrder's fromQueue: even a mix equal to the play order's
+   * own entries consumes the queue, with its toast and Undo), and the queued tracks the mix leaves out follow the one
+   * switch, builderViewModel's QUEUE_UNPICKED: 'leave' (they leave the queue with it; the toast counts them) or 'keep'
+   * (carried after the mix's first track; v16.3 re-review: the toast's one sentence for them is the carry's,
+   * queueKeptText, counted as they are carried).
+   */
+  const startBuilt = (settings: BuilderSettings, mode: 'now' | 'next' | 'queue' | 'save') => {
+    const tracks = builderTracks(settings.source);
+    const b = buildMix(
+      { tracks, history: playHistoryRef.current, rng: Math.random, experience: userExperienceLevel },
+      settings,
+      builderSourceName(settings.source),
+    );
+    const order = b.result.order;
+    if (!order) {
+      applyMix(b.result, b.name);
+      return;
+    }
+    const fromQueue = settings.source.kind === 'queue';
+    if (mode === 'now') {
+      const left = fromQueue ? leftOut(tracks, order).length : 0;
+      applyMix(b.result, b.name, b.positions, fromQueue
+        ? { carry: builderWords.QUEUE_UNPICKED === 'keep' ? 'unpicked' : false, carryText: builderWords.queueKeptText, fromQueue: true, note: builderWords.queuePlayNote(left) }
+        : undefined);
+      return;
+    }
+    const ids = order.map((s: Song) => s.id);
+    if (mode === 'save') {
+      openSavePlaylist({ kind: 'ids', ids, label: b.name, from: { kind: 'builder', label: b.name }, sentence: playlistWords.saveMixSentence(ids.length, !!b.result.walk) });
+      return;
+    }
+    if (fromQueue) {
+      showStatusToast(builderWords.FROM_QUEUE_QUEUED_TEXT, { durationMs: 6000 }); // the view never offers it
+      return;
+    }
+    queueTracks(ids, mode, b.name, { asTracks: !!b.result.walk });
+  };
+  /** The Mixes tab's ⋯: a mix by its id, at its own setting (the same result as its tap: the golden through the
+   *  builder), queued whole or saved. A random walk is a new draw each time, as its tap is. */
+  const queueMix = (id: MixId, mode: 'next' | 'queue' | 'save') => startBuilt(settingsOf(id), mode);
+  /** The Start from sheet's facts: the library's size, the queue's waiting tracks, each playlist's present and missing. */
+  const builderSources = () => {
+    const st = stateRef.current;
+    const qm = queueMirrorRef.current.playlist === st.playlist ? queueMirrorRef.current.marks : null;
+    const idx = libraryIndex();
+    return {
+      library: libraryRef.current.length,
+      queue: waitingIndices({ marks: qm }).length,
+      playlists: (playlistsRef.current ?? []).map((p: PlaylistRecord) => {
+        const r = resolvePlaylist<Song>(p, idx);
+        return { id: p.id, name: p.name, present: r.present, missing: r.missing };
+      }),
+    };
+  };
   /** Open a playlist's view (Library › Playlists › it): its home is the Library tab (decision 1 A: PLAYLISTS_HOME). */
   const openPlaylist = (id: string | null) => {
     // Opening one shows the Playlists side; closing one (Back, "Go to Tracks") leaves the side to the caller (v16.1
@@ -7965,6 +8076,10 @@ registerProcessor('wav-capture', WavCapture);
   // it is). App holds no filter state: the picks, the sheet and the pass live in the Library's Tracks view.
   const filterApiRef: { current: { playFiltered: typeof playFiltered } | null } = useRef(null);
   useLayoutEffect(() => { filterApiRef.current = { playFiltered }; });
+  // v16.3, Create a mix: App's functions for it, in their own one-line effect (none references a library writer; the
+  // pinned shell actions' effect stays as it is).
+  const builderApiRef: { current: { start: typeof startBuilt; queueMix: typeof queueMix; tracks: typeof builderTracks; sources: typeof builderSources } | null } = useRef(null);
+  useLayoutEffect(() => { builderApiRef.current = { start: startBuilt, queueMix, tracks: builderTracks, sources: builderSources }; });
   // v16.1 (spec §3.14): the new layout's Library tools (the health card's Clear and Diagnostics). Their own one-line
   // effect: a reference to a library writer (clearEntirePlaylist) is pinned by check:writers, and here no later edit of
   // the shell actions' or the playlists' effects re-pins it.
@@ -8022,6 +8137,43 @@ registerProcessor('wav-capture', WavCapture);
       },
     };
     return () => { delete w.__aetheriaFilters; };
+  }, []);
+  // v16.3: Create a mix's tests start, queue and save built mixes and read the play order through this hook (dev builds
+  // only; production strips it).
+  useEffect(() => {
+    if (!IS_DEV_BUILD) return;
+    const w = window as unknown as { __aetheriaBuilder?: unknown };
+    const api = () => builderApiRef.current;
+    w.__aetheriaBuilder = {
+      start: (settings: BuilderSettings, mode: 'now' | 'next' | 'queue' | 'save' = 'now') => api()?.start(settings, mode),
+      queueMix: (id: MixId, mode: 'next' | 'queue' | 'save') => api()?.queueMix(id, mode),
+      /** The footer's numbers for these settings, over the source's tracks as they are now. */
+      summary: (settings: BuilderSettings) => {
+        const tracks = api()?.tracks(settings.source) ?? [];
+        const src = settings.source;
+        const name = src.kind === 'playlist' ? (api()?.sources().playlists.find((p: { id: string }) => p.id === src.id)?.name ?? builderWords.GONE_PLAYLIST_NAME)
+          : src.kind === 'queue' ? builderWords.QUEUE_SOURCE_NAME : builderWords.LIBRARY_SOURCE_NAME;
+        return builderSummary(buildFacetIndex(tracks, BUILDER_FACETS as any), settings, name);
+      },
+      settingsOf: (id: MixId) => settingsOf(id),
+      tracks: (source: SourceRef) => (api()?.tracks(source) ?? []).map((s: Song) => s.id),
+      sources: () => api()?.sources(),
+      state: () => {
+        const s = stateRef.current;
+        const q = queueMirrorRef.current;
+        const h = libraryHookRef.current;
+        return {
+          ids: s.playlist.map((x: Song) => x.id),
+          cursor: s.currentSongIndex,
+          walk: h.walk,
+          steps: h.steps,
+          marks: q.playlist === s.playlist ? q.marks : null,
+          label: playOrderLabelRef.current ? playOrderLabelRef.current.label : null,
+          libraryIds: libraryRef.current.map((x: Song) => x.id),
+        };
+      },
+    };
+    return () => { delete w.__aetheriaBuilder; };
   }, []);
 
   /** The layout switch: saved from a tap only. The music, the visualizer and the lock-screen card carry over. */
@@ -8480,6 +8632,7 @@ registerProcessor('wav-capture', WavCapture);
       rootRef: shellRootRef,
       layersScrollRef,
       libraryViewRef,
+      mixesViewRef,
     }),
     [shellTab, shellSheet, sheetFocus, classicPeek, carLayout, desktopShell, shellZen, shellZenHidden]
   );
@@ -8671,6 +8824,12 @@ registerProcessor('wav-capture', WavCapture);
       // v16.2, smart filters: a filtered set's start (Play these, Shuffle, a row's tap while filtering), through
       // filterApiRef (its own layout effect; App's playFiltered, a play-order function: never the library).
       playFiltered: (o: { ids: readonly string[]; startId?: string | null; shuffle?: boolean; label: string; row?: boolean }) => filterApiRef.current?.playFiltered(o),
+      // v16.3, Create a mix and the Mixes tab's ⋯, through builderApiRef (its own layout effect; App's startBuilt and
+      // queueMix, play-order functions: never the library).
+      startBuilt: (settings: BuilderSettings, mode: 'now' | 'next' | 'queue' | 'save') => builderApiRef.current?.start(settings, mode),
+      queueMix: (id: MixId, mode: 'next' | 'queue' | 'save') => builderApiRef.current?.queueMix(id, mode),
+      builderTracks: (source: SourceRef): Song[] => builderApiRef.current?.tracks(source) ?? [],
+      builderSources: () => builderApiRef.current?.sources() ?? { library: 0, queue: 0, playlists: [] },
     };
   }, []);
 
@@ -9082,7 +9241,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

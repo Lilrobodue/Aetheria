@@ -219,7 +219,7 @@ export function planAssign(library: readonly AssignSong[]): AssignPlan {
       if (!s.harmonicFreq) patches.set(s.id, { harmonicFreq: s.closestSolfeggio });
     } else {
       const est = standInFreq(s);
-      const bestMatch = getHarmonicSolfeggio(est);
+      const bestMatch = getHarmonicSolfeggio(est, true); // v16.3: quietly (the same answer, no per-track console lines)
       open.push({ s, failed: o === 'scan-failed', key: fnv1a('order:' + s.id), scores: new Map(ALL_CRYSTALS.map((f) => [f, compatibility(bestMatch, f)])) });
     }
   }

@@ -46,6 +46,74 @@ ok(cleanName('x'.repeat(200))!.length === NAME_MAX, 'cleanName: capped at NAME_M
 ok(Array.from(cleanName('🎵'.repeat(100))!).length === NAME_MAX, 'cleanName: caps by characters, never splits a pair');
 eq(freeName('New playlist', []), 'New playlist', 'freeName free');
 eq(freeName('New playlist', ['new playlist', 'New playlist 2']), 'New playlist 3', 'freeName taken (case-insensitive)');
+// v16.3 review: a long name's number always fits (a built mix's name is up to 80 characters): never a taken name back.
+{
+  const n80 = 'tone-' + 'x'.repeat(NAME_MAX - 5);
+  ok(Array.from(n80).length === NAME_MAX, 'freeName: an 80-character name');
+  const f2 = freeName(n80, [n80]);
+  eq(f2, n80.slice(0, NAME_MAX - 2) + ' 2', 'freeName: 80 characters taken → cut to 78, then " 2"');
+  ok(f2.toLowerCase() !== n80.toLowerCase() && Array.from(f2).length <= NAME_MAX, 'freeName: never the taken name, never over NAME_MAX');
+  eq(freeName(n80, [n80, f2]), n80.slice(0, NAME_MAX - 2) + ' 3', 'freeName: then " 3"');
+  const ten = [n80, ...Array.from({ length: 8 }, (_, i) => n80.slice(0, NAME_MAX - 2) + ` ${i + 2}`)];
+  eq(freeName(n80, ten), n80.slice(0, NAME_MAX - 3) + ' 10', 'freeName: two digits cut one more');
+  const n79 = 'tone-' + 'y'.repeat(NAME_MAX - 6);
+  eq(freeName(n79, [n79.toUpperCase()]), n79.slice(0, NAME_MAX - 2) + ' 2', 'freeName: 79 characters taken (any case)');
+  const n78 = 'tone-' + 'z'.repeat(NAME_MAX - 7);
+  eq(freeName(n78, [n78]), n78 + ' 2', 'freeName: 78 characters: the whole name, then " 2"');
+  const spaced = 'tone-' + 'w'.repeat(NAME_MAX - 8) + ' ab'; // a cut at 78 would end on the space
+  eq(freeName(spaced, [spaced]), spaced.slice(0, NAME_MAX - 3) + ' 2', 'freeName: a cut never ends on a space');
+  const emoji = '🎵'.repeat(NAME_MAX);
+  const fe = freeName(emoji, [emoji]);
+  eq(fe, '🎵'.repeat(NAME_MAX - 2) + ' 2', 'freeName: cuts by characters, never splits a pair');
+  // v16.3 re-review: the cut keeps whole graphemes (Intl.Segmenter), still counting NAME_MAX in code points: an emoji
+  // sequence joined by ZWJ, a flag (two regional indicators) and a letter with its combining marks stay whole or go whole.
+  const fam = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'; // one grapheme of 5 code points
+  const flag = '\u{1F1EF}\u{1F1F5}'; // one grapheme of 2
+  const a = (n: number) => 'a'.repeat(n);
+  eq(freeName(a(75) + fam, [a(75) + fam]), a(75) + ' 2', 'freeName: a ZWJ sequence across the cut goes whole');
+  const famCut = cleanName(a(77) + fam)!; // cleanName's own cap leaves "👨\u200D👩" (3 code points) at the end
+  eq(freeName(a(77) + fam, [famCut]), a(77) + ' 2', 'freeName: a cut ZWJ sequence is never cut again ("…👨 2")');
+  eq(freeName(a(70) + fam + a(5), [a(70) + fam + a(5)]), a(70) + fam + a(3) + ' 2', 'freeName: a ZWJ sequence before the cut stays whole');
+  eq(freeName(a(77) + flag + 'b', [a(77) + flag + 'b']), a(77) + ' 2', 'freeName: a flag across the cut goes whole');
+  eq(freeName(a(76) + flag + 'bb', [a(76) + flag + 'bb']), a(76) + flag + ' 2', 'freeName: a flag that fits stays');
+  eq(freeName('x'.repeat(77) + 'e\u0301y', ['x'.repeat(77) + 'e\u0301y']), 'x'.repeat(77) + ' 2', 'freeName: a letter and its combining mark go whole');
+  eq(freeName('x'.repeat(76) + 'a\u0301\u0323z', ['x'.repeat(76) + 'a\u0301\u0323z']), 'x'.repeat(76) + ' 2', 'freeName: a letter and two marks go whole');
+  eq(freeName('x'.repeat(75) + 'e\u0301 yy', ['x'.repeat(75) + 'e\u0301 yy']), 'x'.repeat(75) + 'e\u0301 2', 'freeName: a mark before the cut stays, the space it ends on goes');
+  // Without Intl.Segmenter (an older engine): the cut by code points, as before, never splitting a surrogate pair.
+  {
+    const Seg = (Intl as any).Segmenter;
+    delete (Intl as any).Segmenter;
+    try {
+      ok((Intl as any).Segmenter === undefined, 'freeName fallback: no Segmenter here');
+      eq(freeName('🎵'.repeat(NAME_MAX), ['🎵'.repeat(NAME_MAX)]), '🎵'.repeat(NAME_MAX - 2) + ' 2', 'freeName fallback: code points, never half a pair');
+      eq(freeName(a(75) + fam, [a(75) + fam]), a(75) + '\u{1F468}\u200D\u{1F469} 2', 'freeName fallback: a ZWJ sequence cut by code points');
+      eq(freeName('x'.repeat(77) + 'e\u0301y', ['x'.repeat(77) + 'e\u0301y']), 'x'.repeat(77) + 'e 2', 'freeName fallback: a mark cut off by code points');
+    } finally {
+      (Intl as any).Segmenter = Seg;
+    }
+  }
+  // Random long names and taken sets: the result is never taken and never over NAME_MAX (a PRNG of its own, so the
+  // sections below draw what they drew before). v16.3 re-review: drawn by code point (indexing the string gave lone
+  // surrogates), then over graphemes too, with each name's head checked as whole graphemes of the base.
+  const seg = (s: string): string[] => Array.from(new (Intl as any).Segmenter('en', { granularity: 'grapheme' }).segment(s), (x: any) => x.segment as string);
+  let s9 = 9;
+  const r9 = () => { s9 = (Math.imul(s9, 1103515245) + 12345) & 0x7fffffff; return s9 / 0x7fffffff; }; // 32-bit (a float product loses its low bits: a 281-state cycle)
+  const alphabets: string[][] = [Array.from('ab c🎵'), ['a', 'b', ' ', '🎵', fam, flag, 'e\u0301', 'o\u0308\u0323', '\u{1F44D}\u{1F3FD}']];
+  for (const [ai, alpha] of alphabets.entries()) {
+    for (let i = 0; i < 400; i++) {
+      const len = 30 + Math.floor(r9() * 70);
+      const base = Array.from({ length: len }, () => alpha[Math.floor(r9() * alpha.length)]).join('');
+      const clean = cleanName(base) ?? 'Playlist';
+      const taken = [clean];
+      for (let k = 0; k < Math.floor(r9() * 12); k++) taken.push(freeName(base, taken));
+      const out = freeName(base, taken);
+      ok(!taken.some((t) => t.toLowerCase() === out.toLowerCase()) && Array.from(out).length <= NAME_MAX && cleanName(out) === out, `freeName random ${ai}.${i}: ${out}`);
+      const head = seg(out.replace(/ \d+$/, ''));
+      const whole = seg(clean);
+      ok(/ \d+$/.test(out) && head.every((g, j) => g === whole[j]), `freeName random ${ai}.${i}: whole graphemes of the base: ${JSON.stringify(out)}`);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // 2. Validation on read

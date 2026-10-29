@@ -4,13 +4,15 @@
 // each mix's count text and accessible name, why a mix can't start (its disabled reason), the empty and no-crystals
 // states, and the decorative dot pattern of each row. The catalogue itself (ids, names, sub-lines, sections, counts)
 // is utils/mix/catalog.ts, shared with the Undo toast's words in both layouts.
+// v16.3: the ⋯ of every live tile and row (whole-mix queueing): its name, its sheet's header and lines; the intro says
+// what it does.
 
 import type { Song } from '../../../types.ts';
 import { MIXES, mixCounts } from '../../../utils/mix/catalog.ts';
 import type { MixDef, MixId, MixSection } from '../../../utils/mix/catalog.ts';
 import { GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS, LO_SHU_WALKS, PRESETS } from '../../../utils/crystalData.ts';
 
-export const MIXES_INTRO = 'A tap builds a play order from your library and starts it. Undo for 10 s.';
+export const MIXES_INTRO = 'A tap builds a play order from your library and starts it. ⋯ queues it, saves it or changes it.';
 export const MIXES_LOADING = 'Loading your library…';
 export const EXPERIMENTAL_NOTE =
   'These rank tracks by Deep Scan’s experimental scores. The scores haven’t been shown to measure anything you can hear, so treat them as curiosities. They need tracks Deep Scan has measured.';
@@ -130,4 +132,47 @@ export function dotsFor(id: MixId, available: ReadonlySet<number>, disabled: boo
     }
   } else cells = grid('... ... ...');
   return { kind: 'grid', cells: disabled ? cells.map((d) => (d === '.' ? '.' : 'o')) : cells };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// v16.3: a mix's ⋯ (MixMenu): Play next, Add to queue, Customize…, Save as a playlist…
+// ---------------------------------------------------------------------------------------------------------------
+
+const many = (n: number) => n.toLocaleString('en-US');
+const allOf = (n: number) => (n === 1 ? 'This track' : `All ${many(n)}`);
+
+/** The ⋯'s name: "More for Grounding". */
+export function moreName(def: MixDef): string {
+  return `More for ${def.fullName}`;
+}
+/** The three walks whose tap is a new draw each time (CAB, Ouroboros, CABI). */
+export function isRandomWalk(id: MixId): boolean {
+  return id === 'walk:combined' || id === 'walk:ouroboros' || id === 'walk:cabi';
+}
+/** The mixes that play as a walk (the cube follows them): the six walks, and GUT Alignment. Queued, they play as tracks. */
+export function playsAsWalk(id: MixId): boolean {
+  return id.startsWith('walk:') || id === 'gut';
+}
+/** The sheet's header line: the recipe and the count ("174 · 285 · 396 · 417 Hz · 62 tracks"). */
+export function menuSub(def: MixDef, view: MixView): string {
+  return `${def.sub} · ${view.text}`;
+}
+const extras = (o: { walk: boolean; random: boolean }) => `${o.walk ? ' They play as tracks, not as a walk.' : ''}${o.random ? ' A new draw.' : ''}`;
+/** Play next's line: "All 62, right after the track that's playing, in the mix's order." (nothing loaded: first when
+ *  Play is pressed). A walk's entries play as tracks; a random walk is a new draw. */
+export function menuNextLine(n: number, o: { walk: boolean; random: boolean; nothingCurrent: boolean }): string {
+  const head = o.nothingCurrent ? `${allOf(n)}, first when you press Play, in the mix’s order.` : `${allOf(n)}, right after the track that’s playing, in the mix’s order.`;
+  return `${head}${extras(o)}`;
+}
+/** Add to queue's line: after the tracks waiting; with none waiting, where Play next puts them. */
+export function menuQueueLine(n: number, waiting: number, o: { walk: boolean; random: boolean; nothingCurrent: boolean }): string {
+  if (waiting <= 0) return menuNextLine(n, o);
+  const head = waiting === 1 ? `${allOf(n)}, after the track waiting in your queue.` : `${allOf(n)}, after the ${many(waiting)} tracks waiting in your queue.`;
+  return `${head}${extras(o)}`;
+}
+export const MENU_CUSTOMIZE_LINE = 'Open it in Create a mix: another source, filters, how many per crystal, the order';
+/** Save's line: a random walk saves this draw. */
+export function menuSaveLine(n: number, random: boolean): string {
+  if (random) return 'A new playlist of this draw, in the mix’s order';
+  return n === 1 ? 'A new playlist of this track' : `A new playlist of these ${many(n)}, in the mix’s order`;
 }

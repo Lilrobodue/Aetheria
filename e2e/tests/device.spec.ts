@@ -10,7 +10,8 @@ import { adb, mediaSession, chromeSessions } from './adb';
 // (v15.4: the panel-crash one after the lock-screen one, the root crash last;
 // v15.5: the new layout's one before the lock-screen one; v15.6: the new layout in Zen after it; v15.7: the Library
 // tab's row tap after that; v15.8: the walk after Assign after that; v15.9: a mix from the Mixes tab after that; v16.0:
-// the queue after that; v16.1: a saved playlist after that; v16.2: a filtered set after that).
+// the queue after that; v16.1: a saved playlist after that; v16.2: a filtered set after that; v16.3: a built mix after
+// that).
 // While Playwright is connected, Chrome on Android keeps every tab visible: no test here ever sees a real hide. The
 // tests that need one (v16.0.1's D1-D3, the hide flush; v16.1's D-PL1, a playlist made just before a background kill)
 // are in device-hide.spec.ts, run on their own with E2E_HIDE=1.
@@ -515,12 +516,48 @@ test('v16.0: by finger, Play next tone-0020 then Add to queue tone-0025 from the
  * past Android's double-tap window), and every outcome is polled (a tap's click lands after tapAt returns).
  */
 async function playlistPhone(page: Page): Promise<{ at: (t: Locator, what: string) => Promise<void> }> {
+  /** What covers the point (null: the target itself); 'offline-ready' for the app's Ready Offline banner. Arms the
+   *  click watch on the target. */
+  const cover = (target: Locator, x: number, y: number) => target.evaluate((el, p) => {
+    const w = window as any;
+    if (!w.__atClicks) {
+      w.__atClicks = [] as { x: number; y: number; on: boolean }[];
+      document.addEventListener('click', (e: MouseEvent) => {
+        if (e.isTrusted) w.__atClicks.push({ x: e.clientX, y: e.clientY, on: !!w.__atTarget && (w.__atTarget === e.target || w.__atTarget.contains(e.target as Node)) });
+      }, true);
+    }
+    w.__atClicks.length = 0;
+    w.__atTarget = el;
+    const hit = document.elementFromPoint(p.x, p.y);
+    if (hit && (el === hit || el.contains(hit))) return null;
+    if (hit?.closest('[aria-label="Dismiss offline-ready notice"]')) return 'offline-ready';
+    return hit ? `${hit.tagName.toLowerCase()}${hit.getAttribute('data-testid') ? `[data-testid=${hit.getAttribute('data-testid')}]` : ''}` : 'nothing';
+  }, { x, y });
   const at = async (target: Locator, what: string) => {
     await target.evaluate((el) => el.scrollIntoView({ block: 'center' })); // a DOM scroll; the tap itself is a finger's
     await page.waitForTimeout(300);
     const box = await target.boundingBox();
     expect(box, what).toBeTruthy();
-    await tapAt(page, box!.x + box!.width / 2, box!.y + box!.height / 2);
+    const x = box!.x + box!.width / 2;
+    const y = box!.y + box!.height / 2;
+    let hit = await cover(target, x, y);
+    if (hit === 'offline-ready') {
+      // The app's Ready Offline banner (shown once offline support installs, until tapped) sits over the top of the
+      // phone's screen: tap it away first, as a person would.
+      const banner = page.getByRole('button', { name: 'Dismiss offline-ready notice' });
+      const b = await banner.boundingBox();
+      if (b) await tapAt(page, b.x + b.width / 2, b.y + b.height / 2);
+      await expect(banner, 'the Ready Offline banner, tapped away').toHaveCount(0, { timeout: 5_000 });
+      hit = await cover(target, x, y);
+    }
+    expect(hit, `${what}: nothing covers it`).toBeNull();
+    await tapAt(page, x, y);
+    // Under the tests' viewport emulation Android Chrome dispatches the click about 0.3 s after the touch: wait for it
+    // to arrive on the target, so the next step's scroll can't move the content under it (a label may forward a
+    // second click to its input).
+    await expect
+      .poll(() => page.evaluate((p) => (window as any).__atClicks.filter((c: { x: number; y: number }) => Math.abs(c.x - p.x) <= 4 && Math.abs(c.y - p.y) <= 4).some((c: { on: boolean }) => c.on), { x, y }), { timeout: 3_000, intervals: [50, 100], message: `${what}: the tap’s click arrives on it` })
+      .toBe(true);
   };
   return { at };
 }
@@ -839,6 +876,171 @@ test('v16.2: a filtered set plays in its own order with the screen off: Play the
       const c = (await libraryState(page)).cursor;
       const line = await page.evaluate(() => document.querySelector('[data-testid="np-source"]')?.textContent ?? null);
       return c >= 3 && line === `Play order · ${c + 1} of 8`;
+    }, { message: 'the source line names the play order and the cursor', timeout: 10_000 })
+    .toBe(true);
+  expect(dialogs).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// v16.3, Create a mix (spec §5.11 steps 3 and 4). By finger (tapAt, 400 ms apart), every outcome polled.
+// ---------------------------------------------------------------------------------------------------------------
+const B_TONE = (k: number) => `tone-${String(k + 1).padStart(4, '0')}`;
+
+test('v16.3 D-B1: by finger, Create a mix › Start from Evening › a Lo Shu walk › Vortex › Play, then Grounding’s ⋯ › Add to queue; a reload brings the walk back with Grounding queued after it; the phone’s cost', async ({ page }) => {
+  // Screen on (the android project). The cost lines are this phone's baseline, recorded with its battery temperature.
+  test.setTimeout(180_000);
+  const temp = Number(/temperature: (\d+)/.exec(adb('shell', 'dumpsys', 'battery'))?.[1] ?? NaN) / 10;
+  const dialogs = await openSeededNewLayout(page, 30, { real: 30, seconds: 40, crystals: 'all' });
+  await page.setViewportSize(PHONE_VIEWPORT);
+  const lib = await libraryState(page);
+  // Evening: the first 20 tones (crystals 174 … 3504 Hz, one each).
+  await expect.poll(() => page.evaluate(() => (window as any).__aetheriaPlaylists?.state()?.status), { timeout: 10_000 }).toBe('ready');
+  await page.evaluate((ids) => (window as any).__aetheriaPlaylists.create('Evening', ids), lib.libraryIds.slice(0, 20));
+  const { at } = await playlistPhone(page);
+  // v16.3 review (from v16.2's D-F1 on the phone): a click's timeStamp is the TOUCH time, and Chrome dispatches the click
+  // ~290 ms after touchstart here (its gesture handling under setViewportSize's emulation), so the commit is measured
+  // from the click's handler (this capture listener runs just before the app's), and touchstart → click is recorded on
+  // its own (an annotation, not gated).
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__handlerAt = 0;
+    w.__touchAt = 0;
+    w.__commitMs = [] as number[];
+    w.__touchToClickMs = [] as number[];
+    const sel = '[data-testid^="builder-follow-"], [data-testid^="builder-walk-"]';
+    document.addEventListener('touchstart', (e) => { if ((e.target as HTMLElement)?.closest?.(sel)) w.__touchAt = performance.now(); }, { capture: true, passive: true });
+    document.addEventListener('click', (e) => {
+      if (!(e.target as HTMLElement)?.closest?.(sel)) return;
+      w.__handlerAt = performance.now();
+      if (w.__touchAt) w.__touchToClickMs.push(w.__handlerAt - w.__touchAt);
+      w.__touchAt = 0;
+    }, true);
+    new MutationObserver((ms) => {
+      for (const m of ms) if (m.attributeName === 'aria-checked' && w.__handlerAt && (m.target as HTMLElement).getAttribute('aria-checked') === 'true') { w.__commitMs.push(performance.now() - w.__handlerAt); w.__handlerAt = 0; }
+    }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['aria-checked'] });
+    w.__longTasks = [] as number[];
+    new PerformanceObserver((l) => { for (const e of l.getEntries()) w.__longTasks.push(Math.round(e.duration)); }).observe({ type: 'longtask' });
+  });
+  await at(page.getByTestId('tab-mixes-button'), 'the Mixes tab');
+  await expect(page.getByTestId('mixes-create')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('mixes-create'), 'Create a mix');
+  await expect(page.getByTestId('mix-builder')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('builder-source-playlist'), 'Start from › Playlist');
+  await expect(page.getByTestId('builder-source-sheet')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('builder-source-sheet').getByText('Evening', { exact: true }), 'Evening');
+  await expect(page.getByTestId('builder-source-playlist')).toHaveAttribute('aria-label', 'Evening, 20 tracks', { timeout: 5_000 });
+  await at(page.getByTestId('builder-follow-walk'), 'A Lo Shu walk');
+  await expect(page.getByTestId('builder-follow-walk')).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
+  await at(page.getByTestId('builder-walk-C'), 'Vortex');
+  await expect(page.getByTestId('builder-walk-C')).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
+  await expect(page.getByTestId('builder-count')).toHaveText(/^20 of 27 positions/, { timeout: 5_000 });
+  const commits: number[] = await page.evaluate(() => (window as any).__commitMs);
+  const touchToClick: number[] = await page.evaluate(() => (window as any).__touchToClickMs);
+  await at(page.getByTestId('builder-play'), 'Play');
+  await expect.poll(async () => { const s = await libraryState(page); return s.walk === 'C' && s.ids.length === 20; }, { timeout: 15_000, message: 'Vortex from Evening plays as a walk' }).toBe(true);
+  const walkIds = (await libraryState(page)).ids;
+  await at(page.getByRole('button', { name: 'Back to Mixes', exact: true }), 'Back');
+  await expect(page.getByTestId('mix-more-preset:qi')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('mix-more-preset:qi'), 'Grounding’s ⋯');
+  await expect(page.getByTestId('mix-menu-body')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('mix-action-queue'), 'Add to queue');
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__aetheriaQueue.state())).waiting.length, { timeout: 15_000, message: 'Grounding queued: 7' }).toBe(7);
+  const longTasks: number[] = await page.evaluate(() => (window as any).__longTasks.slice());
+  await page.waitForTimeout(2600); // the play order's debounced save
+  await page.reload();
+  await acceptDisclaimerNew(page);
+  await expect.poll(async () => (await libraryState(page)).libraryIds.length, { timeout: 60_000 }).toBe(30);
+  await expect.poll(async () => (await libraryState(page)).walk, { timeout: 20_000, message: 'the walk is back' }).toBe('C');
+  const s = await libraryState(page);
+  const q = await page.evaluate(() => (window as any).__aetheriaQueue.state());
+  expect(s.ids.filter((_, i) => !q.waiting.includes(i)), 'the walk’s own entries, in order').toEqual(walkIds);
+  expect(q.waiting.length, 'Grounding’s 7 queued after it').toBe(7);
+  expect(s.steps?.filter((x) => x === -1).length, 'its queued entries are step −1').toBe(7);
+  test.info().annotations.push({ type: 'D-B1 cost (the phone’s baseline)', description: JSON.stringify({ batteryC: temp, followCommitMs: commits.map((c) => Math.round(c)), touchToClickMs: touchToClick.map((c) => Math.round(c)), longTasksMs: longTasks }) });
+  // From the click's handler to the chosen tile's aria-checked: the app's own work, ≤ 150 ms on the phone's DEV build
+  // (about 3× v16.2's 44-57 ms measured the same way; production is several times faster). Touch → click is not gated.
+  expect(commits.length, 'each Follow and walk tap measured').toBeGreaterThanOrEqual(2);
+  expect(Math.max(0, ...commits), 'a Follow tap’s commit, from its click handler (ms)').toBeLessThanOrEqual(150);
+  // The session's longest task on the phone's DEV build: 94 ms (2026-10-29 morning), then 102 and 107 ms (always the
+  // session's first); the per-tap commits stay at 24-35 ms. Production is several times faster, so 150 ms (the commit
+  // gate) still catches a regression of the kind the review found (the walk memo, ~100 ms a tap at 5,000 tracks).
+  expect(Math.max(0, ...longTasks), 'no long task over 150 ms in the session (the dev build)').toBeLessThanOrEqual(150);
+  expect(dialogs).toEqual([]);
+});
+
+// v16.3 review: Grounding's four crystals three times each (tone-0001…0009, -0028…0030), so "3 per crystal" builds 12:
+// room for a late first title, three advances and the checks after the wake before the order ends.
+const BUILT_PATCH = [{ index: 4, crystal: 174 }, { index: 5, crystal: 285 }, { index: 6, crystal: 396 }, { index: 7, crystal: 417 }, { index: 8, crystal: 417 }];
+const BUILT_SET = [0, 1, 2, 3, 4, 5, 6, 7, 8, 27, 28, 29];
+
+test('v16.3: a built mix plays in its own order with the screen off: by finger, Create a mix › 3 per crystal › Shuffle › Play; the card follows three gapless advances in the built order (never a library neighbour); after the wake the source line and the cursor @device', async ({ page }) => {
+  // v16.3 (spec §5.11 step 4): a built mix is a play order, so the gapless swap and the media session follow it. 30
+  // seeded tones of 4 s with crystals. No real page hide is needed (the builder saves at the tap; the play order's save is
+  // v16.0.1's). Turns the screen off; a phone with a secure lock stays locked after the test (unlock it by hand). LAST of
+  // the v16.3 tests (its own unlock).
+  const dialogs = await openSeededNewLayout(page, 30, { real: 30, seconds: 4, crystals: 'all', patch: BUILT_PATCH });
+  await page.setViewportSize(PHONE_VIEWPORT);
+  const lib = await libraryState(page);
+  const { at } = await playlistPhone(page);
+  await at(page.getByTestId('tab-mixes-button'), 'the Mixes tab');
+  await expect(page.getByTestId('mixes-create')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('mixes-create'), 'Create a mix');
+  await expect(page.getByTestId('builder-per-3')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('builder-per-3'), '3 per crystal');
+  await expect(page.getByTestId('builder-per-3')).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
+  await at(page.getByTestId('builder-order-list').getByText('Shuffle, least recently played first', { exact: true }), 'Shuffle');
+  await expect(page.getByTestId('builder-order-shuffle-note')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('builder-play'), 'Play');
+  // Grounding, 3 per crystal on these 30 (BUILT_PATCH): 174, 285, 396 and 417 three each = 12, shuffled.
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__aetheriaBuilder.state())).ids.length, { timeout: 15_000, message: 'the built mix plays' }).toBe(BUILT_SET.length);
+  const built: string[] = (await page.evaluate(() => (window as any).__aetheriaBuilder.state())).ids;
+  expect([...built].sort(), 'the built mix is Grounding’s twelve').toEqual(BUILT_SET.map((k) => lib.libraryIds[k]).sort());
+  const names = built.map((id) => B_TONE(lib.libraryIds.indexOf(id)));
+  await expect.poll(() => mediaSession(), { timeout: 15_000, message: `${names[0]} on the card` }).toEqual({ state: 'playing', title: names[0] });
+  await at(page.getByTestId('tab-now-button'), 'Now Playing');
+  await expect(page.getByTestId('np-source')).toHaveText(new RegExp(`^Play order · [12] of ${built.length}$`), { timeout: 5_000 });
+  const pausesBefore = await pauseCount(page);
+  const first = mediaSession()!.title;
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  const titles: string[] = [];
+  try {
+    await expect
+      .poll(
+        () => {
+          const s = mediaSession();
+          if (s && s.state === 'playing' && s.title !== first && !titles.includes(s.title)) titles.push(s.title);
+          return titles.length;
+        },
+        { timeout: 45_000, intervals: [500], message: 'three gapless advances on the PLAYING card, in the built order' }
+      )
+      .toBeGreaterThanOrEqual(3);
+    expect(mediaSession()?.state, 'the card still says playing').toBe('playing');
+    expect(chromeSessions().filter((s) => s.state === 'playing').length, 'one PLAYING Chrome card: none stranded').toBe(1);
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  test.info().annotations.push({ type: 'card titles with the screen off, a built mix', description: [first, ...titles].join(' → ') });
+  // v16.3 review (as v16.2's fix): `first` is read a moment after the card showed names[0] (the Now Playing tap and its
+  // checks come between), and with 4 s tones an advance can land in that moment. So the titles are a window of the built
+  // order from wherever `first` sits in it: each advance the next of the twelve, never a library neighbour, never a skip.
+  // And early enough that a track is still to come after the third advance: the order must not end before the checks
+  // after the wake (its end pauses the silent anchor, which `__pauseCount` would count).
+  // v16.3 re-review (as v16.2's device fix): TWO tracks after the third advance, not one: with one, the order can end one
+  // 4 s tone after the third advance, and the poll's last 0.5 s, the three adb reads (2-3.5 s on the Note 20) and the wake
+  // can outlast it. `first` sits at 0-2 (the source line said 1 or 2 of 12, and one more advance may land before it is
+  // read); the bound allows up to 6, so the twelve leave room.
+  const from = names.indexOf(first);
+  expect(from, `${first} is one of the built mix, early enough for three advances and two tracks after them`).toBeGreaterThanOrEqual(0);
+  expect(from, `${first} is one of the built mix, early enough for three advances and two tracks after them`).toBeLessThanOrEqual(names.length - 6);
+  expect([first, ...titles.slice(0, 3)], 'the built order, never a library neighbour').toEqual(names.slice(from, from + 4));
+  // After the wake, DOM and state reads only (no click or tap: Chrome draws no frames behind the keyguard).
+  expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
+  expect((await libraryState(page)).ids, 'the play order is the built mix').toEqual(built);
+  await expect
+    .poll(async () => {
+      const c = (await libraryState(page)).cursor;
+      const line = await page.evaluate(() => document.querySelector('[data-testid="np-source"]')?.textContent ?? null);
+      return c >= 3 && line === `Play order · ${c + 1} of ${built.length}`;
     }, { message: 'the source line names the play order and the cursor', timeout: 10_000 })
     .toBe(true);
   expect(dialogs).toEqual([]);

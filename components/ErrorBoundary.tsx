@@ -30,7 +30,7 @@ import { waitForBlobSaves } from '../utils/playlistCache';
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 /** The version the error log records. Bump it with the header badge (App.tsx); isolation.spec checks the two agree. */
-export const APP_VERSION = 'v16.2';
+export const APP_VERSION = 'v16.3';
 
 export type ViewName =
   | 'visualizer'
@@ -84,7 +84,16 @@ export type ViewName =
   // actions' ⋯ sheet.
   | 'library-filters'
   | 'library-filter-bar'
-  | 'library-filter-actions';
+  | 'library-filter-actions'
+  // v16.3, Create a mix: its sections, its footer, and the ⋯ sheets (a Mixes-tab mix's, the builder footer's).
+  | 'mix-builder'
+  | 'mix-builder-footer'
+  | 'mix-menu'
+  // v16.3 review: the whole builder (its model work: the index, the pool, the summary, the choices' counts), and the
+  // bodies of its Start from and Filters sheets.
+  | 'mix-builder-view'
+  | 'mix-builder-source'
+  | 'mix-builder-filters';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The error log
@@ -173,6 +182,44 @@ function CrashProbe({ view }: { view: string }) {
 
 /** A sibling of App under the root boundary (index.tsx): the root drill. Nothing in production. */
 export const RootCrashProbe = IS_DEV_BUILD ? () => <CrashProbe view="root" /> : () => null;
+
+/**
+ * v16.3 review: a drill INSIDE a component's own work, not beside it as a region's CrashProbe is (dev builds only).
+ * useCrashDrill(view) is true once __aetheriaCrash(view) names it, until the component remounts (Reload panel), and the
+ * component then calls crashDrill(view) from the work under test (Create a mix's model memos), which throws there. In
+ * production the hook is a constant false and crashDrill does nothing.
+ */
+function useCrashDrillDev(view: string): boolean {
+  const [boom, setBoom] = useState(false);
+  useEffect(() => {
+    const listener = (v: string) => {
+      if (v === view) setBoom(true);
+    };
+    crashListeners.add(listener);
+    return () => {
+      crashListeners.delete(listener);
+    };
+  }, [view]);
+  return boom;
+}
+export const useCrashDrill: (view: string) => boolean = IS_DEV_BUILD ? useCrashDrillDev : () => false;
+export const crashDrill: (view: string) => void = IS_DEV_BUILD
+  ? (view: string) => {
+      throw new Error(`Test crash in ${view}`);
+    }
+  : () => {};
+/**
+ * v16.3 re-review: a drill tied to a VALUE (dev builds only), for a crash that settings cause and so come back with
+ * them after a reload: a test sets window.__aetheriaCrashWhen = { [view]: (value) => boolean } (an init script, so it
+ * holds across reloads), and crashWhen(view, value), called from the work under test (Create a mix's summary, with its
+ * settings), throws while that says so. In production it does nothing.
+ */
+export const crashWhen: (view: string, value: unknown) => void = IS_DEV_BUILD
+  ? (view: string, value: unknown) => {
+      const when = typeof window === 'undefined' ? undefined : (window as any).__aetheriaCrashWhen?.[view];
+      if (typeof when === 'function' && when(value)) throw new Error(`Test crash in ${view}`);
+    }
+  : () => {};
 
 // ---------------------------------------------------------------------------------------------------------------
 // Fallbacks
@@ -433,6 +480,9 @@ interface ViewBoundaryProps {
   fallback?: (api: FallbackApi) => ReactNode;
   /** After the region or its fallback mounts in the other's place (the header and the transport re-measure). */
   onReset?: () => void;
+  /** v16.3 review: once per caught crash, after it is logged and counted (Create a mix forgets that it was open, so the
+   *  Mixes tab comes back to its list rather than to the crash). Never throws into the boundary: guarded here. */
+  onCatch?: (error: unknown) => void;
 }
 
 interface ViewBoundaryState {
@@ -455,6 +505,9 @@ export class ViewBoundary extends React.Component {
   componentDidCatch(error: unknown) {
     recordViewError(this.props.name, error);
     strikes.set(this.props.name, (strikes.get(this.props.name) ?? 0) + 1);
+    try {
+      this.props.onCatch?.(error);
+    } catch {}
     // The fallback rendered before this count (render runs before the commit that calls this): render it again, so
     // a third crash shows "switched off" at once, not on App's next render.
     this.setState({});

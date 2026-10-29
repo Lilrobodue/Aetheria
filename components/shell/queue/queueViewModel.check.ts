@@ -5,6 +5,7 @@
 import {
   placeWord,
   NO_CRYSTAL_NOTE,
+  AS_TRACKS_NOTE,
   queuedToast,
   removedToast,
   clearedToast,
@@ -60,6 +61,11 @@ eq(queuedToast({ name: '12 tracks', count: 12, from: 'Evening', mode: 'queue', p
 eq(queuedToast({ name: '12 tracks', count: 12, from: 'Evening', mode: 'next', position: 1, noCrystal: true, nothingCurrent: false }), 'Playing next: 12 tracks from Evening. Some have no crystal yet, so on a locked phone the music may stop there.', 'many, some with no crystal');
 eq(queuedToast({ name: '3 tracks', count: 3, mode: 'queue', position: 2, noCrystal: false, nothingCurrent: false }), 'Added 3 tracks to your queue.', 'many, no source');
 eq(queuedToast({ name: 'tone-0117', count: 1, from: 'Evening', mode: 'next', position: 1, noCrystal: false, nothingCurrent: false }), 'Playing next: tone-0117.', 'one track: as v16.0');
+// v16.3: a walk queued whole says its entries play as tracks (after the head, before a crystal note).
+eq(AS_TRACKS_NOTE, 'They play as tracks, not as a walk.', 'the walk note');
+eq(queuedToast({ name: '27 tracks', count: 27, from: 'Flying Star Vortex', mode: 'queue', position: 3, noCrystal: false, nothingCurrent: false, asTracks: true }), 'Added 27 tracks from Flying Star Vortex to your queue. They play as tracks, not as a walk.', 'a walk, Add to queue');
+eq(queuedToast({ name: '26 tracks', count: 26, from: 'Flying Star Vortex', mode: 'next', position: 1, noCrystal: true, nothingCurrent: false, asTracks: true }), 'Playing next: 26 tracks from Flying Star Vortex. They play as tracks, not as a walk. Some have no crystal yet, so on a locked phone the music may stop there.', 'a walk, Play next, a crystal note last');
+eq(queuedToast({ name: '62 tracks', count: 62, from: 'Grounding', mode: 'next', position: 1, noCrystal: false, nothingCurrent: false, asTracks: false }), 'Playing next: 62 tracks from Grounding.', 'not a walk: no note');
 eq(removedToast('tone-0203'), 'Removed tone-0203 from your queue.', 'Remove');
 eq(clearedToast(3), 'Cleared 3 queued tracks.', 'Clear, 3');
 eq(clearedToast(1), 'Cleared 1 queued track.', 'Clear, 1');

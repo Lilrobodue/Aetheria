@@ -15,6 +15,11 @@
 //   node scripts/check-mix-golden.mjs --step=N --from=FILE --to=FILE [--report=FILE]
 //                                                         a release step's diff: only what the step's allow-list
 //                                                         names may change, and the step's own assertions hold
+//   node scripts/check-mix-golden.mjs --via=builder       v16.3: the working tree against the golden with every recipe
+//                                                         the generators call (gutAlignment … loShuWalk, crystalSetMix)
+//                                                         replaced by Create a mix's model (utils/mix/builder.ts) at that
+//                                                         mix's own setting: buildMix(…, settingsOf(<the mix>)).result.
+//                                                         Every preset and walk must come out identical through it
 //
 // The golden holds, per run, the raw calls in order (song ids as `#<fixture>:<index>`), the number of random draws,
 // what was thrown and returned, and the derived walk facts; the canonical record (recorder.mjs) is a function of the
@@ -40,6 +45,8 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '')
 const GOLDEN_DEFAULT = ROOT + '/scripts/mix-golden/golden.json';
 const ENGINE_DEPENDENT = ['walk:combined', 'walk:ouroboros', 'walk:cabi'];
 const arg = (k, d = '') => (process.argv.find((a) => a.startsWith(`--${k}=`)) || '').slice(k.length + 3) || d;
+const VIA = arg('via'); // v16.3: 'builder', or '' (the recipes as they are)
+if (VIA && VIA !== 'builder') throw new Error('--via=builder is the only one');
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 const ts = loadTs(ROOT);
 const cjs = (src) => ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -104,7 +111,38 @@ async function sources(rev) {
   const [C, D, R, L] = await Promise.all([imp('utils/crystalData.ts'), imp('utils/mix/distribution.ts'), imp('utils/mix/recipes.ts'), imp('utils/library/listOps.ts')]);
   // v15.9: the mix catalogue (mixStartText, the Undo toast's words); absent before v15.9.
   const K = await imp('utils/mix/catalog.ts').catch(() => ({}));
+  if (VIA === 'builder') {
+    const via = viaBuilder(await imp('utils/mix/builder.ts'), C);
+    return { label: 'working tree, every recipe through the builder', app, modules: { C, D, R, L, K }, via };
+  }
   return { label: 'working tree', app, modules: { C, D, R, L, K } };
+}
+
+// v16.3: the recipes as the builder gives them. Each recipe's own arguments become the builder's settings for that mix
+// (settingsOf), on the same input (the library, the history, the random source, the experience level); a preset is
+// found by its crystals and name (as the drawer passes them). `calls` counts the builder's runs (0 would mean the
+// generators never reached it, and the check fails).
+function viaBuilder(BLD, C) {
+  const counter = { calls: 0 };
+  const asBuild = (input) => ({ tracks: input.library, history: input.history, rng: input.rng, experience: input.experience });
+  const build = (input, settings) => { counter.calls++; return BLD.buildMix(asBuild(input), settings).result; };
+  const via = (id) => (input) => build(input, BLD.settingsOf(id));
+  const presetBy = (freqs, name) => {
+    const p = C.PRESETS.find((x) => x.name === name && JSON.stringify([...x.crystals]) === JSON.stringify([...freqs]));
+    if (!p) throw new Error(`via=builder: no preset ${name} ${JSON.stringify(freqs)}`);
+    return `preset:${p.id}`;
+  };
+  return {
+    counter,
+    overrides: {
+      gutAlignment: via('gut'), heartAlignment: via('heart'), headAlignment: via('head'),
+      ultimateAlignment: via('ultimate'), fullAlignment: via('full'),
+      goldenRatioMix: via('golden'), sequence111: via('seq111'), sourceField: via('source2178'),
+      crystalSetMix: (input, freqs, name) => via(presetBy(freqs, name))(input),
+      // Any walk, the traditional one too (reachable from no menu, but in the golden).
+      loShuWalk: (input, mode) => build(input, { ...BLD.settingsOf('walk:A'), follow: { kind: 'walk', mode } }),
+    },
+  };
 }
 
 function run(src) {
@@ -123,7 +161,8 @@ function run(src) {
     // v15.8 and later: App's generators, mixInput and applyMix are lifted; the recipes, the distribution and the
     // crystal data come from the modules as Node loads them (every export is offered; the code takes what it uses).
     const { C, D, R, L, K } = src.modules;
-    const moduleImports = Object.fromEntries(Object.entries({ ...C, ...D, ...R, ...(K || {}) }).filter(([k, v]) => typeof v === 'function' || k === k.toUpperCase()));
+    // v16.3: with --via=builder, the builder's recipes in place of recipes.ts's.
+    const moduleImports = Object.fromEntries(Object.entries({ ...C, ...D, ...R, ...(K || {}), ...(src.via ? src.via.overrides : {}) }).filter(([k, v]) => typeof v === 'function' || k === k.toUpperCase()));
     // v15.9: App's module-level shuffle (Restore Library under shuffle) is lifted too; the rest of startPlayOrder's
     // world is the recorder's (it is recorded, never run).
     lifted = liftText(ts, src.app, {
@@ -486,6 +525,7 @@ async function stepV159(step, A, B) {
 const STEP = arg('step');
 const CAPTURE = arg('capture');
 const WRITE = arg('write');
+if (VIA && (STEP || CAPTURE || WRITE)) throw new Error('--via=builder only checks the working tree against a golden');
 if (STEP) {
   const report = { ...(Number(STEP) >= 4 ? await stepV159(STEP, load(arg('from')), load(arg('to'))) : stepDiff(STEP, load(arg('from')), load(arg('to')))), from: arg('from'), to: arg('to') };
   if (arg('report')) writeFileSync(arg('report'), JSON.stringify(report, null, 1) + '\n');
@@ -538,7 +578,9 @@ if (STEP) {
   if (src.modules) for (const p of presetsAgainstDrawer(src.app, src.modules.C.PRESETS)) fails.push(['PRESETS', p]);
   const report = { golden: GOLDEN, goldenLabel: golden.meta.label, candidate: src.label, v8: process.versions.v8, goldenV8: golden.meta.v8, sameEngine, pass, total, skipped, extraRuns: extra.length, ms: Date.now() - t0, fails: fails.slice(0, 50) };
   if (arg('report')) writeFileSync(arg('report'), JSON.stringify(report, null, 1) + '\n');
-  console.log(`check-mix-golden: ${pass} of ${total - skipped} runs identical to ${golden.meta.label} (calls, draws, walk facts)` +
+  if (src.via && src.via.counter.calls === 0) fails.push(['via=builder', 'the builder was never called']);
+  console.log(`check-mix-golden${src.via ? ' --via=builder' : ''}: ${pass} of ${total - skipped} runs identical to ${golden.meta.label} (calls, draws, walk facts)` +
+    (src.via ? `, every recipe through the builder (${src.via.counter.calls} builder calls)` : '') +
     (sameEngine ? '' : `; another V8 (${process.versions.v8}, the golden's ${golden.meta.v8}): the ${skipped} CAB, Ouroboros and CABI runs skipped`) +
     (extra.length ? `; ${extra.length} runs not in the golden` : ''));
   const EXPLAIN = arg('explain');

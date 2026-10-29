@@ -13,6 +13,8 @@
 // v16.0 adds QueueContext (what plays next, the queue; never the clock) and the queue's actions.
 // v16.1 adds PlaylistsContext (the saved playlists, resolved against the library; never the clock), the playlists' and
 // the Library tools' actions, and LibraryViewState.view (the "Tracks · Playlists" switch).
+// v16.3 adds Create a mix's and the Mixes tab's ⋯ actions (App's startBuilt, queueMix, builderTracks, builderSources)
+// and ShellValue.mixesViewRef (the Mixes tab as it was left: Create a mix open, its settings; session only).
 //
 // Each reader throws a clear error without its provider; the ViewBoundary around the view then catches it.
 // No @types/react here: React is `any` to tsc, so these interfaces document the values rather than enforce them.
@@ -25,6 +27,8 @@ import type { LayersSection } from './layers/layersModel';
 import type { LastImport } from './library/libraryModel';
 import type { PassProgress } from '../../utils/library/analysePass';
 import type { Filters } from '../../utils/library/filterModel';
+import type { BuilderSettings, SourceRef } from '../../utils/mix/builder';
+import type { MixId } from '../../utils/mix/catalog';
 
 /** The transport's state. Changes on play/pause, a track change, shuffle/repeat, a new play order. */
 export interface PlayerValue {
@@ -168,6 +172,20 @@ export interface ShellValue {
   layersScrollRef: { current: { top: number; jump: LayersSection | null } };
   /** v15.7: where the Library tab was left (session only; the query is never saved). */
   libraryViewRef: { current: LibraryViewState };
+  /** v16.3: where the Mixes tab was left (session only). */
+  mixesViewRef: { current: MixesViewState };
+}
+
+/** v16.3: the Mixes tab as it was left: its list's scrollTop, and Create a mix: open or not, its settings as they were
+ *  (null: the saved ones, aetheria.builder.v1), its scrollTop, and what opened it (a mix's id after Customize…, to
+ *  focus that mix's ⋯ on Back; null: the Create a mix button). */
+export interface MixesViewState {
+  top: number;
+  builder: { open: boolean; settings: BuilderSettings | null; top: number; opener: MixId | null };
+  /** v16.3 review: Create a mix's settings as the latest tap left them, and whether saving them failed (full or blocked
+   *  storage). "Create a mix" opens at the saved settings: with `unsaved` (or an unreadable store) these instead, not the
+   *  stale stored value. Absent: no tap this session. */
+  last?: { settings: BuilderSettings; unsaved: boolean };
 }
 
 /** v15.7: the Library tab as it was left: its query, its content's scrollTop, and the health card's fold (null: by
@@ -457,6 +475,16 @@ export interface ShellActions {
   /** These library tracks, in this order, as the play order (the Tracks list's filtered rows): from the first, from
    *  `startId` (a row's tap: `row`), or shuffled (the switch turns on). `label` is the filters' name. */
   playFiltered: (o: { ids: readonly string[]; startId?: string | null; shuffle?: boolean; label: string; row?: boolean }) => void;
+  // v16.3, Create a mix and the Mixes tab's ⋯ (references to App's startBuilt and queueMix: play-order functions, never
+  // the library).
+  /** A built mix: Play (now), Play next, Add to queue, or Save as a playlist… (the name Dialog). */
+  startBuilt: (settings: BuilderSettings, mode: 'now' | 'next' | 'queue' | 'save') => void;
+  /** A Mixes-tab mix, whole, at its own setting: Play next, Add to queue, Save as a playlist…. */
+  queueMix: (id: MixId, mode: 'next' | 'queue' | 'save') => void;
+  /** A source's tracks (the library's own objects, in the source's order). */
+  builderTracks: (source: SourceRef) => Song[];
+  /** The Start from sheet's facts. */
+  builderSources: () => { library: number; queue: number; playlists: { id: string; name: string; present: number; missing: number }[] };
 }
 
 export const PlayerContext = createContext(null);
