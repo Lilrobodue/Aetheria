@@ -40,6 +40,8 @@ const ANDROID_UA =
 // any of them is on (a --trace or --screenshot flag would override the config).
 if (DEVICE) process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1';
 
+const HIDE = !!process.env.E2E_HIDE;
+
 export default defineConfig({
   testDir: './tests',
   timeout: 120_000,
@@ -58,9 +60,13 @@ export default defineConfig({
   // parity.spec.ts (v15.3) too (E2E_PARITY=1): it compares a production build
   // served by serve-dist.mjs with screenshots of the previous release. Matched
   // by its whole file name, so chroma-parity.spec.ts is not caught by it.
+  // device-hide.spec.ts (v16.0.1, D1-D3) only with E2E_HIDE=1, and then it runs ALONE (the projects below): while any
+  // Playwright connection is open, Chrome on Android keeps every tab visible, so the worker-wide one the other device
+  // tests share would stop its page from ever going hidden. Without a device it is a desktop dry run.
   testIgnore: [
     ...(process.env.E2E_REAL_LIBRARY ? [] : [/real-library\.spec\.ts/]),
     ...(process.env.E2E_PARITY ? [] : [/[\\/]parity\.spec\.ts$/]),
+    ...(HIDE ? [] : [/[\\/]device-hide\.spec\.ts$/]),
   ],
   // The parity baselines: machine- and Chrome-specific, never committed (.gitignore).
   snapshotPathTemplate: '{testDir}/../parity-baseline/{arg}{ext}',
@@ -78,7 +84,9 @@ export default defineConfig({
       stylePath: fileURLToPath(new URL('./tests/parity.css', import.meta.url)),
     },
   },
-  projects: DEVICE
+  projects: HIDE
+    ? [{ name: DEVICE ? 'android-hide' : 'desktop-hide', testMatch: /[\\/]device-hide\.spec\.ts$/ }]
+    : DEVICE
     ? [
         { name: 'android', grepInvert: /@device|@real/ },
         // Turns the screen off (and leaves a phone with a secure lock locked),

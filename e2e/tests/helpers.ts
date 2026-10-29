@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { ON_DEVICE, test, watchNativeDialogs } from './fixtures';
+import { TEST_ORIGIN } from './adb';
 
 /** A short mono 16-bit PCM sine WAV (8 kHz), small enough to import dozens. */
 export function toneWav(seconds: number, freq: number): Buffer {
@@ -1675,4 +1676,277 @@ export async function countLibraryDeletes(page: Page): Promise<void> {
       return clear.call(this);
     } as typeof clear;
   });
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The hide flush (v16.0.1): save-flush.spec.ts, and device.spec.ts's D1 and D2
+// ---------------------------------------------------------------------------------------------------------------
+
+/** From the next page load on, count every put on the 'playlist-state' store in window.__statePuts: one per metadata +
+ *  state save (the 'current' record), the hide flush's included. statePuts reads it; statePutLibraries reads the
+ *  library each put named; window.__statePutTimes holds when each was made (Date.now()). */
+export async function countStatePuts(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__statePuts = 0;
+    w.__statePutLibraries = [];
+    w.__statePutTimes = [];
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: unknown[]) {
+      if (this.name === 'playlist-state') {
+        w.__statePuts++;
+        w.__statePutTimes.push(Date.now());
+        const order = (args[0] as { originalOrder?: unknown } | undefined)?.originalOrder;
+        w.__statePutLibraries.push(Array.isArray(order) ? order.length : null);
+      }
+      return (put as any).apply(this, args);
+    } as typeof put;
+  });
+}
+
+export async function statePuts(page: Page): Promise<number> {
+  return page.evaluate(() => (window as any).__statePuts as number);
+}
+
+/** The library size (originalOrder's length) of every 'playlist-state' put this page made, in order (countStatePuts). */
+export async function statePutLibraries(page: Page): Promise<(number | null)[]> {
+  return page.evaluate(() => (window as any).__statePutLibraries as (number | null)[]);
+}
+
+/** One page-lifecycle event: what, when (Date.now()), the visibility then, pagehide/pageshow's persisted, and the
+ *  state-record puts counted so far (countStatePuts; null without it). */
+export interface LifecycleEvent { e: string; t: number; vis: string; persisted?: boolean; puts: number | null }
+
+/** From the next page load on, log the page's lifecycle (load, visibilitychange, pagehide, pageshow, freeze, resume) to
+ *  localStorage['e2e.lifecycle'], synchronously as each event fires, so the log survives a reload, a navigation and a
+ *  renderer crash. Registered before the app's own listeners, so an entry's `puts` is the count before any save the
+ *  app makes for that event. Every load of the origin appends to the same log; lifecycleLog reads it. */
+export async function recordLifecycle(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const log = (e: string, extra: { persisted?: boolean } = {}) => {
+      try {
+        const all = JSON.parse(localStorage.getItem('e2e.lifecycle') || '[]');
+        const puts = (window as any).__statePuts;
+        all.push({ e, t: Date.now(), vis: document.visibilityState, ...extra, puts: typeof puts === 'number' ? puts : null });
+        localStorage.setItem('e2e.lifecycle', JSON.stringify(all));
+      } catch {
+        // No storage here: nothing to log.
+      }
+    };
+    log('load');
+    document.addEventListener('visibilitychange', () => log('visibilitychange'));
+    window.addEventListener('pagehide', (ev) => log('pagehide', { persisted: (ev as PageTransitionEvent).persisted }));
+    window.addEventListener('pageshow', (ev) => log('pageshow', { persisted: (ev as PageTransitionEvent).persisted }));
+    document.addEventListener('freeze', () => log('freeze'));
+    document.addEventListener('resume', () => log('resume'));
+  });
+}
+
+export async function lifecycleLog(page: Page): Promise<LifecycleEvent[]> {
+  return page.evaluate(() => JSON.parse(localStorage.getItem('e2e.lifecycle') || '[]'));
+}
+
+/** A log as one line: "load pagehide(false) visibilitychange:hidden …". */
+export const lifecycleLine = (log: LifecycleEvent[]) =>
+  log.map((x) => x.e + (x.persisted !== undefined ? `(${x.persisted})` : '') + (x.e === 'visibilitychange' ? `:${x.vis}` : '')).join(' ');
+
+/** Hosts that are this machine (or, on a device, the phone itself). */
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** Whether a page at `url` is on a local host but not of the test origin (the user's localhost:3100, say). */
+export function isOtherLocalOrigin(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return LOCAL_HOSTS.has(u.hostname) && u.origin !== TEST_ORIGIN;
+  } catch {
+    return false; // Not a URL: no local origin.
+  }
+}
+
+/**
+ * The URLs of every page the browser knows, other than `page`, that is on a local host but not of the test origin: a
+ * page that could share the test tab's renderer process. Page.crash kills that whole process, and a port is not part of
+ * a site, so another localhost origin (the user's own localhost:3100 tab, on the phone) is not kept apart from the test
+ * origin. Only URLs are read: nothing is navigated, closed or evaluated in another page. On a device the browser is the
+ * phone's whole Chrome, every tab of it. (device-hide.spec.ts asks the same over its raw DevTools session.)
+ */
+export function localPagesBesides(page: Page): string[] {
+  const contexts = page.context().browser()?.contexts() ?? [page.context()];
+  const others: string[] = [];
+  for (const context of contexts) {
+    for (const p of context.pages()) {
+      if (p !== page && isOtherLocalOrigin(p.url())) others.push(p.url());
+    }
+  }
+  return others;
+}
+
+/**
+ * Kill the tab's renderer (CDP Page.crash), as Android's background kill or a crash does: no event runs. Only ever the
+ * test's own tab: its URL must be the test origin's (on a device the CDP context also holds the user's own tabs). And
+ * Page.crash kills the tab's whole renderer process, not only the tab, so it refuses while any other page of a local
+ * host but another origin is open anywhere in the browser (localPagesBesides): on the phone, close the localhost:3100
+ * tab first. Page.crash never answers (its target is gone), so it is sent and not awaited (an awaited one hangs); the
+ * page's crash event says it happened. Playwright then refuses to navigate this page ("Page crashed"): open the app
+ * again in a new tab (secondTab).
+ */
+export async function crashPage(page: Page): Promise<void> {
+  const url = page.url();
+  if (!url.startsWith(TEST_ORIGIN + '/')) throw new Error(`Refusing to crash ${url}: only a tab of ${TEST_ORIGIN} is the tests' own.`);
+  const others = localPagesBesides(page);
+  if (others.length) {
+    throw new Error(
+      `Refusing to crash the test tab: Page.crash kills its whole renderer process, which another local origin can share ` +
+        `(a port is not part of a site). Open now: ${others.join(', ')}. Close ${others.length === 1 ? 'that tab' : 'those tabs'} and run it again.`
+    );
+  }
+  const crashed = page.waitForEvent('crash', { timeout: 15_000 });
+  const cdp = await page.context().newCDPSession(page);
+  cdp.send('Page.crash').catch(() => {});
+  await crashed;
+}
+
+/**
+ * A new tab of the test's browser context (the same profile, so the same origin's storage), for a test whose own tab
+ * was closed or crashed. On a device it is a new tab in the phone's Chrome, set up as the fixture sets its own (the
+ * service worker stubbed, every media element tracked): close it with closeSecondTab in a finally. Not navigated: add
+ * any init scripts, then go to an absolute URL (appUrl: a device context has no baseURL).
+ */
+export async function secondTab(page: Page): Promise<Page> {
+  const tab = await page.context().newPage();
+  watchNativeDialogs(tab);
+  if (ON_DEVICE) {
+    await tab.addInitScript(() => {
+      if (navigator.serviceWorker) (navigator.serviceWorker as any).register = () => new Promise(() => {});
+      const media = ((window as any).__e2eMedia = new Set<HTMLMediaElement>());
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+        media.add(this);
+        return play.call(this);
+      };
+    });
+  }
+  return tab;
+}
+
+/** The fixture's teardown for a secondTab: its media stopped and its media session released, then closed; and no
+ *  native dialog opened in it. */
+export async function closeSecondTab(tab: Page): Promise<void> {
+  const opened = watchNativeDialogs(tab);
+  if (!tab.isClosed()) {
+    await tab
+      .evaluate(() => {
+        for (const el of (window as any).__e2eMedia ?? []) {
+          try { el.pause(); } catch {}
+        }
+        try {
+          navigator.mediaSession.playbackState = 'none';
+          navigator.mediaSession.metadata = null;
+        } catch {}
+      })
+      .catch(() => {});
+    if (ON_DEVICE) await tab.waitForTimeout(1000).catch(() => {});
+    await tab.goto('about:blank').catch(() => {});
+    await tab.close().catch(() => {});
+  }
+  expect(opened, 'a native dialog opened in the second tab').toEqual([]);
+}
+
+/** An absolute URL of the test origin (a device context, and so a secondTab there, has no baseURL). */
+export const appUrl = (path = '/') => new URL(path, TEST_ORIGIN).toString();
+
+/** On the tab's first app load: hold the restore's read of the stored audio (restorePlaylist's getAll on 'blobs') until
+ *  window.__releaseRestore(), as a large library restoring slowly does. Both of StrictMode's restores are held. */
+export async function holdRestore(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    if (location.pathname !== '/') return;
+    try {
+      if (sessionStorage.getItem('__e2eHoldRestore') !== null) return;
+      sessionStorage.setItem('__e2eHoldRestore', '1');
+    } catch {
+      return;
+    }
+    const w = window as any;
+    const gate = new Promise<void>((resolve) => (w.__releaseRestore = resolve));
+    w.__restoreHeld = 0;
+    const getAll = IDBObjectStore.prototype.getAll;
+    IDBObjectStore.prototype.getAll = function (this: IDBObjectStore, ...args: unknown[]) {
+      const request: IDBRequest = (getAll as any).apply(this, args);
+      if (this.name !== 'blobs') return request;
+      w.__restoreHeld++;
+      return new Proxy(request, {
+        set(t, k, v) {
+          if (k === 'onsuccess' && typeof v === 'function') {
+            t.onsuccess = (ev) => { gate.then(() => v.call(t, ev)); };
+            return true;
+          }
+          (t as any)[k] = v;
+          return true;
+        },
+        get(t, k) {
+          const x = (t as any)[k];
+          return typeof x === 'function' ? x.bind(t) : x;
+        },
+      });
+    } as typeof getAll;
+  });
+}
+
+/** "Never smaller" (v16.0.1, F12): the saved record's library holds every id in `ids` (the stored library before the
+ *  test, less what it deleted). */
+export async function expectLibraryAtLeast(page: Page, ids: string[], what = 'the saved library'): Promise<void> {
+  const st = await savedState(page);
+  const saved = new Set<string>(st?.originalOrder ?? []);
+  expect(ids.filter((id) => !saved.has(id)), `${what} never smaller: every stored track still listed`).toEqual([]);
+}
+
+/**
+ * The flush tests' library (queue.spec's seed), written straight into IndexedDB from /manifest.json: n synthetic tones
+ * tone-01 … (tone k lasts `seconds(k)`, by default 6 + 0.25 k s), each with a crystal unless listed in `noCrystal`; the
+ * library is the play order, with the cursor at `cursor`. Returns the ids in library order.
+ */
+export async function seedToneLibrary(
+  page: Page,
+  o: { n: number; cursor?: number; noCrystal?: number[]; seconds?: number[] }
+): Promise<string[]> {
+  await page.goto(appUrl('/manifest.json'));
+  const seconds = o.seconds ?? Array.from({ length: o.n }, (_, i) => 6 + 0.25 * (i + 1));
+  return page.evaluate(async ({ n, cursor, noCrystal, seconds }) => {
+    const CRY = [174, 285, 396, 417, 528, 639, 741, 852, 963, 1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150, 3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336];
+    const wav = (secs: number, freq: number) => {
+      const rate = 4000, len = Math.round(secs * rate), buf = new ArrayBuffer(44 + len * 2), v = new DataView(buf);
+      const w = (o: number, x: string) => { for (let i = 0; i < x.length; i++) v.setUint8(o + i, x.charCodeAt(i)); };
+      w(0, 'RIFF'); v.setUint32(4, 36 + len * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+      v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      w(36, 'data'); v.setUint32(40, len * 2, true);
+      for (let i = 0; i < len; i++) v.setInt16(44 + i * 2, Math.round(Math.sin((2 * Math.PI * freq * i) / rate) * 5000 * Math.min(1, i / 400, (len - i) / 400)), true);
+      return new Blob([buf], { type: 'audio/wav' });
+    };
+    const db: IDBDatabase = await new Promise((resolve, reject) => {
+      const r = indexedDB.open('aetheria-db', 2);
+      r.onupgradeneeded = () => { const d = r.result; for (const x of ['blobs', 'meta']) d.createObjectStore(x, { keyPath: 'id' }); d.createObjectStore('playlist-state', { keyPath: 'key' }); };
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    const t0 = Date.now() - n * 1000;
+    const ids: string[] = [];
+    const tx = db.transaction(['blobs', 'meta'], 'readwrite');
+    for (let i = 0; i < n; i++) {
+      const k = i + 1;
+      const id = `${t0 + i * 1000}-f${String(k).padStart(2, '0')}`;
+      ids.push(id);
+      const name = `tone-${String(k).padStart(2, '0')}`;
+      tx.objectStore('blobs').put({ id, fileBlob: wav(seconds[i], 220 + i * 11), fileName: `${name}.wav`, fileType: 'audio/wav' });
+      const hz = CRY[i % 27];
+      tx.objectStore('meta').put(noCrystal.includes(k)
+        ? { id, name, duration: seconds[i] }
+        : { id, name, duration: seconds[i], harmonicFreq: hz + 2.5, closestSolfeggio: hz, harmonicDeviation: 2.5, crystalSource: 'scan' });
+    }
+    await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
+    const st = db.transaction('playlist-state', 'readwrite');
+    st.objectStore('playlist-state').put({ key: 'current', playlistOrder: ids, originalOrder: ids, currentSongIndex: cursor, loShuWalkMode: null, selectedSolfeggio: 396, savedAt: Date.now() });
+    await new Promise((resolve) => (st.oncomplete = resolve));
+    db.close();
+    return ids;
+  }, { n: o.n, cursor: o.cursor ?? 0, noCrystal: o.noCrystal ?? [], seconds });
 }

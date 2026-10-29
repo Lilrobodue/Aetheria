@@ -9,6 +9,8 @@ import { adb, mediaSession, chromeSessions } from './adb';
 // v15.5: the new layout's one before the lock-screen one; v15.6: the new layout in Zen after it; v15.7: the Library
 // tab's row tap after that; v15.8: the walk after Assign after that; v15.9: a mix from the Mixes tab after that; v16.0:
 // the queue after that).
+// While Playwright is connected, Chrome on Android keeps every tab visible: no test here ever sees a real hide. The
+// tests that need one (v16.0.1's D1-D3, the hide flush) are in device-hide.spec.ts, run on their own with E2E_HIDE=1.
 test.skip(!ON_DEVICE, 'needs an Android device (npm run test:device)');
 
 // Android sends the media keys to a card that is PLAYING, so a card left over

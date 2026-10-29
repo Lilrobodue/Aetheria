@@ -27,6 +27,7 @@ import {
   waitForBlobSaves,
   storedTrackIds,
   cacheGeneration,
+  isLoadGateOpen,
 } from './utils/playlistCache';
 import {
   dedupeById,
@@ -2173,6 +2174,11 @@ const App: React.FC = () => {
     window.addEventListener('aetheria:cache-error', onSaveReport);
     window.addEventListener('aetheria:cache-ok', onSaveReport);
     const flush = async () => {
+      // v16.0.1: read as Reload is tapped. Until the saved library has been read back (a slow restore), the lists in
+      // memory hold only what was added meanwhile (an import): saving them would write that over the stored library,
+      // which would come back only as orphans. Then the state save below is skipped; the audio is still stored
+      // (add-only), and comes back as an orphan to recover after the reload.
+      const libraryReadBack = isLoadGateOpen();
       if (sessionRef.current.isScanning) {
         outcome.stoppedScan = true;
         (window as any).cancelAetheriaAnalysis?.({ quiet: true });
@@ -2195,7 +2201,7 @@ const App: React.FC = () => {
       const merged = passHold.results;
       const saveOrder = merged && merged.size ? patchById(nowOrder, merged) : nowOrder;
       const saveLibrary = merged && merged.size ? patchById(nowLibrary, merged) : nowLibrary;
-      if (saveOrder.length || saveLibrary.length) {
+      if (libraryReadBack && (saveOrder.length || saveLibrary.length)) {
         await saveMetaAndState(
           saveOrder,
           saveLibrary,
@@ -8238,7 +8244,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.0</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.0.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

@@ -142,6 +142,8 @@ let dbName = DB_NAME;
  *  so its round-trip tests never touch the real library. */
 function __setCacheDbNameForTests(name: string): void {
   dbName = name;
+  // v16.0.1: the flush connection belongs to the previous database.
+  if (flushDb) { flushDb.close(); flushDb = null; }
 }
 
 // Session tombstones: ids removed by deleteTracksFromCache. A save that was
@@ -480,6 +482,38 @@ async function storedTrackIds(): Promise<Set<string>> {
 // Save — metadata + session state (no audio; rewritten often)
 // ----------------------------------------------------------------------------
 
+/** What one metadata + state save writes (the lists as they were when it was scheduled). */
+interface MetaSave {
+  playlist: Song[];
+  originalPlaylist: Song[];
+  currentSongIndex: number;
+  walk: SavedWalk | null;
+  selectedSolfeggio: number;
+  epoch: number;
+  queue: SavedQueue | null;
+}
+
+// v16.0.1: every metadata + state save takes a version as it starts, and per store it creates its transaction only if
+// no newer save has created one already. The hide flush writes its state record at once, through a connection that is
+// already open, so an older save still waiting for its own connection could otherwise land after it and put an older
+// play state back. (Transactions on one store commit in the order they were created.)
+let saveVersion = 0;
+const lastIssued = { state: 0, meta: 0 };
+
+function stateRecord(p: MetaSave): CachedState {
+  return {
+    key: STATE_KEY,
+    playlistOrder: p.playlist.map((s) => s.id),
+    originalOrder: p.originalPlaylist.map((s) => s.id),
+    currentSongIndex: p.currentSongIndex,
+    loShuWalkMode: p.walk ? p.walk.mode : null,
+    walk: p.walk ?? null,
+    queue: p.queue ?? null,
+    selectedSolfeggio: p.selectedSolfeggio,
+    savedAt: Date.now(),
+  };
+}
+
 async function saveMetaAndState(
   playlist: Song[],
   originalPlaylist: Song[],
@@ -489,9 +523,27 @@ async function saveMetaAndState(
   epoch: number = cacheEpoch,
   queue: SavedQueue | null = null
 ): Promise<void> {
-  const seq = ++saveSeq;
+  return runMetaSave({ playlist, originalPlaylist, currentSongIndex, walk, selectedSolfeggio, epoch, queue }, ++saveVersion, ++saveSeq, null);
+}
+
+/** The save itself. `stateWritten`: the hide flush already put the state record (this waits for it, then writes the
+ *  metadata); null: this writes the state record first, as before. */
+async function runMetaSave(p: MetaSave, version: number, seq: number, stateWritten: Promise<void> | null): Promise<void> {
+  const { playlist, originalPlaylist, epoch } = p;
   let db: IDBDatabase | null = null;
   try {
+    // The flush's own state write can still fail after it was issued: its transaction aborts when the browser
+    // force-closes the kept connection, or on a disk error. Nothing else would write that record (the flush took the
+    // pending save and cancelled its timer), so it is written again below, through this save's own connection.
+    let flushFailed = false;
+    if (stateWritten) {
+      try {
+        await stateWritten;
+      } catch (err) {
+        flushFailed = true;
+        console.warn('[PlaylistCache] The flush could not write the play state; writing it again:', err);
+      }
+    }
     db = await openDB();
 
     // A Clear happened since this save was scheduled: write nothing.
@@ -501,20 +553,17 @@ async function saveMetaAndState(
     // audio it is all a restore needs (metadata is optional), and a nearly
     // full device can still fit it when the metadata below doesn't — so an
     // import is not left out of the library just because analysis didn't fit.
-    const stateTx = db.transaction(STATE_STORE, 'readwrite');
-    const state: CachedState = {
-      key: STATE_KEY,
-      playlistOrder: playlist.map((s) => s.id),
-      originalOrder: originalPlaylist.map((s) => s.id),
-      currentSongIndex,
-      loShuWalkMode: walk ? walk.mode : null,
-      walk: walk ?? null,
-      queue: queue ?? null,
-      selectedSolfeggio,
-      savedAt: Date.now(),
-    };
-    stateTx.objectStore(STATE_STORE).put(state);
-    await txDone(stateTx);
+    // Only while no newer save has issued one (the version guard). After a failed flush, only if nothing was issued
+    // since the flush's own.
+    const stateDue = stateWritten
+      ? flushFailed && lastIssued.state === version
+      : lastIssued.state < version;
+    if (stateDue) {
+      const stateTx = db.transaction(STATE_STORE, 'readwrite');
+      stateTx.objectStore(STATE_STORE).put(stateRecord(p));
+      lastIssued.state = version; // issued: set only once the transaction exists (db.transaction can throw)
+      await txDone(stateTx);
+    }
 
     // Metadata: put every track's record. No clear() first — a track missing
     // from the lists keeps its stored analysis until it is explicitly deleted
@@ -525,10 +574,12 @@ async function saveMetaAndState(
     // reported. Listed after the await so a Clear or a delete that landed
     // during the state write is respected.
     if (epoch !== cacheEpoch) return;
+    if (lastIssued.meta > version) return; // a newer save is writing newer metadata
     const wanted = uniqueSongs(playlist, originalPlaylist);
     const metaTx = db.transaction(META_STORE, 'readwrite');
     const metaStore = metaTx.objectStore(META_STORE);
     for (const song of wanted.values()) metaStore.put(toMeta(song));
+    lastIssued.meta = version;
     await txDone(metaTx);
 
     reportCacheOk('state', seq);
@@ -568,7 +619,25 @@ async function savePlaylist(
 // Restore
 // ----------------------------------------------------------------------------
 
+// v16.0.1, the load gate: nothing is saved before the saved library has been read back. Open once a restore has
+// settled and none is running (StrictMode runs the App's restore twice in development). The App's own continuation of
+// a restore (it drops a save scheduled before the restore landed: cancelPendingSaves('meta')) runs in the microtasks
+// right after, so no hide event (a task) can fall between the two.
+let restoresRunning = 0;
+let restoreSettled = false;
+const loadGateOpen = (): boolean => restoreSettled && restoresRunning === 0;
+
 async function restorePlaylist(): Promise<RestoredPlaylist | null> {
+  restoresRunning++;
+  try {
+    return await readSavedPlaylist();
+  } finally {
+    restoresRunning--;
+    restoreSettled = true;
+  }
+}
+
+async function readSavedPlaylist(): Promise<RestoredPlaylist | null> {
   let db: IDBDatabase | null = null;
   try {
     db = await openDB();
@@ -775,6 +844,80 @@ function cancelPendingSaves(which: 'all' | 'meta' = 'all'): void {
   }
   if (metaTimer) clearTimeout(metaTimer);
   metaTimer = null;
+  pendingMeta = null;
+}
+
+// ----------------------------------------------------------------------------
+// v16.0.1: the hide flush. A change is saved 2 s after it settles (debouncedSaveMeta); a page reloaded, closed,
+// navigated away from or killed in the background within those 2 s lost it. When the page is hidden or goes away,
+// the save that is waiting runs now: the same save with the same lists, so it writes nothing the debounce would not
+// have written 2 s later. Its small state record goes first and at once, through a connection opened while the save
+// waited, and is committed explicitly: a page that is going away runs no further task, so a write that first waits
+// for an open never starts, and one left to auto-commit is aborted with the page. The metadata follows as before.
+// Never the audio.
+// ----------------------------------------------------------------------------
+
+let pendingMeta: MetaSave | null = null;
+let flushDb: IDBDatabase | null = null;
+let flushDbOpening = false;
+let hideFlushInstalled = false;
+
+/** The connection the flush writes through: opened when a save is first scheduled, kept for the page's life. It
+ *  closes for a version change or a delete from anywhere, so it never blocks one. */
+function openFlushConnection(): void {
+  if (flushDb || flushDbOpening || typeof indexedDB === 'undefined') return;
+  flushDbOpening = true;
+  const name = dbName;
+  openDB().then(
+    (db) => {
+      flushDbOpening = false;
+      if (name !== dbName) { db.close(); return; }
+      db.onversionchange = () => { db.close(); if (flushDb === db) flushDb = null; };
+      db.onclose = () => { if (flushDb === db) flushDb = null; };
+      flushDb = db;
+    },
+    () => { flushDbOpening = false; }
+  );
+}
+
+/** Run the waiting metadata + state save now. Returns whether it ran: nothing waiting, or the saved library not read
+ *  back yet (the load gate: the save keeps waiting), or a Clear since it was scheduled: nothing is written. */
+function flushPendingSave(): boolean {
+  const p = pendingMeta;
+  if (!p || !loadGateOpen()) return false;
+  if (metaTimer) clearTimeout(metaTimer);
+  metaTimer = null;
+  pendingMeta = null;
+  if (p.epoch !== cacheEpoch) return false;
+  const version = ++saveVersion;
+  const seq = ++saveSeq;
+  let stateWritten: Promise<void> | null = null;
+  const db = flushDb;
+  if (db) {
+    try {
+      const tx = db.transaction(STATE_STORE, 'readwrite');
+      tx.objectStore(STATE_STORE).put(stateRecord(p));
+      if (typeof tx.commit === 'function') tx.commit();
+      lastIssued.state = version; // issued: set only once nothing above has thrown
+      stateWritten = txDone(tx);
+    } catch (err) {
+      // A connection that is closing: save the usual way (it completes on a hide, not on an unload). If the write
+      // fails later instead (its transaction aborts), runMetaSave writes it again the same way.
+      console.warn('[PlaylistCache] The flush connection is gone; saving the usual way:', err);
+    }
+  }
+  void runMetaSave(p, version, seq, stateWritten);
+  return true;
+}
+
+/** Once per page, when the first save is scheduled: a hide (a lock, an app or tab switch: the page lives on and the
+ *  whole save completes), pagehide (a reload, a close, a navigation, the back/forward cache) and freeze. */
+function installHideFlush(): void {
+  if (hideFlushInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
+  hideFlushInstalled = true;
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushPendingSave(); });
+  window.addEventListener('pagehide', () => { flushPendingSave(); });
+  document.addEventListener('freeze', () => { flushPendingSave(); });
 }
 
 /** Resolve once every blob save already writing has finished. (One still
@@ -818,8 +961,16 @@ function debouncedSaveMeta(
 ): void {
   if (metaTimer) clearTimeout(metaTimer);
   const epoch = cacheEpoch;
-  metaTimer = setTimeout(() => {
+  const p: MetaSave = { playlist, originalPlaylist, currentSongIndex, walk, selectedSolfeggio, epoch, queue };
+  pendingMeta = p;
+  installHideFlush();
+  openFlushConnection();
+  const fire = () => {
     metaTimer = null;
+    // The load gate holds the timer too: a save scheduled before the saved library has been read back (an import while
+    // a large library restores) waits, and the restore's continuation drops it; when the restore found nothing, it runs.
+    if (!loadGateOpen()) { metaTimer = setTimeout(fire, Math.max(delayMs, 250)); return; }
+    if (pendingMeta === p) pendingMeta = null;
     saveMetaAndState(
       playlist,
       originalPlaylist,
@@ -829,7 +980,8 @@ function debouncedSaveMeta(
       epoch,
       queue
     );
-  }, delayMs);
+  };
+  metaTimer = setTimeout(fire, delayMs);
 }
 
 export {
@@ -847,5 +999,8 @@ export {
   hasStorageCapacity,
   saveBlobsNow,
   debouncedSaveMeta,
+  flushPendingSave,
+  // v16.0.1: read-only. False until the saved library has been read back (flushAndReload must not save over it).
+  loadGateOpen as isLoadGateOpen,
   __setCacheDbNameForTests,
 };
