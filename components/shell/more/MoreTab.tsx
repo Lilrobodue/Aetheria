@@ -14,28 +14,48 @@
 // row remembers it (v16.4 review): its Back returns to About, to that row.
 // Each page is its own region (more-safety, the statement too; more-about; more-links): a crash in one leaves the
 // header with Back, the other pages and the music. Everything here is React.memo and reads no clock.
+// v16.5 (part 2; mockups more-phone-A, more-phone-recording): the full set under five headings:
+//   Visuals and recording · Visualizer, Record (the Record sheet; "Recording · 3:12" while one runs);
+//   Learn · Guide, Journal (a dashed Experimental badge; "A session is being documented" while one is);
+//   Safety · Safety & comfort;  About · About, Links;  Advanced · Advanced (the scan scores, the layout switch, the perf
+//   readout; Use the classic layout moved there with its test id).
+// While recording, a card tops the list: a red dot, "Recording · m:ss" (RecordElapsed, the only part that ticks), the
+// kind, and Stop and save (test id more-stop-recording: it stops at once, an explicit labelled button). New regions:
+// more-guide, more-journal, more-advanced.
+// v16.5, Export with layers (mockup more-exporting-phone): while an export runs, a card tops the root ("Exporting <title> ·
+// 62 %", the time left, a thin bar: the progress leaf) with Open (the running sheet); the Record row's line follows it.
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowLeftRight, ChevronLeft, Circle, ExternalLink, Info, Shield, SlidersHorizontal, X } from 'lucide-react';
+import { BookOpen, ChevronLeft, Circle, ExternalLink, FlaskConical, Info, NotebookPen, Shield, SlidersHorizontal, Square, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import Badge from '../../ui/Badge';
 import IconButton from '../../ui/IconButton';
 import ListRow from '../../ui/ListRow';
 import { APP_VERSION, PanelFallback, ViewBoundary } from '../../ErrorBoundary';
 import type { FallbackApi } from '../../ErrorBoundary';
-import { useActions, useMore, useShell, useVisuals } from '../contexts';
+import { useActions, useExport, useExportActions, useMore, useShell, useVisuals } from '../contexts';
+import ExportProgress from '../export/ExportProgress';
 import { countRender } from '../devRenders';
 import SafetyPage, { StatementPage } from './SafetyPage';
 import AboutPage from './AboutPage';
 import LinksPage from './LinksPage';
+import GuidePage from './GuidePage';
+import JournalPage from './JournalPage';
+import AdvancedPage from './AdvancedPage';
+import RecordElapsed from './RecordElapsed';
+import { RECORDING_WORD, STOP_AND_SAVE, recordCardLine } from './recordModel';
 import { visualsSummary } from './visualsModel';
 import {
-  CLASSIC_ROW_SUBTITLE,
-  CLASSIC_ROW_TITLE,
+  ADVANCED_ROW_SUBTITLE,
+  EXPERIMENTAL_BADGE,
   GROUP_ABOUT,
-  GROUP_CLASSIC,
+  GROUP_ADVANCED,
+  GROUP_LEARN,
   GROUP_SAFETY,
   GROUP_VISUALS,
+  GUIDE_ROW_SUBTITLE,
+  RECORD_ROW_SUBTITLE,
+  journalRowSubtitle,
   LINKS_ROW_SUBTITLE,
   SAFETY_ROW_SUBTITLE,
   VIEW_TITLES,
@@ -55,6 +75,9 @@ const OPENED_FROM: Readonly<Record<MoreView, string | null>> = {
   statement: 'safety-statement-row',
   about: 'more-about-row',
   links: 'more-links-row',
+  guide: 'more-guide-row',
+  journal: 'more-journal-row',
+  advanced: 'more-advanced-row',
 };
 
 /** That row, for a page with an opener: Links opened from About returns to About's Links row. */
@@ -70,13 +93,67 @@ const Group = ({ id, title, children }: { id: string; title: string; children: R
   </section>
 );
 
+/** v16.5: the recording card (mockup more-phone-recording): it renders when a recording starts and stops; its time ticks
+ *  in RecordElapsed alone. */
+const RecordingCard = React.memo(({ kind, since }: { kind: 'audio' | 'video' | 'both'; since: number }) => {
+  countRender('RecordingCard');
+  const actions = useActions();
+  return (
+    <div data-testid="more-recording-card" className="mx-4 mt-3 p-3 rounded-card bg-surface-panel border border-line-strong flex items-center gap-3">
+      <span aria-hidden="true" className="shrink-0 w-2.5 h-2.5 rounded-pill bg-status-error" />
+      <span className="flex-1 min-w-0">
+        <span className="block text-base font-semibold text-ink-strong tabular-nums">
+          {RECORDING_WORD} · <RecordElapsed since={since} data-testid="more-recording-elapsed" />
+        </span>
+        <span className="block text-xs text-ink-muted">{recordCardLine(kind)}</span>
+      </span>
+      <button
+        type="button"
+        onClick={actions.stopAndSave}
+        data-testid="more-stop-recording"
+        className="shrink-0 min-h-touch px-3 rounded-control border border-status-error/60 bg-status-error/10 hover:bg-status-error/20 text-sm font-semibold text-ink-strong flex items-center gap-2 transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+      >
+        <Square size={16} className="stroke-status-error" aria-hidden="true" />
+        {STOP_AND_SAVE}
+      </button>
+    </div>
+  );
+});
+
+/** v16.5: the exporting card: it renders when an export starts and ends; its percentage is the progress leaf's. */
+const ExportingCard = React.memo(({ title }: { title: string }) => {
+  countRender('ExportingCard');
+  const { job } = useExport();
+  const exportActions = useExportActions();
+  if (!job) return null;
+  return (
+    <div data-testid="more-exporting-card" className="mx-4 mt-3 p-3 rounded-card bg-surface-panel border border-line-strong flex items-center gap-3">
+      <span className="flex-1 min-w-0">
+        <ExportProgress store={job.store} look="card" title={title} />
+      </span>
+      <button
+        type="button"
+        onClick={() => exportActions.open({ kind: 'playing' })}
+        data-testid="more-exporting-open"
+        className="shrink-0 min-h-touch px-4 rounded-control border border-line-strong bg-surface-raised hover:border-ink-faint text-sm font-semibold text-ink-strong transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+      >
+        Open
+      </button>
+    </div>
+  );
+});
+
 const MoreRoot = React.memo(({ go }: { go: (v: MoreView) => void }) => {
   countRender('MoreRoot');
   const actions = useActions();
   const { settings, userPaused, reducedMotion } = useVisuals();
-  const { updateReady, recording } = useMore();
+  const { updateReady, recording, documenting } = useMore();
+  const { job } = useExport();
+  const exporting = !!job && (job.phase === 'running' || job.phase === 'cancelling') ? job : null;
   return (
     <div data-testid="more-root" className="pb-2">
+      {recording ? <RecordingCard kind={recording.kind} since={recording.since} /> : null}
+      {exporting ? <ExportingCard title={exporting.title} /> : null}
       <Group id="visuals" title={GROUP_VISUALS}>
         <ListRow
           title="Visualizer"
@@ -86,15 +163,36 @@ const MoreRoot = React.memo(({ go }: { go: (v: MoreView) => void }) => {
           onClick={actions.openVisuals}
           data-testid="more-visualizer"
         />
-        {recording ? (
-          <ListRow
-            title="Stop recording"
-            subtitle="Saves the recording to your downloads"
-            icon={<Circle size={20} className="stroke-status-error" />}
-            onClick={actions.stopRecording}
-            data-testid="more-stop-recording"
-          />
-        ) : null}
+        <ListRow
+          title="Record"
+          subtitle={
+            recording ? (
+              <>
+                {RECORDING_WORD} · <RecordElapsed since={recording.since} />
+              </>
+            ) : exporting ? (
+              <ExportProgress store={exporting.store} look="row" title={exporting.title} />
+            ) : (
+              RECORD_ROW_SUBTITLE
+            )
+          }
+          icon={<Circle size={20} className={recording ? 'stroke-status-error' : undefined} />}
+          chevron
+          onClick={actions.openRecord}
+          data-testid="more-record-row"
+        />
+      </Group>
+      <Group id="learn" title={GROUP_LEARN}>
+        <ListRow title="Guide" subtitle={GUIDE_ROW_SUBTITLE} icon={<BookOpen size={20} />} chevron onClick={() => go('guide')} data-testid="more-guide-row" />
+        <ListRow
+          title="Journal"
+          badge={<Badge look="experimental">{EXPERIMENTAL_BADGE}</Badge>}
+          subtitle={journalRowSubtitle(documenting)}
+          icon={<NotebookPen size={20} />}
+          chevron
+          onClick={() => go('journal')}
+          data-testid="more-journal-row"
+        />
       </Group>
       <Group id="safety" title={GROUP_SAFETY}>
         <ListRow title="Safety & comfort" subtitle={SAFETY_ROW_SUBTITLE} icon={<Shield size={20} />} chevron onClick={() => go('safety')} data-testid="more-safety-row" />
@@ -111,14 +209,8 @@ const MoreRoot = React.memo(({ go }: { go: (v: MoreView) => void }) => {
         />
         <ListRow title="Links" subtitle={LINKS_ROW_SUBTITLE} icon={<ExternalLink size={20} />} chevron onClick={() => go('links')} data-testid="more-links-row" />
       </Group>
-      <Group id="classic" title={GROUP_CLASSIC}>
-        <ListRow
-          title={CLASSIC_ROW_TITLE}
-          subtitle={CLASSIC_ROW_SUBTITLE}
-          icon={<ArrowLeftRight size={20} />}
-          onClick={() => actions.setLayout('classic')}
-          data-testid="more-back-to-classic"
-        />
+      <Group id="advanced" title={GROUP_ADVANCED}>
+        <ListRow title="Advanced" subtitle={ADVANCED_ROW_SUBTITLE} icon={<FlaskConical size={20} />} chevron onClick={() => go('advanced')} data-testid="more-advanced-row" />
       </Group>
     </div>
   );
@@ -219,6 +311,11 @@ const MoreTab = ({ inPanel = false }: MoreTabProps) => {
           <h1 ref={headingRef} tabIndex={-1} data-view-heading="" className="text-lg font-semibold text-ink-strong outline-none truncate">
             {VIEW_TITLES[view]}
           </h1>
+          {view === 'journal' ? (
+            <Badge look="experimental" className="shrink-0 ml-1">
+              {EXPERIMENTAL_BADGE}
+            </Badge>
+          ) : null}
         </span>
         <span className="flex items-center gap-1">
           <Badge>Beta</Badge>
@@ -244,6 +341,9 @@ const MoreTab = ({ inPanel = false }: MoreTabProps) => {
         />
         <ViewBoundary name="more-about" fallback={(api) => (view === 'about' ? <PageCrash api={api} /> : null)} render={() => view === 'about' && <AboutPage go={go} />} />
         <ViewBoundary name="more-links" fallback={(api) => (view === 'links' ? <PageCrash api={api} /> : null)} render={() => view === 'links' && <LinksPage />} />
+        <ViewBoundary name="more-guide" fallback={(api) => (view === 'guide' ? <PageCrash api={api} /> : null)} render={() => view === 'guide' && <GuidePage />} />
+        <ViewBoundary name="more-journal" fallback={(api) => (view === 'journal' ? <PageCrash api={api} /> : null)} render={() => view === 'journal' && <JournalPage />} />
+        <ViewBoundary name="more-advanced" fallback={(api) => (view === 'advanced' ? <PageCrash api={api} /> : null)} render={() => view === 'advanced' && <AdvancedPage />} />
       </div>
     </div>
   );

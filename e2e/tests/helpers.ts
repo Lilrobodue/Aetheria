@@ -1069,7 +1069,11 @@ export type CrashView =
   // work (not a region: it throws from the summary's memo, under mix-builder-view).
   | 'mix-builder-view' | 'mix-builder-source' | 'mix-builder-filters' | 'mix-builder-model'
   // v16.4, the More area: its pages and the Visuals sheet's body (moreKit.ts has the More area's helpers).
-  | 'more-safety' | 'more-about' | 'more-links' | 'sheet-visuals';
+  | 'more-safety' | 'more-about' | 'more-links' | 'sheet-visuals'
+  // v16.5, the More area part 2: the Guide, the Journal, Advanced and the Record sheet's body.
+  | 'more-guide' | 'more-journal' | 'more-advanced' | 'sheet-record'
+  // v16.5, Export with layers: the Export sheet's body.
+  | 'sheet-export';
 
 /**
  * Make a region throw on its next render, through the app's dev hook window.__aetheriaCrash (ErrorBoundary.tsx; dev
@@ -1205,6 +1209,20 @@ export async function acceptDisclaimerNew(page: Page): Promise<void> {
 export async function tab(page: Page, name: 'now' | 'library' | 'mixes' | 'layers' | 'more'): Promise<void> {
   const button = page.getByTestId(`tab-${name}-button`).or(page.getByTestId(`nav-${name}`));
   await button.click();
+}
+
+/**
+ * v16.5: the classic layout through More › Advanced › Use the classic layout (v16.4's More root row moved into Advanced,
+ * its test id more-back-to-classic kept). From any tab or More page: the More tab (a second tap goes to its root), the
+ * Advanced row, then the button.
+ */
+export async function backToClassicViaMore(page: Page): Promise<void> {
+  await tab(page, 'more');
+  const more = page.getByTestId('more');
+  await more.waitFor();
+  if ((await more.getAttribute('data-more-view')) !== 'root') await tab(page, 'more');
+  await page.getByTestId('more-root').getByTestId('more-advanced-row').click();
+  await page.getByTestId('more-advanced').getByTestId('more-back-to-classic').click();
 }
 
 /** The open sheet (modal on the phone, the panel on the desktop) by its title. */
@@ -1492,7 +1510,14 @@ export interface SeedOptions {
   /** Per-track fields (by index): a crystal (null: none), a key with its confidence, Analyse tracks' visual envelope;
    *  `unscanned` drops harmonicFreq (Deep Scan's queue, and playTrack decodes it); `scanned` gives it Deep Scan's own
    *  fields (a fractal analysis, harmonicFreq 2.5 Hz off its crystal, that deviation). */
-  patch?: Array<{ index: number; crystal?: number | null; key?: string; confidence?: number; visual?: boolean; unscanned?: boolean; scanned?: boolean }>;
+  patch?: Array<{ index: number; crystal?: number | null; key?: string; confidence?: number; visual?: boolean; unscanned?: boolean; scanned?: boolean; fractal?: Record<string, unknown>; interval?: unknown; amp?: number; seconds?: number; storedSeconds?: number; noBlob?: boolean; freq?: number; rate?: number; stereo?: boolean; from?: number; noFade?: boolean; aiff?: boolean; junk?: boolean; channels?: number; bytes?: string; ext?: string; mime?: string }>;
+  // v16.5 review: `from` starts the sine at that sample (a sine continued from the track before: from = its length) and
+  // `noFade` drops the 400-sample fade at each end (B7's join); `aiff` stores it as an AIFF (.aiff, which Chrome can't
+  // decode: B6); `junk` stores bytes no decoder or probe can read, named .mp3 (B1).
+  // v16.5 re-review: `channels` gives the WAV that many (6: a 5.1 file; each the same sine); `bytes` stores these
+  // bytes (base64: a file made by ffmpeg, tests/media.ts) as the track's file, named .${ext ?? 'mp3'}, typed mime.
+  /** v16.5: saved playlists by library index; `missing` adds entries the library doesn't have. */
+  playlists?: Array<{ id: string; name: string; indexes: number[]; missing?: number }>;
 }
 
 /**
@@ -1505,7 +1530,7 @@ export interface SeedOptions {
 export async function seedLibraryRecords(page: Page, n: number, opts: SeedOptions = {}): Promise<number> {
   await page.goto('/manifest.json');
   return page.evaluate(
-    async ({ n, real, seconds, crystals, keys, envelopes, prefix, pad, names, patch }) => {
+    async ({ n, real, seconds, crystals, keys, envelopes, prefix, pad, names, patch, playlists }) => {
       const CRY = [174, 285, 396, 417, 528, 639, 741, 852, 963, 1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150, 3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336];
       const KEYS = ['Am', 'C', 'Em', 'G', 'Dm', 'F', 'Bm', 'C#m'];
       const wav = (secs: number, freq: number) => {
@@ -1545,8 +1570,54 @@ export async function seedLibraryRecords(page: Page, n: number, opts: SeedOption
           const id = `${t0 + i * 1000}-${Math.random().toString(36).slice(2, 11)}`;
           ids.push(id);
           const isReal = i < real;
-          tx.objectStore('blobs').put({ id, fileBlob: isReal ? wav(seconds, 220 + (i % 40) * 17) : tiny, fileName: `${name}.wav`, fileType: 'audio/wav' });
-          const meta: any = { id, name, duration: isReal ? seconds : 150 + ((num * 37) % 240) };
+          // v16.5: a track of its own amplitude, length, pitch or rate (stereo: a quarter-tone apart), or no blob at all.
+          const own = patch.find((x: any) => x.index === i && (x.amp !== undefined || x.seconds !== undefined || x.freq !== undefined || x.rate !== undefined || x.noBlob || x.aiff || x.junk || x.from !== undefined || x.channels !== undefined || x.bytes !== undefined));
+          const ownWav = (secs: number, freq: number, amp: number, rate: number, stereo: boolean, from = 0, noFade = false, aiff = false, channels?: number) => {
+            const ch = channels ?? (stereo ? 2 : 1);
+            const len = Math.max(8, Math.round(secs * rate));
+            const b = new ArrayBuffer(44 + len * 2 * ch);
+            const dv = new DataView(b);
+            const w2 = (o: number, x: string) => { for (let k = 0; k < x.length; k++) dv.setUint8(o + k, x.charCodeAt(k)); };
+            w2(0, 'RIFF'); dv.setUint32(4, 36 + len * 2 * ch, true); w2(8, 'WAVE'); w2(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+            dv.setUint16(22, ch, true); dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2 * ch, true); dv.setUint16(32, 2 * ch, true); dv.setUint16(34, 16, true);
+            w2(36, 'data'); dv.setUint32(40, len * 2 * ch, true);
+            for (let k = 0; k < len; k++) {
+              const f = noFade ? 1 : Math.min(1, k / 400, (len - k) / 400);
+              for (let c = 0; c < ch; c++) dv.setInt16(44 + (k * ch + c) * 2, Math.round(Math.sin((2 * Math.PI * freq * (c === 1 ? 1.03 : 1) * (from + k)) / rate) * amp * f), true);
+            }
+            if (aiff) {
+              // The same samples as an AIFF: FORM/AIFF, COMM (the rate as an 80-bit float), SSND, big-endian.
+              const a = new ArrayBuffer(54 + len * 2 * ch);
+              const av = new DataView(a);
+              const w3 = (o: number, x: string) => { for (let k = 0; k < x.length; k++) av.setUint8(o + k, x.charCodeAt(k)); };
+              w3(0, 'FORM'); av.setUint32(4, 46 + len * 2 * ch); w3(8, 'AIFF'); w3(12, 'COMM'); av.setUint32(16, 18);
+              av.setUint16(20, ch); av.setUint32(22, len); av.setUint16(26, 16);
+              const e = Math.floor(Math.log2(rate));
+              av.setUint16(28, 16383 + e);
+              const m = rate * 2 ** (63 - e);
+              av.setUint32(30, Math.floor(m / 2 ** 32)); av.setUint32(34, m % 2 ** 32);
+              w3(38, 'SSND'); av.setUint32(42, 8 + len * 2 * ch); av.setUint32(46, 0); av.setUint32(50, 0);
+              for (let k = 0; k < len * ch; k++) av.setInt16(54 + k * 2, dv.getInt16(44 + k * 2, true));
+              return new Blob([a], { type: 'audio/aiff' });
+            }
+            return new Blob([b], { type: 'audio/wav' });
+          };
+          const junk = () => new Blob([Uint8Array.from({ length: 50_000 }, (_, k) => (k * 37 + 11) & 0x7f)], { type: 'audio/mpeg' });
+          const given = (b64: string, mime: string) => {
+            const bin = atob(b64);
+            const u = new Uint8Array(bin.length);
+            for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k);
+            return new Blob([u], { type: mime });
+          };
+          const ownSecs = own?.seconds ?? seconds;
+          if (!own?.noBlob) {
+            const ext = own?.bytes !== undefined ? (own.ext ?? 'mp3') : own?.aiff ? 'aiff' : own?.junk ? 'mp3' : 'wav';
+            const fileBlob = own?.bytes !== undefined ? given(own.bytes, own.mime ?? 'audio/mpeg') : own?.junk ? junk() : own ? ownWav(ownSecs, own.freq ?? 220 + (i % 40) * 17, own.amp ?? 8000, own.rate ?? 8000, !!own.stereo, own.from ?? 0, !!own.noFade, !!own.aiff, own.channels) : isReal ? wav(seconds, 220 + (i % 40) * 17) : tiny;
+            tx.objectStore('blobs').put({ id, fileBlob, fileName: `${name}.${ext}`, fileType: fileBlob.type });
+          }
+          const meta: any = { id, name, duration: own?.seconds !== undefined ? own.seconds : isReal ? seconds : 150 + ((num * 37) % 240) };
+          const stored = patch.find((x: any) => x.index === i && x.storedSeconds !== undefined);
+          if (stored) meta.duration = stored.storedSeconds;
           const hz = crystals === 'all' || (crystals === 'real' && isReal) ? CRY[i % 27] : crystals === 'some' && num % 10 < 7 ? CRY[(num * 7) % 27] : 0;
           if (hz) {
             meta.harmonicFreq = hz;
@@ -1595,6 +1666,9 @@ export async function seedLibraryRecords(page: Page, n: number, opts: SeedOption
                 sacredGeometryAlignment: 0.2, schumannResonanceHarmony: 0.1,
               };
             }
+            // v16.5: Deep Scan's experimental scores as given (merged over `scanned`'s), and the interval analysis.
+            if (p.fractal) meta.fractalAnalysis = { ...(meta.fractalAnalysis ?? {}), ...p.fractal };
+            if (p.interval) meta.intervalAnalysis = p.interval;
           }
           tx.objectStore('meta').put(meta);
         }
@@ -1605,6 +1679,16 @@ export async function seedLibraryRecords(page: Page, n: number, opts: SeedOption
       }
       const tx = db.transaction('playlist-state', 'readwrite');
       tx.objectStore('playlist-state').put({ key: 'current', playlistOrder: ids, originalOrder: ids, currentSongIndex: -1, loShuWalkMode: null, selectedSolfeggio: 396, savedAt: Date.now() });
+      // v16.5: saved playlists (v16.1's 'pl:' records) by library index, and entries the library doesn't have.
+      for (const pl of playlists) {
+        const width2 = Math.max(4, String(n).length);
+        const entries = pl.indexes.map((k: number) => {
+          const nm = names?.[k] ?? `${prefix}-${pad ? String(k + 1).padStart(width2, '0') : String(k + 1)}`;
+          return { id: ids[k], name: nm, file: `${nm}.wav`, size: 0 };
+        });
+        for (let m = 0; m < (pl.missing ?? 0); m++) entries.push({ id: `gone-${m}`, name: `gone-${m}`, file: `gone-${m}.mp3`, size: 12345 + m });
+        tx.objectStore('playlist-state').put({ key: `pl:${pl.id}`, v: 1, id: pl.id, name: pl.name, createdAt: 1000, updatedAt: 1000, entries });
+      }
       await new Promise((resolve) => (tx.oncomplete = resolve));
       db.close();
       return ids.length;
@@ -1620,6 +1704,7 @@ export async function seedLibraryRecords(page: Page, n: number, opts: SeedOption
       pad: opts.pad ?? true,
       names: opts.names ?? null,
       patch: opts.patch ?? [],
+      playlists: opts.playlists ?? [],
     }
   );
 }

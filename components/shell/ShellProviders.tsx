@@ -1,5 +1,6 @@
 // components/shell/ShellProviders.tsx (v15.5, the new layout beta; v15.6 adds the tuning context; v15.7 the library's two;
-// v16.0 the queue's; v16.1 the saved playlists'; v16.4 the Visuals sheet's and the More area's)
+// v16.0 the queue's; v16.1 the saved playlists'; v16.4 the Visuals sheet's and the More area's; v16.5 the Guide's and the
+// Journal's)
 //
 // Nests the new layout's context providers around it. It re-renders with App (four times a second while playing);
 // its children do not: App hands it one memo'd <AppShell /> with no props, and each view reads only the contexts it
@@ -23,6 +24,10 @@ import {
   PlaylistsContext,
   VisualsContext,
   MoreContext,
+  GuideContext,
+  JournalContext,
+  ExportContext,
+  ExportActionsContext,
 } from './contexts';
 import type {
   ShellActions,
@@ -40,6 +45,10 @@ import type {
   PlaylistsValue,
   VisualsValue,
   MoreValue,
+  GuideValue,
+  JournalValue,
+  ExportValue,
+  ExportActions,
 } from './contexts';
 
 interface ShellProvidersProps {
@@ -58,10 +67,14 @@ interface ShellProvidersProps {
   playlists: PlaylistsValue;
   visuals: VisualsValue;
   more: MoreValue;
+  guide: GuideValue;
+  journal: JournalValue;
+  exportValue: ExportValue;
+  exportActions: ExportActions;
   children: ReactNode;
 }
 
-const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library, walk, time, libraryList, libraryStatus, queue, playlists, visuals, more, children }: ShellProvidersProps) => (
+const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library, walk, time, libraryList, libraryStatus, queue, playlists, visuals, more, guide, journal, exportValue, exportActions, children }: ShellProvidersProps) => (
   <ActionsContext.Provider value={actions}>
     <ShellContext.Provider value={shell}>
       <PlayerContext.Provider value={player}>
@@ -76,7 +89,15 @@ const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library
                         <QueueContext.Provider value={queue}>
                           <PlaylistsContext.Provider value={playlists}>
                             <VisualsContext.Provider value={visuals}>
-                              <MoreContext.Provider value={more}>{children}</MoreContext.Provider>
+                              <MoreContext.Provider value={more}>
+                                <GuideContext.Provider value={guide}>
+                                  <JournalContext.Provider value={journal}>
+                                    <ExportActionsContext.Provider value={exportActions}>
+                                      <ExportContext.Provider value={exportValue}>{children}</ExportContext.Provider>
+                                    </ExportActionsContext.Provider>
+                                  </JournalContext.Provider>
+                                </GuideContext.Provider>
+                              </MoreContext.Provider>
                             </VisualsContext.Provider>
                           </PlaylistsContext.Provider>
                         </QueueContext.Provider>

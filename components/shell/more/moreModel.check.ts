@@ -33,8 +33,35 @@ import {
   openerOf,
   onMoreRootRequest,
   requestMoreRoot,
+  GROUP_LEARN,
+  GROUP_ADVANCED,
+  RECORD_ROW_SUBTITLE,
+  GUIDE_ROW_SUBTITLE,
+  ADVANCED_ROW_SUBTITLE,
+  journalRowSubtitle,
+  elapsedText,
+  GUIDE_VIEWS,
+  isGuideView,
+  JOURNAL_LINE,
+  JOURNAL_EXPERIMENTAL_LINE,
+  SCAN_SCORES_LINE,
+  LAYOUT_LINE,
+  PERF_LINE,
+  NO_TRACK_FOR_INFO,
+  RELOAD_ANYWAY_LABEL,
 } from './moreModel.ts';
 import type { AboutInput, MoreView, MoreViewState, UpdateCheck } from './moreModel.ts';
+import {
+  RECORD_CLASSIC_LINE,
+  RECORD_OPTIONS,
+  RECORD_NOT_READY,
+  RECORD_NO_VIDEO,
+  recordKindLine,
+  recordCardLine,
+  recordOptionState,
+  recPillLabel,
+  recordingRowText,
+} from './recordModel.ts';
 
 let passed = 0;
 const failures: string[] = [];
@@ -44,15 +71,15 @@ const eq = (a: unknown, b: unknown, what: string) => {
 };
 
 // The pages.
-eq(MORE_VIEWS, ['root', 'safety', 'statement', 'about', 'links'], "v16.4's pages");
-eq([isMoreView('about'), isMoreView('guide'), isMoreView(null), isMoreView(3)], [true, false, false, false], 'a page or not');
-eq(MORE_VIEWS.map((v) => VIEW_TITLES[v]), ['More', 'Safety & comfort', 'Safety statement', 'About', 'Links'], 'the headers');
-eq(MORE_VIEWS.map((v) => backTarget(v)), ['root', 'root', 'safety', 'root', 'root'], 'where Back goes');
-eq([backLabel('safety'), backLabel('statement'), backLabel('links')], ['Back to More', 'Back to Safety & comfort', 'Back to More'], "Back's name");
+eq(MORE_VIEWS, ['root', 'safety', 'statement', 'about', 'links', 'guide', 'journal', 'advanced'], "v16.5's pages");
+eq([isMoreView('about'), isMoreView('guide'), isMoreView('advanced'), isMoreView('record'), isMoreView(null), isMoreView(3)], [true, true, true, false, false, false], 'a page or not');
+eq(MORE_VIEWS.map((v) => VIEW_TITLES[v]), ['More', 'Safety & comfort', 'Safety statement', 'About', 'Links', 'Guide', 'Journal', 'Advanced'], 'the headers');
+eq(MORE_VIEWS.map((v) => backTarget(v)), ['root', 'root', 'safety', 'root', 'root', 'root', 'root', 'root'], 'where Back goes');
+eq([backLabel('safety'), backLabel('statement'), backLabel('links'), backLabel('guide')], ['Back to More', 'Back to Safety & comfort', 'Back to More', 'Back to More'], "Back's name");
 // v16.4 review: Links opened from About's row goes back to About; from the root, to the root.
-eq(MORE_VIEWS.map((v) => openerOf(v, 'links') ?? null), [null, null, null, 'about', null], "only About is remembered as Links' opener");
-eq(MORE_VIEWS.map((v) => openerOf('about', v) ?? null), [null, null, null, null, 'about'], 'and only for Links');
-eq([backTarget('links', 'about'), backTarget('links', 'root'), backTarget('links', null), backTarget('about', 'about'), backTarget('statement', 'about')], ['about', 'root', 'root', 'root', 'safety'], 'Back with an opener');
+eq(MORE_VIEWS.map((v) => openerOf(v, 'links') ?? null), [null, null, null, 'about', null, null, null, null], "only About is remembered as Links' opener");
+eq(MORE_VIEWS.map((v) => openerOf('about', v) ?? null), [null, null, null, null, 'about', null, null, null], 'and only for Links');
+eq([backTarget('links', 'about'), backTarget('links', 'root'), backTarget('links', null), backTarget('about', 'about'), backTarget('statement', 'about'), backTarget('guide', 'about')], ['about', 'root', 'root', 'root', 'safety', 'root'], 'Back with an opener');
 eq([backLabel('links', 'about'), backLabel('links')], ['Back to About', 'Back to More'], "Back's name with an opener");
 
 // The rows' words.
@@ -95,6 +122,9 @@ eq(
   const version = /export const APP_VERSION = '([^']+)'/.exec(eb)?.[1];
   eq(!!version && cache === offlineCacheName(version), true, `sw.js CACHE_NAME (${cache}) is offlineCacheName(APP_VERSION ${version})`);
 }
+// v16.5 final: flushAndReload (pinned by check:writers, so it keeps its literal) labels its toast with RELOAD_ANYWAY_LABEL's
+// value, which App's showStatusToast compares against to hold the reload while a recording or an export runs.
+eq(/const flushAndReload = useCallback\((?:(?!\}, \[showStatusToast\]\);)[\s\S])*?actionLabel: '([^']*)'/.exec(fs.readFileSync(new URL('../../../App.tsx', import.meta.url), 'utf8'))?.[1], RELOAD_ANYWAY_LABEL, "flushAndReload's toast action is RELOAD_ANYWAY_LABEL");
 const KEYS: Array<ReadonlyArray<string> | null> = [null, [], ['other'], ['aetheria-v16.4-offline'], ['x', 'aetheria-v16.1-offline'], ['aetheria-v16.5-offline']];
 let combos = 0;
 for (const controller of [false, true]) {
@@ -144,6 +174,44 @@ eq((['idle', 'checking', 'latest', 'failed'] as UpdateCheck[]).map((c) => settle
 const none = aboutStatus(null);
 eq([none.offline.title, none.network.title, none.update, none.checkDisabled, none.checkLine], ['Not saved for offline use yet', 'Online', null, true, null], 'total on missing input');
 eq(aboutStatus({ controller: true, cacheKeys: 'nope' as unknown as string[] }).offline.saved, false, 'cache keys of the wrong shape');
+
+// v16.5: the part-2 rows and pages.
+eq([GROUP_LEARN, GROUP_ADVANCED], ['Learn', 'Advanced'], "v16.5's headings");
+eq([RECORD_ROW_SUBTITLE, GUIDE_ROW_SUBTITLE, ADVANCED_ROW_SUBTITLE], ['Audio, visuals or both, saved to your downloads', 'Plain language or technical, with the Lo Shu cube', 'Experimental scan scores, the classic layout'], 'their lines');
+eq([journalRowSubtitle(false), journalRowSubtitle(true)], ['Notes on how a session felt, kept on this device', 'A session is being documented'], "the Journal row's line");
+eq([elapsedText(0, 0), elapsedText(1000, 3500), elapsedText(0, 192_000), elapsedText(0, 3_723_000), elapsedText(5000, 1000), elapsedText(NaN, 5)], ['0:00', '0:02', '3:12', '1:02:03', '0:00', '0:00'], 'the elapsed time');
+eq(GUIDE_VIEWS.map((v) => v.label), ['Plain language', 'Technical'], 'the Guide view');
+eq([isGuideView('plain'), isGuideView('technical'), isGuideView('accessible'), isGuideView(undefined)], [true, true, false, false], 'a Guide view or not');
+eq(JOURNAL_LINE, 'Document how a session felt: before and after, sensations and notes. Kept on this device only.', "the Journal's line");
+eq(JOURNAL_EXPERIMENTAL_LINE, 'Experimental: self-reports, not measurements.', 'its experimental line');
+eq(/not measurements/.test(SCAN_SCORES_LINE) && /unreliable/.test(SCAN_SCORES_LINE), true, 'the scan-score line says they are not measurements');
+eq([LAYOUT_LINE, PERF_LINE], ['The classic layout has every control on one screen. The music keeps playing when you switch.', 'Frames, renders and long tasks in a corner of the screen. Shows from the next launch.'], "Advanced's lines");
+eq(NO_TRACK_FOR_INFO, 'No track currently selected for analysis.', "classic's toast, verbatim");
+
+// v16.5: Record (recordModel.ts).
+eq(RECORD_CLASSIC_LINE, 'Choose a recording mode. Audio-only is recommended for long sessions to prevent crashes.', "classic's line, verbatim");
+eq(RECORD_OPTIONS.map((o) => o.title), ['Audio Only', 'Visuals Only', 'AV Mix'], "classic's labels, verbatim");
+eq(RECORD_OPTIONS.map((o) => o.line), ['The music and the layers, as a 24-bit WAV file', 'The visualizer as a video, without sound', 'The visualizer as a video, with the sound'], "the options' lines");
+eq((['audio', 'video', 'both'] as const).map(recordKindLine), ['Audio Only · a 24-bit WAV file', 'Visuals Only · a video, without sound', 'AV Mix · a video, with the sound'], 'the kind lines');
+eq(recordCardLine('audio'), 'Audio Only · saved to your downloads when you stop', "the More card's line");
+{
+  const cases: Array<[boolean, boolean]> = [[false, false], [false, true], [true, false], [true, true]];
+  const got = cases.map(([ready, video]) => (['audio', 'video', 'both'] as const).map((k) => recordOptionState(k, ready, video)));
+  eq(got[0].map((x) => x.reason), [RECORD_NOT_READY, RECORD_NOT_READY, RECORD_NOT_READY], 'not ready: every option off, one reason');
+  eq(got[1].every((x) => x.disabled), true, 'not ready, video or not');
+  eq(got[2].map((x) => [x.disabled, x.reason]), [[false, null], [true, RECORD_NO_VIDEO], [true, RECORD_NO_VIDEO]], 'no video: audio only');
+  eq(got[3].map((x) => x.disabled), [false, false, false], 'ready: all three');
+}
+eq([recPillLabel('open'), recPillLabel('stop')], ['Rec, recording. Open Record', 'Rec, stop recording'], "the pill's names say what a tap does");
+eq(recordingRowText('3:12'), 'Recording · 3:12', "the Record row's line while recording");
+
+// v16.5: About's Reload also waits for an export.
+{
+  const e = aboutStatus({ updateReady: true, exporting: true, recording: false, audible: false });
+  eq([e.update?.reloadDisabled, e.update?.note], [true, 'Wait for the export to finish: reloading would lose it.'], 'an export holds Reload');
+  const r = aboutStatus({ updateReady: true, exporting: true, recording: true });
+  eq(r.update?.note, 'Stop the recording first: reloading would lose it.', 'a recording first');
+}
 
 // A tap on the active More tab.
 {

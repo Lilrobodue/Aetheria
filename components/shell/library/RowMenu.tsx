@@ -12,7 +12,7 @@
 
 import React from 'react';
 import type { ReactNode } from 'react';
-import { Info, ListEnd, ListPlus, ListStart, Play, Trash2 } from 'lucide-react';
+import { Info, ListEnd, ListPlus, ListStart, Play, Trash2, FileAudio } from 'lucide-react';
 import Sheet from '../../ui/Sheet';
 import ListRow from '../../ui/ListRow';
 import { ViewBoundary } from '../../ErrorBoundary';
@@ -21,13 +21,15 @@ import { countRender } from '../devRenders';
 import { REGIME_DOT } from '../shellModel';
 import { sheetFallback } from '../sheets/sheetFallback';
 import { rowFacts, rowRegime } from './libraryModel';
+import ExportRowLine from '../export/ExportRowLine';
+import { EXPORT_ROW, ROW_LIBRARY } from '../../../utils/export/exportWords';
 
-export type RowMenuAction = 'play' | 'next' | 'queue' | 'playlist' | 'info' | 'delete';
+export type RowMenuAction = 'play' | 'next' | 'queue' | 'playlist' | 'info' | 'export' | 'delete';
 
 interface MenuItem {
   id: RowMenuAction;
   title: string;
-  subtitle: string;
+  subtitle: ReactNode;
   icon: ReactNode;
 }
 
@@ -38,6 +40,8 @@ const items = (lines: { next: string; queue: string }): readonly MenuItem[] => [
   { id: 'queue', title: 'Add to queue', subtitle: lines.queue, icon: <ListEnd size={20} /> },
   { id: 'playlist', title: 'Add to playlist…', subtitle: 'One of your playlists, or a new one', icon: <ListPlus size={20} /> },
   { id: 'info', title: 'Track info', subtitle: 'Length, crystal, key, visual sync and the file', icon: <Info size={20} /> },
+  // v16.5: Export with layers (while one runs, its line follows it and the row opens the running sheet).
+  { id: 'export', title: EXPORT_ROW, subtitle: <ExportRowLine text={ROW_LIBRARY} />, icon: <FileAudio size={20} /> },
   {
     id: 'delete',
     title: 'Delete from library…',

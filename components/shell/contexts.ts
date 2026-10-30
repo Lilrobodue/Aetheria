@@ -18,6 +18,11 @@
 // v16.4 adds VisualsContext (the visual settings, the crystal palette and the pause; it changes only on a setting
 // change) and MoreContext (the update flag, what is audible, Keep screen awake, a recording), ShellValue.moreViewRef,
 // and the More area's actions.
+// v16.5 adds GuideContext (the cube's crystal, Perfect GUT, the walk and the palette: per crystal or walk, never the
+// clock), JournalContext (the documented session: 1 Hz while playing, read only by the Journal page), MoreContext's
+// part-2 fields, ShellValue.guideViewRef and trackInfoId, and Record's, the Journal's and Advanced's actions.
+// v16.5 (Export with layers) adds ExportContext (the job, what the sheet shows, the layers' snapshot: never the clock;
+// the progress is the job's own store) and ExportActionsContext (stable references to App's exportApiRef).
 //
 // Each reader throws a clear error without its provider; the ViewBoundary around the view then catches it.
 // No @types/react here: React is `any` to tsc, so these interfaces document the values rather than enforce them.
@@ -34,7 +39,11 @@ import type { BuilderSettings, SourceRef } from '../../utils/mix/builder';
 import type { MixId } from '../../utils/mix/catalog';
 import type { VizSettings } from '../../types';
 import type { FrequencyColorMode } from '../../utils/spectrumColor';
-import type { MoreViewState } from './more/moreModel';
+import type { MoreViewState, GuideView } from './more/moreModel';
+import type { RecordKind } from './more/recordModel';
+import type { LoShuWalkMode } from '../../constants';
+import type { ExportSnapshot, MadeFor } from '../../utils/export/exportPlan';
+import type { Phase as ExportPhase } from '../../utils/export/exportWords';
 
 /** The transport's state. Changes on play/pause, a track change, shuffle/repeat, a new play order. */
 export interface PlayerValue {
@@ -182,6 +191,10 @@ export interface ShellValue {
   mixesViewRef: { current: MixesViewState };
   /** v16.4: where the More tab was left (its page, that page's scrollTop and its opener; session only). */
   moreViewRef: { current: MoreViewState };
+  /** v16.5: the Guide as it was left: Plain language or Technical, and its scrollTop (session only). */
+  guideViewRef: { current: { view: GuideView; top: number } };
+  /** v16.5: the track ⋯ › Track info shows (the honest TrackInfoDialog, AppShell's TrackInfoHost), or null. */
+  trackInfoId: string | null;
 }
 
 /** v16.3: the Mixes tab as it was left: its list's scrollTop, and Create a mix: open or not, its settings as they were
@@ -224,6 +237,116 @@ export interface MoreValue {
   recording: { kind: 'audio' | 'video' | 'both'; since: number } | null;
   /** The safety statement's version (App's DISCLAIMER_VERSION), for the statement page's line. */
   statementVersion: string;
+  /** v16.5: an AudioContext exists (something has played): a recording can start (classic's Record needs it too). */
+  audioReady: boolean;
+  /** v16.5: MediaRecorder and canvas.captureStream exist: Visuals Only and AV Mix can record. */
+  videoCapable: boolean;
+  /** v16.5: Advanced's "Show experimental scan scores" (aetheria.scanScores.v1; off by default). */
+  scanScores: boolean;
+  /** v16.5: the Journal documents a session (isDocumentingEffects). */
+  documenting: boolean;
+  /** v16.5: an export runs (About's Reload waits for it). */
+  exporting: boolean;
+  /** v16.5 review (A1): a recording's start is in flight (Audio Only's worklet loads): the options are off. */
+  recordStarting: boolean;
+}
+
+/** v16.5, Export with layers: the running job's progress (the engine's store, written at most 4 times a second). */
+export interface ExportProgressStore {
+  subscribe: (fn: () => void) => () => void;
+  get: () => { phase: ExportPhase; fraction: number; etaS: number | null; file: { index: number; count: number; title: string } };
+}
+
+/** One track the Export sheet shows (a playlist's entry with no audio here: song null). */
+export interface ExportEntry {
+  id: string;
+  title: string;
+  song: Song | null;
+}
+
+export interface ExportTargetValue {
+  /** 'track:<id>' or 'playlist:<id>': which sheet a job belongs to. */
+  key: string;
+  kind: 'track' | 'playlist';
+  title: string;
+  entries: ExportEntry[];
+}
+
+export interface ExportJobValue {
+  id: number;
+  kind: 'track' | 'playlist' | 'long';
+  title: string;
+  targetKey: string;
+  phase: 'running' | 'cancelling' | 'done' | 'failed';
+  store: ExportProgressStore;
+  result: {
+    files: Array<{ name: string; bytes: number; outSeconds: number }>;
+    loud: boolean;
+    /** Share is offered (navigator.share, canShare, ≤ 10 files, ≤ 50 MiB). */
+    shareable: boolean;
+    /** The browser has Web Share at all (else no "too large" line). */
+    shareSupported: boolean;
+    skipped: string | null;
+    reason: string | null;
+    /** v16.5 review (B6): how many tracks the export was asked for ("Saved 2 of 3"). */
+    total: number;
+    /** v16.5 review (B12): Share's 10 minutes have passed (the files are in the downloads only). */
+    shareGone?: boolean;
+  } | null;
+}
+
+/** v16.5, the Export sheet's world (ExportContext): set at a job's start and end and on an open; never per slice. */
+export interface ExportValue {
+  job: ExportJobValue | null;
+  target: ExportTargetValue | null;
+  snapshot: ExportSnapshot;
+  mobile: boolean;
+  deviceMemory: number | null;
+  playing: boolean;
+  /** The engine chunk: not fetched yet, loaded, or unreachable (offline before its first load). */
+  engine: 'idle' | 'ready' | 'offline';
+  busy: 'analyse' | 'scan' | null;
+  /** v16.5 final: a cancelled export that was let go hasn't settled yet (its decode may still run): Export, Analyse
+   *  tracks and Deep Scan wait for it. */
+  stopping?: boolean;
+  /** v16.5 export memory: and it has been stopping for a minute or more (the held lines add "or reload Aetheria"). */
+  stoppingLong?: boolean;
+  /** Seconds per source minute the last export took (the next estimate). */
+  learnedRate: number | null;
+  /** The dev hook's caps (seconds), or null. */
+  capSeconds: number | null;
+}
+
+/** v16.5, the export's actions (stable: App's exportApiRef). */
+export interface ExportActions {
+  open: (t: { kind: 'track'; id: string } | { kind: 'playlist'; id: string } | { kind: 'playing' }) => void;
+  start: (o: { madeFor: MadeFor; files: 'each' | 'long' }) => void;
+  cancel: () => void;
+  share: () => void;
+  dismiss: () => void;
+  retry: () => void;
+}
+
+/** v16.5, the Guide's cube (GuideContext): classic's LoShuMatrix values. Per crystal, walk or palette; never the clock. */
+export interface GuideValue {
+  /** selectedSolfeggio (raw: the cube's own numbering). */
+  crystalRaw: number;
+  perfectGut: boolean;
+  walkMode: LoShuWalkMode | null;
+  palette: FrequencyColorMode;
+}
+
+/** v16.5, the Journal (JournalContext): classic's ExperienceTracker props. It changes once a second while playing (App's
+ *  session timer): only the Journal page reads it. */
+export interface JournalValue {
+  documenting: boolean;
+  frequency: number;
+  volume: number;
+  /** v2's tone level in dB (classic's tracker shows a percentage otherwise). */
+  volumeText?: string;
+  /** sessionDuration (App's, in minutes as the tracker reads it). */
+  minutes: number;
+  playing: boolean;
 }
 
 /** v15.7: the Library tab as it was left: its query, its content's scrollTop, and the health card's fold (null: by
@@ -427,6 +550,8 @@ export interface ShellActions {
   setBeatLevel: (v: number) => void;
   /** Emergency Stop's body: the layers fall in 0.1 s, then the pinned pausePlayback (the music, the anchor, the tone). */
   stopAll: () => void;
+  /** The ⋯ menu's Track info. v16.5: the new layout's honest TrackInfoDialog for the playing track (ShellValue.trackInfoId);
+   *  with nothing loaded, classic's toast. */
   trackInfo: () => void;
   stopRecording: () => void;
   setTab: (t: ShellTab) => void;
@@ -538,6 +663,23 @@ export interface ShellActions {
   dismissUpdate: () => void;
   /** The 4-card tour (About › Show the tour; the first run's tutorial in the new layout). */
   showTour: () => void;
+  // v16.5, the More area part 2 (references to App's own functions through more2ApiRef, their own layout effect; the
+  // shell actions' effect stays as it was, so no check:writers pin moves).
+  /** The Record sheet (the phone's bottom sheet, the desktop's panel). */
+  openRecord: () => void;
+  /** App's startRecording (classic's, unchanged): the sheet then follows isRecording. */
+  startRecording: (kind: RecordKind) => void;
+  /** App's stopRecording, then the toast "Saved to your downloads.". */
+  stopAndSave: () => void;
+  /** Advanced's switch: saved from its tap only. */
+  setScanScores: (on: boolean) => void;
+  /** The Journal: classic's handlers, moved into App functions (toggleJournal is classic's onToggleDocumentation). */
+  toggleJournal: () => void;
+  journalStart: (data: any) => void;
+  journalEnd: (data: any) => void;
+  journalNote: (note: string) => void;
+  /** Close the honest Track info (TrackInfoHost). */
+  closeTrackInfo: () => void;
 }
 
 export const PlayerContext = createContext(null);
@@ -555,6 +697,10 @@ export const QueueContext = createContext(null);
 export const PlaylistsContext = createContext(null);
 export const VisualsContext = createContext(null);
 export const MoreContext = createContext(null);
+export const GuideContext = createContext(null);
+export const ExportContext = createContext(null);
+export const ExportActionsContext = createContext(null);
+export const JournalContext = createContext(null);
 
 function read<T>(ctx: unknown, name: string): T {
   const v = useContext(ctx);
@@ -577,3 +723,7 @@ export const useQueue = (): QueueValue => read<QueueValue>(QueueContext, 'QueueC
 export const usePlaylists = (): PlaylistsValue => read<PlaylistsValue>(PlaylistsContext, 'PlaylistsContext');
 export const useVisuals = (): VisualsValue => read<VisualsValue>(VisualsContext, 'VisualsContext');
 export const useMore = (): MoreValue => read<MoreValue>(MoreContext, 'MoreContext');
+export const useGuide = (): GuideValue => read<GuideValue>(GuideContext, 'GuideContext');
+export const useExport = (): ExportValue => read<ExportValue>(ExportContext, 'ExportContext');
+export const useExportActions = (): ExportActions => read<ExportActions>(ExportActionsContext, 'ExportActionsContext');
+export const useJournal = (): JournalValue => read<JournalValue>(JournalContext, 'JournalContext');

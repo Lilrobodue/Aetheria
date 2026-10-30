@@ -1,7 +1,7 @@
 {
-  "name": "v16.4-aetheria:-harmonic-resonance-player",
+  "name": "v16.5-aetheria:-harmonic-resonance-player",
   "private": true,
-  "version": "16.4.0",
+  "version": "16.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,8 +18,9 @@
     "check:sound": "node utils/soundV2/check_vectors.ts && node utils/soundV2/layerSchedule.check.ts && node utils/soundV2/layerPlayer.check.ts && node utils/soundV2/layerHost.check.ts && node utils/soundV2/soundLog.check.ts && node utils/soundV2/keyFit.check.ts",
     "check:chroma": "node utils/soundV2/chroma.check.ts && node utils/soundV2/keyAnalysis.check.ts",
     "check:analyse": "node utils/library/analysePass.check.ts",
-    "check:shell": "node components/shell/shellModel.check.ts && node components/shell/zenModel.check.ts && node components/shell/layers/layersModel.check.ts && node components/shell/layers/soundModel.check.ts && node components/shell/library/libraryModel.check.ts && node components/shell/library/filterViewModel.check.ts && node components/shell/mixes/mixesModel.check.ts && node components/shell/queue/queueViewModel.check.ts && node components/shell/playlists/playlistsViewModel.check.ts && node components/shell/mixes/builder/builderViewModel.check.ts && node components/shell/more/moreModel.check.ts && node components/shell/more/visualsModel.check.ts",
+    "check:shell": "node components/shell/shellModel.check.ts && node components/shell/zenModel.check.ts && node components/shell/layers/layersModel.check.ts && node components/shell/layers/soundModel.check.ts && node components/shell/library/libraryModel.check.ts && node components/shell/library/filterViewModel.check.ts && node components/shell/mixes/mixesModel.check.ts && node components/shell/queue/queueViewModel.check.ts && node components/shell/playlists/playlistsViewModel.check.ts && node components/shell/mixes/builder/builderViewModel.check.ts && node components/shell/more/moreModel.check.ts && node components/shell/more/visualsModel.check.ts && node components/shell/library/scanScoresModel.check.ts",
     "check:writers": "node scripts/check-library-writers.mjs",
+    "check:export": "node utils/export/exportPlan.check.ts && node utils/export/mixWav.check.ts && node utils/export/sourceInfo.check.ts && node utils/export/resample.check.ts",
     "check:queue": "node utils/queue/queueModel.check.ts",
     "check:builder": "node utils/mix/builder.check.ts",
     "check:mix": "node utils/mix/mix.check.ts && node utils/mix/distribution.check.ts && node utils/mix/builder.check.ts && node scripts/check-mix-golden.mjs && node scripts/check-mix-golden.mjs --via=builder",

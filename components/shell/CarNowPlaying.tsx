@@ -5,6 +5,7 @@
 // same three actions as the lock screen's and the car's own), the driving line, and Stop all sound at the bottom,
 // apart from the transport. No chips, no seek bar, no visuals: the screen is solid and the heat guard pauses the
 // visualizer behind it. Change output opens the Sound sheet at its Output group.
+// v16.5 (decision 4 A): the REC pill here keeps its one-tap stop (mode "stop"); everywhere else a tap opens Record.
 
 import React from 'react';
 import { Car, OctagonX, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
@@ -30,7 +31,7 @@ const CarNowPlaying = () => {
           Car
         </span>
         <div className="flex items-center gap-2">
-          <RecButton />
+          <RecButton mode="stop" />
           <button
             type="button"
             onClick={() => actions.openSheet('sound', 'output')}

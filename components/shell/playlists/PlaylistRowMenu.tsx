@@ -8,7 +8,7 @@
 
 import React from 'react';
 import type { ReactNode } from 'react';
-import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpToLine, FileQuestion, Info, ListEnd, ListMinus, ListPlus, ListStart, Play } from 'lucide-react';
+import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpToLine, FileQuestion, Info, ListEnd, ListMinus, ListPlus, ListStart, Play, FileAudio } from 'lucide-react';
 import Sheet from '../../ui/Sheet';
 import ListRow from '../../ui/ListRow';
 import { ViewBoundary } from '../../ErrorBoundary';
@@ -18,13 +18,15 @@ import { REGIME_DOT } from '../shellModel';
 import { rowFacts, rowRegime } from '../library/libraryModel';
 import { sheetFallback } from '../sheets/sheetFallback';
 import { REMOVE_FROM_LINE, inPlaylistPlace, missingLine, playFromHereLine, removeFromTitle } from './playlistsViewModel';
+import ExportRowLine from '../export/ExportRowLine';
+import { EXPORT_ROW, ROW_LIBRARY } from '../../../utils/export/exportWords';
 
-export type PlaylistRowAction = 'play' | 'next' | 'queue' | 'playlist' | 'remove' | 'info' | 'top' | 'up' | 'down' | 'bottom';
+export type PlaylistRowAction = 'play' | 'next' | 'queue' | 'playlist' | 'remove' | 'info' | 'export' | 'top' | 'up' | 'down' | 'bottom';
 
 interface Item {
   id: PlaylistRowAction;
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   icon: ReactNode;
 }
 
@@ -58,6 +60,8 @@ const items = (p: PlaylistRowMenuProps): Item[] => {
     { id: 'playlist', title: 'Add to another playlist…', icon: <ListPlus size={20} /> },
     remove,
     { id: 'info', title: 'Track info', subtitle: 'Length, crystal, key, visual sync and the file', icon: <Info size={20} /> },
+    // v16.5: Export with layers.
+    { id: 'export', title: EXPORT_ROW, subtitle: <ExportRowLine text={ROW_LIBRARY} />, icon: <FileAudio size={20} /> },
   ];
 };
 

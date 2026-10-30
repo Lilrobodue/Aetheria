@@ -11,16 +11,15 @@
 // No animation, no blur.
 //
 // The words: card 1 is the tutorial's step 1 verbatim; card 2 its step 2 (the description and the three tails
-// verbatim, the labels naming the new layout's buttons); card 3 its step 6, with the Guidebook's place as v16.4 has it
-// (the classic layout, through More's classic row: v16.4 review; v16.5 brings the Guide to More and changes it again);
-// card 4 is new.
+// verbatim, the labels naming the new layout's buttons); card 3 its step 6, with the Guide's place: v16.4 named the
+// classic layout's Guidebook (More's classic row, v16.4 review); v16.5 brings the Guide to More (More › Guide) and
+// moves the classic row into Advanced, so card 3 names the Guide again; card 4 is new.
 
 import React, { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, Gem, Headphones, MapPin, Music, X } from 'lucide-react';
 import { useOverlay } from '../ui/overlayStack';
-import { CLASSIC_ROW_TITLE } from '../shell/more/moreModel';
 
 interface TourLine {
   label: string;
@@ -67,8 +66,8 @@ export function tourCards(desktop: boolean): TourCard[] {
       lines: [
         { label: 'Headphones if possible:', text: 'The binaural layer needs each ear to hear its own signal.' },
         { label: 'No wrong way:', text: 'Background while you work, eyes closed, falling asleep, dancing — it adapts to you.' },
-        // v16.4: the Guidebook is still classic's (More's last row switches to it). v16.5: "The Guide: More › Guide, …".
-        { label: 'The Guidebook:', text: `In the classic layout for now: More › ${CLASSIC_ROW_TITLE}, then the book icon in the sidebar. Plain language or the technical view.` },
+        // v16.5: More › Guide (v16.4 named the classic layout's Guidebook, through a row v16.5 moves into Advanced).
+        { label: 'The Guide:', text: 'More › Guide, in plain language or the technical view.' },
       ],
     },
     {

@@ -5,23 +5,27 @@
 // never sits on a Sheet; focus goes back to the ⋯ (the overlay stack). Its body is the `playlist-menu` region.
 
 import React from 'react';
-import { Copy, Pencil, Trash2 } from 'lucide-react';
+import { Copy, FileAudio, Pencil, Trash2 } from 'lucide-react';
 import Sheet from '../../ui/Sheet';
 import ListRow from '../../ui/ListRow';
 import { ViewBoundary } from '../../ErrorBoundary';
 import { countRender } from '../devRenders';
 import { sheetFallback } from '../sheets/sheetFallback';
+import ExportRowLine from '../export/ExportRowLine';
+import { EXPORT_ROW, ROW_PLAYLIST } from '../../../utils/export/exportWords';
 
-export type PlaylistMenuAction = 'rename' | 'duplicate' | 'delete';
+export type PlaylistMenuAction = 'rename' | 'duplicate' | 'export' | 'delete';
 
 interface PlaylistMenuProps {
   name: string;
   facts: string;
   onAction: (a: PlaylistMenuAction) => void;
+  /** v16.5: some of its tracks are here (Export with layers… shows). */
+  canExport?: boolean;
   onClose: () => void;
 }
 
-const PlaylistMenuBody = ({ name, facts, onAction, onClose }: PlaylistMenuProps) => {
+const PlaylistMenuBody = ({ name, facts, onAction, canExport = false, onClose }: PlaylistMenuProps) => {
   countRender('PlaylistMenu');
   return (
     <div data-testid="playlist-menu-body" className="pb-2">
@@ -33,6 +37,9 @@ const PlaylistMenuBody = ({ name, facts, onAction, onClose }: PlaylistMenuProps)
       </div>
       <ListRow title="Rename…" subtitle="A new name; its tracks stay as they are" icon={<Pencil size={20} />} onClick={() => onAction('rename')} data-testid="playlist-menu-rename" />
       <ListRow title="Duplicate" subtitle="A copy with the same tracks" icon={<Copy size={20} />} onClick={() => onAction('duplicate')} data-testid="playlist-menu-duplicate" />
+      {canExport ? (
+        <ListRow title={EXPORT_ROW} subtitle={<ExportRowLine text={ROW_PLAYLIST} />} icon={<FileAudio size={20} />} onClick={() => onAction('export')} data-testid="playlist-menu-export" />
+      ) : null}
       <ListRow
         title="Delete playlist"
         subtitle="Only the playlist; your music is not touched"

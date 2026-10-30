@@ -11,7 +11,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { HardDrive, ListMusic, Plus } from 'lucide-react';
 import Button from '../../ui/Button';
 import { PanelFallback, ViewBoundary } from '../../ErrorBoundary';
-import { useActions, useLibraryList, usePlaylists } from '../contexts';
+import { useActions, useExportActions, useLibraryList, usePlaylists } from '../contexts';
 import { countRender } from '../devRenders';
 import PlaylistRow from './PlaylistRow';
 import PlaylistMenu from './PlaylistMenu';
@@ -32,6 +32,7 @@ import {
 const PlaylistsBody = () => {
   countRender('PlaylistsView');
   const actions = useActions();
+  const exportActions = useExportActions(); // v16.5
   const pls = usePlaylists();
   const { loading } = useLibraryList();
   const [menuId, setMenuId] = useState<string | null>(null);
@@ -60,6 +61,7 @@ const PlaylistsBody = () => {
     const id = menuId;
     setMenuId(null); // the sheet closes first: a Dialog never sits on a Sheet
     if (id === null) return;
+    if (a === 'export') return exportActions.open({ kind: 'playlist', id }); // v16.5
     if (a === 'rename') actions.renamePlaylist(id);
     else if (a === 'duplicate') actions.duplicatePlaylist(id);
     else actions.deletePlaylist(id);
@@ -152,6 +154,7 @@ const PlaylistsBody = () => {
           name={menuList.name}
           facts={rowFacts({ count: menuList.count, seconds: menuList.seconds, missing: menuList.missing, playing: menuList.playing })}
           onAction={onMenuAction}
+          canExport={menuList.present > 0}
           onClose={() => setMenuId(null)}
         />
       ) : null}

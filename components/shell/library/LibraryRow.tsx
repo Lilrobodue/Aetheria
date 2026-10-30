@@ -8,6 +8,9 @@
 // is in the tab order (the list's roving tab stop); the ⋯ is reached with →. `mark` is the queue's (v16.0, mockup
 // library-marks-phone): "Queued · 1" for a track waiting in the queue, a string, so React.memo keeps the other rows still.
 // React.memo: it renders when its own props change, never on the clock.
+// v16.5 (Advanced's "Show experimental scan scores", mockup library-badges-phone): `scores` adds dashed, neutral badges
+// after the facts ("Φ 72%", "111", "DNA"), each named "Experimental score: golden ratio 72 %", at scanScores.ts's
+// cut-offs (scanScoresModel.scanBadges). No colour carries meaning; never the safety level.
 
 import React from 'react';
 import { AudioLines, EllipsisVertical, ListVideo, Pause } from 'lucide-react';
@@ -15,6 +18,7 @@ import type { Song } from '../../../types';
 import { countRender } from '../devRenders';
 import { REGIME_DOT } from '../shellModel';
 import { rowFacts, rowRegime } from './libraryModel';
+import { scanBadges } from './scanScoresModel';
 
 export const ROW_PX = 64;
 
@@ -33,13 +37,16 @@ interface LibraryRowProps {
   onFocusRow: (index: number) => void;
   /** v16.0: the queue's mark ("Queued · 1"), or none. */
   mark?: string;
+  /** v16.5: show the experimental scan-score badges. */
+  scores?: boolean;
 }
 
 const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold-400';
 
-const LibraryRow = ({ song, index, size, current, paused, active, onPlay, onMenu, onFocusRow, mark }: LibraryRowProps) => {
+const LibraryRow = ({ song, index, size, current, paused, active, onPlay, onMenu, onFocusRow, mark, scores = false }: LibraryRowProps) => {
   countRender('LibraryRow');
   const regime = rowRegime(song);
+  const badges = scores ? scanBadges(song) : [];
   return (
     <div
       role="listitem"
@@ -83,9 +90,28 @@ const LibraryRow = ({ song, index, size, current, paused, active, onPlay, onMenu
         </span>
         <span className="min-w-0">
           <span data-row-title="" className={current ? 'block text-sm font-semibold text-ink-strong truncate' : 'block text-sm text-ink-strong truncate'}>{song.name}</span>
-          <span data-row-facts="" className={current ? 'block text-xs text-ink-soft truncate tabular-nums' : 'block text-xs text-ink-muted truncate tabular-nums'}>
-            {rowFacts(song, current ? (paused ? 'paused' : 'playing') : null)}
-          </span>
+          {badges.length ? (
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span data-row-facts="" className={current ? 'min-w-0 text-xs text-ink-soft truncate tabular-nums' : 'min-w-0 text-xs text-ink-muted truncate tabular-nums'}>
+                {rowFacts(song, current ? (paused ? 'paused' : 'playing') : null)}
+              </span>
+              {badges.map((b) => (
+                <span
+                  key={b.id}
+                  role="img"
+                  aria-label={b.label}
+                  data-scan-badge={b.id}
+                  className="shrink-0 inline-flex items-center h-5 px-1.5 rounded border border-dashed border-ink-faint text-xs text-ink-muted tabular-nums"
+                >
+                  {b.text}
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span data-row-facts="" className={current ? 'block text-xs text-ink-soft truncate tabular-nums' : 'block text-xs text-ink-muted truncate tabular-nums'}>
+              {rowFacts(song, current ? (paused ? 'paused' : 'playing') : null)}
+            </span>
+          )}
         </span>
       </button>
       {mark ? (

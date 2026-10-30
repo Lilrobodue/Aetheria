@@ -41,6 +41,8 @@ interface LibraryListProps {
   onReset: () => void;
   /** v16.0: a waiting track's first place in the queue, by id (QueueContext.positions). */
   marks?: ReadonlyMap<string, number>;
+  /** v16.5: Advanced's "Show experimental scan scores": the rows' badges. */
+  scores?: boolean;
 }
 
 interface Range {
@@ -48,7 +50,7 @@ interface Range {
   end: number;
 }
 
-const LibraryList = ({ view, trackId, isPlaying, resetKey, scrollRef, onPlay, onMenu, listRef, initialTopRef, onReset, marks }: LibraryListProps) => {
+const LibraryList = ({ view, trackId, isPlaying, resetKey, scrollRef, onPlay, onMenu, listRef, initialTopRef, onReset, marks, scores = false }: LibraryListProps) => {
   const markOf = (id: string): string | undefined => { const q = marks?.get(id); return q ? libraryMark(q) : undefined; };
   countRender('LibraryList');
   const viewRef: { current: Song[] } = useRef(view);
@@ -211,6 +213,7 @@ const LibraryList = ({ view, trackId, isPlaying, resetKey, scrollRef, onPlay, on
         onMenu={onMenu}
         onFocusRow={onFocusRow}
         mark={markOf(s.id)}
+        scores={scores}
       />
     );
   }
@@ -229,6 +232,7 @@ const LibraryList = ({ view, trackId, isPlaying, resetKey, scrollRef, onPlay, on
         onMenu={onMenu}
         onFocusRow={onFocusRow}
         mark={markOf(s.id)}
+        scores={scores}
       />
     );
   }

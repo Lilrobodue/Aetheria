@@ -15,7 +15,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Activity, Check, ChevronDown, Trash2 } from 'lucide-react';
-import { useActions, useLibraryList, useLibraryStatus, useShell } from '../contexts';
+import { useActions, useExport, useLibraryList, useLibraryStatus, useShell } from '../contexts';
 import { countRender } from '../devRenders';
 import AssignCrystalsDialog from './AssignCrystalsDialog';
 import ClearLibraryDialog from './ClearLibraryDialog';
@@ -33,6 +33,8 @@ const HealthCard = () => {
   const st = useLibraryStatus();
   const actions = useActions();
   const { libraryViewRef, phoneShell } = useShell();
+  const { job, stopping, stoppingLong } = useExport();
+  const exporting = !!job && (job.phase === 'running' || job.phase === 'cancelling');
   const health = useMemo(() => libraryHealth(songs), [songs]);
   const model = healthModel({
     health,
@@ -44,6 +46,9 @@ const HealthCard = () => {
     mobile: st.analyseMobile,
     durationsLeft: st.durationsLeft,
     orphans: st.orphans,
+    exporting, // v16.5 review (B10)
+    exportStopping: !!stopping, // v16.5 final
+    exportStoppingLong: !!stoppingLong, // v16.5 export memory
   });
   const [openPref, setOpenPref] = useState<boolean | null>(libraryViewRef.current.healthOpen);
   const open = openPref ?? model.autoOpen;

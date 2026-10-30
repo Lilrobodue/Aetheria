@@ -518,6 +518,26 @@ async function walkNew(page: Page, vp: Viewport): Promise<void> {
       await shot('sheet-visuals', { compare: false });
       await page.keyboard.press('Escape');
     }
+    // v16.5: the Guide (both views), the Journal, Advanced and the Record sheet (reviewed against the mockups).
+    await page.getByTestId('tab-more-button').click();
+    if (await page.getByTestId('more-guide-row').count()) {
+      const back = page.getByRole('button', { name: 'Back to More', exact: true });
+      for (const [row, name] of [['more-guide-row', 'more-guide'], ['more-journal-row', 'more-journal'], ['more-advanced-row', 'more-advanced']] as const) {
+        await page.getByTestId(row).click();
+        await page.getByTestId(name).waitFor();
+        await shot(name, { compare: false });
+        if (name === 'more-guide') {
+          await page.getByTestId('guide-view-technical').click();
+          await shot('more-guide-technical', { compare: false });
+          await page.getByTestId('guide-view-plain').click();
+        }
+        await back.click();
+      }
+      await page.getByTestId('more-record-row').click();
+      await page.getByRole('dialog', { name: 'Record', exact: true }).waitFor();
+      await shot('sheet-record', { compare: false });
+      await page.keyboard.press('Escape');
+    }
     await page.getByTestId('tab-now-button').click();
     // Tone only: a crystal while paused.
     await page.getByTestId('chip-crystal').click();

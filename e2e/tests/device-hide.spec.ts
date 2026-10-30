@@ -8,10 +8,12 @@ import {
   expectLibraryAtLeast,
   importTones,
   isOtherLocalOrigin,
+  libraryRowButton,
   libraryState,
   lifecycleLine,
   lifecycleLog,
   openApp,
+  openSeededNewLayout,
   optInNewLayout,
   pauseCount,
   recordLifecycle,
@@ -27,6 +29,7 @@ import {
 } from './helpers';
 import { adb, assertUnlocked, chromeSessions, mediaSession, TEST_ORIGIN, TEST_PORT } from './adb';
 import { RawCdp } from './rawCdp';
+import { stubDownloads, caughtDownloads, wavInfo } from './downloads';
 
 // v16.0.1, D1-D3: the hide flush on the phone, with a REAL hide. Only with E2E_HIDE=1, and then this file alone runs
 // (playwright.config.ts), so no worker-wide Playwright connection is open while a test sends its key.
@@ -48,7 +51,7 @@ import { RawCdp } from './rawCdp';
 // the page (what it plays) instead of adb.
 //
 // Order (each locking test needs its own unlock first, so run them one at a time, -g): D1 (screen on), v16.1's D-PL1
-// (screen on), D3 (locks), D2 (locks; last).
+// (screen on), D3 (locks), v16.5's D-R2 (locks), D2 (locks; last).
 
 const DRY = !ON_DEVICE;
 const DEVTOOLS = ON_DEVICE ? 'http://localhost:9222' : `http://localhost:${TEST_PORT + 6000}`;
@@ -692,6 +695,117 @@ test('v16.0.1 D3: locked while playing, with a real hide (Playwright detached): 
     // raw session took over (the tab may be PLAYING), over the raw session after it (Playwright may be off).
     if (setupTab && conn && !ours) await pwTeardown(setupTab);
     if (raw && ours) await rawTeardown(raw, ours.sid, ours.targetId).catch((e) => console.warn('[D3] teardown:', e));
+    raw?.close();
+    if (conn) await conn.browser.close();
+    if (dryChrome) await dryChrome.close();
+  }
+});
+
+test('v16.5 D-R2: recording while locked, with a real hide (Playwright detached): Audio Only by finger, the screen lock; the page goes hidden, the card follows three gapless advances and the recording goes on; after the wake it stops into a file as long as the wall time with the music at its end @device', async ({ screenshot, trace, video }) => {
+  // device.spec's recording with the screen off, with a REAL hide (Playwright detached; the raw session reads the page).
+  // 30 seeded tones of 4 s, the new layout, Music only; tone-0001 then Record › Audio Only by finger. After the wake,
+  // Playwright again for DOM reads and the stop by el.click() (no tap behind the keyguard); the file is caught in the page
+  // (stubDownloads: nothing saved). Turns the screen off; unlock by hand before D2.
+  test.setTimeout(240_000);
+  if (ON_DEVICE) {
+    assertNoDeviceArtifacts({ screenshot, trace, video });
+    assertUnlocked();
+  }
+  const TITLE = `aetheria-e2e-hide-rec-${Date.now()}`;
+  let dryChrome: Browser | null = null;
+  let conn: { browser: Browser; context: BrowserContext } | null = null;
+  let raw: RawCdp | null = null;
+  let ours: { targetId: string; sid: string } | null = null;
+  let setupTab: Page | null = null;
+  try {
+    dryChrome = await dryRunChrome();
+    conn = await connect();
+    const page = await openTab(conn.context, true);
+    setupTab = page;
+    await stubDownloads(page);
+    await page.addInitScript(() => localStorage.setItem('aetheria.musicOnly.v1', 'true'));
+    const dialogs = await openSeededNewLayout(page, 30, { real: 30, seconds: 4 });
+    await page.setViewportSize(PHONE_VIEWPORT);
+    type Card = { state: string; title: string } | null;
+    const pageCard = (s: { playing: boolean; current: string | null }): Card => ({ state: s.playing ? 'playing' : 'paused', title: s.current ?? '' });
+    await tap(page, page.getByTestId('tab-library-button'), 'the Library tab');
+    await expect(page.getByTestId('tab-library')).toBeVisible({ timeout: 5_000 });
+    const row = libraryRowButton(page, 'tone-0001');
+    await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await tap(page, row, 'tone-0001');
+    await expect.poll(async () => (ON_DEVICE ? mediaSession() : pageCard(await libraryState(page)))?.state, { timeout: 15_000, message: 'the card PLAYING' }).toBe('playing');
+    await tap(page, page.getByTestId('tab-more-button'), 'More');
+    await expect(page.getByTestId('more')).toBeVisible({ timeout: 5_000 });
+    await tap(page, page.getByTestId('more-record-row'), 'Record');
+    await expect(page.getByTestId('record-option-audio')).toBeEnabled({ timeout: 5_000 });
+    await tap(page, page.getByTestId('record-option-audio'), 'Audio Only');
+    await expect(page.getByTestId('record-recording')).toBeVisible({ timeout: 10_000 });
+    const wall0 = Date.now();
+    const pausesBefore = await pauseCount(page);
+
+    await page.evaluate((t) => { document.title = t; }, TITLE);
+    raw = await RawCdp.connect(DEVTOOLS);
+    const target = await raw.ourPage(TITLE);
+    ours = { targetId: target.targetId, sid: await raw.attach(target.targetId) };
+    await conn.browser.close();
+    conn = null;
+    setupTab = null;
+
+    type Snap = { current: string | null; playing: boolean; vis: string; recording: boolean };
+    const snap = () =>
+      raw!.evaluate<Snap>(ours!.sid, `(() => {
+        const s = window.__aetheriaLibrary.state();
+        return { current: s.current, playing: s.playing, vis: document.visibilityState,
+          recording: !!document.querySelector('[data-testid="record-stop-save"]') };
+      })()`);
+    const start = await snap();
+    await sendKey('lock', raw, ours.sid);
+    const first = start.current ?? '';
+    const titles: string[] = [];
+    let hidden = false;
+    let recordingThroughout = true;
+    let playingCards = 0;
+    try {
+      const until = Date.now() + 60_000;
+      while (Date.now() < until) {
+        const s = await snap();
+        if (s.vis === 'hidden') hidden = true;
+        if (hidden && !s.recording) recordingThroughout = false;
+        const c = ON_DEVICE ? mediaSession() : pageCard(s);
+        if (c && c.state === 'playing' && c.title !== first && !titles.includes(c.title)) titles.push(c.title);
+        if (titles.length >= 3 && hidden) break;
+        await sleep(400);
+      }
+      playingCards = ON_DEVICE ? chromeSessions().filter((s) => s.state === 'playing').length : 1;
+    } finally {
+      if (ON_DEVICE) adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+    }
+    test.info().annotations.push({ type: `v16.5 D-R2${DRY ? ', desktop dry run' : ''}: recording while locked`, description: `card titles ${[first, ...titles].join(' → ')}; hidden ${hidden}; recording throughout ${recordingThroughout}` });
+    expect(hidden, 'the page says it is hidden: a real hide while locked, read over the raw session').toBe(true);
+    expect(titles.length, 'three gapless advances on the PLAYING card while locked').toBeGreaterThanOrEqual(3);
+    expect(playingCards, 'one PLAYING Chrome card: none stranded').toBe(1);
+    expect(recordingThroughout, 'the recording went on while hidden').toBe(true);
+
+    // After the wake: Playwright again; DOM reads, and the stop by el.click() (no tap: Chrome draws no frames behind the keyguard).
+    conn = await connect();
+    let back: Page | undefined;
+    for (const p of conn.context.pages().filter((x) => x.url().startsWith(TEST_ORIGIN + '/'))) {
+      if ((await p.title()) === TITLE) back = p;
+    }
+    expect(back, 'our tab, found again by its title on the test origin').toBeTruthy();
+    const backDialogs = watchNativeDialogs(back!);
+    expect(await pauseCount(back!), 'the gapless swap never paused').toBe(pausesBefore);
+    await back!.evaluate(() => (document.querySelector('[data-testid="record-stop-save"]') as HTMLButtonElement).click());
+    const [file] = await caughtDownloads(back!, 1, 30_000);
+    const w = await wavInfo(back!, 0, { win: 10, head: 2, tail: 2 });
+    const wallS = (Date.now() - wall0) / 1000;
+    test.info().annotations.push({ type: 'v16.5 D-R2 the file', description: JSON.stringify({ name: file.name, size: file.size, rate: w.rate, seconds: w.seconds, tail: w.tailRms, wallS }) });
+    expect(Math.abs(w.seconds - wallS), 'it recorded the whole time, hidden too').toBeLessThan(5);
+    expect(w.tailRms, 'the music at its end, three advances on').toBeGreaterThan(0.05);
+    expect([...dialogs, ...backDialogs], 'no native dialog').toEqual([]);
+  } finally {
+    if (setupTab && conn && !ours) await pwTeardown(setupTab);
+    if (raw && ours) await rawTeardown(raw, ours.sid, ours.targetId).catch((e) => console.warn('[D-R2] teardown:', e));
     raw?.close();
     if (conn) await conn.browser.close();
     if (dryChrome) await dryChrome.close();

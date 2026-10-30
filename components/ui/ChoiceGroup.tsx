@@ -38,6 +38,8 @@ interface ChoiceGroupProps<T extends string> {
   columns?: 2 | 3 | 4;
   /** v16.4: a line under the label, before the buttons. */
   description?: string;
+  /** v16.5: the pressed button's check (default on); off where three labels with icons fill a phone's row (Made for). */
+  check?: boolean;
   'data-testid'?: string;
 }
 
@@ -50,7 +52,7 @@ const PLAIN =
 
 const COLUMNS = { 2: 'grid grid-cols-2 gap-2', 3: 'grid grid-cols-3 gap-2', 4: 'grid grid-cols-4 gap-2' } as const;
 
-function ChoiceGroup<T extends string>({ label, badge, options, onChoose, children, columns = 2, description, 'data-testid': testId }: ChoiceGroupProps<T>) {
+function ChoiceGroup<T extends string>({ label, badge, options, onChoose, children, columns = 2, description, check = true, 'data-testid': testId }: ChoiceGroupProps<T>) {
   return (
     <div role="group" aria-label={label} className="space-y-2" data-testid={testId}>
       <div className="flex items-baseline justify-between gap-2">
@@ -66,7 +68,7 @@ function ChoiceGroup<T extends string>({ label, badge, options, onChoose, childr
             <button key={o.id} type="button" aria-pressed={o.pressed} onClick={() => onChoose(o.id)} className={solid ? SOLID : o.dashed ? DASHED : PLAIN}>
               {o.icon ? o.icon(lit ? 'shrink-0 text-ink-strong' : 'shrink-0 text-ink-muted') : null}
               <span className="min-w-0">{o.label}</span>
-              {solid ? <Check size={14} className="shrink-0 text-ink-soft" aria-hidden="true" /> : null}
+              {solid && check ? <Check size={14} className="shrink-0 text-ink-soft" aria-hidden="true" /> : null}
             </button>
           );
         })}

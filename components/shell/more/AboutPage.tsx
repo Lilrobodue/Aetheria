@@ -47,7 +47,7 @@ const StatusLine = ({ icon, title, sub, testId }: { icon: React.ReactNode; title
 const AboutPage = ({ go }: { go: (v: MoreView) => void }) => {
   countRender('AboutPage');
   const actions = useActions();
-  const { updateReady, audible, recording } = useMore();
+  const { updateReady, audible, recording, exporting } = useMore();
   const [cacheKeys, setCacheKeys] = useState<string[] | null>(null);
   const [controller, setController] = useState<boolean>(() => !!swContainer()?.controller);
   const [online, setOnline] = useState<boolean>(() => (typeof navigator !== 'undefined' ? navigator.onLine !== false : true));
@@ -157,7 +157,7 @@ const AboutPage = ({ go }: { go: (v: MoreView) => void }) => {
     }
   };
 
-  const s = aboutStatus({ controller, cacheKeys, version: APP_VERSION, online, registration, updateReady, audible, recording: !!recording, check });
+  const s = aboutStatus({ controller, cacheKeys, version: APP_VERSION, online, registration, updateReady, audible, recording: !!recording, exporting, check });
   return (
     <div data-testid="more-about" className="px-4 py-3 space-y-3">
       <div className="flex items-center gap-3 py-2">

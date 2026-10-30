@@ -986,6 +986,224 @@ test.describe('style foundation (v15.3)', () => {
     expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
   });
 
+  test('k. the More area part 2 (v16.5): every class on screen has a rule; no blur and no endless animation, in each of its states', async ({ page }) => {
+    // Classic's moved content (the Guidebook's two views, the Journal's tracker) keeps its own look and effects (the
+    // Technical view's and the tracker's pulsing dots, the tracker's own blurred modals), so the effects scan skips those
+    // two subtrees; their classes are still checked.
+    test.setTimeout(240_000);
+    const seen = new Map<string, string>();
+    const effects = new Set<string>();
+    const census = async (state: string) => {
+      await page.waitForTimeout(250);
+      await collectClasses(page, state, seen);
+      const found = await page.evaluate(() => {
+        const roots = Array.from(document.querySelectorAll('[data-testid="new-shell"], [role="dialog"], [role="alertdialog"], [data-testid="notices"]'));
+        const out: string[] = [];
+        for (const root of roots) {
+          for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+            if (el.closest('[data-testid="guide-content"], [data-testid="journal-tracker"]')) continue;
+            const cs = getComputedStyle(el);
+            const tag = `${el.tagName.toLowerCase()}.${(el.getAttribute('class') || '').split(/\s+/).slice(0, 3).join('.')}`;
+            if (cs.backdropFilter && cs.backdropFilter !== 'none') out.push(`backdrop-filter ${cs.backdropFilter} on ${tag}`);
+            if (cs.animationName && cs.animationName !== 'none' && /infinite/.test(cs.animationIterationCount)) out.push(`infinite animation ${cs.animationName} on ${tag}`);
+          }
+        }
+        return out;
+      });
+      for (const f of found) effects.add(`${f} (${state})`);
+    };
+    await page.setViewportSize({ width: 411, height: 752 });
+    await seedLibraryRecords(page, 6, {
+      real: 6,
+      seconds: 40,
+      patch: [{ index: 0, scanned: true, fractal: { goldenRatioAlignment: 0.75, pattern111Presence: 0.55, dnaResonanceScore: 0.65, infiniteOrderHarmonics: [1838] } }],
+    });
+    await openNewLayout(page, { engine: 'v2', output: 'headphones' });
+    // Before anything plays: Record not ready.
+    await page.getByTestId('tab-more-button').click();
+    await page.getByTestId('more-root').waitFor();
+    await census('More, the root (v16.5)');
+    await page.getByTestId('more-record-row').click();
+    await page.getByRole('dialog', { name: 'Record', exact: true }).waitFor();
+    await census('Record, not ready');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('tab-library-button').click();
+    await page.getByRole('button', { name: /^tone-0001/ }).first().click();
+    await page.getByTestId('tab-more-button').click();
+    await page.getByTestId('more-record-row').click();
+    await page.getByRole('dialog', { name: 'Record', exact: true }).getByTestId('record-option-audio').waitFor();
+    await census('Record, ready');
+    await page.getByTestId('record-option-audio').click();
+    await page.getByTestId('record-recording').waitFor();
+    await census('Record, recording');
+    await crash(page, 'sheet-record');
+    await page.getByRole('dialog', { name: 'Record', exact: true }).getByRole('alert').waitFor();
+    await census('Record, fallback');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('more-recording-card').waitFor();
+    await census('More, the root while recording');
+    await page.getByTestId('tab-library-button').click();
+    await page.getByTestId('mini-player').getByTestId('rec-open').waitFor();
+    await census('Library, REC on the mini-player');
+    await page.getByTestId('tab-now-button').click();
+    await page.getByTestId('np-menu-button').click();
+    await page.getByTestId('menu-body').waitFor();
+    await census('the menu while recording');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('tab-more-button').click();
+    await page.getByTestId('more-stop-recording').click();
+    // The Guide, both views.
+    await page.getByTestId('more-guide-row').click();
+    await page.getByTestId('more-guide').waitFor();
+    await census('the Guide, Plain language');
+    await page.getByTestId('guide-view-technical').click();
+    await census('the Guide, Technical');
+    await page.getByRole('button', { name: 'Back to More', exact: true }).click();
+    // The Journal, Advanced, the scan scores.
+    await page.getByTestId('more-journal-row').click();
+    await page.getByTestId('more-journal').waitFor();
+    await census('the Journal');
+    await page.getByRole('button', { name: 'Back to More', exact: true }).click();
+    await page.getByTestId('more-advanced-row').click();
+    await page.getByTestId('more-advanced').waitFor();
+    await census('Advanced');
+    await page.getByTestId('advanced-scan-scores').getByRole('switch').click();
+    await census('Advanced, the scores on');
+    await page.getByTestId('tab-library-button').click();
+    await page.locator('[data-scan-badge]').first().waitFor();
+    await census('Library, the scan-score badges');
+    await page.getByRole('button', { name: 'Options for tone-0001', exact: true }).click();
+    await page.getByRole('button', { name: /Track info/ }).first().click();
+    await page.getByTestId('track-info-scores').waitFor();
+    await census('Track info, the scores');
+    await page.getByTestId('track-info-dialog').getByRole('button', { name: 'Close', exact: true }).click();
+    await page.getByTestId('tab-more-button').click();
+    await crash(page, 'more-advanced');
+    await page.getByTestId('more-page-fallback').waitFor();
+    await census('a v16.5 page fallback');
+    await page.getByRole('button', { name: 'Reload panel', exact: true }).click();
+    // The desktop panel: Record and the Guide.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.getByTestId('nav-more').click();
+    await page.getByTestId('desktop-panel').getByTestId('more').waitFor();
+    if ((await page.getByTestId('more').getAttribute('data-more-view')) !== 'root') await page.getByTestId('nav-more').click();
+    await page.getByTestId('more-record-row').click();
+    await page.getByRole('region', { name: 'Record', exact: true }).waitFor();
+    await census('desktop, the Record panel');
+
+    const styled = await stylesheetClasses(page);
+    const unstyled = [...seen]
+      .filter(([t]) => !styled.has(t) && !LUCIDE.test(t) && !INERT.has(t))
+      .map(([t, state]) => `${t} (${state})`)
+      .sort();
+    expect(seen.size, 'the walk saw the part-2 pages').toBeGreaterThan(100);
+    expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
+    expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
+  });
+
+  test('l. Export with layers (v16.5): every class on screen has a rule; no blur and no endless animation, in each of its states', async ({ page }) => {
+    test.setTimeout(240_000);
+    const seen = new Map<string, string>();
+    const effects = new Set<string>();
+    const census = async (state: string) => {
+      await page.waitForTimeout(250);
+      await collectClasses(page, state, seen);
+      const found = await page.evaluate(() => {
+        const roots = Array.from(document.querySelectorAll('[data-testid="new-shell"], [role="dialog"], [role="alertdialog"], [data-testid="notices"]'));
+        const out: string[] = [];
+        for (const root of roots) {
+          for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+            const cs = getComputedStyle(el);
+            const tag = `${el.tagName.toLowerCase()}.${(el.getAttribute('class') || '').split(/\s+/).slice(0, 3).join('.')}`;
+            if (cs.backdropFilter && cs.backdropFilter !== 'none') out.push(`backdrop-filter ${cs.backdropFilter} on ${tag}`);
+            if (cs.animationName && cs.animationName !== 'none' && /infinite/.test(cs.animationIterationCount)) out.push(`infinite animation ${cs.animationName} on ${tag}`);
+          }
+        }
+        return out;
+      });
+      for (const f of found) effects.add(`${f} (${state})`);
+    };
+    await page.addInitScript(() => {
+      const click = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+        if (this.hasAttribute('download')) return;
+        return click.call(this);
+      };
+    });
+    await page.setViewportSize({ width: 411, height: 752 });
+    await seedLibraryRecords(page, 4, { real: 4, seconds: 12, playlists: [{ id: 'pstyles1', name: 'Evening', indexes: [0, 1, 2], missing: 1 }] });
+    await openNewLayout(page, { engine: 'v2', output: 'headphones' });
+    await page.getByTestId('tab-library-button').click();
+    await page.getByRole('button', { name: 'Options for tone-0001', exact: true }).click();
+    await page.getByTestId('library-menu-export').waitFor();
+    await census('the row ⋯ with Export');
+    await page.getByTestId('library-menu-export').click();
+    await page.getByTestId('export-summary').waitFor();
+    await census('Export, the summary (a track)');
+    await page.getByRole('group', { name: 'Made for' }).getByRole('button', { name: 'Speakers' }).click();
+    await census('Export, Made for Speakers');
+    await page.waitForFunction(() => typeof (window as any).__aetheriaExport?.tuning === 'function');
+    await page.evaluate(() => (window as any).__aetheriaExport.tuning({ sliceDelayMs: 40 }));
+    await page.getByTestId('export-start').click();
+    await page.getByTestId('export-running').waitFor();
+    await census('Export, running');
+    await page.getByTestId('export-done').waitFor({ timeout: 60_000 });
+    await census('Export, done');
+    await page.getByTestId('export-done-button').click();
+    await page.evaluate(() => (window as any).__aetheriaExport.setCaps(5));
+    await page.getByRole('button', { name: 'Options for tone-0002', exact: true }).click();
+    await page.getByTestId('library-menu-export').click();
+    await page.getByTestId('export-cant').waitFor();
+    await census('Export, over the cap');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => (window as any).__aetheriaExport.setCaps(null));
+    await page.getByTestId('library-view-playlists').click();
+    await page.getByRole('button', { name: 'Options for Evening', exact: true }).click();
+    await page.getByTestId('playlist-menu-export').waitFor();
+    await census('the playlist ⋯ with Export');
+    await page.getByTestId('playlist-menu-export').click();
+    await page.getByTestId('export-tracks').waitFor();
+    await census('Export, a playlist');
+    await page.getByTestId('export-files-long').click();
+    await census('Export, a playlist as one long file');
+    await page.getByTestId('export-start').click();
+    await page.getByTestId('export-running').waitFor();
+    await page.keyboard.press('Escape');
+    await page.getByTestId('tab-more-button').click();
+    await page.getByTestId('more-exporting-card').waitFor();
+    await census('More while exporting');
+    await page.getByTestId('more-record-row').click();
+    await page.getByTestId('record-make-file').waitFor();
+    await census('Record, Make a file while exporting');
+    await page.keyboard.press('Escape');
+    // The crash drill on the open sheet (a crash arms the mounted region), then the job cancelled for the desktop part.
+    await page.getByTestId('more-exporting-open').click();
+    await page.getByRole('dialog', { name: 'Export with layers', exact: true }).getByTestId('export-running').waitFor();
+    await crash(page, 'sheet-export');
+    await page.getByRole('dialog', { name: 'Export with layers', exact: true }).getByRole('alert').waitFor();
+    await census('Export, fallback');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => { (window as any).__aetheriaExport.cancel(); (window as any).__aetheriaExport.tuning({ sliceDelayMs: 0 }); });
+    await page.waitForFunction(() => !(window as any).__aetheriaExport.state().running, null, { timeout: 15_000 });
+    // The desktop panel.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.getByTestId('nav-library').click();
+    await page.getByTestId('library-view-tracks').click(); // the Library came back on Playlists
+    await page.getByRole('button', { name: 'Options for tone-0003', exact: true }).click();
+    await page.getByTestId('library-menu-export').click();
+    await page.getByRole('region', { name: 'Export with layers', exact: true }).waitFor();
+    await census('desktop, the Export panel');
+
+    const styled = await stylesheetClasses(page);
+    const unstyled = [...seen]
+      .filter(([t]) => !styled.has(t) && !LUCIDE.test(t) && !INERT.has(t))
+      .map(([t, state]) => `${t} (${state})`)
+      .sort();
+    expect(seen.size, 'the walk saw Export').toBeGreaterThan(100);
+    expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
+    expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
+  });
+
   test('d. the --ae-* CSS variables equal the tailwind.config.js tokens', async ({ page }) => {
     // The config is ESM (the root package is "type": "module"); imported through a data: URL so the test runner's
     // own loader never transforms it.

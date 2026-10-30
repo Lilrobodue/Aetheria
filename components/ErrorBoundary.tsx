@@ -30,7 +30,7 @@ import { waitForBlobSaves } from '../utils/playlistCache';
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 /** The version the error log records. Bump it with the header badge (App.tsx); isolation.spec checks the two agree. */
-export const APP_VERSION = 'v16.4';
+export const APP_VERSION = 'v16.5';
 
 export type ViewName =
   | 'visualizer'
@@ -98,7 +98,14 @@ export type ViewName =
   | 'more-safety'
   | 'more-about'
   | 'more-links'
-  | 'sheet-visuals';
+  | 'sheet-visuals'
+  // v16.5, the More area part 2: the Guide, the Journal and Advanced pages, and the Record sheet's body.
+  | 'more-guide'
+  | 'more-journal'
+  | 'more-advanced'
+  | 'sheet-record'
+  // v16.5, Export with layers: the Export sheet's body.
+  | 'sheet-export';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The error log

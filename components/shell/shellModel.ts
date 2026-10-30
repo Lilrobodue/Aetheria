@@ -10,8 +10,9 @@ export const LAYOUT_KEY = 'aetheria.layout.v1';
 export type LayoutPref = 'classic' | 'new';
 export type ShellTab = 'now' | 'library' | 'mixes' | 'layers' | 'more';
 /** v15.7 adds the Import sheet; v16.0 the Up next sheet (the queue); v16.1 the Add to playlist sheet (modal on both
- *  shells, as the ⋯ menu); v16.4 the Visuals sheet (the phone's preview sheet over Now Playing, the desktop's panel). */
-export type ShellSheet = 'sound' | 'crystal' | 'walks' | 'menu' | 'import' | 'queue' | 'playlist-add' | 'visuals';
+ *  shells, as the ⋯ menu); v16.4 the Visuals sheet (the phone's preview sheet over Now Playing, the desktop's panel); v16.5
+ *  the Record sheet (the phone's bottom sheet, the desktop's panel). */
+export type ShellSheet = 'sound' | 'crystal' | 'walks' | 'menu' | 'import' | 'queue' | 'playlist-add' | 'visuals' | 'record' | 'export';
 /** The classic panel a stub "peeks" into (decision 4). v15.9: no 'mixes' (the Mixes tab replaced its stub's peek); v16.4: no
  *  'sound' (Layers › Advanced's Visualizer row opens the Visuals sheet). */
 export type PeekPanel = 'library';

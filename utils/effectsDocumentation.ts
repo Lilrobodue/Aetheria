@@ -608,6 +608,71 @@ export interface EffectReport {
  */
 export class ExperienceTracker {
   private sessions: ExperienceSession[] = [];
+  /**
+   * v16.5 review (A6): everything aetheria_sessions held when it was read, in order: the sessions (the same objects
+   * as `sessions`, so a note or an end is written back) and anything that isn't one, kept as it was. Before this,
+   * nothing was read: the first session after a reload overwrote every earlier one.
+   */
+  private records: unknown[] = [];
+  /**
+   * v16.5 re-review (A6 across windows): the sessions this page started, by id. Another window (the installed app
+   * beside a tab) writes the same list: every save reads it again just before it writes and merges into what it holds
+   * then, by id, so neither window overwrites the other's sessions. A session of this page's that a save finds gone
+   * (an older version's tab wrote over the list) is put back.
+   */
+  private own = new Map<string, ExperienceSession>();
+  private loaded = false;
+  /** The stored text when it couldn't be read as a list: it is never overwritten (saves wait). */
+  private unreadable: string | null = null;
+
+  /** What aetheria_sessions holds now: its entries, or null when it can't be read as a list (`unreadable` keeps it). */
+  private readStored(): unknown[] | null {
+    let raw: string | null = null;
+    try {
+      raw = typeof localStorage !== 'undefined' ? localStorage.getItem('aetheria_sessions') : null;
+    } catch {
+      raw = null;
+    }
+    this.unreadable = null;
+    if (raw === null || raw === '') return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // below
+    }
+    this.unreadable = raw;
+    return null;
+  }
+
+  /**
+   * The stored list, read once (before the first change): its sessions to work with, the rest kept as it is. Each
+   * save reads it again (saveToStorage), and what this page holds is then the list as that save wrote it.
+   * Unreadable: this page's own sessions only (nothing is written).
+   */
+  private load(): void {
+    if (this.loaded) return;
+    this.loaded = true;
+    const stored = this.readStored() ?? [];
+    const records: unknown[] = [];
+    const sessions: ExperienceSession[] = [];
+    const seen = new Set<string>();
+    for (const r of stored) {
+      records.push(r);
+      if (isSession(r) && !seen.has(r.id)) {
+        seen.add(r.id);
+        sessions.push(r);
+      }
+    }
+    for (const s of this.own.values()) {
+      if (seen.has(s.id)) continue;
+      seen.add(s.id);
+      records.push(s);
+      sessions.push(s);
+    }
+    this.records = records;
+    this.sessions = sessions;
+  }
   
   startSession(frequency: number, volume: number, waveform: string = 'sine'): string {
     const session: ExperienceSession = {
@@ -620,12 +685,16 @@ export class ExperienceTracker {
       notes: []
     };
     
+    this.load();
+    this.own.set(session.id, session);
     this.sessions.push(session);
-    this.saveToStorage();
+    this.records.push(session);
+    this.saveToStorage(session);
     return session.id;
   }
   
   addNote(sessionId: string, note: string): boolean {
+    this.load();
     const session = this.sessions.find(s => s.id === sessionId);
     if (!session || session.completed) return false;
     
@@ -633,12 +702,14 @@ export class ExperienceTracker {
       timestamp: new Date().toISOString(),
       content: note
     });
+    if (this.own.has(session.id)) this.own.set(session.id, session);
     
-    this.saveToStorage();
+    this.saveToStorage(session);
     return true;
   }
   
   completeSession(sessionId: string): UserReport | null {
+    this.load();
     const session = this.sessions.find(s => s.id === sessionId);
     if (!session || session.completed) return null;
     
@@ -649,6 +720,7 @@ export class ExperienceTracker {
     session.completed = true;
     session.endTime = endTime.toISOString();
     session.postState = this.getCurrentState();
+    if (this.own.has(session.id)) this.own.set(session.id, session);
     
     const report: UserReport = {
       id: this.generateSessionId(),
@@ -672,7 +744,7 @@ export class ExperienceTracker {
       credibility: 7
     };
     
-    this.saveToStorage();
+    this.saveToStorage(session);
     return report;
   }
   
@@ -700,17 +772,52 @@ export class ExperienceTracker {
     return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
   
-  private saveToStorage(): void {
+  /**
+   * v16.5 re-review (A6 across windows): the list is read again just before the write, and `changed` merged into what
+   * it holds then, by id (another window's sessions written since stay, entries this can't read stay as they are);
+   * this page's own sessions it no longer holds go back at the end.
+   */
+  private saveToStorage(changed: ExperienceSession): void {
+    const stored = this.readStored();
+    // v16.5 review (A6): what couldn't be read is never written over (this session stays in memory only).
+    if (stored === null || this.unreadable !== null) {
+      console.warn('Saved sessions could not be read, so they are left as they are; this session is not saved.');
+      return;
+    }
+    const merged: unknown[] = [];
+    const seen = new Set<string>();
+    for (const r of stored) {
+      if (isSession(r) && !seen.has(r.id)) {
+        seen.add(r.id);
+        merged.push(r.id === changed.id ? changed : r);
+      } else merged.push(r);
+    }
+    for (const s of [changed, ...this.own.values()]) {
+      if (seen.has(s.id)) continue;
+      seen.add(s.id);
+      merged.push(s);
+    }
+    this.records = merged;
+    this.sessions = merged.filter((r, i): r is ExperienceSession => isSession(r) && merged.findIndex((x) => isSession(x) && x.id === r.id) === i);
     try {
-      localStorage.setItem('aetheria_sessions', JSON.stringify(this.sessions));
+      localStorage.setItem('aetheria_sessions', JSON.stringify(merged));
     } catch (e) {
       console.warn('Could not save sessions to localStorage:', e);
     }
   }
   
   getSessions(): ExperienceSession[] {
+    this.load();
     return [...this.sessions];
   }
+}
+
+/** v16.5 review (A6): a stored session this tracker can work with (an id, a start, a notes list); anything else is kept
+ *  as it is and left alone. */
+function isSession(r: unknown): r is ExperienceSession {
+  if (!r || typeof r !== 'object') return false;
+  const s = r as Partial<ExperienceSession>;
+  return typeof s.id === 'string' && s.id !== '' && typeof s.startTime === 'string' && Array.isArray(s.notes);
 }
 
 interface ExperienceSession {

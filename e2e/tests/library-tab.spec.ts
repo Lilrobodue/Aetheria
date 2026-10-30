@@ -31,6 +31,7 @@ import {
   shrinkSavedLibrary,
   startWalk,
   tab,
+  backToClassicViaMore,
   tapAt,
   toneWav,
   undoToast,
@@ -763,7 +764,7 @@ test.describe('phone, the row menu', () => {
     await expect(menu.getByTestId('library-menu-next')).toContainText('Play next');
     await expect(menu.getByTestId('library-menu-next')).toContainText('First when you press Play');
     await expect(menu.getByTestId('library-menu-queue')).toContainText('Add to queue');
-    await expect(menu.getByRole('button')).toHaveText([/Play from here/, /Play next/, /Add to queue/, /Add to playlist…/, /Track info/, /Delete from library…/, /Cancel/]); // v16.1: Add to playlist…
+    await expect(menu.getByRole('button')).toHaveText([/Play from here/, /Play next/, /Add to queue/, /Add to playlist…/, /Track info/, /Export with layers…/, /Delete from library…/, /Cancel/]); // v16.5: Export with layers… // v16.1: Add to playlist…
     await expect(menu.getByTestId('library-menu-info')).toContainText('Track info');
     await expect(menu.getByTestId('library-menu-delete')).toContainText('Delete from library…');
     await expect(menu.getByTestId('library-menu-delete')).toContainText('The original file is not touched.');
@@ -858,8 +859,7 @@ test.describe('phone, the row menu', () => {
     await expect(ask.getByTestId('dialog-body')).toHaveText(`"${other}" will be removed from your library, and the copy stored on this device deleted. The original file is not touched. It also comes out of the list that's playing.`);
     await ask.getByRole('button', { name: 'Cancel', exact: true }).click();
     // Classic: the dialog's text byte for byte as v15.6, even for the playing track.
-    await tab(page, 'more');
-    await page.getByTestId('more-back-to-classic').click();
+    await backToClassicViaMore(page);
     await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
     const cur = (await libraryState(page)).current!;
     await page.locator('div.group').filter({ has: page.getByText(cur, { exact: true }) }).getByTitle('Delete song').evaluate((b) => (b as HTMLElement).click());
@@ -1646,8 +1646,7 @@ test.describe('phone, notices', () => {
     await healthAction(page, 'scan').click();
     await expect(healthLine(page, 'scan')).toHaveText(/^Optional · /, { timeout: 30_000 });
     // Classic: the box, as v15.6.
-    await tab(page, 'more');
-    await page.getByTestId('more-back-to-classic').click();
+    await backToClassicViaMore(page);
     await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
     // Deep Scan's start clears the notice 8 s later, whatever it says by then (v15.6): past that, so the import's own
     // words are still up when they are read.

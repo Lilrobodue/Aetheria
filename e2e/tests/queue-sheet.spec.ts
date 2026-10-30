@@ -102,7 +102,7 @@ test.describe('S1 (phone)', () => {
     await expect(menu).toBeVisible();
     await expect(menu.getByTestId('library-menu-next')).toContainText('Right after the track that’s playing');
     await expect(menu.getByTestId('library-menu-queue')).toContainText('Right after the track that’s playing');
-    await expect(menu.getByRole('button')).toHaveText([/Play from here/, /Play next/, /Add to queue/, /Add to playlist…/, /Track info/, /Delete from library…/, /Cancel/]); // v16.1: Add to playlist…
+    await expect(menu.getByRole('button')).toHaveText([/Play from here/, /Play next/, /Add to queue/, /Add to playlist…/, /Track info/, /Export with layers…/, /Delete from library…/, /Cancel/]); // v16.5: Export with layers… // v16.1: Add to playlist…
     await tap(page, menu.getByTestId('library-menu-next'));
     await expect(menu).toHaveCount(0);
     await expect(undoToast(page)).toContainText('Playing next: tone-0005.');

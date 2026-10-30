@@ -294,10 +294,10 @@ test.describe('phone, touch', () => {
     await reveal();
     await page.getByTestId('np-menu-button').click();
     await page.getByTestId('menu-track-info').click();
-    await expect(page.getByTestId('readout-dialog')).toBeVisible();
+    await expect(page.getByTestId('track-info-dialog')).toBeVisible(); // v16.5: the honest Track info (was the readout)
     await stays('Track info');
     await page.keyboard.press('Escape');
-    await expect(page.getByTestId('readout-dialog')).toHaveCount(0);
+    await expect(page.getByTestId('track-info-dialog')).toHaveCount(0);
     await expectShellHidden(page, 'hidden after Track info closes');
     // Another tab.
     await reveal();

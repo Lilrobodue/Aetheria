@@ -16,6 +16,7 @@ import {
   resetRenders,
   sheet,
   tab,
+  backToClassicViaMore,
   tapCount,
   acceptDisclaimerNew,
 } from './helpers';
@@ -534,7 +535,7 @@ test.describe('phone', () => {
     expect(await stored(page, PAUSED_KEY)).toBe('true');
     // Classic never reads it: it draws.
     await page.getByRole('button', { name: 'Back to More', exact: true }).click();
-    await moreRow(page, 'more-back-to-classic').click();
+    await backToClassicViaMore(page);
     await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
     await expect.poll(() => canvasHidden(page)).toBe(false);
     const d = (await drawsPerSecond(page, 3)).slice(1);
@@ -633,7 +634,7 @@ test.describe('phone, recording', () => {
   async function recordInClassic(page: Page, kind: RegExp): Promise<void> {
     await tab(page, 'more');
     if ((await page.getByTestId('more').getAttribute('data-more-view')) !== 'root') await tab(page, 'more');
-    await moreRow(page, 'more-back-to-classic').click();
+    await backToClassicViaMore(page);
     await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
     await page.locator('header').getByRole('button', { name: 'Record', exact: true }).click();
     await page.getByText('Start Recording', { exact: true }).waitFor();
@@ -646,6 +647,8 @@ test.describe('phone, recording', () => {
 
   async function stopRecording(page: Page): Promise<void> {
     await tab(page, 'more');
+    // v16.5: More may reopen on Advanced (the classic layout's way): the card is on the root.
+    if ((await page.getByTestId('more').getAttribute('data-more-view')) !== 'root') await tab(page, 'more');
     await Promise.all([page.waitForEvent('download', { timeout: 20_000 }), moreRow(page, 'more-stop-recording').click()]);
   }
 

@@ -6,13 +6,21 @@
 // v16.1 (mockup np-menu-phone): "Add to playlist…" (the playing track; hidden with none) and "Save as a playlist…" (what's
 // playing; hidden with nothing), after Track info. Each closes the menu first (the Add sheet, the name Dialog).
 // v16.4: "Visuals" after Stop all sound: the Visuals sheet takes the menu's place (one sheet at a time).
+// v16.5: "Record" after Visuals while no recording runs (the Record sheet takes the menu's place; while one runs, the
+// existing "Stop recording" row stops it at once, as before); Track info opens the honest Track info (TrackInfoHost).
+// v16.5 (Export with layers): "Export with layers…" after Record, with a track: the Export sheet takes the menu's place.
+// v16.5 review (A5): while a recording runs, "Stop recording" takes Record's own slot, so no row moves: it used to
+// come after "Save as a playlist…", the rows above it shifting up by one, so a tap meant for Save as a playlist
+// stopped the recording.
 
 import React from 'react';
-import { ArrowLeftRight, Circle, Eye, EyeOff, Info, ListPlus, OctagonX, Save, SlidersHorizontal } from 'lucide-react';
+import { ArrowLeftRight, Circle, Eye, EyeOff, FileAudio, Info, ListPlus, OctagonX, Save, SlidersHorizontal } from 'lucide-react';
 import Sheet from '../../ui/Sheet';
 import ListRow from '../../ui/ListRow';
 import { ViewBoundary } from '../../ErrorBoundary';
-import { useActions, usePlayer, useShell } from '../contexts';
+import { useActions, useExportActions, usePlayer, useShell } from '../contexts';
+import ExportRowLine from '../export/ExportRowLine';
+import { EXPORT_ROW, ROW_PLAYING } from '../../../utils/export/exportWords';
 import { zenMenuRow } from '../zenModel';
 import { addRowLine, saveRowLine } from '../playlists/playlistsViewModel';
 import { countRender } from '../devRenders';
@@ -21,6 +29,7 @@ import { sheetFallback } from './sheetFallback';
 const MenuBody = () => {
   countRender('MenuBody');
   const actions = useActions();
+  const exportActions = useExportActions();
   const { isRecording, hasTrack, trackId, title } = usePlayer();
   const { zen } = useShell();
   const zenRow = zenMenuRow(zen.on);
@@ -55,6 +64,29 @@ const MenuBody = () => {
         onClick={actions.openVisuals}
         data-testid="menu-visuals"
       />
+      {!isRecording ? (
+        <ListRow title="Record" subtitle="Audio, visuals or both" icon={<Circle size={20} />} onClick={actions.openRecord} data-testid="menu-record" />
+      ) : (
+        <ListRow
+          title="Stop recording"
+          subtitle="Saves the recording to your downloads"
+          icon={<Circle size={20} className="stroke-status-error" />}
+          onClick={() => {
+            actions.closeSheet();
+            actions.stopRecording();
+          }}
+          data-testid="menu-stop-recording"
+        />
+      )}
+      {hasTrack ? (
+        <ListRow
+          title={EXPORT_ROW}
+          subtitle={<ExportRowLine text={ROW_PLAYING} />}
+          icon={<FileAudio size={20} />}
+          onClick={() => exportActions.open({ kind: 'playing' })}
+          data-testid="menu-export"
+        />
+      ) : null}
       <ListRow title="Track info" subtitle="Crystal, key and scan details for this track" icon={<Info size={20} />} onClick={actions.trackInfo} data-testid="menu-track-info" />
       {hasTrack && trackId ? (
         <ListRow
@@ -75,17 +107,6 @@ const MenuBody = () => {
           icon={<Save size={20} />}
           onClick={() => actions.savePlaylist('playing')}
           data-testid="menu-save-playlist"
-        />
-      ) : null}
-      {isRecording ? (
-        <ListRow
-          title="Stop recording"
-          subtitle="Saves the recording to your downloads"
-          icon={<Circle size={20} className="stroke-status-error" />}
-          onClick={() => {
-            actions.closeSheet();
-            actions.stopRecording();
-          }}
         />
       ) : null}
       <ListRow

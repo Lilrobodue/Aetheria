@@ -4,10 +4,10 @@
 // the clock), Keep screen awake's stored value, About's status lines (aboutStatus), and the statement page's version
 // line. Free of app imports, so Node checks it directly (moreModel.check.ts: `npm run check:shell`).
 
-/** The More tab's pages (v16.5 adds guide, journal and advanced). The Visuals sheet is a sheet, not a page. */
-export type MoreView = 'root' | 'safety' | 'statement' | 'about' | 'links';
+/** The More tab's pages (v16.5 adds guide, journal and advanced). The Visuals and Record sheets are sheets, not pages. */
+export type MoreView = 'root' | 'safety' | 'statement' | 'about' | 'links' | 'guide' | 'journal' | 'advanced';
 
-export const MORE_VIEWS: ReadonlyArray<MoreView> = ['root', 'safety', 'statement', 'about', 'links'];
+export const MORE_VIEWS: ReadonlyArray<MoreView> = ['root', 'safety', 'statement', 'about', 'links', 'guide', 'journal', 'advanced'];
 
 export function isMoreView(v: unknown): v is MoreView {
   return typeof v === 'string' && (MORE_VIEWS as ReadonlyArray<string>).includes(v);
@@ -20,6 +20,9 @@ export const VIEW_TITLES: Readonly<Record<MoreView, string>> = {
   statement: 'Safety statement',
   about: 'About',
   links: 'Links',
+  guide: 'Guide',
+  journal: 'Journal',
+  advanced: 'Advanced',
 };
 
 /**
@@ -57,9 +60,13 @@ export function backLabel(view: MoreView, from?: MoreView | null): string {
 // ---------------------------------------------------------------------------------------------------------------
 
 export const GROUP_VISUALS = 'Visuals and recording';
+/** v16.5. */
+export const GROUP_LEARN = 'Learn';
 export const GROUP_SAFETY = 'Safety';
 export const GROUP_ABOUT = 'About';
-/** v16.4 only: what part 2 (v16.5) brings is still in the classic layout. */
+/** v16.5. */
+export const GROUP_ADVANCED = 'Advanced';
+/** v16.4 only (v16.5 retires the group: its row is Advanced's Use the classic layout). */
 export const GROUP_CLASSIC = 'In the classic layout for now';
 
 export const SAFETY_ROW_SUBTITLE = 'Stop all sound, Music only, the safety statement';
@@ -68,6 +75,28 @@ export const CLASSIC_ROW_TITLE = 'Guide, Record, Journal, scan scores';
 export const CLASSIC_ROW_SUBTITLE = 'Use the classic layout; the music keeps playing';
 export const TOUR_ROW_SUBTITLE = 'Four cards: your music, the 27 crystals, the layers, where things are';
 export const STATEMENT_ROW_SUBTITLE = 'What this tool is and is not; photosensitivity, audio, data';
+
+// v16.5, the part-2 rows (spec §3.2).
+export const RECORD_ROW_SUBTITLE = 'Audio, visuals or both, saved to your downloads';
+export const GUIDE_ROW_SUBTITLE = 'Plain language or technical, with the Lo Shu cube';
+export const JOURNAL_ROW_SUBTITLE = 'Notes on how a session felt, kept on this device';
+export const JOURNAL_ROW_DOCUMENTING = 'A session is being documented';
+export const ADVANCED_ROW_SUBTITLE = 'Experimental scan scores, the classic layout';
+export const EXPERIMENTAL_BADGE = 'Experimental';
+
+/** The Journal row's line: while a session is documented, it says so. */
+export function journalRowSubtitle(documenting: boolean): string {
+  return documenting ? JOURNAL_ROW_DOCUMENTING : JOURNAL_ROW_SUBTITLE;
+}
+
+/** "3:12", "1:02:03": a recording's elapsed time from its start (ms) to now (ms); 0:00 before it or on bad input. */
+export function elapsedText(sinceMs: number, nowMs: number): string {
+  const s = Number.isFinite(sinceMs) && Number.isFinite(nowMs) && nowMs > sinceMs ? Math.floor((nowMs - sinceMs) / 1000) : 0;
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
+}
 
 /** About's row: "Version v16.4", plus " · an update is ready" while one is. */
 export function aboutRowSubtitle(version: string | null | undefined, updateReady: boolean): string {
@@ -116,6 +145,8 @@ export interface AboutInput {
   /** The music or the tone plays (isPlaying || isSolfeggioActive): Reloading stops it. */
   audible: boolean;
   recording: boolean;
+  /** v16.5: an export runs (a reload would lose it). */
+  exporting?: boolean;
   check: UpdateCheck;
 }
 
@@ -145,6 +176,12 @@ export function isAppCacheKey(k: unknown, version: string | null | undefined): b
 export const UPDATE_READY_TEXT = 'A new version of Aetheria is ready.';
 export const UPDATE_STOPS_MUSIC = ' Reloading stops the music.';
 export const RELOAD_RECORDING_NOTE = 'Stop the recording first: reloading would lose it.';
+/** v16.5. */
+export const RELOAD_EXPORT_NOTE = 'Wait for the export to finish: reloading would lose it.';
+/** v16.5 final: the label of flushAndReload's "the library couldn't be saved" toast action, which App's showStatusToast
+ *  holds while a recording or an export runs. flushAndReload (pinned by check:writers) writes it as a literal; this
+ *  module's check asserts that literal is this value, so a rename of either fails `npm run check:shell`. */
+export const RELOAD_ANYWAY_LABEL = 'Reload anyway';
 
 /** About's status lines, from what the page read (no App state but the update flag; event-driven, no polling). */
 export function aboutStatus(input: Partial<AboutInput> | null | undefined): AboutStatus {
@@ -159,11 +196,12 @@ export function aboutStatus(input: Partial<AboutInput> | null | undefined): Abou
     ? { title: 'Online', sub: 'Updates are checked when the app opens' }
     : { title: 'Offline', sub: 'The app works offline; updates wait for a connection' };
   const recording = !!i.recording;
+  const exporting = !!i.exporting;
   const update = i.updateReady
     ? {
         text: `${UPDATE_READY_TEXT}${i.audible ? UPDATE_STOPS_MUSIC : ''}`,
-        reloadDisabled: recording,
-        note: recording ? RELOAD_RECORDING_NOTE : null,
+        reloadDisabled: recording || exporting,
+        note: recording ? RELOAD_RECORDING_NOTE : exporting ? RELOAD_EXPORT_NOTE : null,
       }
     : null;
   const check = i.check ?? 'idle';
@@ -203,6 +241,39 @@ export function settleCheck(current: UpdateCheck, state: string | null | undefin
   if (state === 'redundant') return 'failed';
   return 'downloading';
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// v16.5: the Guide, the Journal and Advanced (spec §3.7, §3.9, §3.10; their words are new, for the copy pass)
+// ---------------------------------------------------------------------------------------------------------------
+
+export type GuideView = 'plain' | 'technical';
+export const GUIDE_VIEW_LABEL = 'Guide view';
+export const GUIDE_VIEWS: ReadonlyArray<{ value: GuideView; label: string }> = [
+  { value: 'plain', label: 'Plain language' },
+  { value: 'technical', label: 'Technical' },
+];
+
+export function isGuideView(v: unknown): v is GuideView {
+  return v === 'plain' || v === 'technical';
+}
+
+export const JOURNAL_LINE = 'Document how a session felt: before and after, sensations and notes. Kept on this device only.';
+export const JOURNAL_EXPERIMENTAL_LINE = 'Experimental: self-reports, not measurements.';
+
+export const ADVANCED_EXPERIMENTAL = 'Experimental';
+export const ADVANCED_LAYOUT = 'Layout';
+export const ADVANCED_TESTING = 'For testing';
+export const SCAN_SCORES_TITLE = 'Show experimental scan scores';
+export const SCAN_SCORES_LINE =
+  "Deep Scan's golden-ratio, 111 and DNA scores, on Library rows and in Track info. They are scores from an unreliable reading of the spectrum, not measurements.";
+export const LAYOUT_STATUS = 'new (beta)';
+export const LAYOUT_LINE = 'The classic layout has every control on one screen. The music keeps playing when you switch.';
+export const USE_CLASSIC = 'Use the classic layout';
+export const PERF_TITLE = 'Performance readout';
+export const PERF_LINE = 'Frames, renders and long tasks in a corner of the screen. Shows from the next launch.';
+export const PERF_ON_NOW = 'On now';
+/** Track info with nothing loaded: classic's own toast, verbatim. */
+export const NO_TRACK_FOR_INFO = 'No track currently selected for analysis.';
 
 // ---------------------------------------------------------------------------------------------------------------
 // "A tap on the active More tab goes back to the root" (the tab bar and the side nav ask; the mounted More tab answers)

@@ -148,9 +148,13 @@ interface CellProps {
   selected?: boolean;
   onSelect?: (hz: number) => void;
   colorMode?: FrequencyColorMode;
+  /** v16.5 final (the new layout's Guide only): the cell holds its content. On a phone a label can be wider than its
+   *  cell (the phone's own font and text scaling): centred, it spilled over both neighbours and took their taps.
+   *  Clipped to the cell (and sized to it), and scrolled into view clear of the Guide's sticky row. */
+  contain?: boolean;
 }
 
-const Cell: React.FC<CellProps> = ({ freq, position, name, selected, onSelect, colorMode }) => {
+const Cell: React.FC<CellProps> = ({ freq, position, name, selected, onSelect, colorMode, contain }) => {
   const root = digitRoot(freq);
   const color = colorMode === 'spectrum'
     ? frequencyToSpectrumColor(freq)
@@ -162,6 +166,7 @@ const Cell: React.FC<CellProps> = ({ freq, position, name, selected, onSelect, c
     ? 'cursor-pointer hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-black'
     : '';
   const selectedRing = selected ? 'ring-2 ring-offset-2 ring-offset-black' : '';
+  const containClasses = contain ? ' overflow-hidden min-w-0 scroll-mt-16' : '';
 
   const handleClick = () => onSelect?.(freq);
   const handleKey = (e: React.KeyboardEvent) => {
@@ -183,8 +188,9 @@ const Cell: React.FC<CellProps> = ({ freq, position, name, selected, onSelect, c
           ? `Play ${freq} Hz — ${name} (root ${root})`
           : `${name} — root ${root} (${ROOT_LABEL[root]})`
       }
-      className={`${baseClasses} ${interactiveClasses} ${selectedRing}`}
+      className={`${baseClasses} ${interactiveClasses} ${selectedRing}${containClasses}`}
       style={{
+        ...(contain ? { containerType: 'inline-size' as const } : {}),
         borderColor: selected ? color : `${color}55`,
         boxShadow: selected
           ? `inset 0 0 18px ${color}55, 0 0 12px ${color}66`
@@ -201,7 +207,7 @@ const Cell: React.FC<CellProps> = ({ freq, position, name, selected, onSelect, c
         {root}
       </span>
       <div className="text-base sm:text-lg font-bold font-mono" style={{ color }}>
-        {freq}
+        {contain ? <span style={{ fontSize: 'min(1em, 36cqi)' }}>{freq}</span> : freq}
       </div>
       <div className="text-[9px] text-slate-400 mt-0.5">Hz</div>
     </div>
@@ -213,9 +219,10 @@ interface RegimeBlockProps {
   currentFrequency?: number;
   onSelectFrequency?: (hz: number) => void;
   colorMode?: FrequencyColorMode;
+  contain?: boolean;
 }
 
-const RegimeBlock: React.FC<RegimeBlockProps> = ({ regime, currentFrequency, onSelectFrequency, colorMode }) => {
+const RegimeBlock: React.FC<RegimeBlockProps> = ({ regime, currentFrequency, onSelectFrequency, colorMode, contain }) => {
   const analysis = useMemo(() => analyze(regime.freqs), [regime.freqs]);
   const { rows, cols, diags, expected, perfect, perfectCount } = analysis;
 
@@ -253,6 +260,7 @@ const RegimeBlock: React.FC<RegimeBlockProps> = ({ regime, currentFrequency, onS
                   selected={currentFrequency === freq}
                   onSelect={onSelectFrequency}
                   colorMode={colorMode}
+                  contain={contain}
                 />
               );
             })}
@@ -337,6 +345,8 @@ interface LoShuMatrixProps {
   /** Setter for the colour-mode toggle inside the matrix. Render an inline
    *  toggle when provided so the Guidebook can switch palettes in context. */
   onColorModeChange?: (mode: FrequencyColorMode) => void;
+  /** v16.5 final: the new layout's Guide asks the cells to contain their content (Cell `contain`); classic doesn't. */
+  containCells?: boolean;
 }
 
 // The matrix surfaces the three Lo Shu walks (A/B/C) plus the omnibus
@@ -396,6 +406,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
   activeWalkMode,
   colorMode,
   onColorModeChange,
+  containCells,
 }) => {
   const [internalShowPerfect, setInternalShowPerfect] = useState(false);
   const isControlled = loShuPerfectGUT !== undefined;
@@ -642,9 +653,9 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
         </div>
       )}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <RegimeBlock regime={gut} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} />
-        <RegimeBlock regime={HEART} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} />
-        <RegimeBlock regime={HEAD} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} />
+        <RegimeBlock regime={gut} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} contain={containCells} />
+        <RegimeBlock regime={HEART} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} contain={containCells} />
+        <RegimeBlock regime={HEAD} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} contain={containCells} />
       </div>
 
       {/* Interval architecture */}

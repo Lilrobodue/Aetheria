@@ -4,12 +4,15 @@
 // a tone plays (mockup mini-player-library): a 2 px progress line (MiniProgress, the only part that follows the clock),
 // a crystal tile with the regime dot, the title and "1449 Hz · Vortex 3/27" (together one button, 48 px tall, that
 // opens Now Playing), Play/Pause 48 and Next 44.
+// v16.5 (mockup rec-pill-library-phone): while a recording runs, the REC pill sits between the title and Play, so every
+// tab shows it (a tap opens Record, decision 4 A).
 
 import React from 'react';
 import { Pause, Play, SkipForward } from 'lucide-react';
 import { useActions, usePlayer, useSound } from './contexts';
 import { countRender } from './devRenders';
 import MiniProgress from './MiniProgress';
+import RecButton from './RecButton';
 import { REGIME_DOT, regimeOf } from './shellModel';
 
 const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400';
@@ -41,6 +44,7 @@ const MiniPlayer = () => {
           <span className="block text-xs text-ink-muted truncate">{sub}</span>
         </span>
       </button>
+      <RecButton />
       <button
         type="button"
         aria-label={p.isPlaying ? 'Pause' : 'Play'}

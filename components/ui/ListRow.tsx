@@ -4,6 +4,8 @@
 // `current` marks the active row (aria-current="true"); the icon's colour is the caller's (a stroke-* class on the icon
 // for the danger row: text colours stay ink-*).
 // v16.4: `chevron` adds a trailing ChevronRight (aria-hidden): the row opens a page (the More area).
+// v16.5 (additive; absent, the markup is v16.4's): `badge`, a label right after the title (the Journal's dashed
+// Experimental); the subtitle may be a node (a leaf that ticks on its own: Record's elapsed time).
 
 import React from 'react';
 import type { ReactNode } from 'react';
@@ -11,7 +13,9 @@ import { ChevronRight } from 'lucide-react';
 
 interface ListRowProps {
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
+  /** v16.5: a label after the title (a Badge). */
+  badge?: ReactNode;
   icon?: ReactNode;
   onClick: () => void;
   current?: boolean;
@@ -23,7 +27,7 @@ interface ListRowProps {
   'data-testid'?: string;
 }
 
-const ListRow = ({ title, subtitle, icon, onClick, current, trailing, chevron, buttonRef, 'data-testid': testId }: ListRowProps) => (
+const ListRow = ({ title, subtitle, icon, onClick, current, trailing, chevron, badge, buttonRef, 'data-testid': testId }: ListRowProps) => (
   <button
     type="button"
     ref={buttonRef}
@@ -38,7 +42,14 @@ const ListRow = ({ title, subtitle, icon, onClick, current, trailing, chevron, b
       </span>
     ) : null}
     <span className="flex-1 min-w-0">
-      <span className="block text-base text-ink-strong">{title}</span>
+      {badge ? (
+        <span className="flex items-center gap-2">
+          <span className="text-base text-ink-strong">{title}</span>
+          {badge}
+        </span>
+      ) : (
+        <span className="block text-base text-ink-strong">{title}</span>
+      )}
       {subtitle ? <span className="block text-xs text-ink-muted">{subtitle}</span> : null}
     </span>
     {trailing ?? null}

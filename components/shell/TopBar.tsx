@@ -1,6 +1,6 @@
 // components/shell/TopBar.tsx (v15.5, the new layout beta)
 //
-// Now Playing's top bar on the phone: AETHERIA, Beta, REC while a recording runs (a tap stops it), and ⋯ (the menu). A gradient scrim
+// Now Playing's top bar on the phone: AETHERIA, Beta, REC while a recording runs (v16.5: a tap opens Record), and ⋯ (the menu). A gradient scrim
 // over the visualizer, never a blur (I13: no backdrop-filter over the canvas). The Spectrum lens's top inset is
 // measured from it (headerRef). Hidden on a landscape phone, where Now Playing carries its own ⋯.
 // v15.6: the Zen button (the eye) sits left of ⋯ (decision 1, option A).

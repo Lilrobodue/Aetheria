@@ -35,13 +35,13 @@ export async function playingSeeded(page: Page, n = 6, opts: SeedOptions = {}): 
 /** A row of the More root (by its test id). */
 export const moreRow = (page: Page, testId: string): Locator => page.getByTestId('more-root').getByTestId(testId);
 
-/** The More tab's page now showing ('root', 'safety', 'statement', 'about', 'links'). */
+/** The More tab's page now showing ('root', 'safety', 'statement', 'about', 'links'; v16.5 'guide', 'journal', 'advanced'). */
 export async function moreView(page: Page): Promise<string | null> {
   return page.getByTestId('more').getAttribute('data-more-view');
 }
 
 /** Open a More page from the root: the More tab, then its row (the statement through Safety & comfort). */
-export async function openMorePage(page: Page, view: 'safety' | 'statement' | 'about' | 'links'): Promise<void> {
+export async function openMorePage(page: Page, view: 'safety' | 'statement' | 'about' | 'links' | 'guide' | 'journal' | 'advanced'): Promise<void> {
   await tab(page, 'more');
   await page.getByTestId('more').waitFor();
   if ((await moreView(page)) !== 'root') await tab(page, 'more'); // a second tap: the root

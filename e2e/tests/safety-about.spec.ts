@@ -15,6 +15,7 @@ import {
   openHarmonicControl,
   phoneSize,
   tab,
+  backToClassicViaMore,
 } from './helpers';
 import { watchNativeDialogs } from './fixtures';
 import {
@@ -286,7 +287,7 @@ test.describe('phone', () => {
     await expect.poll(async () => (await wl()).held).toBe(0);
     const offAgain = await wl();
     await page.getByRole('button', { name: 'Back to More', exact: true }).click();
-    await moreRow(page, 'more-back-to-classic').click();
+    await backToClassicViaMore(page);
     await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
     const bar = page.getByTestId('player-bar');
     await bar.getByRole('button', { name: 'Pause', exact: true }).first().evaluate((b) => (b as HTMLButtonElement).click());
@@ -448,7 +449,7 @@ test.describe('phone', () => {
     const dialogs = await playingSeeded(page);
     await openMorePage(page, 'about');
     const about = page.getByTestId('more-about');
-    await expect(page.getByTestId('about-version')).toHaveText('Version v16.4 · new layout (beta)');
+    await expect(page.getByTestId('about-version')).toHaveText('Version v16.5 · new layout (beta)');
     await expect(about).toContainText('Nothing about your listening sessions leaves your device.');
     // The suite blocks service workers: not saved, and nothing to ask for an update.
     await expect(page.getByTestId('about-offline')).toContainText('Not saved for offline use yet');
@@ -480,7 +481,7 @@ test.describe('phone', () => {
     if ((await moreView(page)) !== 'about') await openMorePage(page, 'about');
     const version = ((await page.getByTestId('about-version').textContent()) ?? '').replace(/^Version (\S+) .*$/, '$1');
     await page.getByRole('button', { name: 'Back to More', exact: true }).click();
-    await moreRow(page, 'more-back-to-classic').click();
+    await backToClassicViaMore(page);
     await expect(page.locator('header h1 > span').first()).toHaveText(version);
     expect(dialogs).toEqual([]);
   });
@@ -567,7 +568,7 @@ test.describe('phone', () => {
     await page.evaluate(() => {
       const sw = (window as any).__sw;
       sw.setController(true);
-      sw.keys = ['aetheria-v16.4-offline'];
+      sw.keys = ['aetheria-v16.5-offline'];
       navigator.serviceWorker.dispatchEvent(new Event('controllerchange'));
     });
     await expect.soft(offline, 'a new controller').toContainText('Works offline');
@@ -575,7 +576,7 @@ test.describe('phone', () => {
     await page.evaluate(() => ((window as any).__sw.keys = []));
     await reopen();
     await page.evaluate(() => {
-      (window as any).__sw.keys = ['aetheria-v16.4-offline'];
+      (window as any).__sw.keys = ['aetheria-v16.5-offline'];
       navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'OFFLINE_READY', added: 0, total: 9 } }));
     });
     await expect.soft(offline, "the worker's cached message").toContainText('Works offline');
@@ -584,7 +585,7 @@ test.describe('phone', () => {
     await reopen();
     await page.evaluate(() => {
       const sw = (window as any).__sw;
-      sw.keys = ['aetheria-v16.4-offline'];
+      sw.keys = ['aetheria-v16.5-offline'];
       sw.active.state = 'activated';
       sw.active.dispatchEvent(new Event('statechange'));
     });
@@ -594,12 +595,12 @@ test.describe('phone', () => {
 
   test('S5e. only this version\'s offline cache counts: another version\'s says "Not saved for offline use yet"', async ({ page }) => {
     test.setTimeout(150_000);
-    await stubServiceWorker(page, { controller: true, keys: ['aetheria-v16.3-offline', 'aetheria-v16.5-offline'] });
+    await stubServiceWorker(page, { controller: true, keys: ['aetheria-v16.3-offline', 'aetheria-v16.4-offline', 'aetheria-v16.6-offline'] });
     const dialogs = await playingSeeded(page);
     await openMorePage(page, 'about');
     const offline = page.getByTestId('about-offline');
     await expect(offline, "another version's cache").toContainText('Not saved for offline use yet');
-    await page.evaluate(() => ((window as any).__sw.keys = ['aetheria-v16.3-offline', 'aetheria-v16.4-offline']));
+    await page.evaluate(() => ((window as any).__sw.keys = ['aetheria-v16.4-offline', 'aetheria-v16.5-offline']));
     await page.getByRole('button', { name: 'Back to More', exact: true }).click();
     await openMorePage(page, 'about');
     await expect(offline, "this version's").toContainText('Works offline');
@@ -625,12 +626,13 @@ test.describe('phone', () => {
     await next.click();
     await expect(page.getByRole('dialog', { name: 'Tour, card 2 of 4', exact: true })).toContainText('27 crystals, three ranges');
     await next.click();
-    // Card 3 names the Guidebook where v16.4 has it (v16.4 review: there is no More › Guide yet).
+    // Card 3 names the Guide where v16.5 has it: More › Guide.
     const card3 = page.getByRole('dialog', { name: 'Tour, card 3 of 4', exact: true });
     await expect(card3).toContainText(
-      'The Guidebook: In the classic layout for now: More › Guide, Record, Journal, scan scores, then the book icon in the sidebar. Plain language or the technical view.'
+      'The Guide: More › Guide, in plain language or the technical view.'
     );
-    await expect(card3).not.toContainText('More › Guide, in plain language');
+    // v16.5: the Guide is in More (v16.4 named the classic Guidebook, through a row v16.5 moved into Advanced).
+    await expect(card3).not.toContainText('In the classic layout for now');
     await next.click();
     const last = page.getByRole('dialog', { name: 'Tour, card 4 of 4', exact: true });
     await expect(last).toContainText('Where things are');

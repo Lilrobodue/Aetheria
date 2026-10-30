@@ -18,6 +18,9 @@
 // sw.js CACHE_NAME. Exit code 1 on any failure; a JSON report on stdout.
 // v16.4: online, the new layout's More › About is opened too, and must say "Works offline" and name <version> (then the
 // classic layout again, for the offline relaunch).
+// v16.5: online, a synthetic track is stored and the new layout stays open for 35 s: the Export engine (a lazy chunk the
+// app fetches once on idle) must then be in the cache. After the offline boot, the new layout opens offline and exports
+// that track (the download caught in the page, nothing saved): it must complete.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -176,6 +179,32 @@ try {
   };
   check('More › About says "Works offline"', /^Works offline/.test(report.about.offline), report.about.offline);
   check(`More › About names ${VERSION}`, report.about.version.includes(VERSION), report.about.version);
+  // ---- v16.5: Export with layers' engine chunk is cached by the idle prefetch ----
+  await page.evaluate(async () => {
+    const rate = 8000, secs = 6, len = rate * secs;
+    const buf = new ArrayBuffer(44 + len * 2);
+    const v = new DataView(buf);
+    const w = (o, x) => { for (let i = 0; i < x.length; i++) v.setUint8(o + i, x.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + len * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+    v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    w(36, 'data'); v.setUint32(40, len * 2, true);
+    for (let i = 0; i < len; i++) v.setInt16(44 + i * 2, Math.round(Math.sin((2 * Math.PI * 220 * i) / rate) * 8000 * Math.min(1, i / 400, (len - i) / 400)), true);
+    const db = await new Promise((resolve, reject) => { const r = indexedDB.open('aetheria-db', 2); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+    const id = `${Date.now()}-offline1`;
+    const tx = db.transaction(['blobs', 'meta', 'playlist-state'], 'readwrite');
+    tx.objectStore('blobs').put({ id, fileBlob: new Blob([buf], { type: 'audio/wav' }), fileName: 'tone-offline.wav', fileType: 'audio/wav' });
+    tx.objectStore('meta').put({ id, name: 'tone-offline', duration: secs, harmonicFreq: 528, closestSolfeggio: 528, harmonicDeviation: 0 });
+    tx.objectStore('playlist-state').put({ key: 'current', playlistOrder: [id], originalOrder: [id], currentSongIndex: -1, loShuWalkMode: null, selectedSolfeggio: 528, savedAt: Date.now() });
+    await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
+    db.close();
+    localStorage.setItem('aetheria.layerEngine.v1', 'v2');
+    localStorage.setItem('aetheria.layerOutput.v1', 'headphones');
+  });
+  await page.reload();
+  await page.getByTestId('new-shell').waitFor({ timeout: 20_000 });
+  const engineCached = await waitForCached([/^\/assets\/engine-[\w-]+\.js$/], 60_000);
+  report.exportEngine = { cached: engineCached, assets: Object.values(await cacheContents()).flat().filter((u) => /engine/.test(u)) };
+  check('online: the Export engine chunk is in the offline cache after the idle prefetch', engineCached, report.exportEngine.assets);
   await page.evaluate(() => localStorage.setItem('aetheria.layout.v1', 'classic'));
   await page.reload();
   await appUp();
@@ -247,6 +276,42 @@ try {
     fs.mkdirSync(path.dirname(SHOT), { recursive: true });
     await page.screenshot({ path: SHOT, animations: 'disabled', style: 'canvas{visibility:hidden !important}' });
     report.offline.screenshot = SHOT;
+  }
+  // ---- v16.5: offline, the new layout exports the stored track (its download caught in the page) ----
+  if (booted) {
+    await page.addInitScript(() => {
+      const w = window;
+      w.__caught = [];
+      const click = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () {
+        if (this.hasAttribute('download') && this.href.startsWith('blob:')) {
+          const e = { name: this.download, size: null };
+          w.__caught.push(e);
+          fetch(this.href).then((r) => r.blob()).then((b) => { e.size = b.size; });
+          return;
+        }
+        return click.call(this);
+      };
+    });
+    await page.evaluate(() => localStorage.setItem('aetheria.layout.v1', 'new'));
+    await page.reload();
+    const shell = await page.getByTestId('new-shell').waitFor({ timeout: 20_000 }).then(() => true, () => false);
+    let exported = null;
+    if (shell) {
+      try {
+        await page.getByTestId('tab-library-button').click();
+        await page.getByRole('button', { name: 'Options for tone-offline', exact: true }).click({ timeout: 20_000 });
+        await page.getByTestId('library-menu-export').click();
+        await page.getByTestId('export-start').click({ timeout: 10_000 });
+        await page.getByTestId('export-done').waitFor({ timeout: 60_000 });
+        await page.waitForFunction(() => (window.__caught || []).some((c) => c.size), null, { timeout: 10_000 });
+        exported = await page.evaluate(() => window.__caught);
+      } catch (e) {
+        exported = { error: String(e?.message ?? e).slice(0, 300) };
+      }
+    }
+    report.offline.export = exported;
+    check('offline: Export with layers makes the file (the engine from the cache)', Array.isArray(exported) && exported.length === 1 && exported[0].name === 'tone-offline · 528 Hz · Aetheria.wav' && exported[0].size > 1000, exported);
   }
   report.pageErrors = errors;
   check('no page errors on the new build (online and offline)', errors.filter((e) => e.phase !== 'old').length === 0, errors);

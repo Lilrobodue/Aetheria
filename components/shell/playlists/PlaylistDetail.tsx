@@ -15,7 +15,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, EllipsisVertical, ListEnd, ListStart, Pencil, Play, Shuffle, X } from 'lucide-react';
 import { PanelFallback, ViewBoundary } from '../../ErrorBoundary';
-import { useActions, usePlayer, usePlaylists, useQueue, useShell } from '../contexts';
+import { useActions, useExportActions, usePlayer, usePlaylists, useQueue, useShell } from '../contexts';
 import type { PlaylistEntryValue } from '../contexts';
 import { countRender } from '../devRenders';
 import { addToQueueLine, playNextLine } from '../queue/queueViewModel';
@@ -45,6 +45,7 @@ const QUIET = `shrink-0 -mr-2 min-h-touch px-3 rounded-control text-sm text-ink-
 const DetailBody = ({ inPanel, onGoToTracks }: { inPanel: boolean; onGoToTracks: () => void }) => {
   countRender('PlaylistDetail');
   const actions = useActions();
+  const exportActions = useExportActions(); // v16.5
   const pls = usePlaylists();
   const { isPlaying } = usePlayer();
   const queue = useQueue();
@@ -137,6 +138,9 @@ const DetailBody = ({ inPanel, onGoToTracks }: { inPanel: boolean; onGoToTracks:
     } else if (a === 'playlist') {
       if (r.song) actions.addToPlaylist([r.song.id]);
     } else if (a === 'info') setInfoIndex(i);
+    else if (a === 'export') {
+      if (r.song) exportActions.open({ kind: 'track', id: r.song.id }); // v16.5
+    }
     else if (a === 'remove') actions.editPlaylist(open.id, { remove: { index: i, key: r.key } });
     else {
       const to = a === 'top' ? 0 : a === 'up' ? i - 1 : a === 'down' ? i + 1 : open.rows.length - 1;
@@ -145,6 +149,7 @@ const DetailBody = ({ inPanel, onGoToTracks }: { inPanel: boolean; onGoToTracks:
   };
   const onPlaylistAction = (a: PlaylistMenuAction) => {
     setPlMenu(false);
+    if (a === 'export') return exportActions.open({ kind: 'playlist', id: open.id }); // v16.5
     if (a === 'rename') actions.renamePlaylist(open.id);
     else if (a === 'duplicate') actions.duplicatePlaylist(open.id);
     else actions.deletePlaylist(open.id);
@@ -323,6 +328,7 @@ const DetailBody = ({ inPanel, onGoToTracks }: { inPanel: boolean; onGoToTracks:
           name={open.name}
           facts={rowFacts({ count: open.count, seconds: open.seconds, missing: open.missing, playing: pls.playingId === open.id })}
           onAction={onPlaylistAction}
+          canExport={open.present > 0}
           onClose={() => setPlMenu(false)}
         />
       ) : null}

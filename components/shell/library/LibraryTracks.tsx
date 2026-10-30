@@ -31,7 +31,7 @@ import EmptyState from '../../ui/EmptyState';
 import { PanelFallback, ViewBoundary } from '../../ErrorBoundary';
 import type { FallbackApi } from '../../ErrorBoundary';
 import type { Song } from '../../../types';
-import { useActions, useLibraryList, useLibrarySummary, usePlayer, useQueue, useShell, useWalk } from '../contexts';
+import { useActions, useExportActions, useLibraryList, useLibrarySummary, useMore, usePlayer, useQueue, useShell, useWalk } from '../contexts';
 import type { LibraryViewState } from '../contexts';
 import { addToQueueLine, playNextLine } from '../queue/queueViewModel';
 import { countRender } from '../devRenders';
@@ -119,6 +119,8 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
   const walk = useWalk();
   const queue = useQueue();
   const { libraryViewRef } = useShell();
+  const { scanScores: scanScoresOn } = useMore(); // v16.5: Advanced's experimental scan scores (the rows' badges)
+  const exportActions = useExportActions(); // v16.5: the row ⋯'s Export with layers…
   const menuLines = useMemo(
     () => ({ next: playNextLine(queue.nothingCurrent), queue: addToQueueLine(queue.waiting, queue.nothingCurrent) }),
     [queue.nothingCurrent, queue.waiting]
@@ -299,6 +301,7 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
     else if (a === 'next' || a === 'queue') actions.queueTracks([id], a);
     else if (a === 'playlist') actions.addToPlaylist([id]); // v16.1: the Add to playlist sheet
     else if (a === 'info') setInfoId(id);
+    else if (a === 'export') exportActions.open({ kind: 'track', id }); // v16.5
     else actions.requestDelete(id);
   };
 
@@ -372,6 +375,7 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
                     initialTopRef={initialTopRef}
                     onReset={onReset}
                     marks={queue.positions}
+                    scores={scanScoresOn}
                   />
                 ) : on ? (
                   <div data-testid="library-filter-empty" className="mx-4 mt-3 mb-6 p-4 rounded-card border border-dashed border-line-strong">

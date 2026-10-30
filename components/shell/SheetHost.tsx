@@ -6,6 +6,7 @@
 // panel on the desktop too.
 // v16.1: the Add to playlist sheet, modal on both shells (with the menu on the desktop).
 // v16.4: the Visuals sheet (decision 1 A): the phone's preview sheet over Now Playing, the desktop's panel.
+// v16.5: the Record sheet and the Export sheet: the phone's bottom sheets, the desktop's panel.
 
 import React from 'react';
 import { useShell } from './contexts';
@@ -17,6 +18,8 @@ import ImportSheet from './sheets/ImportSheet';
 import QueueSheet from './queue/QueueSheet';
 import AddToPlaylistSheet from './playlists/AddToPlaylistSheet';
 import VisualsSheet from './more/VisualsSheet';
+import RecordSheet from './more/RecordSheet';
+import ExportSheet from './export/ExportSheet';
 
 interface SheetHostProps {
   presentation: 'sheet' | 'panel';
@@ -36,6 +39,8 @@ const SheetHost = ({ presentation, only = 'all' }: SheetHostProps) => {
       {sheet === 'queue' && only !== 'menu' ? <QueueSheet presentation={presentation} /> : null}
       {sheet === 'playlist-add' && only !== 'panel' ? <AddToPlaylistSheet /> : null}
       {sheet === 'visuals' && only !== 'menu' ? <VisualsSheet presentation={presentation} /> : null}
+      {sheet === 'record' && only !== 'menu' ? <RecordSheet presentation={presentation} /> : null}
+      {sheet === 'export' && only !== 'menu' ? <ExportSheet presentation={presentation} /> : null}
     </>
   );
 };

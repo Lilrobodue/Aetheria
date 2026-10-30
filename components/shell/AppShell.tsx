@@ -11,6 +11,7 @@
 // v15.6: while Zen hides the controls, ZenReveal comes first ("Show controls", then the surface that turns the first
 // tap into a reveal). It sits outside the shell region and outside the inert shell root, as the announcer does, so the
 // shell's own fallback is covered by it too (the first tap only reveals).
+// v16.5: TrackInfoHost, the ⋯ menu's honest Track info for the playing track (a kit Dialog, modal on both shells).
 
 import React from 'react';
 import { ViewBoundary } from '../ErrorBoundary';
@@ -20,6 +21,7 @@ import PhoneShell from './PhoneShell';
 import DesktopShell from './DesktopShell';
 import TrackAnnouncer from './TrackAnnouncer';
 import ZenReveal from './ZenReveal';
+import TrackInfoHost from './TrackInfoHost';
 import { ShellCrash } from './fallbacks';
 
 const AppShell = () => {
@@ -35,6 +37,7 @@ const AppShell = () => {
           <>
             {phoneShell ? <PhoneShell /> : <DesktopShell />}
             <TrackAnnouncer />
+            <TrackInfoHost />
           </>
         )}
       />

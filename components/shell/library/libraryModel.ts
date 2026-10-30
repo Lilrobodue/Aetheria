@@ -14,6 +14,7 @@ import { formatTime, formatTotal, regimeName, regimeOf } from '../shellModel.ts'
 import { passButtonText, passEta, passEtaMinutes } from '../../../utils/library/analysePass.ts';
 import type { PassProgress } from '../../../utils/library/analysePass.ts';
 import { CHROMA_VERSION } from '../../../utils/soundV2/keyAnalysis.ts';
+import { BUSY_EXPORT, BUSY_STOPPING, BUSY_STOPPING_LONG } from '../../../utils/export/exportWords.ts';
 import { ALL_CRYSTALS, crystalOrigin, deepScanQueue, scanCrystalChanged } from '../../../utils/mix/distribution.ts';
 import type { CrystalSource } from '../../../utils/mix/distribution.ts';
 
@@ -505,6 +506,12 @@ export interface HealthInput {
   mobile: boolean;
   durationsLeft: number;
   orphans: { fresh: number; duplicates: number } | null;
+  /** v16.5 review (B10): an export runs: Analyse tracks and Deep Scan wait for it. */
+  exporting?: boolean;
+  /** v16.5 final: a cancelled export that was let go is still stopping (its decode may run on): they wait for it too. */
+  exportStopping?: boolean;
+  /** v16.5 export memory: and for a minute or more (the line adds "or reload Aetheria"). */
+  exportStoppingLong?: boolean;
 }
 
 export interface HealthModel {
@@ -670,6 +677,26 @@ export function healthModel(i: HealthInput): HealthModel {
       todo: true,
       action: { label: 'Review', kind: 'review', blocked: false },
     });
+  }
+
+  // v16.5 review (B10): while an export runs, Analyse tracks and Deep Scan don't start (their decodes would stack on
+  // the export's): their buttons are held, with the reason. A running pass's Stop stays.
+  if (i.exporting) {
+    for (const l of lines) {
+      const a = l.action;
+      if (!a || a.label === 'Stop' || (a.kind !== 'analyse' && a.kind !== 'scan' && a.kind !== 'scan-assigned')) continue;
+      l.action = { ...a, blocked: true };
+      l.sub = BUSY_EXPORT;
+    }
+  }
+  // v16.5 final: and while a cancelled export that was let go is still stopping (abandon() can't stop its decode).
+  if (i.exportStopping && !i.exporting) {
+    for (const l of lines) {
+      const a = l.action;
+      if (!a || a.label === 'Stop' || (a.kind !== 'analyse' && a.kind !== 'scan' && a.kind !== 'scan-assigned')) continue;
+      l.action = { ...a, blocked: true };
+      l.sub = i.exportStoppingLong ? BUSY_STOPPING_LONG : BUSY_STOPPING;
+    }
   }
 
   const toDo = lines.filter((l) => l.todo).length;

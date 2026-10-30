@@ -26,6 +26,7 @@ import {
   startWalk,
   tab,
   tapAt,
+  backToClassicViaMore,
   tapCount,
   LAYER_OUTPUT_KEY,
   LAYOUT_KEY,
@@ -583,14 +584,14 @@ test.describe('phone, heat guard', () => {
     await page.getByRole('button', { name: /Visuals Only/ }).click();
     await expect(page.getByText('Start Recording', { exact: true }), 'the recording started (its dialog closed)').toBeHidden({ timeout: 10_000 });
     await optInNewLayout(page);
-    await expect(page.getByTestId('rec-stop')).toBeVisible();
+    await expect(page.getByTestId('rec-open')).toBeVisible(); // v16.5: the pill opens Record (decision 4 A)
     await tab(page, 'library');
     await expectDrawing(page, 'Library while recording');
     // Stop it from the menu (on Now Playing).
     await tab(page, 'now');
     await moreOptions(page).click();
     await page.getByRole('button', { name: /Stop recording/ }).click();
-    await expect(page.getByTestId('rec-stop')).toHaveCount(0);
+    await expect(page.getByTestId('rec-open')).toHaveCount(0);
     await tab(page, 'library');
     await expectPaused(page, 'Library after the recording');
     expect(dialogs).toEqual([]);
@@ -847,8 +848,7 @@ test.describe('phone, peek', () => {
     await expect(pill).toHaveCount(0);
     await expect(page.getByTestId('view-now')).toBeVisible();
     // Classic proper has no pill.
-    await tab(page, 'more');
-    await page.getByTestId('more-back-to-classic').click();
+    await backToClassicViaMore(page);
     await expect(classicHeader(page)).toBeVisible();
     await expect(pill).toHaveCount(0);
     expect(await layoutPref(page)).toBe('classic');
@@ -1013,7 +1013,7 @@ test.describe('phone, review fixes', () => {
     expect(dialogs).toEqual([]);
   });
 
-  test('16b. REC shows in the top bar and in More while recording, and a tap stops it', async ({ page }) => {
+  test('16b. REC shows in the top bar and in More while recording; a tap opens Record (decision 4 A), and Stop and save stops it', async ({ page }) => {
     test.skip(ON_DEVICE, 'stopping the recording would save a file on the phone');
     test.setTimeout(120_000);
     await instrumentAudio(page);
@@ -1022,14 +1022,18 @@ test.describe('phone, review fixes', () => {
     await startVisualsRecording(page);
     await optInNewLayout(page);
     await phoneSize(page);
-    const rec = page.getByTestId('new-top-bar').getByTestId('rec-stop');
+    const rec = page.getByTestId('new-top-bar').getByTestId('rec-open');
     await expect(rec).toBeVisible();
-    await expect(rec).toHaveAccessibleName(/stop recording/i);
+    await expect(rec).toHaveAccessibleName('Rec, recording. Open Record');
     await tab(page, 'more');
     await expect(page.getByTestId('more-stop-recording')).toBeVisible();
     await tab(page, 'now');
     await rec.click();
-    await expect(page.getByTestId('rec-stop')).toHaveCount(0);
+    const record = page.getByRole('dialog', { name: 'Record', exact: true });
+    await expect(record, 'a tap opens the Record sheet').toBeVisible();
+    await expect(page.getByTestId('rec-open'), 'it did not stop the recording').toBeVisible();
+    await Promise.all([page.waitForEvent('download', { timeout: 20_000 }), record.getByTestId('record-stop-save').click()]);
+    await expect(page.getByTestId('rec-open')).toHaveCount(0);
     expect(dialogs).toEqual([]);
   });
 
@@ -1090,8 +1094,7 @@ test.describe('phone, review fixes', () => {
     const dialogs = await openNewLayout(page, { via: 'query' });
     expect(new URL(page.url()).searchParams.has('layout'), 'the param is gone from the address').toBe(false);
     expect(await layoutPref(page)).toBe('new');
-    await tab(page, 'more');
-    await page.getByTestId('more-back-to-classic').click();
+    await backToClassicViaMore(page);
     await expect(classicHeader(page)).toBeVisible();
     await page.reload();
     await acceptDisclaimer(page);

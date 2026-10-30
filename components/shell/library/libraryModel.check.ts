@@ -383,6 +383,28 @@ eq(mScan.lines[1].sub, 'Unavailable while Deep Scan runs', 'its reason (passButt
 eq(mScan.lines[0].action?.blocked, true, 'Assign blocked while Deep Scan runs (its toast explains)');
 eq([mScan.status, mScan.autoOpen], ['Scanning…', true], 'status while scanning');
 for (const p of BAD_NUMBERS) check(/^Scanning · \d+ %$/.test(healthModel(base({ isScanning: true, scanProgress: p })).lines[2].line), `scan progress total on ${p}`);
+// v16.5 review (B10): an export running holds Analyse tracks and Deep Scan (both scans), with the reason; nothing else.
+{
+  const mExp = healthModel(base({ exporting: true }));
+  eq([mExp.lines[1].action?.blocked, mExp.lines[1].sub], [true, 'Unavailable while an export runs'], 'exporting: Analyse held, the reason');
+  eq([mExp.lines[2].action?.blocked, mExp.lines[2].sub], [true, 'Unavailable while an export runs'], 'exporting: Deep Scan held');
+  eq(mExp.lines[0].action?.blocked ?? false, healthModel(base()).lines[0].action?.blocked ?? false, 'exporting: Assign as it was');
+  const mExpRun = healthModel(base({ exporting: true, pass: running }));
+  eq([mExpRun.lines[1].action?.label, mExpRun.lines[1].action?.blocked], ['Stop', false], 'exporting: a running pass keeps its Stop');
+  const mExpScan = healthModel(base({ exporting: true, isScanning: true, scanProgress: 5 }));
+  eq(mExpScan.lines[2].action, { label: 'Stop', kind: 'stop-scan', blocked: false }, 'exporting: a running scan keeps its Stop');
+  eq(JSON.stringify(healthModel(base({ exporting: false }))), JSON.stringify(healthModel(base())), 'not exporting: the card as it was');
+  // v16.5 final: a cancelled export that was let go and is still stopping holds them too, with its own reason.
+  const mStop = healthModel(base({ exportStopping: true }));
+  eq([mStop.lines[1].action?.blocked, mStop.lines[1].sub], [true, 'Unavailable while the cancelled export stops'], 'stopping: Analyse held, the reason');
+  eq([mStop.lines[2].action?.blocked, mStop.lines[2].sub], [true, 'Unavailable while the cancelled export stops'], 'stopping: Deep Scan held');
+  eq(healthModel(base({ exportStopping: true, pass: running })).lines[1].action?.label, 'Stop', 'stopping: a running pass keeps its Stop');
+  eq(JSON.stringify(healthModel(base({ exportStopping: false }))), JSON.stringify(healthModel(base())), 'not stopping: the card as it was');
+  // v16.5 export memory: still stopping a minute on, the line adds the reload.
+  const mLong = healthModel(base({ exportStopping: true, exportStoppingLong: true }));
+  eq([mLong.lines[1].sub, mLong.lines[2].sub], ['Unavailable while the cancelled export stops, or reload Aetheria', 'Unavailable while the cancelled export stops, or reload Aetheria'], 'a minute on: the reload added');
+  eq(JSON.stringify(healthModel(base({ exportStoppingLong: true }))), JSON.stringify(healthModel(base())), 'not stopping: the minute changes nothing');
+}
 // Restoring blocks Analyse.
 eq(healthModel(base({ restoring: true })).lines[1].action?.blocked, true, 'Analyse blocked while the library loads');
 // Failed and too long.

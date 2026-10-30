@@ -41,6 +41,28 @@ function readFlag(): boolean {
 
 export const perfHudEnabled: boolean = typeof window !== 'undefined' && readFlag();
 
+/** v16.5, More › Advanced › Performance readout: the same key ?perf=1 sets. It is read at module load, so the switch
+ *  takes effect from the next launch (the running session never changes); it lets the installed PWA, where no URL can
+ *  be typed, switch the readout on. Returns whether the write held. */
+export function setPerfHudNextLaunch(on: boolean): boolean {
+  try {
+    if (on) localStorage.setItem(FLAG_KEY, '1');
+    else localStorage.removeItem(FLAG_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** v16.5: the readout's saved choice (what the next launch reads), or false when storage is unreadable. */
+export function perfHudNextLaunch(): boolean {
+  try {
+    return localStorage.getItem(FLAG_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 let draws = 0;
 let commits = 0;
 
