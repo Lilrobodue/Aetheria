@@ -882,6 +882,110 @@ test.describe('style foundation (v15.3)', () => {
     expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
   });
 
+  test('j. the More area (v16.4): every class on screen has a rule; no blur and no endless animation, in each of its states', async ({ page }) => {
+    test.setTimeout(240_000);
+    const seen = new Map<string, string>();
+    const effects = new Set<string>();
+    const census = async (state: string) => {
+      await page.waitForTimeout(250);
+      await collectClasses(page, state, seen);
+      const found = await page.evaluate(() => {
+        const roots = Array.from(document.querySelectorAll('[data-testid="new-shell"], [role="dialog"], [role="alertdialog"], [data-testid="notices"]'));
+        const out: string[] = [];
+        for (const root of roots) {
+          for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+            const cs = getComputedStyle(el);
+            const tag = `${el.tagName.toLowerCase()}.${(el.getAttribute('class') || '').split(/\s+/).slice(0, 3).join('.')}`;
+            if (cs.backdropFilter && cs.backdropFilter !== 'none') out.push(`backdrop-filter ${cs.backdropFilter} on ${tag}`);
+            if (cs.animationName && cs.animationName !== 'none' && /infinite/.test(cs.animationIterationCount)) out.push(`infinite animation ${cs.animationName} on ${tag}`);
+          }
+        }
+        return out;
+      });
+      for (const f of found) effects.add(`${f} (${state})`);
+    };
+    await page.setViewportSize({ width: 411, height: 752 });
+    await seedLibraryRecords(page, 6, { real: 6, seconds: 40 });
+    await openNewLayout(page, { engine: 'v2', output: 'headphones' });
+    await page.getByTestId('tab-library-button').click();
+    await page.getByRole('button', { name: /^tone-0001/ }).first().click();
+    await page.getByTestId('tab-more-button').click();
+    await page.getByTestId('more-root').waitFor();
+    await census('More, the root');
+    await page.evaluate(() => window.dispatchEvent(new Event('aetheria:update-ready')));
+    await census('More, the root, an update ready');
+    await page.getByTestId('more-safety-row').click();
+    await page.getByTestId('more-safety').waitFor();
+    await census('Safety & comfort');
+    await page.getByTestId('safety-statement-row').click();
+    await page.getByTestId('more-statement').waitFor();
+    await census('the safety statement');
+    await page.getByRole('button', { name: 'Back to Safety & comfort', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to More', exact: true }).click();
+    await page.getByTestId('more-about-row').click();
+    await page.getByTestId('about-update').waitFor();
+    await census('About, the update card');
+    await page.getByTestId('about-tour-row').click();
+    for (let i = 1; i <= 4; i++) {
+      await page.getByRole('dialog', { name: `Tour, card ${i} of 4`, exact: true }).waitFor();
+      await census(`the tour, card ${i}`);
+      if (i < 4) await page.getByTestId('tour').getByRole('button', { name: 'Next', exact: true }).click();
+    }
+    await page.getByTestId('tour').getByRole('button', { name: 'Done', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to More', exact: true }).click();
+    await page.getByTestId('more-links-row').click();
+    await page.getByTestId('more-links').waitFor();
+    await census('Links');
+    await crash(page, 'more-links');
+    await page.getByTestId('more-page-fallback').waitFor();
+    await census('a page fallback');
+    await page.getByRole('button', { name: 'Reload panel', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to More', exact: true }).click();
+    // The Visuals sheet at each jump, with the dependent rows and the pause.
+    await page.getByTestId('more-visualizer').click();
+    await page.getByRole('dialog', { name: 'Visuals', exact: true }).waitFor();
+    for (const j of ['look', 'hexes', 'overlays', 'motion', 'comfort'] as const) {
+      await page.getByTestId(`visuals-jump-${j}`).click();
+      await census(`the Visuals sheet, ${j}`);
+    }
+    await page.getByTestId('visuals-jump-overlays').click();
+    await page.getByRole('switch', { name: 'Hydro-Acoustics', exact: true }).click();
+    await page.getByRole('switch', { name: 'Lo Shu Cube', exact: true }).click();
+    await census('the Visuals sheet, the cube and ripples');
+    await page.getByTestId('visuals-jump-hexes').click();
+    await page.getByRole('switch', { name: 'Hex grid', exact: true }).click();
+    await census('the Visuals sheet, the grid off');
+    await page.getByTestId('visuals-jump-comfort').click();
+    await page.getByRole('switch', { name: 'Pause visuals', exact: true }).click();
+    await census('the Visuals sheet, paused');
+    await page.getByRole('switch', { name: 'Pause visuals', exact: true }).click();
+    await crash(page, 'sheet-visuals');
+    await page.getByRole('dialog', { name: 'Visuals', exact: true }).getByRole('alert').waitFor();
+    await census('the Visuals sheet, fallback');
+    await page.keyboard.press('Escape');
+    // The menu's Visuals row; the desktop panel: More and the Visuals panel.
+    await page.getByTestId('np-menu-button').click();
+    await page.getByTestId('menu-visuals').waitFor();
+    await census('the menu, Visuals');
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.getByTestId('nav-more').click();
+    await page.getByTestId('desktop-panel').getByTestId('more-root').waitFor();
+    await census('desktop, More');
+    await page.getByTestId('more-visualizer').click();
+    await page.getByRole('region', { name: 'Visuals', exact: true }).waitFor();
+    await census('desktop, the Visuals panel');
+
+    const styled = await stylesheetClasses(page);
+    const unstyled = [...seen]
+      .filter(([t]) => !styled.has(t) && !LUCIDE.test(t) && !INERT.has(t))
+      .map(([t, state]) => `${t} (${state})`)
+      .sort();
+    expect(seen.size, 'the walk saw the More area').toBeGreaterThan(100);
+    expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
+    expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
+  });
+
   test('d. the --ae-* CSS variables equal the tailwind.config.js tokens', async ({ page }) => {
     // The config is ESM (the root package is "type": "module"); imported through a data: URL so the test runner's
     // own loader never transforms it.

@@ -5,6 +5,10 @@
 // each aria-pressed, at least 44 px tall, with an optional icon. Three looks, in the Quiet style: pressed is raised with
 // a light border and a check; dashed (the unchosen default, the assumed output, an output asked again) is outlined;
 // the rest are deep and quiet. No indigo, no gold. Every class a complete literal (tailwind.config.js scans this file).
+// v16.4 (the Visuals sheet): `columns` (2, 3 or 4 a row; default 2) and `description` (a line under the label, before the
+// buttons: the Crystal colours' words). Each option already carries its own aria-pressed, so a group of independent
+// toggles (Particle physics, Rotate · Ascension) needs nothing more than options pressed independently. React.memo (it is
+// pure): with memoised options and a stable handler, a group re-renders only when its own choice changes.
 
 import React from 'react';
 import type { ReactNode } from 'react';
@@ -30,6 +34,10 @@ interface ChoiceGroupProps<T extends string> {
   onChoose: (id: T) => void;
   /** Notes under the buttons. */
   children?: ReactNode;
+  /** v16.4: buttons a row (default 2). */
+  columns?: 2 | 3 | 4;
+  /** v16.4: a line under the label, before the buttons. */
+  description?: string;
   'data-testid'?: string;
 }
 
@@ -40,14 +48,17 @@ const DASHED =
 const PLAIN =
   'min-h-touch px-2 rounded-control border flex items-center justify-center gap-2 text-sm border-line-strong bg-surface-deep text-ink-soft hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400';
 
-function ChoiceGroup<T extends string>({ label, badge, options, onChoose, children, 'data-testid': testId }: ChoiceGroupProps<T>) {
+const COLUMNS = { 2: 'grid grid-cols-2 gap-2', 3: 'grid grid-cols-3 gap-2', 4: 'grid grid-cols-4 gap-2' } as const;
+
+function ChoiceGroup<T extends string>({ label, badge, options, onChoose, children, columns = 2, description, 'data-testid': testId }: ChoiceGroupProps<T>) {
   return (
     <div role="group" aria-label={label} className="space-y-2" data-testid={testId}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-sm text-ink-strong">{label}</span>
         {badge ? <span className="text-xs text-ink-muted">{badge}</span> : null}
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      {description ? <p className="text-xs text-ink-muted leading-snug">{description}</p> : null}
+      <div className={COLUMNS[columns]}>
         {options.map((o) => {
           const solid = o.pressed && !o.dashed;
           const lit = solid || o.dashed;
@@ -65,4 +76,4 @@ function ChoiceGroup<T extends string>({ label, badge, options, onChoose, childr
   );
 }
 
-export default ChoiceGroup;
+export default React.memo(ChoiceGroup) as typeof ChoiceGroup;

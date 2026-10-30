@@ -8,6 +8,7 @@
 // closed, as on the phone: inert and transparent, a mouse move brings it back.
 // v15.7: Library shows the Library tab in the panel; an Escape in its search field with text clears the text and stops
 // there (the field handles it first); the Import sheet takes the panel until closed.
+// v16.4: More shows the More tab in the panel (its pages too); the Visuals sheet takes the panel until closed.
 
 import React, { useEffect, useRef } from 'react';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
@@ -20,7 +21,7 @@ import DesktopTransport from './DesktopTransport';
 import SheetHost from './SheetHost';
 import PlaylistDialogs from './playlists/PlaylistDialogs';
 import MixesTab from './mixes/MixesTab';
-import MoreStub from './tabs/MoreStub';
+import MoreTab from './more/MoreTab';
 import LayersTab from './layers/LayersTab';
 import LibraryTab from './library/LibraryTab';
 import { TabCrash, TransportCrash } from './fallbacks';
@@ -96,7 +97,7 @@ const DesktopShell = () => {
               <ViewBoundary
                 name="more"
                 fallback={(api) => (tab === 'more' ? <TabCrash api={api} inPanel /> : null)}
-                render={() => tab === 'more' && <MoreStub inPanel />}
+                render={() => tab === 'more' && <MoreTab inPanel />}
               />
             </>
           )}

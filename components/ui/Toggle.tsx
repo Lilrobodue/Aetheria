@@ -6,6 +6,7 @@
 // on a light track with a dark knob, the knob on the right.
 // v15.6: `disabled` greys the row (opacity-50) and disables the button; `note` is a reason line under the description
 // ("Needs φ integration", "This track peaks at 2:00"), read out with the switch (aria-describedby).
+// v16.4: React.memo (it is pure): the Visuals sheet passes stable handlers, so a setting re-renders its own switch only.
 
 import React, { useId } from 'react';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
@@ -61,4 +62,4 @@ const Toggle = ({ label, description, checked, onChange, disabled = false, note,
   );
 };
 
-export default Toggle;
+export default React.memo(Toggle);

@@ -9,6 +9,8 @@
 // v16.0 (decision 1 A, mockup np-phone-A-upnext): the Up next line under the transport, above Output · Walks: the track
 // that plays next and the queue's count; a tap opens the queue. Shown with a track loaded or a queue waiting. It reads
 // the queue's context (never the clock).
+// v16.4: while the Visuals sheet previews over it (decision 1 A), this panel is hidden (visibility only: the Spectrum
+// lens keeps its insets), so the space above the sheet shows the visuals alone.
 
 import React from 'react';
 import { ChevronRight, Ellipsis, ListVideo, Pause, Play, Repeat, Route, Shuffle, SkipBack, SkipForward } from 'lucide-react';
@@ -33,11 +35,11 @@ const NowPlaying = () => {
   const lib = useLibrarySummary();
   const queue = useQueue();
   const actions = useActions();
-  const { barRef } = useShell();
+  const { barRef, sheet } = useShell();
   const count = queuedCount(queue.waiting);
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col justify-end">
+    <div className={sheet === 'visuals' ? 'flex-1 min-h-0 flex flex-col justify-end invisible' : 'flex-1 min-h-0 flex flex-col justify-end'}>
       <section
         ref={barRef}
         aria-label="Now playing"

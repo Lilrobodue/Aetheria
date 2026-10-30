@@ -296,6 +296,12 @@ export class StabilityManager {
   }
 }
 
+// v16.4 re-review: how long a wake-lock request in flight is shared. A request the browser has not answered by then is
+// left to land on its own (WakeLockManager.acquire keeps it only if it is the one lock wanted), and the next caller
+// asks again: before, a request that never settled was shared by every later call for the page's life, so the screen
+// could sleep while music played until a reload.
+export const WAKE_LOCK_PENDING_MS = 5000;
+
 // Wake Lock Manager for preventing screen sleep during playback
 export class WakeLockManager {
   private wakeLock: any = null;
@@ -306,11 +312,42 @@ export class WakeLockManager {
   // or auto-release the lock (also tab-hide). Intent drives the retry on
   // visibility return.
   private intendedHeld = false;
+  // v16.4, Keep screen awake (More › Safety & comfort; App's keepAwake, saved from its switch). Off: no lock is taken or
+  // held while music plays, so the screen sleeps as the device is set to. The intent above is kept, so turning it back
+  // on while playing takes a lock at once. App's pinned keep-alive effect still asks and releases as before: this is
+  // the gate that decides whether a lock is taken. On (unset) is the behaviour before v16.4.
+  private enabled = true;
+  // v16.4 review: the one request in flight, or null. At most one lock is ever held: a caller while a request is
+  // pending shares it, and a lock that lands when it is no longer wanted (the switch went off, or the music stopped
+  // asking) is released at once. Before, a second request (the switch off and on again, or the keep-alive effect and
+  // the visibility handler together) overwrote the first lock, which was never released and kept the screen on until
+  // the page was hidden.
+  // v16.4 re-review: with when it was asked (`since`). It is shared for WAKE_LOCK_PENDING_MS only; after that the next
+  // caller asks again, and the old request, should it ever land, is released at once unless it is the one lock wanted
+  // and none is held (so still at most one).
+  private pending: { promise: Promise<boolean>; since: number } | null = null;
+  // The clock for `since` (an instance field, so a test can drive it).
+  private now = (): number => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
+
+  setEnabled(on: boolean) {
+    this.enabled = on;
+    if (!on) {
+      const held = this.wakeLock;
+      this.wakeLock = null;
+      if (held && !held.released) {
+        held.release().catch(() => {});
+      }
+      // A request still in flight is released when it lands (acquire reads `enabled` after its await).
+    } else if (this.intendedHeld) {
+      // requestWakeLock decides: none while hidden, none while a live lock is held or a request is in flight (one asked
+      // under WAKE_LOCK_PENDING_MS ago).
+      void this.requestWakeLock();
+    }
+  }
 
   // Install the visibilitychange re-acquire handler exactly once per page
-  // lifetime. The handler reads `this.wakeLock` and `this.intendedHeld`
-  // at call time, so a single listener covers every future acquire/release
-  // cycle.
+  // lifetime. The handler reads `this.intendedHeld` at call time, so a
+  // single listener covers every future acquire/release cycle.
   //
   // The previous code attached a fresh listener inside every
   // requestWakeLock() call. Over a 19-hour 240-track session that produced
@@ -320,12 +357,14 @@ export class WakeLockManager {
   // growth, console flooded, native-memory accumulation.
   private ensureVisibilityHandler() {
     if (this.visibilityHandlerInstalled) return;
-    document.addEventListener('visibilitychange', async () => {
-      // On return-to-visible: if we're supposed to hold a lock but don't,
-      // re-acquire. Covers both the auto-release-on-hide case and the
-      // request-denied-while-hidden case.
-      if (!document.hidden && this.intendedHeld && (this.wakeLock === null || this.wakeLock.released)) {
-        await this.requestWakeLock();
+    document.addEventListener('visibilitychange', () => {
+      // On return-to-visible: if we're supposed to hold a lock, ask again.
+      // Covers both the auto-release-on-hide case and the request-denied-
+      // while-hidden case. requestWakeLock is the one gate (v16.4 review):
+      // Keep screen awake off, a live lock already held, or a request in
+      // flight all take none there.
+      if (!document.hidden && this.intendedHeld) {
+        void this.requestWakeLock();
       }
     });
     this.visibilityHandlerInstalled = true;
@@ -340,6 +379,11 @@ export class WakeLockManager {
     this.intendedHeld = true;
     this.ensureVisibilityHandler();
 
+    // v16.4: Keep screen awake is off.
+    if (!this.enabled) {
+      return false;
+    }
+
     // Already holding a live lock — nothing to do.
     if (this.wakeLock !== null && !this.wakeLock.released) {
       return true;
@@ -353,28 +397,64 @@ export class WakeLockManager {
       return false;
     }
 
+    // v16.4 review: one request at a time; a caller while one is in flight shares it. v16.4 re-review: for
+    // WAKE_LOCK_PENDING_MS; one the browser hasn't answered by then is no longer waited for, and this caller asks again.
+    if (this.pending && this.now() - this.pending.since < WAKE_LOCK_PENDING_MS) {
+      return this.pending.promise;
+    }
+    const entry: { promise: Promise<boolean>; since: number } = { promise: Promise.resolve(false), since: this.now() };
+    this.pending = entry;
+    entry.promise = this.acquire(entry);
+    return entry.promise;
+  }
+
+  // The request itself. Its first await comes before anything can settle (the browser is asked a microtask later), so
+  // `pending` is always set by the time it is cleared here. It clears `pending` only if it is still the request in
+  // flight (v16.4 re-review: an older one, no longer waited for, can land after a newer one was asked).
+  private async acquire(entry: { promise: Promise<boolean>; since: number }): Promise<boolean> {
+    let lock: any;
     try {
-      this.wakeLock = await (navigator as any).wakeLock.request('screen');
-      console.log('Wake lock acquired');
-
-      // Release listener is attached to the sentinel object itself, so it
-      // GCs with the sentinel on release — no document-level accumulation.
-      this.wakeLock.addEventListener('release', () => {
-        console.log('Wake lock released');
-      });
-
-      return true;
+      lock = await Promise.resolve().then(() => (navigator as any).wakeLock.request('screen'));
     } catch (error) {
+      if (this.pending === entry) this.pending = null;
       console.error('Failed to acquire wake lock:', error);
       return false;
     }
+    if (this.pending === entry) this.pending = null;
+
+    // Landed when no longer wanted: Keep screen awake went off (v16.4), or the music stopped asking (a pause while it
+    // was in flight). Or (v16.4 re-review) a live lock is already held: this is the second of two requests in flight,
+    // which happens only once one went unanswered for WAKE_LOCK_PENDING_MS and the next caller asked again; whichever
+    // lands first is kept. Released at once, so at most one lock is held.
+    const holding = this.wakeLock !== null && !this.wakeLock.released;
+    if (!this.enabled || !this.intendedHeld || holding) {
+      lock.release().catch(() => {});
+      return holding && this.enabled && this.intendedHeld;
+    }
+
+    this.wakeLock = lock;
+    console.log('Wake lock acquired');
+
+    // Release listener is attached to the sentinel object itself, so it
+    // GCs with the sentinel on release — no document-level accumulation.
+    this.wakeLock.addEventListener('release', () => {
+      console.log('Wake lock released');
+    });
+
+    return true;
   }
 
   async releaseWakeLock() {
     this.intendedHeld = false;
-    if (this.wakeLock && !this.wakeLock.released) {
-      await this.wakeLock.release();
-      this.wakeLock = null;
+    // v16.4 review: let go of the reference first, so a request that lands while this release is awaited is never
+    // overwritten by a late `null` (it would then be held with nothing left to release it). A request still in flight
+    // is released when it lands (acquire reads `intendedHeld` after its await).
+    const held = this.wakeLock;
+    this.wakeLock = null;
+    if (held && !held.released) {
+      try {
+        await held.release();
+      } catch {}
       console.log('Wake lock released');
     }
   }

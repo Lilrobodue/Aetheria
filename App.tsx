@@ -218,6 +218,12 @@ import type { LayerStatus } from './components/layers/layerCopy';
 // `Activity` is lucide's icon.
 import ShellProviders from './components/shell/ShellProviders';
 import AppShell from './components/shell/AppShell';
+// v16.4, the More area: the statement's moved sections, the new layout's tour, Pause visuals and Keep screen awake.
+import { StatementLiability, StatementSections } from './components/more/SafetyStatement';
+import Tour from './components/more/Tour';
+import { VISUALS_PAUSED_KEY, parseVisualsPaused, userPauseHolds } from './components/shell/more/visualsModel';
+import { KEEP_AWAKE_KEY, parseKeepAwake } from './components/shell/more/moreModel';
+import type { MoreView } from './components/shell/more/moreModel';
 import VisualsPause from './components/shell/VisualsPause';
 import PeekPill from './components/shell/PeekPill';
 import { useMediaQuery } from './components/shell/useMediaQuery';
@@ -1241,6 +1247,32 @@ const App: React.FC = () => {
   // v16.3: the Mixes tab as it was left (session only): its list's scroll, and Create a mix open or not, with its settings
   // as they were (the saved key is the view's, written from its taps only).
   const mixesViewRef: { current: MixesViewState } = useRef({ top: 0, builder: { open: false, settings: null, top: 0, opener: null } });
+  // v16.4, the More area. Pause visuals (the new layout's own switch: classic never reads it) and Keep screen awake (a
+  // device setting in both layouts; unset = on, the behaviour before v16.4): each read once, lazily, and saved only
+  // from its switch (the actions setVisualsPaused / setKeepAwake), never by an effect. What a recording takes and since
+  // when (set where startRecording sets isRecording, cleared in stopRecording). Where the More tab was left.
+  const [visualsUserPaused, setVisualsUserPaused] = useState<boolean>(() => {
+    try {
+      return parseVisualsPaused(typeof localStorage !== 'undefined' ? localStorage.getItem(VISUALS_PAUSED_KEY) : null);
+    } catch {
+      return false;
+    }
+  });
+  const [keepAwake, setKeepAwakeState] = useState<boolean>(() => {
+    try {
+      return parseKeepAwake(typeof localStorage !== 'undefined' ? localStorage.getItem(KEEP_AWAKE_KEY) : null);
+    } catch {
+      return true;
+    }
+  });
+  const [recordingKind, setRecordingKind] = useState<'audio' | 'video' | 'both' | null>(null);
+  const [recordingSince, setRecordingSince] = useState<number | null>(null);
+  const moreViewRef: { current: { view: MoreView; top: number } } = useRef({ view: 'root', top: 0 });
+  // Keep screen awake gates the lock the pinned keep-alive effect asks for (WakeLockManager.setEnabled): off, no lock is
+  // taken or held; on again while playing, one is taken at once.
+  useEffect(() => {
+    wakeLockManager.setEnabled(keepAwake);
+  }, [keepAwake]);
   const [lastImport, setLastImport] = useState<LastImport | null>(null);
   const lastPlayOrderRef: { current: PlayOrderSnapshot | null } = useRef(null);
   // v15.9: the latest classic notice a mix showed (in classic, or a classic peek). The new layout never routes it to its
@@ -6659,6 +6691,8 @@ registerProcessor('wav-capture', WavCapture);
           startWavRecording()
               .then(() => {
                   setIsRecording(true);
+                  setRecordingKind('audio'); // v16.4
+                  setRecordingSince(Date.now());
                   setShowRecordOptions(false);
                   warnIfRecordingSilent();
               })
@@ -6717,6 +6751,8 @@ registerProcessor('wav-capture', WavCapture);
           recorder.start();
           mediaRecorderRef.current = recorder;
           setIsRecording(true);
+          setRecordingKind(type); // v16.4
+          setRecordingSince(Date.now());
           setShowRecordOptions(false);
       } catch (e) {
           showStatusToast("Recording failed to start. Your browser might not support this format.", { durationMs: 8000 });
@@ -6742,6 +6778,8 @@ registerProcessor('wav-capture', WavCapture);
       recordMusicDetachRef.current?.();
       recordMusicDetachRef.current = null;
       setIsRecording(false);
+      setRecordingKind(null); // v16.4
+      setRecordingSince(null);
   };
 
   const getCurrentChakraColor = () => {
@@ -6920,6 +6958,9 @@ registerProcessor('wav-capture', WavCapture);
   // visualizer, so it stops drawing (VisualsPause). Never in classic or the desktop shell, never while recording (a
   // video recording captures the canvas).
   const visualsPaused = shellOn && !desktopShell && (shellTab !== 'now' || carLayout) && !isRecording;
+  // v16.4: the user's Pause visuals (More › Visualizer › Comfort, Safety & comfort), the new layout only: it yields to a
+  // recording that captures the canvas (Visuals Only, AV Mix), never to an Audio Only one.
+  const userPausedNow = userPauseHolds(shellOn, visualsUserPaused, recordingKind);
   // Where the shared notices (the status toasts, the update and recovery banners, the restore toast) sit in the new
   // layout, clear of every control: under Now Playing's top bar or the Car header (the top of the screen there is
   // the visualizer or text), above the mini-player and the tab bar on the other tabs, and on the desktop at the right,
@@ -8202,8 +8243,7 @@ registerProcessor('wav-capture', WavCapture);
     setShellSheet(null);
     setSheetFocus(null);
     setShellZen(false); // v15.6: a peek ends the new layout's Zen (classic's own Zen is classic's).
-    if (panel === 'sound') setShowSettings(true);
-    else setShowSidebar(true);
+    setShowSidebar(true); // v16.4: the library's peek only (Layers' Visualizer row opens the Visuals sheet)
     setClassicPeek(panel);
   };
   // The new seek: handleSeek's body, from a fraction of the track or a step in seconds (element time).
@@ -8633,9 +8673,42 @@ registerProcessor('wav-capture', WavCapture);
       layersScrollRef,
       libraryViewRef,
       mixesViewRef,
+      moreViewRef, // v16.4
     }),
     [shellTab, shellSheet, sheetFocus, classicPeek, carLayout, desktopShell, shellZen, shellZenHidden]
   );
+  // v16.4, the Visuals sheet (VisualsContext) and the More area (MoreContext): settings and status, never the clock.
+  const shellVisualRecording = recordingKind === 'video' || recordingKind === 'both';
+  const shellVisuals = useMemo(
+    () => ({
+      settings: vizSettings,
+      palette: frequencyColorMode,
+      reducedMotion: prefersReducedMotion,
+      userPaused: visualsUserPaused,
+      pausedNow: visualsPaused || userPausedNow,
+      car: carLayout,
+      visualRecording: shellVisualRecording,
+    }),
+    [vizSettings, frequencyColorMode, prefersReducedMotion, visualsUserPaused, visualsPaused, userPausedNow, carLayout, shellVisualRecording]
+  );
+  const shellAudible = isPlaying || isSolfeggioActive;
+  const shellMore = useMemo(
+    () => ({
+      updateReady,
+      audible: shellAudible,
+      keepAwake,
+      recording: recordingKind && recordingSince !== null ? { kind: recordingKind, since: recordingSince } : null,
+      statementVersion: DISCLAIMER_VERSION,
+    }),
+    [updateReady, shellAudible, keepAwake, recordingKind, recordingSince]
+  );
+  // v16.4: the More area's references, in their own effect (as v16.1's playlistApiRef), so the shell actions' effect
+  // below stays as it was. flushAndReload saves the library before it reloads (a writer wrapper): About's Reload calls
+  // it by reference, nothing more (check:writers pins this one use).
+  const moreApiRef: { current: { flushAndReload: () => void; desktop: boolean } | null } = useRef(null);
+  useLayoutEffect(() => {
+    moreApiRef.current = { flushAndReload, desktop: desktopShell };
+  });
   // The stable actions: App's latest functions, refreshed after every commit; references, never re-implementations
   // (the pinned handlers stay the only path to the music).
   const shellActionsRef: { current: any } = useRef(null);
@@ -8830,6 +8903,33 @@ registerProcessor('wav-capture', WavCapture);
       queueMix: (id: MixId, mode: 'next' | 'queue' | 'save') => builderApiRef.current?.queueMix(id, mode),
       builderTracks: (source: SourceRef): Song[] => builderApiRef.current?.tracks(source) ?? [],
       builderSources: () => builderApiRef.current?.sources() ?? { library: 0, queue: 0, playlists: [] },
+      // v16.4, the More area: App's own setters, and moreApiRef's references. A visual setting is classic's write over
+      // the latest state (so two changes in one task both land); the two new switches save from their tap only.
+      openVisuals: () => {
+        // The phone: over Now Playing, where the visuals draw; the desktop: in the panel, beside them.
+        if (!moreApiRef.current?.desktop) setShellTab('now');
+        setSheetFocus(null);
+        setShellSheet('visuals');
+      },
+      setViz: (patch: Partial<VizSettings>) => setVizSettings((prev: VizSettings) => ({ ...prev, ...patch })),
+      setPalette: (m: FrequencyColorMode) => setFrequencyColorMode(m),
+      setVisualsPaused: (on: boolean) => {
+        setVisualsUserPaused(on);
+        try {
+          localStorage.setItem(VISUALS_PAUSED_KEY, String(on));
+        } catch {}
+      },
+      setKeepAwake: (on: boolean) => {
+        setKeepAwakeState(on);
+        try {
+          localStorage.setItem(KEEP_AWAKE_KEY, String(on));
+        } catch {}
+      },
+      reloadForUpdate: () => {
+        void moreApiRef.current?.flushAndReload();
+      },
+      dismissUpdate: () => setUpdateReady(false),
+      showTour: () => setShowTutorial(true),
     };
   }, []);
 
@@ -8862,74 +8962,13 @@ registerProcessor('wav-capture', WavCapture);
 
             <div className="text-left text-slate-400 text-sm mb-6 space-y-5 bg-black/40 p-5 rounded-lg border border-slate-800">
 
-              {/* Medical device disclaimer */}
-              <div>
-                <h3 className="flex items-center gap-2 text-slate-200 font-semibold mb-2">
-                  <Shield size={16} className="text-gold-500 shrink-0" />
-                  This is a meditation and exploration tool, not a medical device.
-                </h3>
-                <p className="ml-6">The Aetheria Resonance &amp; Geometry Player offers curated soundscapes tuned to 432Hz and solfeggio frequencies, paired with sacred geometry visualizations. It is an experience built on the Unified Lewis Framework&#39;s exploration of sound, frequency, and form. It is not intended to diagnose, treat, cure, or prevent any disease or medical condition.</p>
-              </div>
-
-              {/* Photosensitivity Warning */}
-              <div>
-                <h3 className="flex items-center gap-2 text-slate-200 font-semibold mb-2">
-                  <Zap size={16} className="text-gold-500 shrink-0" />
-                  Photosensitivity Warning
-                </h3>
-                <p className="ml-6">This application generates intense visual patterns, flashing lights, and geometric strobing effects. Do not use if you have a history of seizures, epilepsy, or photosensitive reactions to visual stimuli. If you have any doubt, consult a healthcare provider before use.</p>
-              </div>
-
-              {/* Audio Warning */}
-              <div>
-                <h3 className="flex items-center gap-2 text-slate-200 font-semibold mb-2">
-                  <Waves size={16} className="text-blue-500 shrink-0" />
-                  Audio Warning
-                </h3>
-                <p className="ml-6">Contains binaural beats, solfeggio frequencies, and sustained low-frequency tones. Beats and the drone are for when you can relax. While driving, use Car output (only the music and a quiet tone) and your car&#39;s own controls. Do not use while operating heavy machinery. Start at low volume — audio at sustained high levels can damage hearing. Take regular breaks during extended listening sessions.</p>
-              </div>
-
-              {/* Contraindications */}
-              <div>
-                <h3 className="flex items-center gap-2 text-slate-200 font-semibold mb-2">
-                  <AlertTriangle size={16} className="text-amber-500 shrink-0" />
-                  Please do not use this tool if you:
-                </h3>
-                <ul className="ml-8 space-y-1.5 list-disc text-slate-400">
-                  <li>Are pregnant (low-frequency audio effects on pregnancy have not been studied)</li>
-                  <li>Have a history of seizures, epilepsy, or photosensitive reactions</li>
-                  <li>Have a pacemaker or other implanted electronic device</li>
-                  <li>Are experiencing an acute psychiatric condition where altered states could be destabilizing</li>
-                  <li>Are under 18 and using the tool without adult supervision</li>
-                </ul>
-                <p className="ml-6 mt-2 text-slate-500 italic">If any of these apply to you and you wish to use the tool anyway, please consult your healthcare provider first.</p>
-              </div>
-
-              {/* Data handling */}
-              <div>
-                <h3 className="flex items-center gap-2 text-slate-200 font-semibold mb-2">
-                  <Eye size={16} className="text-emerald-500 shrink-0" />
-                  How we handle your data.
-                </h3>
-                <p className="ml-6">The player runs entirely in your browser on your own device. There is no account, no login, no tracking. Nothing about your listening sessions leaves your device.</p>
-              </div>
-
-              {/* Spirit of this work */}
-              <div className="border-l-2 border-gold-500/40 bg-gold-500/5 pl-4 py-3 rounded-r-lg">
-                <h3 className="flex items-center gap-2 text-slate-200 font-semibold mb-2">
-                  <Heart size={16} className="text-rose-400 shrink-0" />
-                  A note on the spirit of this work.
-                </h3>
-                <p className="italic text-slate-300">Aetheria was built by a family — two humans and a family of AI collaborators — exploring whether the healing traditions around sound, frequency, and sacred geometry can be honored with both rigor and reverence. We believe they can. We are also honest that this is early work, that our interpretations will evolve, and that your own experience is ultimately more authoritative than anything we can tell you about what these frequencies mean. Listen with curiosity. Let your body respond as it wishes. Trust what you feel.</p>
-              </div>
+              <StatementSections />
 
               {/* Acknowledgment & Liability */}
               <p className="text-xs text-slate-500 italic text-center border-t border-slate-800 pt-3">
                 By tapping &ldquo;I understand, let me begin&rdquo; below, you acknowledge that you have read this disclaimer, that you understand what this tool is and is not, and that you are using it at your own curiosity and at your own risk.
               </p>
-              <p className="text-[10px] text-slate-600 text-center leading-relaxed">
-                To the maximum extent permitted by law, the developers, contributors, and associated entities disclaim all liability for direct, indirect, incidental, or consequential damages arising from use of this tool.
-              </p>
+              <StatementLiability />
             </div>
 
             <button onClick={acceptDisclaimer} className="w-full py-3 bg-gold-600 hover:bg-gold-500 text-black font-bold rounded-xl transition-all hover:scale-[1.02] active:scale-95 shadow-[0_0_20px_rgba(234,179,8,0.3)]">
@@ -8947,7 +8986,7 @@ registerProcessor('wav-capture', WavCapture);
           <ViewBoundary
             name="tutorial"
             fallback={modalFallback(showTutorial, closeTutorial, 'fixed inset-0 z-tutorial flex items-center justify-center p-4')}
-            render={() => showTutorial && <TutorialModal onClose={closeTutorial} />}
+            render={() => showTutorial && (shellOn ? <Tour onClose={closeTutorial} desktop={desktopShell} /> : <TutorialModal onClose={closeTutorial} />)}
           />
           
           <ViewBoundary
@@ -8982,7 +9021,8 @@ registerProcessor('wav-capture', WavCapture);
           {/* Non-blocking notices — the replacement for alert()/confirm() on
               paths the lock screen or the car can reach. Three independent
               slots so none evicts another: the update banner, the recovery
-              offer, and the status toast. Sits above the restore toast.
+              offer, and the status toast (in the new layout a fourth since
+              v16.4: the Ready Offline card). Sits above the restore toast.
               The container is the live region and is ALWAYS mounted (empty, it
               takes no space): screen readers often skip a live region that is
               inserted together with its text, but announce what is added to
@@ -9003,6 +9043,24 @@ registerProcessor('wav-capture', WavCapture);
             style={shellOn ? shellNoticeStyle : undefined}
             data-testid={shellOn ? 'notices' : undefined}
           >
+              {/* v16.4: in the new layout the Ready Offline notice is a card here, first in the stack (so an Undo toast
+                  keeps its place at the stack's foot above the mini-player), clear of the controls as every notice is;
+                  classic keeps its own banner (below). It stays until its X is tapped, as the update banner does. Not
+                  aria-atomic: its words never change once shown, and an added card is read whole. */}
+              {shellOn && offlineReadyNotice && (
+                <div data-testid="offline-ready" className="flex items-center gap-3 bg-slate-900/95 border border-emerald-500/40 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-lg">
+                  <CheckCircle2 size={16} aria-hidden="true" className="shrink-0 text-emerald-400" />
+                  <span className="flex-1 leading-snug">{offlineReadyNotice}.</span>
+                  <button
+                    type="button"
+                    onClick={() => setOfflineReadyNotice(null)}
+                    aria-label="Dismiss offline-ready notice"
+                    className="shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-white"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
               {updateReady && (
                 <div aria-atomic="true" className="flex items-center gap-3 bg-slate-900/95 border border-gold-500/40 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-lg">
                   <span className="flex-1 leading-snug">{(isPlaying || isSolfeggioActive) ? 'A new version of Aetheria is ready. Reloading stops the music.' : 'A new version of Aetheria is ready.'}</span>
@@ -9146,14 +9204,16 @@ registerProcessor('wav-capture', WavCapture);
 
           {/* Offline-ready confirmation — persists until the user taps it away.
               The whole banner is the dismiss target (mobile-friendly), not just
-              a small corner X. */}
-          {offlineReadyNotice && (
-            <div className={shellOn && desktopShell ? 'fixed top-4 right-4 z-[101] w-[90%] max-w-lg px-2' : "fixed top-20 left-1/2 transform -translate-x-1/2 z-[101] w-[90%] max-w-lg px-2"}>
+              a small corner X. Classic only since v16.4: over the top of a phone
+              it covered the new layout's controls, which shows it in the notices
+              stack instead (above). */}
+          {offlineReadyNotice && !shellOn && (
+            <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[101] w-[90%] max-w-lg px-2">
               <button
                 type="button"
                 aria-label="Dismiss offline-ready notice"
                 onClick={() => setOfflineReadyNotice(null)}
-                className={shellOn ? 'w-full text-left bg-emerald-900/90 border border-emerald-500 text-emerald-100 p-4 rounded-lg shadow-lg active:scale-[0.99] transition-transform' : "w-full text-left bg-emerald-900/90 border border-emerald-500 text-emerald-100 p-4 rounded-lg shadow-lg backdrop-blur-md active:scale-[0.99] transition-transform"}
+                className="w-full text-left bg-emerald-900/90 border border-emerald-500 text-emerald-100 p-4 rounded-lg shadow-lg backdrop-blur-md active:scale-[0.99] transition-transform"
               >
                 <div className="flex items-start gap-3">
                   <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 flex-shrink-0" />
@@ -9174,7 +9234,7 @@ registerProcessor('wav-capture', WavCapture);
       <div className="absolute inset-0 z-0 pointer-events-none">
         {/* v15.5's heat guard, in both layouts so the Visualizer's place in the tree (and so the Visualizer) never
             changes: paused only while a solid screen of the new layout's phone shell covers it. */}
-        <VisualsPause paused={visualsPaused}>
+        <VisualsPause paused={visualsPaused || userPausedNow}>
         <ViewBoundary
           name="visualizer"
           fallback={(api) => (
@@ -9218,6 +9278,8 @@ registerProcessor('wav-capture', WavCapture);
           libraryStatus={shellLibraryStatus}
           queue={shellQueue}
           playlists={shellPlaylists}
+          visuals={shellVisuals}
+          more={shellMore}
         >
           <AppShell />
         </ShellProviders>
@@ -9241,7 +9303,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.4</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

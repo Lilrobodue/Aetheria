@@ -1159,3 +1159,69 @@ test('R9b. re-review fix 2, the session mirror: with the storage refusing the bu
   await expect(page.getByTestId('builder-follow-set')).toHaveAttribute('aria-checked', 'true');
   await expect(footerName(page)).toHaveText('Same as Grounding in Mixes');
 });
+
+test('R9c. v16.4: after the third crash (the saved settings, Vortex) the builder is switched off, yet its fallback still offers Start over: Grounding saved and for the session, the list, and the next Create a mix opens at Grounding; settings that still crash cost one strike per Create a mix and Start over none, never a loop @mobile', async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as any).__aetheriaCrashWhen = { 'mix-builder-settings': (s: any) => s?.follow?.kind === 'walk' && s?.follow?.mode === 'C' };
+  });
+  const ids = await openBuilderApp(page);
+  // The builder's strikes: each caught crash is one entry of the view error log (ErrorBoundary's recordViewError).
+  const strikes = () => page.evaluate(() => (JSON.parse(localStorage.getItem('aetheria.viewErrors.v1') || '[]') as Array<{ view?: string }>).filter((e) => e?.view === 'mix-builder-view').length);
+  const saved = () => page.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.follow ?? null, BUILDER_KEY);
+  const fallback = page.getByTestId('mix-builder-view-fallback');
+  const startOver = fallback.getByRole('button', { name: 'Start over', exact: true });
+  const s0 = await strikes();
+  await openBuilder(page);
+  await tapId(page, 'builder-follow-walk');
+  await tapId(page, 'builder-walk-C'); // the tap saves Vortex, then the summary throws: the first crash
+  await expect(fallback).toContainText('Create a mix hit a problem.');
+  await expect.poll(strikes, { message: 'one strike' }).toBe(s0 + 1);
+  // Back and Create a mix, twice: the saved Vortex crashes the builder again, and the third crash switches it off.
+  for (const k of [2, 3]) {
+    await press(page, fallback.getByRole('button', { name: 'Back to Mixes', exact: true }));
+    await tapId(page, 'mixes-create');
+    await expect(fallback, `crash ${k}`).toBeVisible();
+    await expect.poll(strikes, { message: `${k} strikes` }).toBe(s0 + k);
+  }
+  await expect(fallback).toContainText('switched off');
+  await expect(fallback.getByRole('button', { name: 'Reload panel' }), 'Reload panel is refused').toHaveCount(0);
+  expect(await saved(), 'Vortex still saved').toEqual({ kind: 'walk', mode: 'C' });
+  // Switched off, Start over is still offered: Grounding saved, and the list.
+  await expect(startOver, 'switched off, Start over is still offered').toBeVisible();
+  await press(page, startOver);
+  await expect(page.getByTestId('mixes-create'), 'Start over: back to the list').toBeVisible();
+  await expect(fallback).toHaveCount(0);
+  await expect(page.getByTestId('mixes-create'), 'the focus on Create a mix').toBeFocused();
+  await page.waitForTimeout(500);
+  await expect(builderView(page), 'Start over opens nothing by itself').toHaveCount(0);
+  await expect(fallback).toHaveCount(0);
+  expect(await saved(), 'Grounding saved').toEqual({ kind: 'set', set: 'preset:qi' });
+  expect(await strikes(), 'Start over mounted nothing').toBe(s0 + 3);
+  // The next Create a mix opens at Grounding.
+  await tapId(page, 'mixes-create');
+  await expect(builderView(page), 'the builder opens').toBeVisible();
+  await expect(fallback).toHaveCount(0);
+  await expect(page.getByTestId('builder-follow-set')).toHaveAttribute('aria-checked', 'true');
+  await expect(footerName(page)).toHaveText('Same as Grounding in Mixes');
+  await expect(footerCount(page)).toHaveText(countText(setAll(libraryKs, GROUNDING)));
+  expect(await strikes(), 'Grounding: no crash').toBe(s0 + 3);
+  // Never a loop: with Grounding crashing too, each Create a mix costs one strike; Start over goes to the list for none.
+  await press(page, page.getByRole('button', { name: 'Back to Mixes', exact: true }));
+  await page.evaluate(() => {
+    (window as any).__aetheriaCrashWhen['mix-builder-settings'] = () => true;
+  });
+  for (const k of [4, 5]) {
+    await tapId(page, 'mixes-create');
+    await expect(fallback).toContainText('switched off');
+    await expect.poll(strikes, { message: `${k} strikes: one for the tap` }).toBe(s0 + k);
+    await expect(startOver).toBeVisible();
+    await press(page, startOver);
+    await expect(page.getByTestId('mixes-create')).toBeVisible();
+    await expect(fallback).toHaveCount(0);
+    await page.waitForTimeout(500);
+    await expect(fallback, 'Start over opens nothing by itself').toHaveCount(0);
+    expect(await strikes(), 'Start over: no strike, nothing mounted').toBe(s0 + k);
+  }
+  expect(await saved(), 'Grounding saved').toEqual({ kind: 'set', set: 'preset:qi' });
+  expect((await libraryState(page)).libraryIds, 'the library untouched').toEqual(ids);
+});

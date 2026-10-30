@@ -72,16 +72,23 @@ async function topInScroller(page: Page, name: LayersSectionName): Promise<numbe
   }, name);
 }
 
-/** Into classic's Harmonic Control from the tab (Advanced › Visualizer settings › Open): a peek; the choice stays new. */
+/** Into classic's Harmonic Control, to compare: ⋯ › Back to classic, then the gear. (v16.4: Advanced's Visualizer row opens
+ *  the Visuals sheet now, so its peek into Harmonic Control is gone.) */
 async function peekHarmonic(page: Page): Promise<void> {
-  await layersJump(page, 'advanced').click();
-  await page.getByTestId('layers-open-visualizer').click();
+  await tab(page, 'now');
+  await page.getByRole('button', { name: 'More options', exact: true }).first().click();
+  await page.getByTestId('menu-back-to-classic').click();
+  await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
+  await openHarmonicControl(page);
   await expect(page.getByRole('heading', { name: 'Harmonic Control', exact: true })).toBeVisible();
-  await expect(peekPill(page)).toBeVisible();
+  await expect(peekPill(page), 'no peek: classic proper').toHaveCount(0);
 }
 
+/** Back to the new layout (Harmonic Control's opt-in), on the Layers tab. */
 async function backFromPeek(page: Page): Promise<void> {
-  await peekPill(page).click();
+  await page.getByTestId('try-new-layout').click();
+  await newShell(page).waitFor();
+  await openLayersTab(page);
   await expect(page.getByTestId('tab-layers')).toBeVisible();
 }
 

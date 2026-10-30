@@ -8,10 +8,11 @@
 //   - The crystal filter, the plan's decision 11: optional, off by default (all 27 show), saved from its tap only; the
 //     level is classic's own (shared, journeys still raise it). The ceilings are the select's words: 963 / 2,000 /
 //     5,000 Hz / all.
-//   - Visualizer settings: in the classic layout until v14.22's Visualizer page (Open peeks into Harmonic Control).
+//   - Visualizer settings: v16.4's Open opens the Visuals sheet (on a phone over Now Playing, so a change shows as it is
+//     made; on the desktop in the panel). It peeked into classic's Harmonic Control before.
 
 import React from 'react';
-import { ExternalLink } from 'lucide-react';
+import { SlidersHorizontal } from 'lucide-react';
 import Toggle from '../../ui/Toggle';
 import Select from '../../ui/Select';
 import Button from '../../ui/Button';
@@ -55,10 +56,10 @@ const AdvancedSection = () => {
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm text-ink-strong">Visualizer settings</div>
-          <p className="text-xs text-ink-faint leading-snug">In the classic layout until the Visualizer page arrives. The music keeps playing.</p>
+          <p className="text-xs text-ink-faint leading-snug">Every visual setting, with the visuals showing while you change them.</p>
         </div>
-        <Button variant="secondary" onClick={() => actions.peekClassic('sound')} className="shrink-0 flex items-center justify-center gap-2" data-testid="layers-open-visualizer">
-          <ExternalLink size={16} className="text-ink-muted" aria-hidden="true" />
+        <Button variant="secondary" onClick={actions.openVisuals} className="shrink-0 flex items-center justify-center gap-2" data-testid="layers-open-visualizer">
+          <SlidersHorizontal size={16} className="text-ink-muted" aria-hidden="true" />
           Open
         </Button>
       </div>

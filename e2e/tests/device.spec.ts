@@ -11,7 +11,7 @@ import { adb, mediaSession, chromeSessions } from './adb';
 // v15.5: the new layout's one before the lock-screen one; v15.6: the new layout in Zen after it; v15.7: the Library
 // tab's row tap after that; v15.8: the walk after Assign after that; v15.9: a mix from the Mixes tab after that; v16.0:
 // the queue after that; v16.1: a saved playlist after that; v16.2: a filtered set after that; v16.3: a built mix after
-// that).
+// that; v16.4: Keep screen awake off with Pause visuals on after that).
 // While Playwright is connected, Chrome on Android keeps every tab visible: no test here ever sees a real hide. The
 // tests that need one (v16.0.1's D1-D3, the hide flush; v16.1's D-PL1, a playlist made just before a background kill)
 // are in device-hide.spec.ts, run on their own with E2E_HIDE=1.
@@ -530,7 +530,9 @@ async function playlistPhone(page: Page): Promise<{ at: (t: Locator, what: strin
     w.__atTarget = el;
     const hit = document.elementFromPoint(p.x, p.y);
     if (hit && (el === hit || el.contains(hit))) return null;
-    if (hit?.closest('[aria-label="Dismiss offline-ready notice"]')) return 'offline-ready';
+    // The Ready Offline notice: classic's banner is itself the labelled button; v16.4's new-layout card holds it as its X.
+    const dismiss = document.querySelector('[aria-label="Dismiss offline-ready notice"]');
+    if (hit && dismiss && (dismiss.contains(hit) || dismiss.parentElement?.contains(hit))) return 'offline-ready';
     return hit ? `${hit.tagName.toLowerCase()}${hit.getAttribute('data-testid') ? `[data-testid=${hit.getAttribute('data-testid')}]` : ''}` : 'nothing';
   }, { x, y });
   const at = async (target: Locator, what: string) => {
@@ -542,8 +544,8 @@ async function playlistPhone(page: Page): Promise<{ at: (t: Locator, what: strin
     const y = box!.y + box!.height / 2;
     let hit = await cover(target, x, y);
     if (hit === 'offline-ready') {
-      // The app's Ready Offline banner (shown once offline support installs, until tapped) sits over the top of the
-      // phone's screen: tap it away first, as a person would.
+      // The app's Ready Offline notice (shown once offline support installs, until tapped away: a banner at the top of
+      // the phone's screen before v16.4, a card in the notices since): tap its dismiss first, as a person would.
       const banner = page.getByRole('button', { name: 'Dismiss offline-ready notice' });
       const b = await banner.boundingBox();
       if (b) await tapAt(page, b.x + b.width / 2, b.y + b.height / 2);
@@ -1043,6 +1045,194 @@ test('v16.3: a built mix plays in its own order with the screen off: by finger, 
       return c >= 3 && line === `Play order · ${c + 1} of ${built.length}`;
     }, { message: 'the source line names the play order and the cursor', timeout: 10_000 })
     .toBe(true);
+  expect(dialogs).toEqual([]);
+});
+
+/**
+ * v16.4 (spec §5.11 step 4): Keep screen awake as Android itself lists it, screen on (the android project). While music
+ * plays with the switch on, `dumpsys power` lists a screen wake lock of Chrome's (its uid); with it off, none of Chrome's.
+ * The switch by finger in Safety & comfort. If Android lists no Chrome screen lock even with the switch on, the page-side
+ * checks stand (safety-about.spec S3, and S3b–S3f for the races) and this test says so in its annotations rather than
+ * failing.
+ * v16.4 review: the page side is checked here too, on the phone's real wake lock: a pass-through spy on
+ * navigator.wakeLock.request keeps the sentinels Chrome returns, so the test reads how many the page holds (released
+ * is Chrome's own flag): at most one ever, none once off. Its output says plainly which sides it could check.
+ * v16.4 re-review: the "on" side can fail. With the switch on while music plays the page must have asked Chrome for a
+ * lock, and must hold Chrome's one lock unless Chrome refused it or had not answered yet (a lock taken and let go while
+ * music plays fails). Each [wake lock] line is printed only once the assertions it describes have passed (a FAILED line
+ * otherwise, then the failure).
+ */
+function chromeScreenLocks(): string[] {
+  const uid = /userId=(\d+)/.exec(adb('shell', 'dumpsys', 'package', 'com.android.chrome'))?.[1] ?? '';
+  const power = adb('shell', 'dumpsys', 'power');
+  const section = power.slice(power.indexOf('Wake Locks:'), power.indexOf('Suspend Blockers:') > 0 ? power.indexOf('Suspend Blockers:') : undefined);
+  return section
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => /SCREEN_(BRIGHT|DIM)_WAKE_LOCK|FULL_WAKE_LOCK/.test(l) && ((uid && new RegExp(`uid=${uid}\\b`).test(l)) || /chrome/i.test(l)));
+}
+
+test('v16.4: Keep screen awake, by finger in Safety & comfort: on, Android lists a Chrome screen wake lock while music plays; off, none of Chrome’s', async ({ page }) => {
+  test.setTimeout(180_000);
+  // The page side: a pass-through spy (the real request; the sentinels it returns are kept to read their released flag).
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__wlReal = { supported: false, requests: 0, settled: 0, errors: [] as string[], sentinels: [] as any[] };
+    try {
+      const lock = (navigator as any).wakeLock;
+      if (!lock || typeof lock.request !== 'function') return;
+      const request = lock.request.bind(lock);
+      w.__wlReal.supported = true;
+      lock.request = async (type: string) => {
+        w.__wlReal.requests++;
+        try {
+          const sentinel = await request(type);
+          w.__wlReal.settled++;
+          w.__wlReal.sentinels.push(sentinel);
+          return sentinel;
+        } catch (e) {
+          w.__wlReal.settled++;
+          w.__wlReal.errors.push(String((e as Error)?.name ?? e));
+          throw e;
+        }
+      };
+    } catch {}
+  });
+  const pageLocks = () =>
+    page.evaluate(() => {
+      const r = (window as any).__wlReal;
+      return { supported: !!r?.supported, requests: r?.requests ?? 0, settled: r?.settled ?? 0, held: (r?.sentinels ?? []).filter((x: any) => !x.released).length, errors: [...(r?.errors ?? [])] as string[] };
+    });
+  // Each line is printed once the assertions it describes have passed; a FAILED line otherwise, then the failure.
+  const lines: string[] = [];
+  const report = (side: string, assertions: () => void, line: () => string): void => {
+    try {
+      assertions();
+    } catch (e) {
+      console.log(`[wake lock] ${side}: FAILED (${String((e as Error)?.message ?? e).split(/\r?\n/)[0]})`);
+      throw e;
+    }
+    lines.push(`${side}: ${line()}`);
+    console.log(`[wake lock] ${lines[lines.length - 1]}`);
+  };
+  const dialogs = await openSeededNewLayout(page, 6, { real: 6, seconds: 40 });
+  await page.setViewportSize(PHONE_VIEWPORT);
+  const { at } = await playlistPhone(page);
+  await at(page.getByTestId('tab-library-button'), 'the Library tab');
+  await expect(page.getByTestId('tab-library')).toBeVisible({ timeout: 5_000 });
+  await at(libraryRowButton(page, 'tone-0001'), 'tone-0001');
+  await expect.poll(async () => (await libraryState(page)).playing, { timeout: 15_000, message: 'tone-0001 plays' }).toBe(true);
+  await page.waitForTimeout(2000);
+  const on = chromeScreenLocks();
+  const pageOn = await pageLocks();
+  test.info().annotations.push({ type: 'Chrome screen locks, Keep screen awake on', description: on.join(' | ') || '(none)' });
+  test.info().annotations.push({ type: 'the page, Keep screen awake on', description: JSON.stringify(pageOn) });
+  report(
+    'page side, switch on',
+    () => {
+      expect(pageOn.supported, 'this Chrome has navigator.wakeLock (the spy wraps its request)').toBe(true);
+      expect(pageOn.requests, 'on, music playing: the page asked Chrome for a lock').toBeGreaterThan(0);
+      expect(pageOn.held, 'on: the page holds at most one lock').toBeLessThanOrEqual(1);
+      if (pageOn.held === 0) {
+        const answering = pageOn.requests > pageOn.settled;
+        expect(pageOn.errors.length > 0 || answering, 'on: the page holds no lock, yet Chrome neither refused one nor is still answering (a lock let go while music plays)').toBe(true);
+      }
+    },
+    () =>
+      pageOn.held === 1
+        ? `CHECKED (it asked, ${pageOn.requests} request(s), and holds Chrome’s one lock)`
+        : pageOn.errors.length
+          ? `PARTLY CHECKED (it asked; Chrome refused: ${pageOn.errors.join(', ')})`
+          : 'PARTLY CHECKED (it asked; Chrome had not answered 2 s on)'
+  );
+  await at(page.getByTestId('tab-more-button'), 'More');
+  await expect(page.getByTestId('more')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('more-safety-row'), 'Safety & comfort');
+  const sw = page.getByTestId('safety-keep-awake').getByRole('switch');
+  await expect(sw).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
+  await at(sw, 'Keep screen awake');
+  await expect(sw).toHaveAttribute('aria-checked', 'false', { timeout: 5_000 });
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('aetheria.keepAwake.v1')), { timeout: 5_000 }).toBe('false');
+  await page.waitForTimeout(2000);
+  const off = chromeScreenLocks();
+  const pageOff = await pageLocks();
+  test.info().annotations.push({ type: 'Chrome screen locks, Keep screen awake off', description: off.join(' | ') || '(none)' });
+  test.info().annotations.push({ type: 'the page, Keep screen awake off', description: JSON.stringify(pageOff) });
+  report(
+    'page side, switch off',
+    () => expect(pageOff.held, 'off: the page holds none').toBe(0),
+    () => 'CHECKED (it holds none)'
+  );
+  // Which Android side this run could check, said plainly (the list reporter prints it).
+  report(
+    'Android side',
+    () => expect(off, 'off: Android lists no screen wake lock of Chrome’s').toEqual([]),
+    () => (on.length > 0 ? 'CHECKED (Android listed Chrome’s screen lock with the switch on, and none with it off)' : 'NOT CHECKED (Android listed no Chrome screen lock with the switch on; none with it off)')
+  );
+  test.info().annotations.push({ type: 'checked', description: lines.join('; ') });
+  if (on.length === 0) test.info().annotations.push({ type: 'inconclusive', description: 'Android listed no Chrome screen lock with the switch on either: the page-side checks stand (this test\'s, and S3, S3b–S3f)' });
+  // Back on, for the user's own use of this profile.
+  await at(sw, 'Keep screen awake');
+  await expect(sw).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
+  expect(dialogs).toEqual([]);
+});
+
+/**
+ * v16.4 (spec §5.11 step 5): the comfort settings with the screen off. 30 seeded tones of 4 s, the new layout; Keep
+ * screen awake off and Pause visuals on, by finger in Safety & comfort; tone-0001 from the Library by finger; the screen
+ * off: the card follows three gapless advances, no pause, one PLAYING card. After the wake, DOM reads only: both keys
+ * still set and the canvas display:none. Turns the screen off; a phone with a secure lock stays locked after the test
+ * (unlock it by hand). LAST of the v16.4 tests (its own unlock).
+ */
+test('v16.4: Keep screen awake off and Pause visuals on, set by finger: with the screen off the card follows three gapless advances; after the wake both are still set and the canvas still hidden @device', async ({ page }) => {
+  const dialogs = await openSeededNewLayout(page, 30, { real: 30, seconds: 4 });
+  await page.setViewportSize(PHONE_VIEWPORT);
+  const { at } = await playlistPhone(page);
+  await at(page.getByTestId('tab-more-button'), 'More');
+  await expect(page.getByTestId('more')).toBeVisible({ timeout: 5_000 });
+  await at(page.getByTestId('more-safety-row'), 'Safety & comfort');
+  const awake = page.getByTestId('safety-keep-awake').getByRole('switch');
+  const pause = page.getByTestId('safety-pause-visuals').getByRole('switch');
+  await expect(awake).toBeVisible({ timeout: 5_000 });
+  await at(awake, 'Keep screen awake');
+  await expect(awake).toHaveAttribute('aria-checked', 'false', { timeout: 5_000 });
+  await at(pause, 'Pause visuals');
+  await expect(pause).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
+  await at(page.getByTestId('tab-library-button'), 'the Library tab');
+  await expect(page.getByTestId('tab-library')).toBeVisible({ timeout: 5_000 });
+  await at(libraryRowButton(page, 'tone-0001'), 'tone-0001');
+  await expect.poll(() => mediaSession(), { timeout: 15_000, message: 'tone-0001 on the card' }).toEqual({ state: 'playing', title: 'tone-0001' });
+  await at(page.getByTestId('tab-now-button'), 'Now Playing');
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.getElementById('viz-canvas')!).display), { timeout: 5_000, message: 'the visuals are paused on Now Playing' }).toBe('none');
+  const pausesBefore = await pauseCount(page);
+  const first = mediaSession()!.title;
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  const titles: string[] = [];
+  try {
+    await expect
+      .poll(
+        () => {
+          const s = mediaSession();
+          if (s && s.state === 'playing' && s.title !== first && !titles.includes(s.title)) titles.push(s.title);
+          return titles.length;
+        },
+        { timeout: 45_000, intervals: [500], message: 'three gapless advances on the PLAYING card' }
+      )
+      .toBeGreaterThanOrEqual(3);
+    expect(mediaSession()?.state, 'the card still says playing').toBe('playing');
+    expect(chromeSessions().filter((s) => s.state === 'playing').length, 'one PLAYING Chrome card: none stranded').toBe(1);
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  test.info().annotations.push({ type: 'card titles with the screen off, Keep screen awake off, Pause visuals on', description: [first, ...titles].join(' → ') });
+  // After the wake, DOM and state reads only (no click or tap: Chrome draws no frames behind the keyguard).
+  expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
+  const after = await page.evaluate(() => ({
+    awake: localStorage.getItem('aetheria.keepAwake.v1'),
+    paused: localStorage.getItem('aetheria.visualsPaused.v1'),
+    canvas: getComputedStyle(document.getElementById('viz-canvas')!).display,
+  }));
+  expect(after, 'both settings kept, the visuals still paused').toEqual({ awake: 'false', paused: 'true', canvas: 'none' });
   expect(dialogs).toEqual([]);
 });
 

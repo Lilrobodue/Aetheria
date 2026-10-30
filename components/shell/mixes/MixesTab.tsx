@@ -25,6 +25,8 @@
 // v16.3 re-review: the fallback's header has the builder's Start over too: its settings back to Grounding, saved and for
 // the session (MixBuilder's keepBuilderSettings), then the builder opens again. A crash its saved settings cause would
 // otherwise come back at every Create a mix, after a reload too. The list stays outside the crash.
+// v16.4: Start over stays when the builder is switched off (a third crash; only Reload panel is refused): Grounding,
+// saved and for the session, then the list, so the next Create a mix opens at Grounding.
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ChevronRight, ListMusic, SlidersHorizontal, X } from 'lucide-react';
@@ -89,7 +91,8 @@ const RegionCrash = ({ api, text, testId }: { api: FallbackApi; text: string; te
 
 /** v16.3 review: Create a mix's fallback, in the tab: its own header (Back always works) and the card (Reload panel opens
  *  the builder again; Close goes back to the list, as Back does). v16.3 re-review: the header's Start over, as the
- *  builder's own (its settings back to Grounding, then the builder again), while the region isn't switched off. */
+ *  builder's own (its settings back to Grounding, then the builder again). v16.4: switched off too (a third crash), when
+ *  it puts Grounding back and goes to the list, so the next Create a mix opens at Grounding. */
 const BuilderCrash = ({ api, inPanel, onBack, onStartOver }: { api: FallbackApi; inPanel: boolean; onBack: () => void; onStartOver: (api: FallbackApi) => void }) => (
   <div data-testid="mix-builder-view-fallback" className={inPanel ? 'h-full flex flex-col bg-surface-panel' : 'absolute inset-0 flex flex-col bg-surface-deep pointer-events-auto'}>
     <header className="shrink-0 h-14 pl-1 pr-2 flex items-center gap-1 border-b border-line bg-surface-deep">
@@ -97,16 +100,14 @@ const BuilderCrash = ({ api, inPanel, onBack, onStartOver }: { api: FallbackApi;
       <h1 tabIndex={-1} className="flex-1 min-w-0 text-lg font-semibold text-ink-strong truncate outline-none">
         {CREATE_TITLE}
       </h1>
-      {api.switchedOff ? null : (
-        <button
-          type="button"
-          data-testid="builder-fallback-start-over"
-          onClick={() => onStartOver(api)}
-          className="shrink-0 min-h-touch px-2 rounded-control text-sm text-ink-muted underline underline-offset-2 hover:text-ink-strong transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
-        >
-          {START_OVER}
-        </button>
-      )}
+      <button
+        type="button"
+        data-testid="builder-fallback-start-over"
+        onClick={() => onStartOver(api)}
+        className="shrink-0 min-h-touch px-2 rounded-control text-sm text-ink-muted underline underline-offset-2 hover:text-ink-strong transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+      >
+        {START_OVER}
+      </button>
     </header>
     <div className="m-4">
       <PanelFallback
@@ -236,10 +237,14 @@ const MixesTab = ({ inPanel = false }: MixesTabProps) => {
   }, []);
   // v16.3 re-review: the fallback's Start over (a tap): Grounding, saved and for the session, the builder's place at its
   // top; then the region again (the builder marks itself open when it mounts).
+  // v16.4: switched off (a third crash), Reload panel is refused but the settings can still go back: Grounding is kept as
+  // above and the tab goes back to its list, as Back does, so the next Create a mix opens at Grounding. Switched off, it
+  // never mounts the builder itself: settings that still crash cost one strike per Create a mix tap, never a loop.
   const onBuilderStartOver = useCallback((api: FallbackApi) => {
     keepBuilderSettings(mixesViewRef.current, normalized(DEFAULT_SETTINGS));
     mixesViewRef.current.builder.top = 0;
-    api.retry();
+    if (api.switchedOff) closeBuilder();
+    else api.retry();
   }, []);
   // Back: the list where it was, the focus on what opened the builder. Only on the way back from the builder (v16.3
   // review: the position is written when the builder opens, so on a plain mount, a tab switch, it would be stale).

@@ -30,7 +30,7 @@ import { waitForBlobSaves } from '../utils/playlistCache';
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 /** The version the error log records. Bump it with the header badge (App.tsx); isolation.spec checks the two agree. */
-export const APP_VERSION = 'v16.3';
+export const APP_VERSION = 'v16.4';
 
 export type ViewName =
   | 'visualizer'
@@ -93,7 +93,12 @@ export type ViewName =
   // bodies of its Start from and Filters sheets.
   | 'mix-builder-view'
   | 'mix-builder-source'
-  | 'mix-builder-filters';
+  | 'mix-builder-filters'
+  // v16.4, the More area: its pages (Safety & comfort with its statement, About, Links) and the Visuals sheet's body.
+  | 'more-safety'
+  | 'more-about'
+  | 'more-links'
+  | 'sheet-visuals';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The error log

@@ -5,9 +5,10 @@
 // Dialog never sits on a Sheet.
 // v16.1 (mockup np-menu-phone): "Add to playlist…" (the playing track; hidden with none) and "Save as a playlist…" (what's
 // playing; hidden with nothing), after Track info. Each closes the menu first (the Add sheet, the name Dialog).
+// v16.4: "Visuals" after Stop all sound: the Visuals sheet takes the menu's place (one sheet at a time).
 
 import React from 'react';
-import { ArrowLeftRight, Circle, Eye, EyeOff, Info, ListPlus, OctagonX, Save } from 'lucide-react';
+import { ArrowLeftRight, Circle, Eye, EyeOff, Info, ListPlus, OctagonX, Save, SlidersHorizontal } from 'lucide-react';
 import Sheet from '../../ui/Sheet';
 import ListRow from '../../ui/ListRow';
 import { ViewBoundary } from '../../ErrorBoundary';
@@ -46,6 +47,13 @@ const MenuBody = () => {
           actions.stopAll();
         }}
         data-testid="menu-stop-all"
+      />
+      <ListRow
+        title="Visuals"
+        subtitle="Every visual setting, with the visuals showing"
+        icon={<SlidersHorizontal size={20} />}
+        onClick={actions.openVisuals}
+        data-testid="menu-visuals"
       />
       <ListRow title="Track info" subtitle="Crystal, key and scan details for this track" icon={<Info size={20} />} onClick={actions.trackInfo} data-testid="menu-track-info" />
       {hasTrack && trackId ? (

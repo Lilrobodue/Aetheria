@@ -7,6 +7,9 @@
 // It reopens where it was left: the content's scrollTop goes into App's layersScrollRef as it scrolls and comes back on
 // mount; opened at a section (the Sound sheet's row), it starts there instead.
 // React.memo; no section reads the time, so the 4 Hz clock re-renders nothing here.
+// v16.4: on the phone the notices (the Ready Offline card, the update banner, a toast) sit over the bottom of the page,
+// above the mini-player: a spacer as tall as they are ends the scroller (useNoticeSpacer, the Library's and Mixes'
+// rule), so the last row (Advanced › Visualizer settings › Open) can always scroll clear of them. 0 px with none.
 
 import React, { useLayoutEffect, useRef } from 'react';
 import { X } from 'lucide-react';
@@ -15,6 +18,7 @@ import IconButton from '../../ui/IconButton';
 import { ViewBoundary } from '../../ErrorBoundary';
 import { useActions, useShell } from '../contexts';
 import { countRender } from '../devRenders';
+import { useNoticeSpacer } from '../playlists/useNoticeSpacer';
 import JumpRow from './JumpRow';
 import { SectionCrash } from './SectionCard';
 import SoundSection from './SoundSection';
@@ -34,6 +38,8 @@ const LayersTab = ({ inPanel = false }: LayersTabProps) => {
   const actions = useActions();
   const { layersScrollRef } = useShell();
   const scrollRef: { current: HTMLDivElement | null } = useRef(null);
+  const spacerRef: { current: HTMLDivElement | null } = useRef(null);
+  useNoticeSpacer(spacerRef, inPanel, null);
 
   // Where it was left, or the section it was opened at.
   useLayoutEffect(() => {
@@ -80,6 +86,7 @@ const LayersTab = ({ inPanel = false }: LayersTabProps) => {
           <ViewBoundary name="layers-beat" fallback={(api) => <SectionCrash section="beat" title="Beat" api={api} />} render={() => <BeatSection />} />
           <ViewBoundary name="layers-advanced" fallback={(api) => <SectionCrash section="advanced" title="Advanced" api={api} />} render={() => <AdvancedSection />} />
         </div>
+        <div ref={spacerRef} aria-hidden="true" data-testid="layers-notice-spacer" />
       </div>
     </div>
   );

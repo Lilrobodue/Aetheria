@@ -2,6 +2,8 @@
 //
 // The desktop shell's 72 px side nav (mockup desktop-shell): the same five sections as the phone's tabs, as 64 × 56
 // tiles with short labels, the active one gold, and Beta at the foot. v14.24 widens it and adds shortcuts.
+// v16.4: a click on the active More section takes More back to its root, also when the
+// desktop panel shows the Visuals sheet in More's place (v16.4 review: requestMoreRoot is given where More was left).
 
 import React from 'react';
 import { Activity as PulseIcon, Disc3, Layers, Library, ListMusic, Menu } from 'lucide-react';
@@ -9,13 +11,14 @@ import Badge from '../ui/Badge';
 import { useActions, useShell } from './contexts';
 import { countRender } from './devRenders';
 import { TABS } from './shellModel';
+import { requestMoreRoot } from './more/moreModel';
 import type { ShellTab } from './shellModel';
 
 const ICONS: Record<ShellTab, any> = { now: Disc3, library: Library, mixes: ListMusic, layers: Layers, more: Menu };
 
 const SideNav = () => {
   countRender('SideNav');
-  const { tab } = useShell();
+  const { tab, moreViewRef } = useShell();
   const actions = useActions();
   return (
     <nav
@@ -36,7 +39,10 @@ const SideNav = () => {
             aria-label={label}
             aria-current={on ? 'page' : undefined}
             data-testid={`nav-${id}`}
-            onClick={() => actions.setTab(id)}
+            onClick={() => {
+              if (on && id === 'more') requestMoreRoot(moreViewRef);
+              actions.setTab(id);
+            }}
             className={
               on
                 ? 'w-16 h-14 rounded-card flex flex-col items-center justify-center gap-0.5 text-caption bg-gold-500/10 text-gold-400 font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400'

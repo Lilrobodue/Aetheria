@@ -14,6 +14,7 @@ import {
   openApp,
   openHarmonicControl,
   openNewLayout,
+  openSeededNewLayout,
   optInNewLayout,
   pauseCount,
   peekClassicLibrary,
@@ -22,7 +23,9 @@ import {
   resetRenders,
   seedLayers,
   sheet,
+  startWalk,
   tab,
+  tapAt,
   tapCount,
   LAYER_OUTPUT_KEY,
   LAYOUT_KEY,
@@ -1113,15 +1116,11 @@ test.describe('small phone, review fixes', () => {
     ];
     for (const size of sizes) {
       await page.setViewportSize(size);
-      // v15.6: Layers is no stub any more: its peek is Advanced › Visualizer settings › Open (Harmonic Control).
-      for (const stub of ['library', 'layers'] as const) {
+      // v15.6: Layers is no stub any more: its peek was Advanced › Visualizer settings › Open (Harmonic Control). v16.4:
+      // that row opens the Visuals sheet, so the library's is the one peek left.
+      for (const stub of ['library'] as const) {
         await tab(page, stub);
-        if (stub === 'library') {
-          await peekClassicLibrary(page);
-        } else {
-          await page.getByTestId('layers-jump-advanced').click();
-          await page.getByTestId('layers-open-visualizer').click();
-        }
+        await peekClassicLibrary(page);
         const pill = page.getByTestId('peek-pill');
         await expect(pill).toBeVisible();
         await page.waitForTimeout(400); // the insets follow classic's player bar
@@ -1288,4 +1287,222 @@ test.describe('desktop, review fixes', () => {
     await expect(page.getByTestId('desktop-crystal'), 'the crystal tile that opened Crystal').toBeFocused();
     expect(dialogs).toEqual([]);
   });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// 22–24. v16.4: the Ready Offline notice (found on the Note 20). It shows once offline support installs (the first
+// visit, an update) and stays until it is tapped away. In the new layout it sat over the top of the phone's screen for
+// minutes, over Create a mix, the Library's Tracks · Playlists switch and a toast's Undo (a tap there dismissed it
+// instead). Now it is a card in the notices stack, where every notice sits clear of the controls; classic keeps its
+// banner.
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The service worker's word that it cached new files (public/sw.js's OFFLINE_READY, added > 0), which raises the
+ *  notice. The suite blocks real workers; App listens on navigator.serviceWorker, so a message dispatched there is the
+ *  worker's (as safety-about.spec's S5d does for About). */
+async function raiseOfflineReady(page: Page): Promise<void> {
+  await page.evaluate(() =>
+    navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'OFFLINE_READY', added: 3, total: 9 } }))
+  );
+}
+const offlineDismiss = (page: Page) => page.getByRole('button', { name: 'Dismiss offline-ready notice', exact: true });
+
+/** What a tap at the target's centre lands on: null for the target itself. */
+const centreHit = (target: Locator) =>
+  target.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    if (at && (at === el || el.contains(at))) return null;
+    if (!at) return 'nothing';
+    const who = (at.closest('button, a, [role="tab"]') as HTMLElement | null) ?? (at as HTMLElement);
+    return `${who.tagName.toLowerCase()} "${(who.getAttribute('aria-label') || who.textContent || '').trim().slice(0, 40)}"`;
+  });
+
+/**
+ * The notices' cards, and the Ready Offline notice wherever it is, against the controls: the shell's fixed ones (the top
+ * bar or a tab's header, the Library's switch, the mini-player, the tab bar; on the desktop the nav and the transport)
+ * and every control in the top half of the screen. A scroller's content lower down passes under a notice, as it always
+ * has: its spacer lets it scroll clear (test 14).
+ */
+async function noticeOverlaps(page: Page): Promise<{ cards: number; out: string[] }> {
+  await page.waitForTimeout(300);
+  return page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="notices"] > div')).filter((c) => c.getBoundingClientRect().height > 0);
+    const dismiss = document.querySelector<HTMLElement>('[aria-label="Dismiss offline-ready notice"]');
+    const offline = dismiss ? ((dismiss.closest('[data-testid="offline-ready"]') as HTMLElement | null) ?? dismiss) : null;
+    if (offline && !cards.some((c) => c.contains(offline))) cards.push(offline);
+    const inScroller = (el: HTMLElement) => {
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        const o = getComputedStyle(p).overflowY;
+        if (o === 'auto' || o === 'scroll') return true;
+      }
+      return false;
+    };
+    const controls = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '[data-testid="new-shell"] button, [data-testid="new-shell"] [role="tab"], [data-testid="new-shell"] [role="slider"], [data-testid="new-shell"] input'
+      )
+    ).filter((el) => {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height || r.bottom <= 0 || r.top >= innerHeight) return false;
+      return !inScroller(el) || r.top + r.height / 2 < innerHeight / 2;
+    });
+    const out: string[] = [];
+    for (const card of cards) {
+      const c = card.getBoundingClientRect();
+      for (const el of controls) {
+        const r = el.getBoundingClientRect();
+        if (r.right > c.left + 0.5 && c.right > r.left + 0.5 && r.bottom > c.top + 0.5 && c.bottom > r.top + 0.5) {
+          out.push(`${(card.textContent || '').trim().slice(0, 30)} over ${el.getAttribute('aria-label') || (el.textContent || '').trim().slice(0, 24) || el.tagName}`);
+        }
+      }
+    }
+    return { cards: cards.length, out };
+  });
+}
+
+test.describe('phone, Ready Offline', () => {
+  test.use({ viewport: PHONE_VIEWPORT, hasTouch: true });
+
+  test("22. the Ready Offline notice is a card in the notices, clear of every tab's controls: a toast's Undo, Create a mix and Tracks · Playlists take their taps, Layers' last row scrolls clear of it; its X dismisses it @mobile", async ({ page }) => {
+    test.setTimeout(180_000);
+    const dialogs = await openSeededNewLayout(page, 30, { crystals: 'all' });
+    await phoneSize(page);
+    // A walk: a track (the mini-player on the other tabs) and its Undo toast (10 s).
+    await startWalk(page, 'A');
+    const notices = page.getByTestId('notices');
+    const undo = notices.getByRole('button', { name: 'Undo', exact: true });
+    await expect(undo).toBeVisible();
+    await raiseOfflineReady(page);
+    await expect(offlineDismiss(page), 'the notice shows').toBeVisible();
+
+    // Now Playing: the Undo (the stack under the top bar) is the Undo's own, and the notice is a card of the stack.
+    expect.soft(await centreHit(undo), "the Undo's centre").toBeNull();
+    expect.soft(await undo.click({ trial: true, timeout: 5_000 }).then(() => true, () => false), 'the Undo takes a click (nothing over it)').toBe(true);
+    const card = notices.getByTestId('offline-ready');
+    await expect.soft(card, 'a card in the notices').toBeVisible();
+    await expect.soft(card).toHaveText('Aetheria is ready to use offline.');
+    await expect.soft(card.getByRole('button', { name: 'Dismiss offline-ready notice', exact: true }), 'its own X').toBeVisible();
+    await expect(offlineDismiss(page), 'one notice, nowhere else').toHaveCount(1);
+
+    // Every tab: no notice over a control.
+    for (const t of ['now', 'library', 'mixes', 'layers', 'more'] as const) {
+      await tab(page, t);
+      await expect(page.getByTestId(viewOf[t])).toBeVisible();
+      const found = await noticeOverlaps(page);
+      expect.soft(found.cards, `${t}: the notice shows`).toBeGreaterThan(0);
+      expect.soft(found.out, `${t}: notices over controls`).toEqual([]);
+    }
+
+    // Layers at its end: the last row's Open (Advanced › Visualizer settings) scrolls clear of the lasting notice (the
+    // tab's notice spacer, as the Library's and Mixes'). The walk's toast is dismissed first, so the lasting notice is
+    // the only one.
+    await notices.getByRole('button', { name: 'Dismiss', exact: true }).click({ timeout: 2_000 }).catch(() => {});
+    await expect(undo, 'the toast is gone').toHaveCount(0);
+    await tab(page, 'layers');
+    await expect
+      .poll(() => page.getByTestId('layers-scroll').evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+        return Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) <= 1;
+      }), { message: 'Layers scrolled to its end' })
+      .toBe(true);
+    await page.waitForTimeout(300);
+    await expect(card, 'the notice still shows').toBeVisible();
+    const open = page.getByTestId('layers-open-visualizer');
+    expect.soft(await centreHit(open), "Layers' last row at the page's end: Open's centre").toBeNull();
+    expect.soft(await open.click({ trial: true, timeout: 5_000 }).then(() => true, () => false), 'Open takes a click (nothing over it)').toBe(true);
+
+    // Create a mix (the Mixes tab): its centre is its own, and a finger's tap opens the builder.
+    await tab(page, 'mixes');
+    const create = page.getByTestId('mixes-create');
+    await expect(create).toBeVisible();
+    expect.soft(await centreHit(create), "Create a mix's centre").toBeNull();
+    let b = (await create.boundingBox())!;
+    await tapAt(page, b.x + b.width / 2, b.y + b.height / 2);
+    await expect(page.getByTestId('mix-builder'), 'the tap opens the builder').toBeVisible();
+    await expect(offlineDismiss(page), 'and leaves the notice').toBeVisible();
+    await page.getByRole('button', { name: 'Back to Mixes', exact: true }).click();
+    await expect(create).toBeVisible();
+
+    // The Library's Tracks · Playlists switch: each tab's centre is its own, and a finger's tap switches.
+    await tab(page, 'library');
+    for (const [id, label] of [['playlists', 'Playlists'], ['tracks', 'Tracks']] as const) {
+      const sw = page.getByTestId(`library-view-${id}`);
+      await expect(sw).toBeVisible();
+      expect.soft(await centreHit(sw), `${label}'s centre`).toBeNull();
+      b = (await sw.boundingBox())!;
+      await tapAt(page, b.x + b.width / 2, b.y + b.height / 2);
+      await expect(sw, `the tap chooses ${label}`).toHaveAttribute('aria-selected', 'true');
+    }
+    await expect(card, 'the notice stays until its X').toBeVisible();
+
+    // Its X, by finger: gone, from everywhere.
+    const x = card.getByRole('button', { name: 'Dismiss offline-ready notice', exact: true });
+    expect.soft(await centreHit(x), "the X's centre").toBeNull();
+    b = (await x.boundingBox())!;
+    await tapAt(page, b.x + b.width / 2, b.y + b.height / 2);
+    await expect(offlineDismiss(page), 'dismissed').toHaveCount(0);
+    await expect(page.getByTestId('offline-ready')).toHaveCount(0);
+    expect(dialogs).toEqual([]);
+  });
+});
+
+test.describe('desktop, Ready Offline', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('23. on the desktop the Ready Offline notice is a card in the notices: at the right above the transport, clear of every control', async ({ page }) => {
+    test.setTimeout(150_000);
+    const dialogs = await openSeededNewLayout(page, 12, { crystals: 'all' });
+    await raiseOfflineReady(page);
+    await expect(offlineDismiss(page), 'the notice shows').toBeVisible();
+    const card = page.getByTestId('notices').getByTestId('offline-ready');
+    await expect(card, 'a card in the notices').toBeVisible();
+    await expect(card).toHaveText('Aetheria is ready to use offline.');
+    // The notices' place: 16 px from the right, its foot 16 px above the transport.
+    const place = await page.evaluate(() => {
+      const n = document.querySelector('[data-testid="notices"]')!.getBoundingClientRect();
+      const t = document.querySelector('[data-testid="new-shell"] [data-testid="desktop-transport"]')?.getBoundingClientRect() ?? null;
+      return { right: innerWidth - n.right, bottom: n.bottom, transportTop: t ? t.top : null };
+    });
+    expect(place.right, '16 px from the right').toBeCloseTo(16, 0);
+    if (place.transportTop !== null) expect(place.transportTop - place.bottom, '16 px above the transport').toBeCloseTo(16, 0);
+    for (const t of ['now', 'library', 'mixes'] as const) {
+      await tab(page, t);
+      const found = await noticeOverlaps(page);
+      expect.soft(found.cards, `${t}: the notice shows`).toBeGreaterThan(0);
+      expect.soft(found.out, `${t}: notices over controls`).toEqual([]);
+    }
+    await offlineDismiss(page).click();
+    await expect(offlineDismiss(page), 'dismissed').toHaveCount(0);
+    expect(dialogs).toEqual([]);
+  });
+});
+
+test('24. classic keeps its Ready Offline banner, as before: at the top, outside the notices, the whole banner its dismiss', async ({ page }) => {
+  test.setTimeout(150_000);
+  const dialogs = await openApp(page);
+  for (const size of [{ width: 1280, height: 800 }, PHONE_VIEWPORT]) {
+    await page.setViewportSize(size);
+    await raiseOfflineReady(page);
+    const banner = offlineDismiss(page);
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('Ready Offline');
+    await expect(banner).toContainText('Aetheria is ready to use offline');
+    await expect(banner).toContainText('Tap anywhere to dismiss');
+    await expect(page.getByTestId('offline-ready'), 'no card').toHaveCount(0);
+    await expect(page.getByRole('status').getByRole('button', { name: 'Dismiss offline-ready notice' }), 'not in the notices').toHaveCount(0);
+    const at = await banner.evaluate((el) => {
+      const w = el.parentElement!;
+      const r = w.getBoundingClientRect();
+      return { wrap: w.className, button: el.className, top: r.top, centre: r.left + r.width / 2 };
+    });
+    expect(at.wrap).toBe('fixed top-20 left-1/2 transform -translate-x-1/2 z-[101] w-[90%] max-w-lg px-2');
+    expect(at.button).toBe('w-full text-left bg-emerald-900/90 border border-emerald-500 text-emerald-100 p-4 rounded-lg shadow-lg backdrop-blur-md active:scale-[0.99] transition-transform');
+    expect(at.top, `${size.width}: 80 px from the top`).toBe(80);
+    expect(Math.abs(at.centre - size.width / 2), `${size.width}: centred`).toBeLessThan(1);
+    // A click on its words dismisses it (the whole banner is the target).
+    await banner.getByText('Tap anywhere to dismiss').click();
+    await expect(banner, 'dismissed').toHaveCount(0);
+  }
+  expect(dialogs).toEqual([]);
 });

@@ -2,19 +2,22 @@
 //
 // The phone shell's five tabs: a `nav` of buttons with aria-current="page" on the active one (each view is a page,
 // not an ARIA tab panel). 56 px tall plus the safe-area inset; the active tab is gold (one of gold's four places).
+// v16.4: a tap on the active More tab takes More back to its root (v16.4 review: requestMoreRoot is also given the
+// place More was left, for when no More tab is mounted to hear it).
 
 import React from 'react';
 import { Disc3, Layers, Library, ListMusic, Menu } from 'lucide-react';
 import { useActions, useShell } from './contexts';
 import { countRender } from './devRenders';
 import { TABS } from './shellModel';
+import { requestMoreRoot } from './more/moreModel';
 import type { ShellTab } from './shellModel';
 
 const ICONS: Record<ShellTab, any> = { now: Disc3, library: Library, mixes: ListMusic, layers: Layers, more: Menu };
 
 const TabBar = () => {
   countRender('TabBar');
-  const { tab } = useShell();
+  const { tab, moreViewRef } = useShell();
   const actions = useActions();
   return (
     <nav aria-label="Main" data-testid="tab-bar" className="flex bg-surface-deep border-t border-line pb-[env(safe-area-inset-bottom)]">
@@ -27,7 +30,10 @@ const TabBar = () => {
             type="button"
             aria-current={on ? 'page' : undefined}
             data-testid={`tab-${id}-button`}
-            onClick={() => actions.setTab(id)}
+            onClick={() => {
+              if (on && id === 'more') requestMoreRoot(moreViewRef);
+              actions.setTab(id);
+            }}
             className={
               on
                 ? 'flex-1 h-tabbar flex flex-col items-center justify-center gap-0.5 text-caption text-gold-400 font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold-400'

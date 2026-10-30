@@ -15,6 +15,9 @@
 // the Library tools' actions, and LibraryViewState.view (the "Tracks · Playlists" switch).
 // v16.3 adds Create a mix's and the Mixes tab's ⋯ actions (App's startBuilt, queueMix, builderTracks, builderSources)
 // and ShellValue.mixesViewRef (the Mixes tab as it was left: Create a mix open, its settings; session only).
+// v16.4 adds VisualsContext (the visual settings, the crystal palette and the pause; it changes only on a setting
+// change) and MoreContext (the update flag, what is audible, Keep screen awake, a recording), ShellValue.moreViewRef,
+// and the More area's actions.
 //
 // Each reader throws a clear error without its provider; the ViewBoundary around the view then catches it.
 // No @types/react here: React is `any` to tsc, so these interfaces document the values rather than enforce them.
@@ -29,6 +32,9 @@ import type { PassProgress } from '../../utils/library/analysePass';
 import type { Filters } from '../../utils/library/filterModel';
 import type { BuilderSettings, SourceRef } from '../../utils/mix/builder';
 import type { MixId } from '../../utils/mix/catalog';
+import type { VizSettings } from '../../types';
+import type { FrequencyColorMode } from '../../utils/spectrumColor';
+import type { MoreViewState } from './more/moreModel';
 
 /** The transport's state. Changes on play/pause, a track change, shuffle/repeat, a new play order. */
 export interface PlayerValue {
@@ -174,6 +180,8 @@ export interface ShellValue {
   libraryViewRef: { current: LibraryViewState };
   /** v16.3: where the Mixes tab was left (session only). */
   mixesViewRef: { current: MixesViewState };
+  /** v16.4: where the More tab was left (its page, that page's scrollTop and its opener; session only). */
+  moreViewRef: { current: MoreViewState };
 }
 
 /** v16.3: the Mixes tab as it was left: its list's scrollTop, and Create a mix: open or not, its settings as they were
@@ -186,6 +194,36 @@ export interface MixesViewState {
    *  storage). "Create a mix" opens at the saved settings: with `unsaved` (or an unreadable store) these instead, not the
    *  stale stored value. Absent: no tap this session. */
   last?: { settings: BuilderSettings; unsaved: boolean };
+}
+
+/**
+ * v16.4, the Visuals sheet (VisualsContext): App's vizSettings and crystal palette as they are, and the pause. Built
+ * from settings only, so it changes on a setting change, never on the 4 Hz clock.
+ */
+export interface VisualsValue {
+  settings: VizSettings;
+  /** frequencyColorMode: the crystal palette (classic's Lo Shu popover "Colour Mode"). */
+  palette: FrequencyColorMode;
+  reducedMotion: boolean;
+  /** The user's Pause visuals switch (aetheria.visualsPaused.v1). */
+  userPaused: boolean;
+  /** The canvas is paused right now: the heat guard (a solid tab, the Car screen) or the switch. */
+  pausedNow: boolean;
+  /** The Car screen (Output = Car on the phone): the visuals stay off there. */
+  car: boolean;
+  /** A visual recording (Visuals Only, AV Mix) runs: it overrides the switch. */
+  visualRecording: boolean;
+}
+
+/** v16.4, the More area's status (MoreContext): what About and Safety & comfort show. Never the clock. */
+export interface MoreValue {
+  updateReady: boolean;
+  /** isPlaying || isSolfeggioActive: a reload would stop what is heard. */
+  audible: boolean;
+  keepAwake: boolean;
+  recording: { kind: 'audio' | 'video' | 'both'; since: number } | null;
+  /** The safety statement's version (App's DISCLAIMER_VERSION), for the statement page's line. */
+  statementVersion: string;
 }
 
 /** v15.7: the Library tab as it was left: its query, its content's scrollTop, and the health card's fold (null: by
@@ -485,6 +523,21 @@ export interface ShellActions {
   builderTracks: (source: SourceRef) => Song[];
   /** The Start from sheet's facts. */
   builderSources: () => { library: number; queue: number; playlists: { id: string; name: string; present: number; missing: number }[] };
+  // v16.4, the More area (references to App's setters and functions; nothing re-implemented).
+  /** The Visuals sheet: on the phone over Now Playing (the tab switches to it first), on the desktop in the panel. */
+  openVisuals: () => void;
+  /** A visual setting: setVizSettings(prev => ({ ...prev, ...patch })), as classic's controls write it. */
+  setViz: (patch: Partial<VizSettings>) => void;
+  /** The crystal palette (setFrequencyColorMode, as the Lo Shu popover). */
+  setPalette: (m: FrequencyColorMode) => void;
+  /** Pause visuals and Keep screen awake: saved from the tap only. */
+  setVisualsPaused: (on: boolean) => void;
+  setKeepAwake: (on: boolean) => void;
+  /** The update card's Reload (App's flushAndReload, by reference) and Later (the shared toast's dismiss). */
+  reloadForUpdate: () => void;
+  dismissUpdate: () => void;
+  /** The 4-card tour (About › Show the tour; the first run's tutorial in the new layout). */
+  showTour: () => void;
 }
 
 export const PlayerContext = createContext(null);
@@ -500,6 +553,8 @@ export const LibraryListContext = createContext(null);
 export const LibraryStatusContext = createContext(null);
 export const QueueContext = createContext(null);
 export const PlaylistsContext = createContext(null);
+export const VisualsContext = createContext(null);
+export const MoreContext = createContext(null);
 
 function read<T>(ctx: unknown, name: string): T {
   const v = useContext(ctx);
@@ -520,3 +575,5 @@ export const useLibraryList = (): LibraryListValue => read<LibraryListValue>(Lib
 export const useLibraryStatus = (): LibraryStatusValue => read<LibraryStatusValue>(LibraryStatusContext, 'LibraryStatusContext');
 export const useQueue = (): QueueValue => read<QueueValue>(QueueContext, 'QueueContext');
 export const usePlaylists = (): PlaylistsValue => read<PlaylistsValue>(PlaylistsContext, 'PlaylistsContext');
+export const useVisuals = (): VisualsValue => read<VisualsValue>(VisualsContext, 'VisualsContext');
+export const useMore = (): MoreValue => read<MoreValue>(MoreContext, 'MoreContext');

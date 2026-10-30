@@ -44,6 +44,13 @@ eq(cleanName('  Evening\u0007  walk\n'), 'Evening walk', 'cleanName: control cha
 ok(cleanName('   ') === null && cleanName('') === null && cleanName(5) === null && cleanName(null) === null, 'cleanName: empty and non-strings');
 ok(cleanName('x'.repeat(200))!.length === NAME_MAX, 'cleanName: capped at NAME_MAX');
 ok(Array.from(cleanName('🎵'.repeat(100))!).length === NAME_MAX, 'cleanName: caps by characters, never splits a pair');
+// v16.4: trimmed again after the cap, so a name never ends on a space (it did when the cap fell just after one), and
+// cleanName of a result is the result (random cases in the block below).
+eq(cleanName('x'.repeat(79) + ' y'), 'x'.repeat(79), 'cleanName: the cap never leaves a space at the end');
+eq(cleanName('x'.repeat(79) + '\u3000\u00a0\ty'), 'x'.repeat(79), 'cleanName: nor a run of spaces of any kind');
+eq(cleanName('🎵'.repeat(79) + ' y'), '🎵'.repeat(79), 'cleanName: nor after a pair');
+eq(cleanName('x'.repeat(78) + ' y'), 'x'.repeat(78) + ' y', 'cleanName: 80 characters are kept as they are');
+for (const raw of ['x'.repeat(79) + ' y', 'x'.repeat(200), ' a  b ', 'x'.repeat(78) + ' y z']) ok(cleanName(cleanName(raw)) === cleanName(raw), 'cleanName: idempotent: ' + raw.slice(-6));
 eq(freeName('New playlist', []), 'New playlist', 'freeName free');
 eq(freeName('New playlist', ['new playlist', 'New playlist 2']), 'New playlist 3', 'freeName taken (case-insensitive)');
 // v16.3 review: a long name's number always fits (a built mix's name is up to 80 characters): never a taken name back.
@@ -71,7 +78,10 @@ eq(freeName('New playlist', ['new playlist', 'New playlist 2']), 'New playlist 3
   const flag = '\u{1F1EF}\u{1F1F5}'; // one grapheme of 2
   const a = (n: number) => 'a'.repeat(n);
   eq(freeName(a(75) + fam, [a(75) + fam]), a(75) + ' 2', 'freeName: a ZWJ sequence across the cut goes whole');
-  const famCut = cleanName(a(77) + fam)!; // cleanName's own cap leaves "👨\u200D👩" (3 code points) at the end
+  const famCut = cleanName(a(77) + fam)!; // v16.4: cleanName's own cap drops the sequence whole (it left "👨\u200D👩")
+  eq(famCut, a(77), 'cleanName: a ZWJ sequence across the cap goes whole, as in freeName (v16.4)');
+  eq(cleanName(a(76) + flag + 'b' + flag), a(76) + flag + 'b', 'cleanName: a flag across the cap goes whole (v16.4)');
+  eq(cleanName('x'.repeat(79) + 'e\u0301'), 'x'.repeat(79), 'cleanName: a letter and its mark across the cap go whole (v16.4)');
   eq(freeName(a(77) + fam, [famCut]), a(77) + ' 2', 'freeName: a cut ZWJ sequence is never cut again ("…👨 2")');
   eq(freeName(a(70) + fam + a(5), [a(70) + fam + a(5)]), a(70) + fam + a(3) + ' 2', 'freeName: a ZWJ sequence before the cut stays whole');
   eq(freeName(a(77) + flag + 'b', [a(77) + flag + 'b']), a(77) + ' 2', 'freeName: a flag across the cut goes whole');
@@ -79,6 +89,25 @@ eq(freeName('New playlist', ['new playlist', 'New playlist 2']), 'New playlist 3
   eq(freeName('x'.repeat(77) + 'e\u0301y', ['x'.repeat(77) + 'e\u0301y']), 'x'.repeat(77) + ' 2', 'freeName: a letter and its combining mark go whole');
   eq(freeName('x'.repeat(76) + 'a\u0301\u0323z', ['x'.repeat(76) + 'a\u0301\u0323z']), 'x'.repeat(76) + ' 2', 'freeName: a letter and two marks go whole');
   eq(freeName('x'.repeat(75) + 'e\u0301 yy', ['x'.repeat(75) + 'e\u0301 yy']), 'x'.repeat(75) + 'e\u0301 2', 'freeName: a mark before the cut stays, the space it ends on goes');
+  // v16.4: a first grapheme longer than the room (one letter carrying 80 marks, a Zalgo name) is cut by code points, as
+  // before v16.3, never left out: Duplicate of such a playlist gave a copy called just "2".
+  const zal = cleanName('Z' + '\u0336\u0321'.repeat(40))!;
+  const graphemeCount = (s: string) => Array.from(new (Intl as any).Segmenter('en', { granularity: 'grapheme' }).segment(s)).length;
+  ok(Array.from(zal).length === NAME_MAX && graphemeCount(zal) === 1, 'a Zalgo name: one grapheme, cut by cleanName to 80 code points');
+  const zcut = (n: number) => Array.from(zal).slice(0, n).join('');
+  eq(freeName(zal + ' copy', [zal]), zcut(NAME_MAX - 2) + ' 2', 'freeName: the copy of a one-grapheme name is cut by code points, never "2"');
+  eq(freeName(zal + ' copy', [zal, zcut(NAME_MAX - 2) + ' 2']), zcut(NAME_MAX - 2) + ' 3', 'freeName: a one-grapheme name, then " 3"');
+  eq(freeName(zal, [zal, '2', ...Array.from({ length: 8 }, (_, i) => zcut(NAME_MAX - 2) + ` ${i + 2}`)]), zcut(NAME_MAX - 3) + ' 10', 'freeName: a one-grapheme name, two digits cut one more');
+  const acc = 'a' + '\u0301'.repeat(200);
+  eq(cleanName(acc), 'a' + '\u0301'.repeat(NAME_MAX - 1), 'cleanName: a first grapheme over NAME_MAX is cut by code points, never to nothing');
+  eq(freeName(acc, [cleanName(acc)]), 'a' + '\u0301'.repeat(NAME_MAX - 3) + ' 2', 'freeName: a letter with 200 marks');
+  const chain = Array.from({ length: 50 }, () => '\u{1F3B5}').join('\u200D'); // one grapheme of 99 code points, 149 units
+  ok(graphemeCount(chain) === 1, 'a ZWJ chain: one grapheme');
+  eq(cleanName(chain), Array.from(chain).slice(0, NAME_MAX).join(''), 'cleanName: a first grapheme of pairs over NAME_MAX: by code points, never half a pair');
+  eq(freeName(chain, [cleanName(chain)]), Array.from(chain).slice(0, NAME_MAX - 2).join('') + ' 2', 'freeName: a first grapheme of pairs: by code points, never half a pair');
+  eq(cleanName('Name ' + acc), 'Name', 'cleanName: a long grapheme after the first goes whole');
+  eq(freeName('Name ' + acc, ['Name']), 'Name 2', 'freeName: a long grapheme after the first goes whole');
+  eq(freeName('é' + 'x'.repeat(NAME_MAX), ['é' + 'x'.repeat(NAME_MAX - 1)]), 'é' + 'x'.repeat(NAME_MAX - 3) + ' 2', 'freeName: a short first grapheme as before');
   // Without Intl.Segmenter (an older engine): the cut by code points, as before, never splitting a surrogate pair.
   {
     const Seg = (Intl as any).Segmenter;
@@ -88,8 +117,37 @@ eq(freeName('New playlist', ['new playlist', 'New playlist 2']), 'New playlist 3
       eq(freeName('🎵'.repeat(NAME_MAX), ['🎵'.repeat(NAME_MAX)]), '🎵'.repeat(NAME_MAX - 2) + ' 2', 'freeName fallback: code points, never half a pair');
       eq(freeName(a(75) + fam, [a(75) + fam]), a(75) + '\u{1F468}\u200D\u{1F469} 2', 'freeName fallback: a ZWJ sequence cut by code points');
       eq(freeName('x'.repeat(77) + 'e\u0301y', ['x'.repeat(77) + 'e\u0301y']), 'x'.repeat(77) + 'e 2', 'freeName fallback: a mark cut off by code points');
+      eq(cleanName(a(77) + fam), a(77) + '\u{1F468}\u200D\u{1F469}', 'cleanName fallback: the cap by code points');
+      eq(cleanName('x'.repeat(79) + ' y'), 'x'.repeat(79), 'cleanName fallback: trimmed after the cap');
+      eq(freeName(zal + ' copy', [zal]), zcut(NAME_MAX - 2) + ' 2', 'freeName fallback: a Zalgo name by code points');
     } finally {
       (Intl as any).Segmenter = Seg;
+    }
+  }
+  // v16.4: a Segmenter that answers oddly (it throws, gives no pieces, pieces of no string, or pieces that are not the
+  // name): the cut by code points, never an error (cleanName cuts by graphemes too, and parseRecord runs it on reads).
+  {
+    const Seg = (Intl as any).Segmenter;
+    const odd: Array<[string, () => unknown]> = [
+      ['throws', () => { throw new RangeError('x'); }],
+      ['no pieces', () => []],
+      ['not iterable', () => 5],
+      ['pieces of no string', () => [{ segment: undefined }]],
+      ['undefined items', () => [undefined]],
+      ['other pieces', () => [{ segment: 'q' }, { segment: 'r' }]],
+      ['empty pieces', () => [{ segment: '' }]],
+    ];
+    for (const [what, segment] of odd) {
+      (Intl as any).Segmenter = function () { return { segment }; };
+      try {
+        eq(cleanName(a(77) + fam), a(77) + '\u{1F468}\u200D\u{1F469}', `cleanName, a Segmenter that ${what}: code points`);
+        eq(cleanName('x'.repeat(79) + ' y'), 'x'.repeat(79), `cleanName, a Segmenter that ${what}: trimmed`);
+        eq(freeName('z'.repeat(90), ['z'.repeat(80)]), 'z'.repeat(NAME_MAX - 2) + ' 2', `freeName, a Segmenter that ${what}: code points`);
+      } catch (e) {
+        ok(false, `a Segmenter that ${what}: threw ${e}`);
+      } finally {
+        (Intl as any).Segmenter = Seg;
+      }
     }
   }
   // Random long names and taken sets: the result is never taken and never over NAME_MAX (a PRNG of its own, so the
@@ -112,6 +170,39 @@ eq(freeName('New playlist', ['new playlist', 'New playlist 2']), 'New playlist 3
       const whole = seg(clean);
       ok(/ \d+$/.test(out) && head.every((g, j) => g === whole[j]), `freeName random ${ai}.${i}: whole graphemes of the base: ${JSON.stringify(out)}`);
     }
+  }
+  // v16.4: cleanName of every result is itself, never starts or ends on a space, and is the cut its rule says: the name
+  // as typed when it fits, else its whole graphemes within NAME_MAX code points (its code points when the first grapheme
+  // alone is longer), trimmed. Random names of up to 70 pieces: spaces of every kind, control characters, letters, marks,
+  // emoji sequences, flags, lone surrogates and a one-grapheme Zalgo letter (a PRNG of its own: nothing else draws less).
+  {
+    let s7 = 7;
+    const r7 = () => { s7 = (Math.imul(s7, 1103515245) + 12345) & 0x7fffffff; return s7 / 0x7fffffff; };
+    const pieces = ['a', 'b', 'Z', ' ', '  ', '\t', '\n', '\r\n', '\u00a0', '\u3000', '\u2028', '\u0007', '\u007f', '🎵', fam, flag, 'e\u0301', 'o\u0308\u0323', '\u{1F44D}\u{1F3FD}', '\u0301', '\uD83C', '\uDFB5', 'Z' + '\u0336\u0321'.repeat(40), 'x'.repeat(30), 'tone-07 '];
+    let kept = 0;
+    for (let i = 0; i < 4000; i++) {
+      const raw = Array.from({ length: Math.floor(r7() * 70) }, () => pieces[Math.floor(r7() * pieces.length)]).join('');
+      const c = cleanName(raw);
+      // eslint-disable-next-line no-control-regex
+      const norm = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (c === null) { ok(norm === '', `cleanName random ${i}: null only when nothing is left`); continue; }
+      kept++;
+      ok(cleanName(c) === c, `cleanName random ${i}: idempotent: ${JSON.stringify(c)}`);
+      // eslint-disable-next-line no-control-regex
+      ok(c.length > 0 && c.trim() === c && !/\s\s/.test(c) && !/[\u0000-\u001f\u007f]/.test(c) && Array.from(c).length <= NAME_MAX, `cleanName random ${i}: trimmed, no runs, no controls, within NAME_MAX: ${JSON.stringify(c)}`);
+      const gs = seg(norm);
+      let want = norm;
+      if (Array.from(norm).length > NAME_MAX) {
+        if (Array.from(gs[0]).length > NAME_MAX) want = Array.from(norm).slice(0, NAME_MAX).join('');
+        else {
+          want = '';
+          for (const g of gs) { if (Array.from(want + g).length > NAME_MAX) break; want += g; }
+        }
+        want = want.trimEnd();
+      }
+      eq(c, want, `cleanName random ${i}: the cut its rule says`);
+    }
+    ok(kept > 3000, `cleanName random: ${kept} of 4000 names kept something`);
   }
 }
 

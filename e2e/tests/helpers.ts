@@ -1067,7 +1067,9 @@ export type CrashView =
   | 'mix-builder' | 'mix-builder-footer' | 'mix-menu'
   // v16.3 review: the whole builder, the Start from and Filters sheets' bodies, and a drill inside the builder's model
   // work (not a region: it throws from the summary's memo, under mix-builder-view).
-  | 'mix-builder-view' | 'mix-builder-source' | 'mix-builder-filters' | 'mix-builder-model';
+  | 'mix-builder-view' | 'mix-builder-source' | 'mix-builder-filters' | 'mix-builder-model'
+  // v16.4, the More area: its pages and the Visuals sheet's body (moreKit.ts has the More area's helpers).
+  | 'more-safety' | 'more-about' | 'more-links' | 'sheet-visuals';
 
 /**
  * Make a region throw on its next render, through the app's dev hook window.__aetheriaCrash (ErrorBoundary.tsx; dev

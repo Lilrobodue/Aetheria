@@ -34,6 +34,8 @@ import { importTones, openHarmonicControl, openSafety } from './helpers';
 //
 // v15.6: E2E_PARITY=new runs the new layout's screens instead (walkNew, below): the same procedure, other rules.
 // v15.7: the Library tab (phone) and the desktop Library panel are reviewed shots, no longer compared.
+// v16.4: More's pages, the Visuals sheet and the tour are reviewed shots (absent before v16.4: the walk skips them there,
+// so it still runs against the previous release's build); the ⋯ menu (one row more) and More stay reviewed.
 
 const VIEWPORTS = {
   desktop: { width: 1280, height: 800 },
@@ -490,6 +492,32 @@ async function walkNew(page: Page, vp: Viewport): Promise<void> {
       await page.getByTestId(`tab-${t}-button`).click();
       await shot(`tab-${t}`, { compare: false });
     }
+    // v16.4: the More pages, the Visuals sheet and the tour (reviewed against the mockups).
+    if (await page.getByTestId('more-root').count()) {
+      const back = page.getByRole('button', { name: 'Back to More', exact: true });
+      for (const [row, name] of [['more-safety-row', 'more-safety'], ['more-about-row', 'more-about'], ['more-links-row', 'more-links']] as const) {
+        await page.getByTestId(row).click();
+        await shot(name, { compare: false });
+        await back.click();
+      }
+      await page.getByTestId('more-safety-row').click();
+      await page.getByTestId('safety-statement-row').click();
+      await shot('more-statement', { compare: false });
+      await page.getByRole('button', { name: 'Back to Safety & comfort', exact: true }).click();
+      await back.click();
+      await page.getByTestId('more-about-row').click();
+      await page.getByTestId('about-tour-row').click();
+      await page.getByTestId('tour').waitFor();
+      await shot('tour-1', { compare: false });
+      for (let i = 0; i < 3; i++) await page.getByTestId('tour').getByRole('button', { name: 'Next', exact: true }).click();
+      await shot('tour-4', { compare: false });
+      await page.getByTestId('tour').getByRole('button', { name: 'Done', exact: true }).click();
+      await back.click();
+      await page.getByTestId('more-visualizer').click();
+      await page.getByRole('dialog', { name: 'Visuals', exact: true }).waitFor();
+      await shot('sheet-visuals', { compare: false });
+      await page.keyboard.press('Escape');
+    }
     await page.getByTestId('tab-now-button').click();
     // Tone only: a crystal while paused.
     await page.getByTestId('chip-crystal').click();
@@ -524,6 +552,15 @@ async function walkNew(page: Page, vp: Viewport): Promise<void> {
     }
     await page.getByTestId('nav-layers').click();
     await shot('panel-layers', { compare: false });
+    await page.keyboard.press('Escape');
+    // v16.4: More in the panel, and the Visuals panel beside the canvas (reviewed).
+    await page.getByTestId('nav-more').click();
+    if (await page.getByTestId('more-root').count()) {
+      await shot('panel-more', { compare: false, masks: [transport] });
+      await page.getByTestId('more-visualizer').click();
+      await page.getByRole('region', { name: 'Visuals', exact: true }).waitFor();
+      await shot('panel-visuals', { compare: false, masks: [transport] });
+    }
     await page.keyboard.press('Escape');
   }
   test.info().annotations.push({ type: 'compared', description: compared.join(', ') });

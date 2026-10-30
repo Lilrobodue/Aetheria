@@ -78,22 +78,28 @@ export function newPlaylistId(now: number, rand: () => number = Math.random): st
 }
 
 /** A name as typed, cleaned: control characters out, runs of spaces as one, trimmed, at most NAME_MAX characters.
- *  Null when nothing is left (the Save button stays off). */
+ *  Null when nothing is left (the Save button stays off).
+ *  v16.4: a longer name is cut as freeName cuts (whole graphemes, NAME_MAX counted in code points) and trimmed again
+ *  after the cut, so a name never ends on a space and cleanName(cleanName(s)) === cleanName(s). */
 export function cleanName(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   // eslint-disable-next-line no-control-regex
   const s = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!s) return null;
-  return Array.from(s).slice(0, NAME_MAX).join('');
+  if (s.length <= NAME_MAX || Array.from(s).length <= NAME_MAX) return s;
+  return headOf(s, graphemes(s), NAME_MAX).trimEnd();
 }
 
 /** A name's characters as a cut may keep or drop them: whole graphemes (an emoji sequence, a flag, a letter with its
- *  combining marks) where Intl.Segmenter exists, else code points (as before v16.3's re-review). */
+ *  combining marks) where Intl.Segmenter exists, else code points (as before v16.3's re-review).
+ *  v16.4: the graphemes only when they are strings that make up s again (cleanName cuts by them too, so a stored
+ *  record's long name passes here: an engine whose Segmenter answers oddly gets code points, never an error). */
 function graphemes(s: string): string[] {
   const Seg = (Intl as unknown as { Segmenter?: new (locale: string, o: { granularity: 'grapheme' }) => { segment(s: string): Iterable<{ segment: string }> } }).Segmenter;
   if (typeof Seg === 'function') {
     try {
-      return Array.from(new Seg('en', { granularity: 'grapheme' }).segment(s), (x) => x.segment);
+      const parts = Array.from(new Seg('en', { granularity: 'grapheme' }).segment(s), (x) => x.segment);
+      if (parts.every((g) => typeof g === 'string' && g !== '') && parts.join('') === s) return parts;
     } catch {
       // fall through to code points
     }
@@ -101,11 +107,29 @@ function graphemes(s: string): string[] {
   return Array.from(s);
 }
 
+/** The start of s (whose graphemes are `parts`) in at most `room` code points: whole graphemes while they fit.
+ *  v16.4: when the first grapheme alone is longer than the room (a letter carrying dozens of marks), its first `room`
+ *  code points instead (the cut before v16.3), so a name is never cut to nothing. */
+function headOf(s: string, parts: readonly string[], room: number): string {
+  let head = '';
+  let size = 0;
+  for (const g of parts) {
+    const len = Array.from(g).length;
+    if (size + len > room) break;
+    head += g;
+    size += len;
+  }
+  if (!head) head = Array.from(s).slice(0, room).join('');
+  return head;
+}
+
 /** "New playlist", then "New playlist 2", "New playlist 3"… for the first one not taken (case-insensitive).
  *  v16.3 review: the number always fits. A long name is cut first (and a space it would end on dropped), so
  *  "<name> 2" is at most NAME_MAX characters and never trimmed back to the taken name itself.
  *  v16.3 re-review: the cut keeps whole graphemes (a family emoji, a flag, an accent stay whole or go whole), still
- *  counting NAME_MAX in code points as cleanName does. */
+ *  counting NAME_MAX in code points as cleanName does.
+ *  v16.4: a first grapheme longer than the room is cut by code points (headOf), never left out: a name that is one
+ *  letter with 80 marks gave a copy called just "2". */
 export function freeName(base: string, taken: Iterable<string>): string {
   const used = new Set<string>();
   for (const t of taken) used.add(t.toLocaleLowerCase('en-US'));
@@ -116,15 +140,7 @@ export function freeName(base: string, taken: Iterable<string>): string {
   const headFor = (room: number): string => {
     let head = heads.get(room);
     if (head === undefined) {
-      head = '';
-      let size = 0;
-      for (const g of parts) {
-        const len = Array.from(g).length;
-        if (size + len > room) break;
-        head += g;
-        size += len;
-      }
-      head = head.trimEnd();
+      head = headOf(b, parts, room).trimEnd();
       heads.set(room, head);
     }
     return head;

@@ -16,6 +16,8 @@
 // goes away (context.setOffline) and the page reloads: the app boots, styled from the one cached main CSS (> 900 rules), with
 // the --ae-* variables, the "Offline Mode" indicator and no page errors. <version> defaults to the new build's
 // sw.js CACHE_NAME. Exit code 1 on any failure; a JSON report on stdout.
+// v16.4: online, the new layout's More › About is opened too, and must say "Works offline" and name <version> (then the
+// classic layout again, for the offline relaunch).
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -155,6 +157,28 @@ try {
   check('no request to aistudiocdn.com since the new build was served', report.online.aistudiocdnRequests.length === 0, report.online.aistudiocdnRequests);
   check('no Tailwind runtime (window.tailwind undefined)', report.online.tailwindGlobal === 'undefined', report.online.tailwindGlobal);
   check(`the header badge reads ${VERSION}`, report.online.badge === VERSION, report.online.badge);
+
+  // ---- v16.4: More › About, in the new layout, says this version is saved for offline use ----
+  await page.evaluate(() => localStorage.setItem('aetheria.layout.v1', 'new'));
+  await page.reload();
+  await page.getByTestId('new-shell').waitFor({ timeout: 20_000 });
+  const acceptNew = page.getByRole('button', { name: /I understand, let me begin/ });
+  if (await acceptNew.isVisible().catch(() => false)) await acceptNew.click();
+  await page.getByTestId('tab-more-button').click();
+  await page.getByTestId('more-about-row').click();
+  await page.getByTestId('about-offline').waitFor({ timeout: 10_000 });
+  await page
+    .waitForFunction(() => /Works offline/.test(document.querySelector('[data-testid="about-offline"]')?.textContent ?? ''), null, { timeout: 10_000 })
+    .catch(() => {});
+  report.about = {
+    offline: ((await page.getByTestId('about-offline').textContent()) ?? '').trim(),
+    version: ((await page.getByTestId('about-version').textContent()) ?? '').trim(),
+  };
+  check('More › About says "Works offline"', /^Works offline/.test(report.about.offline), report.about.offline);
+  check(`More › About names ${VERSION}`, report.about.version.includes(VERSION), report.about.version);
+  await page.evaluate(() => localStorage.setItem('aetheria.layout.v1', 'classic'));
+  await page.reload();
+  await appUp();
 
   // ---- Offline ----
   // Empty the browser's HTTP cache first: Pages' max-age=600 would otherwise answer the service worker's fetches

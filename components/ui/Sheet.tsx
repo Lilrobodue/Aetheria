@@ -12,6 +12,10 @@
 // keeps the h2 for the name but shows only the handle (the menu).
 // v16.2 (additive; absent, the markup is as before): `footer`, a row after the scrolling body that never scrolls (the
 // filter sheet's Clear all / Show N tracks); `subtitleLive`, the subtitle announced politely as it changes (a live count).
+// v16.4: `look="preview"` (the Visuals sheet, decision 1 A): the modal sheet over the playing visuals, so a change shows
+// as it is made. Its scrim is transparent (a tap above still closes it; nothing dims, nothing blurs) and its panel a
+// fixed 55 % of the screen's height, at the bottom at every width. Everything else is the modal sheet's: the trap,
+// Escape, focus return and #root inert. The subtitle may be a node (a leaf that reads its own context).
 
 import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
@@ -23,7 +27,7 @@ import { overlayDepth, useOverlay } from './overlayStack';
 interface SheetProps {
   open: boolean;
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   onClose: () => void;
   children: ReactNode;
   presentation?: 'sheet' | 'panel';
@@ -37,6 +41,8 @@ interface SheetProps {
   footer?: ReactNode;
   /** v16.2: the subtitle is a live region (aria-live="polite"), for a count that changes while the sheet is open. */
   subtitleLive?: boolean;
+  /** v16.4: 'preview' (modal only): a transparent scrim and a fixed 55 dvh panel, over visuals that keep drawing. */
+  look?: 'default' | 'preview';
   'data-testid'?: string;
 }
 
@@ -54,9 +60,11 @@ const Sheet = ({
   bodyRef,
   footer,
   subtitleLive = false,
+  look = 'default',
   'data-testid': testId,
 }: SheetProps) => {
   const modal = presentation === 'sheet';
+  const preview = modal && look === 'preview';
   const panelRef: { current: HTMLDivElement | null } = useRef(null);
   const headingRef: { current: HTMLHeadingElement | null } = useRef(null);
   const idRef: { current: number } = useRef(0);
@@ -146,15 +154,19 @@ const Sheet = ({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-dialog flex items-end sm:items-center justify-center" data-testid={testId}>
-      <div className="absolute inset-0 bg-black/60" aria-hidden="true" onClick={onClose} />
+    <div className={preview ? 'fixed inset-0 z-dialog flex items-end justify-center' : 'fixed inset-0 z-dialog flex items-end sm:items-center justify-center'} data-testid={testId}>
+      <div className={preview ? 'absolute inset-0 bg-transparent' : 'absolute inset-0 bg-black/60'} aria-hidden="true" onClick={onClose} />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="relative w-full sm:max-w-md max-h-[85dvh] flex flex-col bg-surface-panel border-t sm:border border-line-strong rounded-t-sheet sm:rounded-sheet shadow-overlay pb-[max(0.5rem,env(safe-area-inset-bottom))] outline-none"
+        className={
+          preview
+            ? 'relative w-full sm:max-w-md h-[55dvh] flex flex-col bg-surface-panel border-t sm:border border-line-strong rounded-t-sheet shadow-overlay pb-[max(0.5rem,env(safe-area-inset-bottom))] outline-none'
+            : 'relative w-full sm:max-w-md max-h-[85dvh] flex flex-col bg-surface-panel border-t sm:border border-line-strong rounded-t-sheet sm:rounded-sheet shadow-overlay pb-[max(0.5rem,env(safe-area-inset-bottom))] outline-none'
+        }
       >
         <div aria-hidden="true" className="shrink-0 mx-auto mt-2 mb-1 w-10 h-1 rounded-pill bg-surface-control" />
         {header}

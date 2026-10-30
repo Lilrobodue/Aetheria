@@ -3,9 +3,11 @@
 // A 64 px row (min-h-row) that is one button: an icon tile, a title and a subtitle, and an optional trailing badge.
 // `current` marks the active row (aria-current="true"); the icon's colour is the caller's (a stroke-* class on the icon
 // for the danger row: text colours stay ink-*).
+// v16.4: `chevron` adds a trailing ChevronRight (aria-hidden): the row opens a page (the More area).
 
 import React from 'react';
 import type { ReactNode } from 'react';
+import { ChevronRight } from 'lucide-react';
 
 interface ListRowProps {
   title: string;
@@ -15,11 +17,13 @@ interface ListRowProps {
   current?: boolean;
   /** Trailing content (a Badge). */
   trailing?: ReactNode;
+  /** v16.4: a trailing chevron (the row opens a page). */
+  chevron?: boolean;
   buttonRef?: { current: HTMLButtonElement | null };
   'data-testid'?: string;
 }
 
-const ListRow = ({ title, subtitle, icon, onClick, current, trailing, buttonRef, 'data-testid': testId }: ListRowProps) => (
+const ListRow = ({ title, subtitle, icon, onClick, current, trailing, chevron, buttonRef, 'data-testid': testId }: ListRowProps) => (
   <button
     type="button"
     ref={buttonRef}
@@ -38,6 +42,7 @@ const ListRow = ({ title, subtitle, icon, onClick, current, trailing, buttonRef,
       {subtitle ? <span className="block text-xs text-ink-muted">{subtitle}</span> : null}
     </span>
     {trailing ?? null}
+    {chevron ? <ChevronRight size={18} aria-hidden="true" className="shrink-0 text-ink-faint" /> : null}
   </button>
 );
 

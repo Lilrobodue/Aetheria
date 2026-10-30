@@ -2,6 +2,7 @@
 //
 // A labelled native select (the Layers tab's experience level): the visible label names it (the <label> wraps both),
 // a 44 px control in the Quiet look with a ChevronDown drawn over its right end (the native arrow is hidden).
+// v16.4: React.memo (it is pure; the Visuals sheet passes a stable handler).
 
 import React from 'react';
 import { ChevronDown } from 'lucide-react';
@@ -38,4 +39,4 @@ function Select<T extends string>({ label, value, options, onChange, 'data-testi
   );
 }
 
-export default Select;
+export default React.memo(Select) as typeof Select;

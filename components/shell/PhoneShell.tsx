@@ -9,6 +9,7 @@
 // v15.6: the Layers tab replaces its stub (still the tab-layers region), and Zen hides this root: inert and transparent
 // (a 500 ms fade out, none under reduced motion; the reveal is instant). Its ref is the shell root Zen watches.
 // v15.7: the Library tab replaces its stub (still the tab-library region).
+// v16.4: the More tab replaces its stub (still the more region).
 
 import React, { useEffect, useRef } from 'react';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
@@ -21,7 +22,7 @@ import NowPlaying from './NowPlaying';
 import CarNowPlaying from './CarNowPlaying';
 import MiniPlayer from './MiniPlayer';
 import MixesTab from './mixes/MixesTab';
-import MoreStub from './tabs/MoreStub';
+import MoreTab from './more/MoreTab';
 import LayersTab from './layers/LayersTab';
 import LibraryTab from './library/LibraryTab';
 import SheetHost from './SheetHost';
@@ -86,7 +87,7 @@ const PhoneShell = () => {
         <ViewBoundary
           name="more"
           fallback={(api) => (tab === 'more' ? <TabCrash api={api} inPanel={false} /> : null)}
-          render={() => tab === 'more' && <MoreStub />}
+          render={() => tab === 'more' && <MoreTab />}
         />
       </div>
       <div ref={nowPanel ? undefined : barRef} data-testid="phone-bottom" className="shrink-0 pointer-events-auto">
