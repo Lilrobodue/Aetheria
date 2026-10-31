@@ -15,13 +15,20 @@ import { GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS, LO_SHU_WALKS, PRESETS } fr
 export const MIXES_INTRO = 'A tap builds a play order from your library and starts it. ⋯ queues it, saves it or changes it.';
 export const MIXES_LOADING = 'Loading your library…';
 export const EXPERIMENTAL_NOTE =
-  'These rank tracks by Deep Scan’s experimental scores. The scores haven’t been shown to measure anything you can hear, so treat them as curiosities. They need tracks Deep Scan has measured.';
+  'These rank tracks by Deep Scan’s experimental scores. The scores haven’t been shown to measure anything you can hear, so take them as curiosities. They need tracks Deep Scan has scanned.';
 /** The 111 Sequence row's pointer to the 111 Hz chip (Layers › Crystal). */
 export const SEQ111_LINE = 'Plays each track’s own crystal. For a 111\u00a0Hz tone: Layers › Crystal'; // (a no-break space keeps Hz with 111)
 export const NO_CRYSTALS_TITLE = 'Your tracks have no crystals yet';
-export const NO_CRYSTALS_BODY = 'Every mix follows the crystals. Assign them now (instant), or let Deep Scan measure them (slow).';
+export const NO_CRYSTALS_BODY = 'Every mix follows the crystals. Assign them now (instant), or run Deep Scan (slow).';
 export const EMPTY_TITLE = 'Nothing to mix yet';
 export const EMPTY_BODY = 'Mixes are built from your library. Import music first; your files are not changed.';
+/** v16.6 ("How sure are we?"): the leads under three section headings, each with its evidence tags (the Mixes tab's only
+ *  tags: one block per section, never per row). Journeys have none: their sub-lines are recipes. */
+export const SECTION_LEADS: Readonly<Partial<Record<MixSection, { line: string; tags: readonly ('arithmetic' | 'tradition' | 'design')[] }>>> = {
+  walks: { line: 'Paths through the Lo Shu magic square: arithmetic, and a Chinese tradition.', tags: ['arithmetic', 'tradition'] },
+  sets: { line: 'A few crystals each, played one after another. The names are moods to try, not effects.', tags: ['design'] },
+  experimental: { line: EXPERIMENTAL_NOTE, tags: ['design'] },
+};
 export const SECTION_TITLES: Readonly<Record<MixSection, string>> = {
   walks: 'Lo Shu walks',
   journeys: 'Journeys',

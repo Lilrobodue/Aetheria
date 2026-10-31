@@ -150,8 +150,11 @@ check(!/Hz/.test(toneLoweredText(false, 0.5, 0.29)) && !/Hz/.test(toneLoweredTex
 
 // Beat bands: the presets' names and beats, neutral subtitles; v2's Gamma keeps its existing note.
 eq(BEAT_BANDS.map((b) => `${b.name} · ${b.delta} Hz`), ['Delta · 2 Hz', 'Theta · 6 Hz', 'Alpha · 10 Hz', 'Beta · 20 Hz', 'Gamma · 40 Hz'], 'band titles');
-eq(bandSubtitle('Alpha', true, true), 'The 8–13 Hz band · now', 'Alpha, now');
-eq(bandSubtitle('Delta', false, false), 'The 0.5–4 Hz band', 'Delta');
+// v16.6: the band lines (utils/copy's BAND_LINES): the range and what the EEG band is usually seen with, never "best for".
+eq(bandSubtitle('Alpha', true, true), 'The 8–13 Hz band: relaxed and awake, eyes closed · now', 'Alpha, now');
+eq(bandSubtitle('Delta', false, false), 'The 0.5–4 Hz band: deep sleep’s rhythm', 'Delta');
+eq(bandSubtitle('Gamma', false, false), 'The band above 30 Hz', 'Gamma (classic)');
+eq(BEAT_BANDS.map((b) => bandSubtitle(b.name, false, false)).every((s) => !/best for|healing/i.test(s)), true, 'no band line says "best for" or "healing"');
 eq(bandSubtitle('Gamma', true, false), GAMMA_DESCRIPTION_V2, "v2's Gamma");
 eq(bandSubtitle('Gamma', false, false), 'The band above 30 Hz', "classic's Gamma");
 for (const b of BEAT_BANDS) check(!/Sleep|Healing|Meditation|Focus|Processing|Best for/.test(bandSubtitle(b.name, false, false)), `${b.name}: no benefit claim`);

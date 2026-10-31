@@ -21,6 +21,8 @@
 // v16.5 adds GuideContext (the cube's crystal, Perfect GUT, the walk and the palette: per crystal or walk, never the
 // clock), JournalContext (the documented session: 1 Hz while playing, read only by the Journal page), MoreContext's
 // part-2 fields, ShellValue.guideViewRef and trackInfoId, and Record's, the Journal's and Advanced's actions.
+// v16.6 ("How sure are we?") adds ShellValue.evidenceOriginRef (where an evidence tag was tapped, for the Guide's "Back
+// to …" chip; session only), the Guide's anchor on guideViewRef, and actions.openEvidence / backFromEvidence.
 // v16.5 (Export with layers) adds ExportContext (the job, what the sheet shows, the layers' snapshot: never the clock;
 // the progress is the job's own store) and ExportActionsContext (stable references to App's exportApiRef).
 //
@@ -44,6 +46,8 @@ import type { RecordKind } from './more/recordModel';
 import type { LoShuWalkMode } from '../../constants';
 import type { ExportSnapshot, MadeFor } from '../../utils/export/exportPlan';
 import type { Phase as ExportPhase } from '../../utils/export/exportWords';
+import type { Tier } from '../../utils/copy/evidence';
+import type { EvidenceOriginValue } from '../guide/evidenceLink';
 
 /** The transport's state. Changes on play/pause, a track change, shuffle/repeat, a new play order. */
 export interface PlayerValue {
@@ -191,8 +195,11 @@ export interface ShellValue {
   mixesViewRef: { current: MixesViewState };
   /** v16.4: where the More tab was left (its page, that page's scrollTop and its opener; session only). */
   moreViewRef: { current: MoreViewState };
-  /** v16.5: the Guide as it was left: Plain language or Technical, and its scrollTop (session only). */
-  guideViewRef: { current: { view: GuideView; top: number } };
+  /** v16.5: the Guide as it was left: Plain language or Technical, and its scrollTop (session only). v16.6: `anchor`,
+   *  a tier (or 'section') the Guide scrolls to and focuses on arrival, then clears. */
+  guideViewRef: { current: { view: GuideView; top: number; anchor?: Tier | 'section' | null } };
+  /** v16.6: where the evidence tag that opened the Guide was (its "Back to …" chip), or null; visiting a tab clears it. */
+  evidenceOriginRef: { current: EvidenceOriginValue | null };
   /** v16.5: the track ⋯ › Track info shows (the honest TrackInfoDialog, AppShell's TrackInfoHost), or null. */
   trackInfoId: string | null;
 }
@@ -680,6 +687,12 @@ export interface ShellActions {
   journalNote: (note: string) => void;
   /** Close the honest Track info (TrackInfoHost). */
   closeTrackInfo: () => void;
+  // v16.6, "How sure are we?" (App's setters and refs only: no state, no storage).
+  /** An evidence tag: More › Guide at the tier (the open sheet or Track info closes; the Guide's view is kept), with the
+   *  way back to `origin`. */
+  openEvidence: (tier: Tier | 'section', origin: EvidenceOriginValue | null) => void;
+  /** The Guide's "Back to …" chip: the tab, sheet, More page or Track info the tag was tapped in. */
+  backFromEvidence: () => void;
 }
 
 export const PlayerContext = createContext(null);

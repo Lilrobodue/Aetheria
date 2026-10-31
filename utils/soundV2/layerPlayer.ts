@@ -635,7 +635,7 @@ export class LayerPlayer {
     if (!ok) {
       this.warnOnce(`plan:${plan.tone_hz}|${plan.carrier_hz}|${plan.beat_hz}|${plan.drone_hz}|${plan.pulse_hz}`,
         `LayerPlayer.play: the plan for ${plan.canonical_hz} Hz is not playable (tone ${plan.tone_hz}, carrier ${plan.carrier_hz}, `
-        + `beat ${plan.beat_hz}, drone ${plan.drone_hz}); treated as silence`);
+        + `beat ${plan.beat_hz}, drone ${plan.drone_hz}); it plays nothing`);
       return null;
     }
     let r: BeatRender = render === 'binaural' || render === 'pulse' || render === 'off'

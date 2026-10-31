@@ -1069,6 +1069,12 @@ test.describe('style foundation (v15.3)', () => {
     await census('Advanced');
     await page.getByTestId('advanced-scan-scores').getByRole('switch').click();
     await census('Advanced, the scores on');
+    // v16.6: an evidence tag's way to the Guide: How sure are we? at the tier, the "Back to Advanced" chip.
+    await page.getByTestId('more-advanced').locator('[data-evidence-tag]').first().click();
+    await page.getByTestId('evidence-back').waitFor();
+    await census('the Guide, arrived from a tag (the Back chip)');
+    await page.getByTestId('evidence-back').click();
+    await page.getByTestId('more-advanced').waitFor();
     await page.getByTestId('tab-library-button').click();
     await page.locator('[data-scan-badge]').first().waitFor();
     await census('Library, the scan-score badges');

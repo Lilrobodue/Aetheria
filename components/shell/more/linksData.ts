@@ -33,15 +33,15 @@ export const LINK_SECTIONS: ReadonlyArray<LinkSection> = [
   {
     section: 'Books',
     items: [
-      { title: 'Aetheria', sub: 'The frequency healing system — foundational text', href: 'https://a.co/d/079tM297' },
-      { title: 'Aetheria: The Science', sub: 'A research-driven deep dive — the evidence behind the system', href: 'https://www.amazon.com/dp/B0HF38MDJB' },
+      { title: 'Aetheria', sub: 'The foundational text of the frequency system', href: 'https://a.co/d/079tM297' },
+      { title: 'Aetheria: The Science', sub: 'A research-driven deep dive — the ideas behind the system', href: 'https://www.amazon.com/dp/B0HF38MDJB' },
       { title: 'Cosmic Rhythms', sub: 'How sun, moon & earth shape your biology', href: 'https://a.co/d/0ckEN0Qs' },
       { title: 'SFB — A TBI Guide', sub: 'Navigating traumatic brain injury recovery', href: 'https://a.co/d/04Y1pUtE' },
     ],
   },
   {
     section: 'Music',
-    items: [{ title: 'Aetheria on Spotify', sub: 'Lyric-aligned healing music', href: 'https://open.spotify.com/artist/4CXB2ctrUCvInDQkKDhw4q' }],
+    items: [{ title: 'Aetheria on Spotify', sub: 'Lyric-aligned music', href: 'https://open.spotify.com/artist/4CXB2ctrUCvInDQkKDhw4q' }],
   },
   {
     section: 'Interactive Simulations',
@@ -51,14 +51,14 @@ export const LINK_SECTIONS: ReadonlyArray<LinkSection> = [
       { title: 'Unified Scale Navigator', sub: 'Quantum to cosmic', href: 'https://lilrobodue.github.io/Unified-Scale-Navigator/' },
       { title: 'HRV Coherence Visualizer', sub: 'Heart rate variability', href: 'https://lilrobodue.github.io/HRV-Coherence-Visualizer/' },
       { title: 'Schumann Biology Simulator', sub: "Earth's resonance", href: 'https://lilrobodue.github.io/Schumann-Biology-Simulator/' },
-      { title: 'Cellular Voltage Model', sub: 'Frequency & cell health', href: 'https://lilrobodue.github.io/Cellular-Voltage-Frequency-Model/' },
+      { title: 'Cellular Voltage Model', sub: 'A model of cell voltage and frequency', href: 'https://lilrobodue.github.io/Cellular-Voltage-Frequency-Model/' },
       { title: 'Galactic Vortex Formation', sub: 'Cosmic scale structure', href: 'https://lilrobodue.github.io/Galactic-Scale-Vortex-Formation/' },
     ],
   },
   {
     section: 'Community & Social',
     items: [
-      { title: 'Th3 L0unG3 — Discord', sub: '365+ healing frequency songs · community · resources', href: 'https://discord.gg/ddR3MfgCsM' },
+      { title: 'Th3 L0unG3 — Discord', sub: '365+ frequency songs · community · resources', href: 'https://discord.gg/ddR3MfgCsM' },
       { title: 'YouTube', sub: 'Aetheria content, demos, and explorations', href: 'https://www.youtube.com/@Aetheria432' },
       { title: 'X / Twitter', sub: '@TheyCallmeJobo — thoughts, updates, frequencies', href: 'https://x.com/TheyCallmeJobo' },
     ],

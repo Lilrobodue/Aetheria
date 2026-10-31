@@ -16,6 +16,7 @@ import {
   moreName,
   playsAsWalk,
   NO_CRYSTALS_BODY,
+  SECTION_LEADS,
   NO_CRYSTALS_TITLE,
   SECTION_TITLES,
   SEQ111_LINE,
@@ -50,9 +51,14 @@ const st = mixesStats(lib);
 // The words.
 eq(MIXES_INTRO, 'A tap builds a play order from your library and starts it. ⋯ queues it, saves it or changes it.', 'the intro (v16.3: the ⋯)');
 eq([SECTION_TITLES.walks, SECTION_TITLES.journeys, SECTION_TITLES.sets, SECTION_TITLES.experimental], ['Lo Shu walks', 'Journeys', 'Crystal sets', 'Experimental'], 'section titles');
-check(EXPERIMENTAL_NOTE.startsWith('These rank tracks by Deep Scan’s experimental scores.') && EXPERIMENTAL_NOTE.endsWith('They need tracks Deep Scan has measured.'), 'the Experimental note');
+check(EXPERIMENTAL_NOTE.startsWith('These rank tracks by Deep Scan’s experimental scores.') && EXPERIMENTAL_NOTE.includes('so take them as curiosities') && EXPERIMENTAL_NOTE.endsWith('They need tracks Deep Scan has scanned.'), 'the Experimental note (v16.6: "take", "scanned")');
 eq(SEQ111_LINE.replace(/ /g, ' '), 'Plays each track’s own crystal. For a 111 Hz tone: Layers › Crystal', 'the 111 line');
-eq([NO_CRYSTALS_TITLE, NO_CRYSTALS_BODY], ['Your tracks have no crystals yet', 'Every mix follows the crystals. Assign them now (instant), or let Deep Scan measure them (slow).'], 'the no-crystals card');
+eq([NO_CRYSTALS_TITLE, NO_CRYSTALS_BODY], ['Your tracks have no crystals yet', 'Every mix follows the crystals. Assign them now (instant), or run Deep Scan (slow).'], 'the no-crystals card');
+// v16.6: the three section leads and their tags (journeys have none: their sub-lines are recipes).
+eq(Object.keys(SECTION_LEADS), ['walks', 'sets', 'experimental'], 'three sections have a lead');
+eq([SECTION_LEADS.walks?.tags, SECTION_LEADS.sets?.tags, SECTION_LEADS.experimental?.tags], [['arithmetic', 'tradition'], ['design'], ['design']], 'their tags');
+eq(SECTION_LEADS.sets?.line, 'A few crystals each, played one after another. The names are moods to try, not effects.', 'the crystal sets’ lead');
+eq(SECTION_LEADS.experimental?.line, EXPERIMENTAL_NOTE, 'the experimental lead is the note');
 eq([EMPTY_TITLE, EMPTY_BODY], ['Nothing to mix yet', 'Mixes are built from your library. Import music first; your files are not changed.'], 'the empty state');
 
 // The stats: one pass, the catalogue's counts.

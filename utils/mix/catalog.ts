@@ -53,11 +53,7 @@ export const MIXES: readonly MixDef[] = [
   { id: 'head', section: 'journeys', name: 'HEAD Alignment', fullName: 'HEAD Alignment', sub: 'One track per HEAD crystal, 3504 → 6336 Hz', needs: 'crystal' },
   { id: 'ultimate', section: 'journeys', name: 'Ultimate', fullName: 'Ultimate', sub: 'One track per crystal, all 27', needs: 'crystal' },
   { id: 'full', section: 'journeys', name: 'Full Alignment', fullName: 'Full Alignment', sub: 'Every track with a crystal, low to high', needs: 'crystal' },
-  presetDef('qi'),
-  presetDef('healing'),
-  presetDef('mood'),
-  presetDef('meditation'),
-  presetDef('flow'),
+  ...PRESETS.map((p) => presetDef(p.id)), // qi, healing, mood, meditation, flow: PRESETS' order
   { id: 'golden', section: 'experimental', name: 'Golden Φ', fullName: 'Golden Φ', sub: 'Tracks scoring over 30 % on golden ratio', needs: 'scan' },
   { id: 'seq111', section: 'experimental', name: '111 Sequence', fullName: '111 Sequence', sub: 'One track per order, by 111-pattern score', needs: 'scan' },
   { id: 'source2178', section: 'experimental', name: '2178 Hz · SOURCE', fullName: '2178 Hz · SOURCE', sub: 'Scanned 2178 Hz tracks, by geometry score', needs: 'scan' },

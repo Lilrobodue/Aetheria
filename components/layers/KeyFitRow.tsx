@@ -8,6 +8,7 @@
 
 import React from 'react';
 import { KEY_FIT_LABEL, KEY_FIT_DESCRIPTION, KEY_FIT_EVIDENCE } from './layerCopy';
+import EvidenceTag from '../ui/EvidenceTag';
 
 interface Props {
   on: boolean;
@@ -36,7 +37,14 @@ const KeyFitRow: React.FC<Props> = ({ on, status, onToggle }) => (
       </button>
     </div>
     <p data-testid="key-fit-status" className="text-[11px] text-slate-300">{status}</p>
-    <p className="text-[10px] text-slate-500 leading-snug">{KEY_FIT_EVIDENCE}</p>
+    {/* v16.6: the evidence line carries its two tags (roughness is well studied; using it for levels is a design choice). */}
+    <div data-evidence="tier1" className="space-y-2">
+      <p className="text-[10px] text-slate-500 leading-snug">{KEY_FIT_EVIDENCE}</p>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
+        <EvidenceTag tier="tier1" />
+        <EvidenceTag tier="design" />
+      </div>
+    </div>
   </div>
 );
 

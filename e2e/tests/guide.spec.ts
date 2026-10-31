@@ -3,6 +3,14 @@ import { type Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import { PHONE_VIEWPORT, libraryState, openSeededNewLayout, openLibraryTab, libraryRowButton, renders, resetRenders, tab, undoToast, backToClassicViaMore, phoneSize } from './helpers';
 import { moreRow, moreView, textNodes } from './moreKit';
+import { PLACES } from '../../utils/copy/places.ts';
+
+/** v16.6: the views name each layout's own places (utils/copy/places: the Tree of Life, the cube's notes); the rest of the
+ *  text is the same node for node, so the new layout's place lines are read as classic's before the comparison. */
+const asClassicPlaces = (nodes: string[]): string[] => {
+  const map = new Map(Object.values(PLACES).map((p) => [p.new, p.classic] as [string, string]));
+  return nodes.map((n) => map.get(n) ?? n);
+};
 
 // v16.5, the Guide (v16.4 spec §3.7, §5.3 guide.spec): the one Plain language / Technical control; the Technical view
 // moved VERBATIM out of App (its text nodes equal classic's Guidebook's in the same build, and the previous release's:
@@ -11,7 +19,12 @@ import { moreRow, moreView, textNodes } from './moreKit';
 
 /** The text of classic's Technical Guidebook as v16.4's build rendered it (the negative-control run's hash of
  *  textNodes() over the Guidebook's scrolling content, desktop 1280 × 800): the move changed no word. */
-const TECHNICAL_TEXT_SHA = 'bb60693cfce7df9a'; // 908 text nodes, the base build (v16.4 on v16.3, 640f0bf)
+// v16.6 re-pin (spec §6.2: the copy pass's rewrites are intended): classic's Technical Guidebook in v16.6's build (G2b
+// prints it). v16.5's was 'bb60693cfce7df9a' (908 text nodes, v16.4 on v16.3, 640f0bf).
+// v16.6 review round 1 re-pin (the review's rewording of the technical view: B5, B6, B8, B14, B17): was
+// '64122645130c392c' (1157 text nodes).
+// Round 2 re-pin (2178's centre-cell sentences): was 'fb28630853f1004b'.
+const TECHNICAL_TEXT_SHA = '00bb58554f82ecf0'; // 1158 text nodes, v16.6 review round 2
 
 const sha = (parts: string[]) => createHash('sha256').update(parts.join('\n'), 'utf8').digest('hex').slice(0, 16);
 
@@ -233,7 +246,7 @@ test.describe('desktop', () => {
     const classic = await classicTechnicalText(page);
     test.info().annotations.push({ type: 'technical text', description: `${classic.length} text nodes, sha ${sha(classic)}` });
     expect(mine.length).toBeGreaterThan(300);
-    expect(mine, 'the Guide shows classic’s Technical view, node for node').toEqual(classic);
+    expect(asClassicPlaces(mine), 'the Guide shows classic’s Technical view, node for node (each layout’s places aside)').toEqual(classic);
     if (TECHNICAL_TEXT_SHA) expect(sha(classic), 'the same text as the previous release’s classic Guidebook').toBe(TECHNICAL_TEXT_SHA);
     expect(dialogs).toEqual([]);
   });

@@ -16,6 +16,11 @@ import Toggle from '../../ui/Toggle';
 import { useActions, useMore } from '../contexts';
 import { countRender } from '../devRenders';
 import { perfHudEnabled, perfHudNextLaunch, setPerfHudNextLaunch } from '../../../utils/perfHud';
+import EvidenceTag from '../../ui/EvidenceTag';
+import { EvidenceOrigin } from '../../guide/evidenceLink';
+
+/** v16.6: the tag here leads back to Advanced (the Guide's "Back to Advanced"). */
+const ORIGIN = { tab: 'more', sheet: null, label: 'Advanced', more: 'advanced' } as const;
 import {
   ADVANCED_EXPERIMENTAL,
   ADVANCED_LAYOUT,
@@ -25,7 +30,7 @@ import {
   PERF_LINE,
   PERF_ON_NOW,
   PERF_TITLE,
-  SCAN_SCORES_LINE,
+  SCAN_SCORES_NOTE,
   SCAN_SCORES_TITLE,
   USE_CLASSIC,
 } from './moreModel';
@@ -54,7 +59,14 @@ const AdvancedPage = () => {
   return (
     <div data-testid="more-advanced" className="px-4 py-3 space-y-3">
       <Card id="experimental" title={ADVANCED_EXPERIMENTAL}>
-        <Toggle label={SCAN_SCORES_TITLE} description={SCAN_SCORES_LINE} checked={scanScores} onChange={actions.setScanScores} data-testid="advanced-scan-scores" />
+        <EvidenceOrigin.Provider value={ORIGIN}>
+          <div data-evidence={SCAN_SCORES_NOTE.tag} className="space-y-2">
+            <Toggle label={SCAN_SCORES_TITLE} description={SCAN_SCORES_NOTE.line} checked={scanScores} onChange={actions.setScanScores} data-testid="advanced-scan-scores" />
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
+              <EvidenceTag tier={SCAN_SCORES_NOTE.tag} />
+            </div>
+          </div>
+        </EvidenceOrigin.Provider>
       </Card>
       <Card id="layout" title={ADVANCED_LAYOUT} status={LAYOUT_STATUS}>
         <p className="text-sm text-ink-soft leading-snug">{LAYOUT_LINE}</p>

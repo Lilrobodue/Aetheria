@@ -14,6 +14,7 @@ import { V2_TONE_SLIDER_MAX, V2_TONE_SLIDER_STEP, V2_BEAT_SLIDER_MAX } from '../
 import { useActions, useLevels, useSound } from '../contexts';
 import { countRender } from '../devRenders';
 import SectionCard from './SectionCard';
+import EvidenceTag from '../../ui/EvidenceTag';
 import { COMFORT_LEVELS } from './layersModel';
 
 const pct = (x: number) => `${Math.round(x * 100)} %`;
@@ -72,7 +73,13 @@ const KeyFitBlock = React.memo(() => {
       <p data-testid="layers-keyfit-status" className="text-sm text-ink-soft">
         {s.keyFitRowLine}
       </p>
-      <p className="text-xs text-ink-faint leading-snug">{KEY_FIT_EVIDENCE}</p>
+      <div data-evidence="tier1" className="space-y-2">
+        <p className="text-xs text-ink-faint leading-snug">{KEY_FIT_EVIDENCE}</p>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
+          <EvidenceTag tier="tier1" />
+          <EvidenceTag tier="design" />
+        </div>
+      </div>
     </div>
   );
 });

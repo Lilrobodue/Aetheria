@@ -2,6 +2,15 @@ import React, { useState, useMemo } from 'react';
 import { Calculator, Sparkles, CheckCircle2, AlertCircle, Box, Volume2, ArrowUpCircle, Layers, Wind, Infinity as InfinityIcon, Atom } from 'lucide-react';
 import { LO_SHU_WALK_INFO, type LoShuWalkMode } from '../constants';
 import { frequencyToSpectrumColor, type FrequencyColorMode } from '../utils/spectrumColor';
+import EvidenceTag from './ui/EvidenceTag';
+import { place } from '../utils/copy/places';
+import type { Layout } from '../utils/copy/places';
+
+// v16.6 ("How sure are we?", the copy pass): a cell's name stands alone, untagged, so it carries no claim word ("Tissue
+// Repair" is "Renewal"; the association, "tissue repair", is in the meaning block and the technical guide's cards,
+// tagged). A caption over the grids says whose names they are, with its Tradition tag; the walks' and cells' notes name
+// the host's places (`layout`, utils/copy/places), and say a walk uses the songs' crystals, not a measurement; the closed
+// circuit's lineage is a Tradition block.
 
 // Standard Lo Shu position layout:
 //   4  9  2
@@ -49,7 +58,7 @@ const SOLFEGGIO_GUT: RegimeDef = {
   intervalNote: 'Interval irregular (avg 99) — 7/8 lines = 1665',
   freqs: [174, 285, 396, 417, 528, 639, 741, 852, 963],
   names: [
-    'Foundation', 'Tissue Repair', 'Liberating Fear',
+    'Foundation', 'Renewal', 'Liberating Fear',
     'Facilitating Change', 'Transformation', 'Connecting Relationships',
     'Awakening Intuition', 'Spiritual Order', 'Divine Consciousness',
   ],
@@ -64,7 +73,7 @@ const PERFECT_GUT: RegimeDef = {
   intervalNote: 'Interval 111 — 8/8 lines = 1557 (perfect magic square)',
   freqs: [75, 186, 297, 408, 519, 630, 741, 852, 963],
   names: [
-    'Foundation+', 'Tissue Repair+', 'Liberating Fear+',
+    'Foundation+', 'Renewal+', 'Liberating Fear+',
     'Facilitating Change+', 'Transformation+', 'Connecting Relationships+',
     'Awakening Intuition', 'Spiritual Order', 'Divine Consciousness',
   ],
@@ -347,6 +356,8 @@ interface LoShuMatrixProps {
   onColorModeChange?: (mode: FrequencyColorMode) => void;
   /** v16.5 final: the new layout's Guide asks the cells to contain their content (Cell `contain`); classic doesn't. */
   containCells?: boolean;
+  /** v16.6: the host's layout, for the places the notes name. */
+  layout?: Layout;
 }
 
 // The matrix surfaces the three Lo Shu walks (A/B/C) plus the omnibus
@@ -407,6 +418,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
   colorMode,
   onColorModeChange,
   containCells,
+  layout = 'classic',
 }) => {
   const [internalShowPerfect, setInternalShowPerfect] = useState(false);
   const isControlled = loShuPerfectGUT !== undefined;
@@ -573,8 +585,8 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
           <p className="text-sm text-slate-300 leading-relaxed mb-4">
             Three 27-track journeys built from the standard Lo Shu magic square. Each walk traces a distinct
             path through the GUT (174–963 Hz), HEART (1206–3150 Hz), and HEAD (3504–6336 Hz) regimes.
-            Pick a walk and the player assembles a playlist by matching each frequency to the closest song
-            in your library — positions with no match are skipped.
+            Pick a walk and the player builds a playlist from the songs assigned to each crystal; positions with
+            no song are skipped.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {(['A', 'B', 'C'] as MatrixWalkMode[]).map(mode => {
@@ -640,7 +652,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
           })}
 
           <div className="mt-3 text-[10px] text-slate-500 italic">
-            Walks need analyzed songs across the regime ranges. Run Deep Scan first if your library is unprocessed.
+            {place('walksNeed', layout as Layout)}
           </div>
         </div>
       )}
@@ -649,9 +661,13 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
       {cellsClickable && (
         <div className="mb-3 flex items-center gap-2 text-[11px] text-slate-400">
           <Volume2 size={12} className="text-purple-300" />
-          Click any cell to set the playing frequency.
+          {place('cellTap', layout as Layout)}
         </div>
       )}
+      <div data-evidence="tradition" data-testid="loshu-cell-names" className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-3 text-[11px] text-slate-400">
+        <span>Cell names: the traditional Solfeggio associations (GUT) and the Aetheria framework's (HEART, HEAD).</span>
+        <EvidenceTag tier="tradition" />
+      </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
         <RegimeBlock regime={gut} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} contain={containCells} />
         <RegimeBlock regime={HEART} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} contain={containCells} />
@@ -726,11 +742,14 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
           Condensed from the_closed_circuit_ouroboros_inheritance.md.
           Frames why one of the six Aetheria walks is closed and surfaces
           the cross-cultural correspondences that converge on the same shape. */}
-      <div className="mt-6 p-6 bg-gradient-to-br from-cyan-900/15 via-slate-900/40 to-purple-900/15 border border-cyan-500/30 rounded-xl">
-        <div className="flex items-center gap-2 mb-3">
+      <div data-evidence="tradition" className="mt-6 p-6 bg-gradient-to-br from-cyan-900/15 via-slate-900/40 to-purple-900/15 border border-cyan-500/30 rounded-xl">
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
           <InfinityIcon className="text-cyan-300" size={20} />
           <h4 className="text-lg font-bold text-cyan-200 uppercase tracking-wider">The Closed Circuit · 周天</h4>
           <span className="ml-auto text-[10px] text-cyan-400/70 font-mono italic">Ouroboros as Inheritance</span>
+        </div>
+        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-3">
+          <EvidenceTag tier="tradition" />
         </div>
         <p className="text-sm text-slate-300 mb-3 leading-relaxed">
           Two of the Aetheria walks are closed: the <span className="text-cyan-200 font-semibold">Ouroboros</span> (29 steps)

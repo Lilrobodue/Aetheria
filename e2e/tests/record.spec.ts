@@ -64,7 +64,8 @@ test.describe('phone', () => {
     await openRecordFromMore(page);
     const sheet = recordSheet(page);
     await expect(sheet.getByTestId('record-not-ready')).toHaveText('Play something first: a recording starts from what is playing.');
-    await expect(sheet.getByText('Choose a recording mode. Audio-only is recommended for long sessions to prevent crashes.', { exact: true })).toBeVisible();
+    // v16.6 (N1): the advice was backwards (Audio Only holds the whole recording in memory), so only the line stays.
+    await expect(sheet.getByText('Choose a recording mode.', { exact: true })).toBeVisible();
     for (const k of ['audio', 'video', 'both']) await expect(sheet.getByTestId(`record-option-${k}`)).toBeDisabled();
     await expect(sheet.getByTestId('record-option-audio')).toContainText('Audio Only');
     await expect(sheet.getByTestId('record-option-video')).toContainText('Visuals Only');

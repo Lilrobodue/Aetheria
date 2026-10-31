@@ -378,6 +378,8 @@ for (const raw of [null, 7, '', 'x'.repeat(5000), '{', '[]', '{"v":2}', '{"v":1,
 ok(B.builderName({ ...B.DEFAULT_SETTINGS, per: 1 }) === 'Grounding · 1 per crystal', 'I: name with per');
 ok(B.builderName({ ...B.settingsOf('walk:C'), order: 'shuffle', source: { kind: 'playlist', id: 'pabcdef12' } }, 'Evening') === 'Flying Star Vortex · shuffled · from Evening', 'I: name with order and source');
 ok(B.builderName({ ...B.settingsOf('walk:C'), filters: withFacet(NO_FILTERS, 'x-golden', ['over'], B.BUILDER_FACETS) }) === 'Flying Star Vortex · Golden ratio score over 30 %', 'I: a score filter in words');
+ok(B.builderName({ ...B.settingsOf('walk:C'), filters: withFacet(NO_FILTERS, 'x-dna', ['over'], B.BUILDER_FACETS) }) === 'Flying Star Vortex · Experimental resonance score over 30 %', 'I: decision 13: the DNA score in a name is the Experimental resonance score');
+for (const f of B.BUILDER_FACETS.filter((x) => x.id.startsWith('x-'))) ok(!/DNA/i.test(B.builderName({ ...B.DEFAULT_SETTINGS, filters: withFacet(NO_FILTERS, f.id, ['over'], B.BUILDER_FACETS) })), `I: decision 13: no DNA in a name (${f.id})`);
 ok(B.builderName({ ...B.settingsOf('preset:qi'), order: 'source', source: { kind: 'queue' } }, 'your queue') === 'Grounding · in queue order · from your queue', 'I: queue order');
 ok(B.builderName({ ...B.DEFAULT_SETTINGS, follow: { kind: 'set', set: 'custom', crystals: [528, 639] } }) === 'Custom: 528 · 639 Hz', 'I: a custom set');
 {

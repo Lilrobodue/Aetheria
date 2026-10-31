@@ -12,16 +12,16 @@
 // React.memo; it reads no clock, so playback re-renders nothing here.
 
 import React, { useMemo } from 'react';
-import { OctagonX, Shield } from 'lucide-react';
+import { OctagonX, Scale, Shield } from 'lucide-react';
 import Toggle from '../../ui/Toggle';
 import ListRow from '../../ui/ListRow';
 import { StatementLiability, StatementSections } from '../../more/SafetyStatement';
-import { useActions, useMore, useSound, useVisuals } from '../contexts';
+import { useActions, useMore, useShell, useSound, useVisuals } from '../contexts';
 import { countRender } from '../devRenders';
 import { MUSIC_ONLY_DESCRIPTION } from '../layers/soundModel';
 import { COMFORT_LEVELS } from '../layers/layersModel';
 import { PAUSE_VISUALS_LABEL, PAUSE_VISUALS_RECORDING, pauseVisualsLine } from './visualsModel';
-import { KEEP_AWAKE_LABEL, KEEP_AWAKE_LINE, STATEMENT_ROW_SUBTITLE, STOP_ALL_LINE, statementVersionLine } from './moreModel';
+import { KEEP_AWAKE_LABEL, KEEP_AWAKE_LINE, STATEMENT_ROW_SUBTITLE, STOP_ALL_LINE, statementVersionLine, HOW_SURE_ROW_TITLE, HOW_SURE_ROW_LINE } from './moreModel';
 import type { MoreView } from './moreModel';
 
 const SafetyPage = ({ go }: { go: (v: MoreView) => void }) => {
@@ -30,6 +30,7 @@ const SafetyPage = ({ go }: { go: (v: MoreView) => void }) => {
   const { musicOnly } = useSound();
   const { userPaused, visualRecording } = useVisuals();
   const { keepAwake } = useMore();
+  const { guideViewRef } = useShell();
   const h = useMemo(() => ({ musicOnly: () => actions.toggleMusicOnly() }), [actions]);
   return (
     <div data-testid="more-safety" className="px-4 py-3 space-y-3">
@@ -69,6 +70,18 @@ const SafetyPage = ({ go }: { go: (v: MoreView) => void }) => {
           chevron
           onClick={() => go('statement')}
           data-testid="safety-statement-row"
+        />
+        {/* v16.6: the evidence, beside the statement (the Guide opens at its How sure are we? section; Back returns here). */}
+        <ListRow
+          title={HOW_SURE_ROW_TITLE}
+          subtitle={HOW_SURE_ROW_LINE}
+          icon={<Scale size={20} />}
+          chevron
+          onClick={() => {
+            guideViewRef.current = { ...guideViewRef.current, top: 0, anchor: 'section' };
+            go('guide');
+          }}
+          data-testid="safety-how-sure-row"
         />
       </div>
     </div>

@@ -20,6 +20,7 @@ import type { LayerPhase, LayerPlayerState } from '../../utils/soundV2/layerPlay
 import type { KeyFitView } from '../../utils/soundV2/keyFit.ts';
 import { formatDb, gainToDb, MAX_BOOST, TONE_REF_DB, BEAT_REF_DB } from '../../utils/soundV2/layerHost.ts';
 import { NO_DUCK_DB } from '../../utils/soundV2/keyFit.ts';
+import { highCrystalHumLine } from '../../utils/copy/soundCopy.ts';
 
 /** What a helper shows when it has nothing to show (formatDb's fallback too). */
 export const DASH = '—';
@@ -83,8 +84,7 @@ export const V2_UNAVAILABLE_CAR_RECORDING =
   "v2 unavailable on this device. For Car output the layers are off and the music can't be recorded here, so this recording will be silent.";
 
 export const SHEET_HEADING = 'What are you listening on?';
-export const SHEET_BODY =
-  'The layers are shaped for your output. Change it any time with the layers button in the player.';
+export const SHEET_BODY = 'The layers are shaped for your output. You can change it any time.';
 export const SHEET_LATER = 'Ask me later';
 export const QUICK_SWITCH_LABEL = 'Layer sound and output';
 
@@ -168,7 +168,7 @@ export function beatReadout(g: number, render: BeatRender): string {
  *  line (App renders the classic markup itself whenever v2 has no tone to name). */
 export function feltLineV2(selectedHz: number, toneHz: number): string {
   const sel = isNum(selectedHz) ? String(selectedHz) : DASH;
-  if (!isNum(toneHz) || toneHz <= 0) return `High frequency detected (${sel}Hz). Focus on feeling rather than hearing.`;
+  if (!isNum(toneHz) || toneHz <= 0) return highCrystalHumLine(sel);
   return `High-order frequency (${sel} Hz). v2 plays its octave ${hz(toneHz)} Hz: an audible tone under the music.`;
 }
 

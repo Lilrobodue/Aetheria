@@ -36,6 +36,8 @@ const pct = (v: number): number => Math.round(v * 100);
 const BADGES: ReadonlyArray<{ id: ScanScoreId; spoken: string; text: (p: number) => string }> = [
   { id: 'golden', spoken: 'golden ratio', text: (p) => `Φ ${p}%` },
   { id: 'p111', spoken: '111 pattern', text: () => '111' },
+  // v16.6 (review C5): a row's badge carries no tag (never per row), so this data claims none either; its two words are
+  // score names, allow-listed by name and scoped to the badges (scripts/copy-allow.json, kind score-name).
   { id: 'dna', spoken: 'DNA resonance', text: () => 'DNA' },
 ];
 
@@ -80,8 +82,9 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
 export function scanScoreRows(song: ScanSong | null | undefined): ScanRow[] {
   if (!song) return [];
   const rows: ScanRow[] = [];
-  for (const id of ['golden', 'p111', 'dna', 'geometry', 'schumann'] as const) {
-    const d = def(id);
+  // The five scores in SCAN_SCORES' own order (the Aetheria candidate is a builder filter only, not a row here).
+  for (const d of SCAN_SCORES) {
+    if (d.id === 'candidate') continue;
     const v = d.read(song);
     if (v === null) continue;
     rows.push(d.note ? { label: d.name, value: `${pct(v)} %`, note: d.note.replace(/\.$/, '') } : { label: d.name, value: `${pct(v)} %` });

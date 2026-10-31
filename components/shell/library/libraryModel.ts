@@ -331,6 +331,8 @@ export interface InfoRow {
   label: string;
   value: string;
   note?: string;
+  /** v16.6: the note's evidence tag (the assigned crystal: Design choice); the dialog renders it beside the note. */
+  tag?: 'design';
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -392,7 +394,7 @@ export function trackInfoRows(s: LibSong, now: number): InfoRow[] {
   rows.push({ label: 'Length', value: Number.isFinite(d) && (d as number) > 0 ? formatTime(d as number) : d === 0 ? 'Reading…' : 'Unknown' });
   const hz = s.closestSolfeggio;
   if (Number.isFinite(hz) && (hz as number) > 0) {
-    rows.push({ label: 'Crystal', value: `${Math.round(hz as number)} Hz · ${regimeName(regimeOf(hz as number))}`, note: `${crystalSource(s)}. ${ASSIGNED_NOTE}` });
+    rows.push({ label: 'Crystal', value: `${Math.round(hz as number)} Hz · ${regimeName(regimeOf(hz as number))}`, note: `${crystalSource(s)}. ${ASSIGNED_NOTE}`, tag: 'design' });
   } else {
     rows.push({ label: 'Crystal', value: 'None yet' });
   }

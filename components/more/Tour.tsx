@@ -15,6 +15,7 @@
 // classic layout's Guidebook (More's classic row, v16.4 review); v16.5 brings the Guide to More (More › Guide) and
 // moves the classic row into Advanced, so card 3 names the Guide again; card 4 is new.
 
+import { RETUNE_SHORT } from '../../utils/copy/crystalCopy';
 import React, { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -33,7 +34,8 @@ interface TourCard {
   lines: TourLine[];
 }
 
-/** The four cards. `desktop` changes card 4's first line (sections on the left, not tabs at the bottom). */
+/** The four cards. `desktop` changes card 2's description (a click, not a tap) and card 4's first line (sections on the
+ *  left, not tabs at the bottom). */
 export function tourCards(desktop: boolean): TourCard[] {
   return [
     {
@@ -41,20 +43,20 @@ export function tourCards(desktop: boolean): TourCard[] {
       desc: 'An advanced music player that takes the songs you already love and does three things.',
       icon: <Music size={28} aria-hidden="true" />,
       lines: [
-        { label: 'Retunes to 432 Hz:', text: 'A natural tuning many listeners find warmer than standard 440 Hz.' },
+        { label: 'Retunes to 432 Hz:', text: RETUNE_SHORT },
         { label: 'Sorts into 27 frequencies:', text: 'Each song is assigned to one of three ranges — GUT, HEART, or HEAD.' },
         { label: 'Layers binaural beats:', text: 'A subtle layer underneath your music. Headphones recommended.' },
       ],
     },
     {
       title: '27 crystals, three ranges',
-      desc: 'Two clicks let the player understand your library and sort it into the 27 frequencies.',
+      desc: `${desktop ? 'One click' : 'One tap'} gives every song a crystal: one of the 27 frequencies. Scanning first is optional.`,
       icon: <Gem size={28} aria-hidden="true" />,
       lines: [
-        { label: 'Scan:', text: "The engine analyzes each song's frequency content." },
+        { label: 'Scan:', text: 'Reads each song and gives it a crystal (slow, and optional).' },
         {
           label: 'Assign crystals:',
-          text: 'Keeps the frequencies Deep Scan found and gives every other song one of the 27 across the GUT, HEART, and HEAD ranges, empty ones first.',
+          text: 'Keeps the crystals Deep Scan gave and gives every other song one of the 27 across the GUT, HEART, and HEAD ranges, empty ones first.',
         },
         { label: 'One-time:', text: 'Once assigned, your library is ready for any listening mode.' },
       ],

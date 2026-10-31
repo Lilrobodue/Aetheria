@@ -13,6 +13,7 @@
 
 import React, { useLayoutEffect, useRef } from 'react';
 import { ListFilter, X } from 'lucide-react';
+import EvidenceTag from '../../../ui/EvidenceTag';
 import RadioList from '../../../ui/RadioList';
 import { ChoiceTile, LINE, SectionHead, onRadioKeys, rovingTabIndex } from './parts';
 import { removeChipName, filtersButtonName } from '../../library/filterViewModel';
@@ -62,6 +63,8 @@ interface FiltersSectionProps {
 }
 export const FiltersSection = React.memo(({ chips, noneLine, onRemove, onOpen, buttonRef }: FiltersSectionProps) => {
   const listRef: { current: HTMLDivElement | null } = useRef(null);
+  // v16.6 (decision 11): an experimental scan-score chip names the app's own score: the chips carry Design choice.
+  const experimental = chips.some((c) => c.facet.startsWith('x-'));
   // A removal moves the focus to the next chip (or the previous, or the Filters button with none left).
   const focusNextRef: { current: number | null } = useRef(null);
   useLayoutEffect(() => {
@@ -78,6 +81,7 @@ export const FiltersSection = React.memo(({ chips, noneLine, onRemove, onOpen, b
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           {chips.length ? (
+            <div data-evidence={experimental ? 'design' : undefined} data-testid="builder-chips-block">
             <div ref={listRef} data-testid="builder-active-chips" className="pt-1 flex flex-wrap gap-x-2 gap-y-3">
               {chips.map((c, i) => (
                 <button
@@ -94,6 +98,12 @@ export const FiltersSection = React.memo(({ chips, noneLine, onRemove, onOpen, b
                   <X size={14} className="text-ink-muted" aria-hidden="true" />
                 </button>
               ))}
+            </div>
+            {experimental ? (
+              <div className="pt-3 flex flex-wrap items-center gap-x-2 gap-y-3">
+                <EvidenceTag tier="design" />
+              </div>
+            ) : null}
             </div>
           ) : (
             <p className="pt-2 text-sm text-ink-muted">{noneLine}</p>

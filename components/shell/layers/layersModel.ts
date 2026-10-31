@@ -11,6 +11,7 @@ import { formatTime } from '../shellModel.ts';
 import type { CrystalSection } from '../shellModel.ts';
 import { formatDb, gainToDb, sliderGain, TONE_SLIDER_DEFAULT } from '../../../utils/soundV2/layerHost.ts';
 import { GAMMA_DESCRIPTION_V2 } from '../../layers/layerCopy.ts';
+import { BAND_LINES } from '../../../utils/copy/crystalCopy.ts';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The sections
@@ -198,10 +199,12 @@ export const BEAT_BANDS: ReadonlyArray<{ name: string; delta: number; range: str
   { name: 'Gamma', delta: 40, range: 'The band above 30 Hz' },
 ];
 
-/** A band row's subtitle: its range (v2's Gamma: the existing design-choice note), " · now" on the band delivered. */
+/** A band row's subtitle: its range and what the EEG band is usually seen with (v16.6: utils/copy's BAND_LINES, both
+ *  layouts; never "best for"); v2's Gamma: the existing design-choice note; " · now" on the band delivered. */
 export function bandSubtitle(name: string, v2: boolean, now: boolean): string {
   const band = BEAT_BANDS.find((b) => b.name === name);
-  const base = v2 && name === 'Gamma' ? GAMMA_DESCRIPTION_V2 : (band?.range ?? '');
+  const line = (BAND_LINES as Record<string, string>)[name];
+  const base = v2 && name === 'Gamma' ? GAMMA_DESCRIPTION_V2 : (line ?? band?.range ?? '');
   return now ? `${base} · now` : base;
 }
 

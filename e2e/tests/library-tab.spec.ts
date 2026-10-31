@@ -801,7 +801,8 @@ test.describe('phone, the row menu', () => {
     const today = await page.evaluate(() => { const d = new Date(); return `${d.getDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()]} ${d.getFullYear()}`; });
     expect(await rows()).toEqual([
       ['Length', '0:40'],
-      ['Crystal', '528 Hz · GUTAssigned, not scanned yet. An assigned crystal, not a measured pitch.'],
+      // v16.6: the note carries its evidence tag (the button's text, "Design choice"); the copied text stays the words.
+      ['Crystal', '528 Hz · GUTAssigned, not scanned yet. An assigned crystal, not a measured pitch.Design choice'],
       ['Key', 'A minor · confidence 0.62From Analyse tracks'],
       ['Visual sync', 'From Analyse tracks'],
       ['File', 'tone-0003.wav · 625 KB'],
@@ -951,7 +952,7 @@ test.describe('phone, the health card', () => {
     await expect(healthLine(page, 'scan-assigned')).toHaveText('Also scan the 19 assigned tracks (about 47 min)');
     await healthAction(page, 'scan').click();
     await expect(healthLine(page, 'scan')).toHaveText(/^Scanning · \d+ %$/, { timeout: 15_000 });
-    await expect(page.getByText('Deep Analysis In Progress'), 'not classic’s box (v15.7: the card says it)').toHaveCount(0);
+    await expect(page.getByText('Deep Scan in progress'), 'not classic’s box (v15.7: the card says it)').toHaveCount(0);
     await expect(page.getByTestId('library-health-status')).toHaveText('Scanning…');
     await expect(healthAction(page, 'analyse')).toHaveAttribute('aria-disabled', 'true');
     await expect(page.getByTestId('health-analyse')).toContainText('Unavailable while Deep Scan runs');
@@ -1620,7 +1621,7 @@ test.describe('phone, notices', () => {
   test('27. classic’s Analysis Status box never shows in the new layout: an import’s skips are the sheet’s, Deep Scan’s progress the card’s, a walk’s message a toast; classic unchanged', async ({ page }) => {
     test.setTimeout(180_000);
     const dialogs = await openSeededNewLayout(page, 30, { crystals: 'some' });
-    const box = page.getByText('Analysis Status', { exact: true }).or(page.getByText('Deep Analysis In Progress', { exact: true }));
+    const box = page.getByText('Analysis Status', { exact: true }).or(page.getByText('Deep Scan in progress', { exact: true }));
     const notices = page.getByTestId('notices');
     const skipped = [{ name: 'new-1.wav', mimeType: 'audio/wav', buffer: toneWav(3, 340) }, { name: 'list.m3u', mimeType: 'audio/x-mpegurl', buffer: Buffer.from('#EXTM3U\n') }];
     await openLibraryTab(page);
@@ -1642,7 +1643,7 @@ test.describe('phone, notices', () => {
     await expect(healthLine(page, 'scan')).toHaveText(/^Scanning · \d+ %$/, { timeout: 15_000 });
     await page.waitForTimeout(2000);
     await expect(box, 'no box for Deep Scan').toHaveCount(0);
-    await expect(notices, 'no start or progress toast: the card says it').not.toContainText(/Starting deep fractal analysis|Analyzing: /);
+    await expect(notices, 'no start or progress toast: the card says it').not.toContainText(/Starting Deep Scan|Analyzing: /);
     await healthAction(page, 'scan').click();
     await expect(healthLine(page, 'scan')).toHaveText(/^Optional · /, { timeout: 30_000 });
     // Classic: the box, as v15.6.

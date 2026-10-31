@@ -27,6 +27,10 @@ import LevelsSection from './LevelsSection';
 import BeatSection from './BeatSection';
 import AdvancedSection from './AdvancedSection';
 import { sectionId } from './layersModel';
+import { EvidenceOrigin } from '../../guide/evidenceLink';
+
+/** v16.6: where this tab's evidence tags lead back to (the Guide's "Back to Layers"). */
+const ORIGIN = { tab: 'layers', sheet: null, label: 'Layers' } as const;
 
 interface LayersTabProps {
   /** In the desktop shell's 420 px panel (Close; non-modal), else the phone's full tab. */
@@ -79,6 +83,7 @@ const LayersTab = ({ inPanel = false }: LayersTabProps) => {
         data-testid="layers-scroll"
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain bg-surface-deep"
       >
+        <EvidenceOrigin.Provider value={ORIGIN}>
         <div className="px-4 py-3 space-y-3">
           <ViewBoundary name="layers-sound" fallback={(api) => <SectionCrash section="sound" title="Sound" api={api} />} render={() => <SoundSection />} />
           <ViewBoundary name="layers-crystal" fallback={(api) => <SectionCrash section="crystal" title="Crystal" api={api} />} render={() => <CrystalSection />} />
@@ -86,6 +91,7 @@ const LayersTab = ({ inPanel = false }: LayersTabProps) => {
           <ViewBoundary name="layers-beat" fallback={(api) => <SectionCrash section="beat" title="Beat" api={api} />} render={() => <BeatSection />} />
           <ViewBoundary name="layers-advanced" fallback={(api) => <SectionCrash section="advanced" title="Advanced" api={api} />} render={() => <AdvancedSection />} />
         </div>
+        </EvidenceOrigin.Provider>
         <div ref={spacerRef} aria-hidden="true" data-testid="layers-notice-spacer" />
       </div>
     </div>

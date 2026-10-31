@@ -236,7 +236,7 @@ const seeded = S(`${Date.UTC(2026, 9, 25, 8)}-k1`, 'tone-0142', {
 });
 eq(trackInfoRows(seeded, NOW), [
   { label: 'Length', value: '3:52' },
-  { label: 'Crystal', value: '528 Hz · GUT', note: 'Assigned, not scanned yet. An assigned crystal, not a measured pitch.' },
+  { label: 'Crystal', value: '528 Hz · GUT', note: 'Assigned, not scanned yet. An assigned crystal, not a measured pitch.', tag: 'design' },
   { label: 'Key', value: 'A minor · confidence 0.62', note: 'From Analyse tracks' },
   { label: 'Visual sync', value: 'From Analyse tracks' },
   { label: 'File', value: 'tone-0142.wav · 4.1 MB' },
@@ -258,8 +258,8 @@ const visual = (o: Partial<LibSong>) => trackInfoRows(S('x', 'x', o), NOW).find(
 eq(visual({ bandEnvelope: { bass: { length: 3 } }, visualEnvelope: { bass: { length: 3 } } }), 'From Deep Scan', 'visual sync: Deep Scan first');
 eq(visual({ bandEnvelope: { bass: { length: 0 } }, visualEnvelope: { bass: { length: 3 } } }), 'From Analyse tracks', 'visual sync: Analyse tracks');
 eq(visual({ bandEnvelope: null, visualEnvelope: { bass: { length: 0 } } }), 'None yet', 'visual sync: none');
-eq(trackInfoRows(S('x', 'x', { closestSolfeggio: 2178, harmonicFreq: 2180, harmonicDeviation: 2, fractalAnalysis: {} }), NOW)[1], { label: 'Crystal', value: '2178 Hz · SOURCE', note: 'From Deep Scan. An assigned crystal, not a measured pitch.' }, 'crystal: SOURCE, Deep Scan');
-eq(trackInfoRows(S('x', 'x', { closestSolfeggio: 2421, harmonicFreq: 2180, harmonicDeviation: 0, fractalAnalysis: {} }), NOW)[1], { label: 'Crystal', value: '2421 Hz · HEART', note: `${REPLACED}. An assigned crystal, not a measured pitch.` }, 'crystal: replaced after a scan');
+eq(trackInfoRows(S('x', 'x', { closestSolfeggio: 2178, harmonicFreq: 2180, harmonicDeviation: 2, fractalAnalysis: {} }), NOW)[1], { label: 'Crystal', value: '2178 Hz · SOURCE', note: 'From Deep Scan. An assigned crystal, not a measured pitch.', tag: 'design' }, 'crystal: SOURCE, Deep Scan');
+eq(trackInfoRows(S('x', 'x', { closestSolfeggio: 2421, harmonicFreq: 2180, harmonicDeviation: 0, fractalAnalysis: {} }), NOW)[1], { label: 'Crystal', value: '2421 Hz · HEART', note: `${REPLACED}. An assigned crystal, not a measured pitch.`, tag: 'design' }, 'crystal: replaced after a scan');
 eq(trackInfoRows(S('x', 'x', { closestSolfeggio: 2178, harmonicFreq: 2180, harmonicDeviation: 0, fractalAnalysis: {} }), NOW)[1].note, 'From Deep Scan. An assigned crystal, not a measured pitch.', 'crystal: re-stored on Deep Scan\'s own crystal (fix 3)');
 for (const n of BAD_NUMBERS) {
   const rows = trackInfoRows(S('x', 'x', { duration: n, closestSolfeggio: n, keyConfidence: n, chromaVersion: 1, musicKey: 'C', file: { name: 'f', size: n } }), NOW);

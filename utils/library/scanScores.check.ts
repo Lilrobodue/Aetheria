@@ -1,7 +1,7 @@
 // utils/library/scanScores.check.ts (v16.3; npm run check:filters): the scores' cut-offs and words, and the seam the
 // builder uses: the Library's facets composed with the experimental ones, over any set of tracks.
 import { LIBRARY_FACETS, buildFacetIndex, filterPass, countOf, withFacet, NO_FILTERS } from './filterModel.ts';
-import { EXPERIMENTAL_FACETS, SCAN_SCORES, hasScore, scoreChipText, SCAN_SCORES_LEAD } from './scanScores.ts';
+import { EXPERIMENTAL_FACETS, SCAN_SCORES, hasScore, scoreChipText, scoreNameText, SCAN_SCORES_LEAD } from './scanScores.ts';
 import type { ScoreSong } from './scanScores.ts';
 
 let passed = 0, failed = 0;
@@ -21,6 +21,8 @@ eq(songs.map((s) => hasScore(golden, s)), [true, false, null, null, null], 'gold
 eq(SCAN_SCORES.filter((d) => d.over !== null).map((d) => [d.id, d.over]), [['golden', 0.3], ['p111', 0.2], ['dna', 0.3], ['candidate', 0.5]], 'the cut-offs (decision 4 A)');
 eq(EXPERIMENTAL_FACETS.map((f) => f.id), ['x-golden', 'x-p111', 'x-dna', 'x-candidate'], 'the experimental facets');
 eq(SCAN_SCORES.filter((d) => d.over !== null).map(scoreChipText), ['Golden ratio score over 30 %', '111 pattern score over 20 %', 'DNA resonance score over 30 %', 'Aetheria number'], 'chip words');
+// v16.6 (decision 13): a mix's name never says DNA; the other scores' names hold no gate word and stay as they are.
+eq(SCAN_SCORES.filter((d) => d.over !== null).map(scoreNameText), ['Golden ratio score over 30 %', '111 pattern score over 20 %', 'Experimental resonance score over 30 %', 'Aetheria number'], 'name words (decision 13)');
 ok(SCAN_SCORES_LEAD.includes('not a pitch measurement'), 'the lead says it is not a measurement');
 
 // Composed: the library's facets + the experimental ones, on a playlist-like set with a repeat.

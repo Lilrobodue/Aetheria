@@ -449,7 +449,7 @@ test.describe('phone', () => {
     const dialogs = await playingSeeded(page);
     await openMorePage(page, 'about');
     const about = page.getByTestId('more-about');
-    await expect(page.getByTestId('about-version')).toHaveText('Version v16.5 · new layout (beta)');
+    await expect(page.getByTestId('about-version')).toHaveText('Version v16.6 · new layout (beta)');
     await expect(about).toContainText('Nothing about your listening sessions leaves your device.');
     // The suite blocks service workers: not saved, and nothing to ask for an update.
     await expect(page.getByTestId('about-offline')).toContainText('Not saved for offline use yet');
@@ -568,7 +568,7 @@ test.describe('phone', () => {
     await page.evaluate(() => {
       const sw = (window as any).__sw;
       sw.setController(true);
-      sw.keys = ['aetheria-v16.5-offline'];
+      sw.keys = ['aetheria-v16.6-offline'];
       navigator.serviceWorker.dispatchEvent(new Event('controllerchange'));
     });
     await expect.soft(offline, 'a new controller').toContainText('Works offline');
@@ -576,7 +576,7 @@ test.describe('phone', () => {
     await page.evaluate(() => ((window as any).__sw.keys = []));
     await reopen();
     await page.evaluate(() => {
-      (window as any).__sw.keys = ['aetheria-v16.5-offline'];
+      (window as any).__sw.keys = ['aetheria-v16.6-offline'];
       navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'OFFLINE_READY', added: 0, total: 9 } }));
     });
     await expect.soft(offline, "the worker's cached message").toContainText('Works offline');
@@ -585,7 +585,7 @@ test.describe('phone', () => {
     await reopen();
     await page.evaluate(() => {
       const sw = (window as any).__sw;
-      sw.keys = ['aetheria-v16.5-offline'];
+      sw.keys = ['aetheria-v16.6-offline'];
       sw.active.state = 'activated';
       sw.active.dispatchEvent(new Event('statechange'));
     });
@@ -595,12 +595,12 @@ test.describe('phone', () => {
 
   test('S5e. only this version\'s offline cache counts: another version\'s says "Not saved for offline use yet"', async ({ page }) => {
     test.setTimeout(150_000);
-    await stubServiceWorker(page, { controller: true, keys: ['aetheria-v16.3-offline', 'aetheria-v16.4-offline', 'aetheria-v16.6-offline'] });
+    await stubServiceWorker(page, { controller: true, keys: ['aetheria-v16.4-offline', 'aetheria-v16.5-offline', 'aetheria-v16.7-offline'] });
     const dialogs = await playingSeeded(page);
     await openMorePage(page, 'about');
     const offline = page.getByTestId('about-offline');
     await expect(offline, "another version's cache").toContainText('Not saved for offline use yet');
-    await page.evaluate(() => ((window as any).__sw.keys = ['aetheria-v16.4-offline', 'aetheria-v16.5-offline']));
+    await page.evaluate(() => ((window as any).__sw.keys = ['aetheria-v16.5-offline', 'aetheria-v16.6-offline']));
     await page.getByRole('button', { name: 'Back to More', exact: true }).click();
     await openMorePage(page, 'about');
     await expect(offline, "this version's").toContainText('Works offline');

@@ -9,8 +9,9 @@ export type RecordKind = 'audio' | 'video' | 'both';
 export const RECORD_TITLE = 'Record';
 export const RECORD_SUBTITLE = 'Audio, visuals or both';
 export const RECORD_SUBTITLE_RECORDING = 'Stop it here or from REC on any screen';
-/** Classic's Record dialog, verbatim. */
-export const RECORD_CLASSIC_LINE = 'Choose a recording mode. Audio-only is recommended for long sessions to prevent crashes.';
+/** Classic's Record dialog's line. v16.6 (R12): its advice is gone (Audio Only is the mode that holds the whole recording
+ *  in memory, so it was backwards). */
+export const RECORD_CLASSIC_LINE = 'Choose a recording mode.';
 /** No AudioContext yet (nothing has played): classic's Record silently does nothing then (v16.4 spec §2.5). */
 export const RECORD_NOT_READY = 'Play something first: a recording starts from what is playing.';
 export const RECORD_NO_VIDEO = "This browser can't record video.";

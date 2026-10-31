@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { test, expect, ON_DEVICE } from './fixtures';
 import { acceptDisclaimerNew, seedToneLibrary, LAYER_ENGINE_KEY, LAYOUT_KEY } from './helpers';
-import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY, crash, optInNewLayout, layoutPref, tapAt, shellHidden, PHONE_VIEWPORT, openSeededNewLayout, openLibraryTab, libraryState, startWalk, libraryRowButton, rowMenu, recordHudDraws, type LibraryState } from './helpers';
+import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY, crash, optInNewLayout, layoutPref, tapAt, shellHidden, PHONE_VIEWPORT, openSeededNewLayout, openLibraryTab, libraryState, startWalk, libraryRowButton, rowMenu, recordHudDraws, openHarmonicControl, type LibraryState } from './helpers';
 import { adb, mediaSession, chromeSessions } from './adb';
 import { stubDownloads, caughtDownloads, wavInfo } from './downloads';
 
@@ -1350,6 +1350,49 @@ async function addMasters(page: Page, files: string[], playlist?: { id: string; 
   await expect.poll(async () => (await libraryState(page)).libraryIds.filter((x) => ids.includes(x)).length, { timeout: 60_000, message: 'the masters restore' }).toBe(ids.length);
   return ids;
 }
+
+/**
+ * v16.6 (spec §6.8 step 3, by finger): an evidence tag by a finger's tap. The new layout: Now Playing › Crystal ›
+ * the meaning block's tag opens More › Guide at its tier ("How sure are we?"), the tier's heading focused; "Back to
+ * Crystal" reopens the sheet. Classic: Harmonic Control › Binaural Beat's Mixed evidence tag opens the Guidebook at
+ * Tier 2; Escape closes it back to Harmonic Control.
+ */
+test('v16.6 D-C1: by finger, the Crystal sheet’s evidence tag opens the Guide at its tier; "Back to Crystal" reopens the sheet', async ({ page }) => {
+  test.setTimeout(150_000);
+  const dialogs = await openSeededNewLayout(page, 6);
+  await page.setViewportSize(PHONE_VIEWPORT);
+  const { at } = await playlistPhone(page);
+  await at(page.getByTestId('tab-now-button'), 'Now Playing');
+  await at(page.getByTestId('chip-crystal'), 'the crystal chip');
+  const meaning = page.getByTestId('crystal-meaning-sheet');
+  await expect(meaning, 'the meaning block').toBeVisible({ timeout: 5_000 });
+  const tag = meaning.locator('[data-evidence-tag]').first();
+  const tier = (await tag.getAttribute('data-evidence-tag')) ?? '';
+  expect(['tradition', 'design'], 'the meaning block’s tier').toContain(tier);
+  await at(tag, `the ${tier} tag`);
+  await expect(page.getByTestId('more-guide'), 'More › Guide').toBeVisible({ timeout: 5_000 });
+  await expect.poll(() => page.evaluate(() => document.activeElement?.id ?? ''), { timeout: 5_000, message: 'the tier’s heading has the focus' }).toBe(`how-sure-${tier}`);
+  const back = page.getByTestId('evidence-back');
+  await expect(back).toHaveText('Back to Crystal');
+  await at(back, 'Back to Crystal');
+  await expect(page.getByTestId('crystal-meaning-sheet'), 'the Crystal sheet again').toBeVisible({ timeout: 5_000 });
+  expect(dialogs).toEqual([]);
+});
+
+test('v16.6 D-C2: by finger, classic’s Harmonic Control › Binaural Beat tag opens the Guidebook at Mixed evidence (Tier 2); Escape closes it back to Harmonic Control', async ({ page }) => {
+  test.setTimeout(150_000);
+  const dialogs = await openApp(page);
+  await openHarmonicControl(page);
+  const { at } = await playlistPhone(page);
+  const block = page.locator('[data-evidence="tier2"]').filter({ hasText: 'The evidence on whether a beat moves your own brainwaves is mixed.' });
+  await at(block.locator('[data-evidence-tag="tier2"]'), 'the Mixed evidence tag');
+  await expect(page.getByRole('heading', { name: 'The Guidebook', exact: true })).toBeVisible({ timeout: 5_000 });
+  await expect.poll(() => page.evaluate(() => document.activeElement?.id ?? ''), { timeout: 5_000, message: 'Tier 2’s heading has the focus' }).toBe('how-sure-tier2');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading', { name: 'The Guidebook', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Harmonic Control', exact: true })).toBeVisible();
+  expect(dialogs).toEqual([]);
+});
 
 test('v16.5 D-R1: by finger, More › Record › Audio Only; the mini-player’s REC on Library opens Record; Stop and save after one gapless advance: the file has the music after the advance (decision 3 A)', async ({ page }) => {
   test.setTimeout(180_000);

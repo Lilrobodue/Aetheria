@@ -194,7 +194,7 @@ test.describe('phone', () => {
     await openMixes(page, { n: 30, crystal: () => null });
     const card = page.getByTestId('mixes-no-crystals');
     await expect(card).toContainText('Your tracks have no crystals yet');
-    await expect(card).toContainText('Every mix follows the crystals. Assign them now (instant), or let Deep Scan measure them (slow).');
+    await expect(card).toContainText('Every mix follows the crystals. Assign them now (instant), or run Deep Scan (slow).');
     for (const id of IDS) {
       await expect(mix(page, id), `${id}: dimmed, not a button`).toContainText('No tracks yet');
       expect(await mix(page, id).evaluate((el) => el.tagName), id).not.toBe('BUTTON');
@@ -220,7 +220,7 @@ test.describe('phone', () => {
       expect(await mix(page, id).evaluate((el) => el.tagName), id).not.toBe('BUTTON');
     }
     await expect(mix(page, 'gut')).toHaveAccessibleName('GUT Alignment, 9 tracks');
-    await expect(page.getByTestId('mixes-experimental')).toContainText('They need tracks Deep Scan has measured.');
+    await expect(page.getByTestId('mixes-experimental')).toContainText('They need tracks Deep Scan has scanned.');
     await mix(page, 'gut').click();
     await expectMixPlays(page, 9, 'GUT Alignment');
   });
@@ -360,7 +360,16 @@ test.describe('phone', () => {
       expect(sub, `${id}: described by its recipe`).toBeTruthy();
       await expect(b).toHaveAccessibleDescription(sub!);
     }
-    const small = await t.locator('button').evaluateAll((bs) => bs.map((b) => { const r = b.getBoundingClientRect(); return { name: b.getAttribute('aria-label') ?? b.textContent, w: r.width, h: r.height }; }).filter((r) => r.w < 44 || r.h < 44));
+    // v16.6: a box's ::after extends its target (the evidence tags: a 28 px chip with a 44 px hit area, as the kit's Chip).
+    const small = await t.locator('button').evaluateAll((bs) => bs.map((b) => {
+      const r = b.getBoundingClientRect();
+      const a = getComputedStyle(b, '::after');
+      const px = (v: string) => (v.endsWith('px') ? parseFloat(v) : 0);
+      const grown = a.content && a.content !== 'none' && a.position === 'absolute';
+      const w = grown ? Math.max(r.width, r.width - px(a.left) - px(a.right)) : r.width;
+      const h = grown ? Math.max(r.height, r.height - px(a.top) - px(a.bottom)) : r.height;
+      return { name: b.getAttribute('aria-label') ?? b.textContent, w, h };
+    }).filter((r) => r.w < 44 || r.h < 44));
     expect(small, 'no target under 44 × 44').toEqual([]);
     const tiles = await t.locator('[data-testid^="mix-walk:"]').evaluateAll((bs) => bs.map((b) => Math.round(b.getBoundingClientRect().height)));
     expect(Math.min(...tiles), 'walk tiles ≥ 96 px').toBeGreaterThanOrEqual(96);

@@ -1,0 +1,606 @@
+{
+ "version": 1,
+ "about": "check:copy's manifest (v16.6, review C4): every flagged-word unit that passes, with its verdict (T1/T2 and the tier, T3, T4, or allowed:<kind>). A new or changed flagged unit fails the gate until this is rewritten with `node scripts/check-copy.mjs --update-manifest`: a reviewed change, listed in the commit.",
+ "units": [
+  {
+   "file": "App.tsx",
+   "verdict": "allowed:work-title",
+   "words": "cellular",
+   "text": "Cellular Voltage Model"
+  },
+  {
+   "file": "App.tsx",
+   "verdict": "T1:design",
+   "words": "DNA",
+   "text": "DNA resonance score"
+  },
+  {
+   "file": "App.tsx",
+   "verdict": "allowed:score-name",
+   "words": "DNA",
+   "text": "DNA"
+  },
+  {
+   "file": "App.tsx",
+   "verdict": "allowed:brand",
+   "words": "heal",
+   "text": "Healing the world heART"
+  },
+  {
+   "file": "App.tsx",
+   "verdict": "allowed:brand",
+   "words": "heal",
+   "text": "Healing the world heART"
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T1:tier1",
+   "words": "therapy",
+   "text": ", with most randomized controlled trials showing significant reduction in depressive symptoms after structured music therapy"
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T1:tier1",
+   "words": "therapy",
+   "text": "All Children's Music Therapy"
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T1:tier1",
+   "words": "medical",
+   "text": "Center for Music and Medicine (Research)"
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T4:cite",
+   "words": "medical",
+   "text": "Harvard Health Publishing. (2024). Music as medicine. Harvard Medical School."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T4:cite",
+   "words": "medical",
+   "text": "Harvard Medical School. (n.d.). Music and the brain."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T1:tier1",
+   "words": "medical",
+   "text": "Harvard Medical School"
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T4:cite",
+   "words": "therapy",
+   "text": "Johns Hopkins All Children's Hospital. (n.d.). Music Therapy Program."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T4:cite",
+   "words": "medical",
+   "text": "Johns Hopkins Medicine. (n.d.). Center for Music and Medicine — Research."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T4:cite",
+   "words": "medical",
+   "text": "Johns Hopkins Medicine. (n.d.). Music as Medicine."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T4:cite",
+   "words": "therapy",
+   "text": "Mojtabavi, H., et al. (2020). Music therapy for postoperative outcomes following coronary artery bypass grafting (Review)."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T1:tier1",
+   "words": "medical",
+   "text": "Music as Medicine (Harvard Health)"
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T1:tier1",
+   "words": "medical",
+   "text": "Music as Medicine"
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T4:cite",
+   "words": "treat",
+   "text": "Pantelyat, A., et al. (2016). The use of group drumming for non-pharmacological treatment of Parkinson disease."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "allowed:negation",
+   "words": "cure,medical,treat",
+   "text": "The Aetheria 432Hz Harmonic Player is provided for entertainment, personal enjoyment, and exploration purposes only. It is not a medical device and makes no claims to diagnose, treat, cure, or prevent any condition. The frequency system, binaural beats, and Lo Shu modes are features of the music player experience. Individual experiences while listening vary and are personal. If you have health concerns, consult a qualified healthcare professional."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T1:tier1",
+   "words": "medical,therapy",
+   "text": "The Center for Music and Medicine — an entire research center dedicated to this work — investigates how music affects Parkinson's disease, Alzheimer's disease, stroke recovery, and a range of other disorders. Johns Hopkins Medicine has run a music therapy program in its children's hospital since 1993, with over 22,000 documented patient interactions. Its Department of Psychiatry and Behavioral Sciences describes music-based therapies as a recognized clinical approach for cognitive disorders, including Alzheimer's and memory disorders."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T1:tier1",
+   "words": "therapy",
+   "text": "These findings are about music in general, often music the listener chose, and about music therapy led by trained therapists. They are not findings about any particular frequency or tuning."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T1:tier2",
+   "words": "treat",
+   "text": "Whether binaural beats change brainwaves is still debated: a 2023 review of 14 studies with brain recordings (EEG) found 5 that support it, 8 that don't and 1 mixed. Aetheria uses them as part of the listening experience, not as a treatment."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "allowed:negation",
+   "words": "medical",
+   "text": "a medical device, a diagnostic tool, or a substitute for professional healthcare. The frequencies, binaural beats, and listening modes are provided for personal enjoyment and exploration."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T1:tier1",
+   "words": "medical,treat",
+   "text": "concluded that music-based interventions provide important relief by reducing anxiety during medical treatment."
+  },
+  {
+   "file": "components/AccessibleGuidebook.tsx",
+   "verdict": "T1:tier1",
+   "words": "therapy",
+   "text": "through rhythm-based therapies that help retrain motor function"
+  },
+  {
+   "file": "components/ExperienceTracker.tsx",
+   "verdict": "allowed:self-report",
+   "words": "heal",
+   "text": "Healing sensation"
+  },
+  {
+   "file": "components/ExperienceTracker.tsx",
+   "verdict": "allowed:self-report",
+   "words": "heal",
+   "text": "e.g., relaxation, healing, spiritual connection..."
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "DNA,cellular",
+   "text": "111 Hz pattern harmonic for DNA activation and cellular resonance"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "heal",
+   "text": "Ancient solfeggio frequency for healing and transformation"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "cellular",
+   "text": "Cellular communication"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "cellular,repair",
+   "text": "Cellular repair"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "DNA",
+   "text": "DNA Resonance"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "DNA",
+   "text": "DNA activation"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "DNA,repair",
+   "text": "DNA repair"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "repair",
+   "text": "Genetic repair"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "heal",
+   "text": "Heal connections"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "heal",
+   "text": "Heal trauma"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "therapy",
+   "text": "High-frequency therapeutic tone for advanced practitioners"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "cellular",
+   "text": "Hz - Cellular Communication"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "frequency of love",
+   "text": "Love frequency"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "miracle",
+   "text": "MI - Miracle"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "pineal",
+   "text": "Pineal activation"
+  },
+  {
+   "file": "components/FrequencySelector.tsx",
+   "verdict": "allowed:dead",
+   "words": "heal",
+   "text": "healing"
+  },
+  {
+   "file": "components/LoShuMatrix.tsx",
+   "verdict": "T1:tradition",
+   "words": "heal",
+   "text": "Healing is not a journey to a destination. It is a circulation that returns to source."
+  },
+  {
+   "file": "components/more/SafetyStatement.tsx",
+   "verdict": "allowed:statement-tradition",
+   "words": "heal",
+   "text": "Aetheria was built by a family — two humans and a family of AI collaborators — exploring whether the healing traditions around sound, frequency, and sacred geometry can be honored with both rigor and reverence. We believe they can. We are also honest that this is early work, that our interpretations will evolve, and that your own experience is ultimately more authoritative than anything we can tell you about what these frequencies mean. Listen with curiosity. Let your body respond as it wishes. Trust what you feel."
+  },
+  {
+   "file": "components/more/SafetyStatement.tsx",
+   "verdict": "allowed:negation",
+   "words": "cure,medical,treat",
+   "text": "The Aetheria Resonance &amp; Geometry Player offers curated soundscapes tuned to 432Hz and solfeggio frequencies, paired with sacred geometry visualizations. It is an experience built on the Unified Lewis Framework&#39;s exploration of sound, frequency, and form. It is not intended to diagnose, treat, cure, or prevent any disease or medical condition."
+  },
+  {
+   "file": "components/more/SafetyStatement.tsx",
+   "verdict": "allowed:negation",
+   "words": "medical",
+   "text": "This is a meditation and exploration tool, not a medical device."
+  },
+  {
+   "file": "components/shell/library/scanScoresModel.ts",
+   "verdict": "allowed:score-name",
+   "words": "DNA",
+   "text": "DNA resonance"
+  },
+  {
+   "file": "components/shell/library/scanScoresModel.ts",
+   "verdict": "allowed:score-name",
+   "words": "DNA",
+   "text": "DNA"
+  },
+  {
+   "file": "components/shell/more/linksData.ts",
+   "verdict": "allowed:work-title",
+   "words": "cellular",
+   "text": "Cellular Voltage Model"
+  },
+  {
+   "file": "components/shell/more/linksData.ts",
+   "verdict": "allowed:brand",
+   "words": "heal",
+   "text": "Healing the world heART"
+  },
+  {
+   "file": "components/shell/more/moreModel.ts",
+   "verdict": "T2:design",
+   "words": "DNA",
+   "text": "Deep Scan's golden-ratio, 111 and DNA scores, on Library rows and in Track info. They are scores from an unreliable reading of the spectrum, not measurements."
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "pineal",
+   "text": "Activates pineal gland and connects to divine consciousness and unity."
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "heal",
+   "text": "Complex circular patterns representing the journey from fragmentation to wholeness and healing."
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "heal",
+   "text": "Deep Sleep & Healing (0.5-4Hz). Best for deep restorative sleep and detachment."
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "pineal",
+   "text": "Divine consciousness, pineal activation"
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "heal",
+   "text": "Each Solfeggio tone comprises a frequency required to balance your energy and keep your body, mind and spirit in perfect harmony. These frequencies resonate with specific energy centers (Chakras) in the human body, facilitating healing and restoration."
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "heal",
+   "text": "Healing Mandala"
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "heal",
+   "text": "Healing"
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "pineal",
+   "text": "Pineal Gland, Pituitary Gland, Eyes"
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "repair",
+   "text": "Powerful tissue repair frequency with quantum cognition enhancement effects."
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "DNA,miracle,repair",
+   "text": "The miracle tone - repairs DNA and brings transformation into your life."
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "DNA",
+   "text": "The spiral of nature based on the Golden Ratio, found in galaxies, shells, and DNA itself."
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "repair",
+   "text": "Tissue repair, quantum cognition"
+  },
+  {
+   "file": "constants.ts",
+   "verdict": "allowed:data",
+   "words": "DNA,miracle,repair",
+   "text": "Transformation, miracles, DNA repair"
+  },
+  {
+   "file": "utils/copy/crystalCopy.ts",
+   "verdict": "allowed:data",
+   "words": "heal",
+   "text": "Healing Mandala"
+  },
+  {
+   "file": "utils/copy/crystalCopy.ts",
+   "verdict": "T2:tradition",
+   "words": "immune",
+   "text": "In the Aetheria framework, associated with the heart, the breath and the immune system. Focus: love, compassion, connection, harmony."
+  },
+  {
+   "file": "utils/copy/crystalCopy.ts",
+   "verdict": "T2:tradition",
+   "words": "pineal",
+   "text": "Traditionally associated with divine consciousness, unity and pineal activation."
+  },
+  {
+   "file": "utils/copy/crystalCopy.ts",
+   "verdict": "T2:tradition",
+   "words": "heal",
+   "text": "Traditionally associated with the digestive, nervous, skeletal and reproductive systems. Focus: grounding, healing, security."
+  },
+  {
+   "file": "utils/copy/crystalCopy.ts",
+   "verdict": "T2:tradition",
+   "words": "repair",
+   "text": "Traditionally associated with tissue repair and quantum cognition."
+  },
+  {
+   "file": "utils/copy/crystalCopy.ts",
+   "verdict": "T2:tradition",
+   "words": "DNA,miracle,repair",
+   "text": "Traditionally associated with transformation, miracles and DNA repair. In Solfeggio teaching it is called “the miracle tone”."
+  },
+  {
+   "file": "utils/copy/evidence.ts",
+   "verdict": "T4:cite",
+   "words": "medical",
+   "text": "Goyal M, et al. (2014). Meditation programs for psychological stress and well-being. JAMA Internal Medicine 174(3):357–368."
+  },
+  {
+   "file": "utils/copy/evidence.ts",
+   "verdict": "T4:cite",
+   "words": "therapy",
+   "text": "Kantor J, et al. (2022). Exploring vibroacoustic therapy in adults experiencing pain: a scoping review. BMJ Open 12(4):e046591."
+  },
+  {
+   "file": "utils/copy/evidence.ts",
+   "verdict": "T2:design+tier3",
+   "words": "therapy",
+   "text": "Kantor et al. 2022 (BMJ Open), a scoping review of vibroacoustic therapy: 20 studies, too varied to say what helps. Møller & Pedersen 2004: below the hearing threshold, low sound is not felt."
+  },
+  {
+   "file": "utils/copy/evidence.ts",
+   "verdict": "T4:cite",
+   "words": "medical,therapy",
+   "text": "Stanhope J, Weinstein P (2020). The human health effects of singing bowls: a systematic review. Complementary Therapies in Medicine 51:102412."
+  },
+  {
+   "file": "utils/copy/evidence.ts",
+   "verdict": "T2:tier1+tier3",
+   "words": "treat",
+   "text": "Structured meditation programmes help anxiety and low mood a little, no more than other active treatments such as exercise. Sound baths and singing bowls have only a few small studies."
+  },
+  {
+   "file": "utils/copy/evidence.ts",
+   "verdict": "T2:design+tier3",
+   "words": "therapy",
+   "text": "The drone is a design choice: a quiet low tone for headphones, with rests. Vibration therapy uses body-contact speakers, not headphones, and its studies are few. A drone too quiet to hear is not felt either."
+  },
+  {
+   "file": "utils/copy/evidence.ts",
+   "verdict": "T2:tradition+open",
+   "words": "DNA,pineal,repair",
+   "text": "The nine Solfeggio numbers are a modern teaching, from the 1970s to the 1990s, named after the medieval singing syllables. Their meanings are respected here as tradition. No study has tested 528 Hz repairing DNA in people: one lab study exposed cells in a dish. No study of 963 Hz and the pineal gland was found."
+  },
+  {
+   "file": "utils/copy/evidence.ts",
+   "verdict": "allowed:guide",
+   "words": "DNA,cure,heal,pineal,repair,treat",
+   "text": "We don’t say a sound heals, cures, repairs DNA or activates the pineal gland. Where a tradition teaches that, we write “Traditionally associated with …” and tag it Tradition. Nothing in Aetheria is a treatment; for a health concern, see a qualified professional."
+  },
+  {
+   "file": "utils/copy/soundCopy.ts",
+   "verdict": "allowed:score-name",
+   "words": "DNA",
+   "text": "DNA resonance score over 60 % (experimental)"
+  },
+  {
+   "file": "utils/copy/soundCopy.ts",
+   "verdict": "allowed:score-name",
+   "words": "DNA",
+   "text": "• DNA resonance score over 30 %:"
+  },
+  {
+   "file": "utils/copy/soundCopy.ts",
+   "verdict": "allowed:score-name",
+   "words": "DNA",
+   "text": "• DNA resonance score:"
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "cellular",
+   "text": "111 Hz pattern reported to enhance intercellular communication and synchronize cellular oscillations."
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "medical",
+   "text": "Any medical conditions"
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "cellular",
+   "text": "Cellular Communication Enhancement"
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "DNA,repair",
+   "text": "DNA Repair Resonance"
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "pineal",
+   "text": "Fourth order solfeggio frequency (963 + 111) reported to activate pineal gland and open channels to higher consciousness. Mathematical progression from crown chakra frequency."
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "DNA,cellular,heal,repair",
+   "text": "Frequency reported to repair DNA damage and promote cellular healing through resonance with the hexagonal structure of water molecules in DNA."
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "pineal",
+   "text": "Pineal Gland Activation (Fourth Order)"
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "safe for",
+   "text": "Safe frequency with documented effects. Good for beginners."
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "cellular",
+   "text": "cellular"
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "cellular",
+   "text": "cellular"
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "cellular",
+   "text": "cellular"
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "cellular",
+   "text": "cellular"
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "DNA",
+   "text": "dna"
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "heal",
+   "text": "healing"
+  },
+  {
+   "file": "utils/effectsDocumentation.ts",
+   "verdict": "allowed:data",
+   "words": "pineal",
+   "text": "pineal"
+  },
+  {
+   "file": "utils/fractalFrequencyAnalysis.ts",
+   "verdict": "allowed:dead",
+   "words": "heal,therapy",
+   "text": "Hz) This frequency operates beyond normal therapeutic ranges. Use only with: • Deep meditation experience • Sound healing training • Short exposure periods (5-15 minutes) • Volume kept at"
+  },
+  {
+   "file": "utils/library/scanScores.ts",
+   "verdict": "T2:design",
+   "words": "DNA",
+   "text": "DNA resonance score"
+  },
+  {
+   "file": "utils/library/scanScores.ts",
+   "verdict": "T2:design",
+   "words": "DNA",
+   "text": "DNA"
+  }
+ ]
+}

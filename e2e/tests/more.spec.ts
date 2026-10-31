@@ -112,11 +112,11 @@ test.describe('phone', () => {
     await expect(moreRow(page, 'more-back-to-classic'), 'the classic row moved into Advanced').toHaveCount(0);
     // About: the version, then "an update is ready" and its dot once one is.
     const about = moreRow(page, 'more-about-row');
-    await expect(about).toContainText('Version v16.5');
+    await expect(about).toContainText('Version v16.6');
     await expect(about).not.toContainText('an update is ready');
     await expect(page.getByTestId('more-update-dot')).toHaveCount(0);
     await page.evaluate(() => window.dispatchEvent(new Event('aetheria:update-ready')));
-    await expect(about).toContainText('Version v16.5 · an update is ready');
+    await expect(about).toContainText('Version v16.6 · an update is ready');
     await expect(page.getByTestId('more-update-dot')).toBeVisible();
     // The Visualizer line follows a setting changed in the sheet, and Pause visuals.
     await viz.click();

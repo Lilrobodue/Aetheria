@@ -189,7 +189,9 @@ eq([LAYOUT_LINE, PERF_LINE], ['The classic layout has every control on one scree
 eq(NO_TRACK_FOR_INFO, 'No track currently selected for analysis.', "classic's toast, verbatim");
 
 // v16.5: Record (recordModel.ts).
-eq(RECORD_CLASSIC_LINE, 'Choose a recording mode. Audio-only is recommended for long sessions to prevent crashes.', "classic's line, verbatim");
+eq(RECORD_CLASSIC_LINE, 'Choose a recording mode.', "classic's line (v16.6, N1: its advice was backwards, so it is gone)");
+// v16.6: the Guide opened from Safety & comfort's How sure are we? row comes back there.
+eq([openerOf('safety', 'guide'), backTarget('guide', 'safety'), backTarget('guide')], ['safety', 'safety', 'root'], 'the Guide from Safety & comfort returns there');
 eq(RECORD_OPTIONS.map((o) => o.title), ['Audio Only', 'Visuals Only', 'AV Mix'], "classic's labels, verbatim");
 eq(RECORD_OPTIONS.map((o) => o.line), ['The music and the layers, as a 24-bit WAV file', 'The visualizer as a video, without sound', 'The visualizer as a video, with the sound'], "the options' lines");
 eq((['audio', 'video', 'both'] as const).map(recordKindLine), ['Audio Only · a 24-bit WAV file', 'Visuals Only · a video, without sound', 'AV Mix · a video, with the sound'], 'the kind lines');

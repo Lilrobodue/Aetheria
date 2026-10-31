@@ -16,6 +16,7 @@ import type { ChoiceOption } from '../../ui/ChoiceGroup';
 import { useSound } from '../contexts';
 import { countRender } from '../devRenders';
 import SectionCard from './SectionCard';
+import EvidenceTag from '../../ui/EvidenceTag';
 import { soundSectionView } from './soundModel';
 import type { LayerOutput } from '../../../utils/soundV2/layerHost';
 
@@ -61,14 +62,21 @@ export const SoundControls = ({ withExport }: { withExport: boolean }) => {
       ) : null}
       {v.headphonesHint ? <p className="text-xs text-ink-faint leading-snug">{v.headphonesHint}</p> : null}
       {v.drone ? (
-        <Toggle
-          label={v.drone.label}
-          description={v.drone.description}
-          checked={v.drone.checked}
-          disabled={!v.drone.usable}
-          onChange={() => p.onToggleDrone()}
-          data-testid="layers-drone"
-        />
+        <div data-evidence={withExport ? 'design' : undefined} className="space-y-2">
+          <Toggle
+            label={v.drone.label}
+            description={v.drone.description}
+            checked={v.drone.checked}
+            disabled={!v.drone.usable}
+            onChange={() => p.onToggleDrone()}
+            data-testid="layers-drone"
+          />
+          {withExport ? (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
+              <EvidenceTag tier="design" />
+            </div>
+          ) : null}
+        </div>
       ) : null}
       {v.askAgain ? (
         <div className="flex items-center justify-between gap-3">

@@ -28,6 +28,8 @@
 // v16.4: Start over stays when the builder is switched off (a third crash; only Reload panel is refused): Grounding,
 // saved and for the session, then the list, so the next Create a mix opens at Grounding.
 
+import EvidenceTag from '../../ui/EvidenceTag';
+import { EvidenceOrigin } from '../../guide/evidenceLink';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ChevronRight, ListMusic, SlidersHorizontal, X } from 'lucide-react';
 import Badge from '../../ui/Badge';
@@ -51,7 +53,7 @@ import type { MixAction } from './MixMenu';
 import {
   EMPTY_BODY,
   EMPTY_TITLE,
-  EXPERIMENTAL_NOTE,
+  SECTION_LEADS,
   MIXES_INTRO,
   MIXES_LOADING,
   NO_CRYSTALS_BODY,
@@ -75,13 +77,32 @@ interface MixesTabProps {
 
 const headId = (s: MixSection | 'none') => `mixes-h-${s}`;
 
-const SectionHead = ({ section }: { section: MixSection }) => (
-  <div className="px-4 pt-5 pb-2 flex items-center gap-2">
-    <h2 id={headId(section)} className="text-xs font-semibold uppercase tracking-widest text-ink-soft">
-      {SECTION_TITLES[section]}
-    </h2>
-  </div>
-);
+/** v16.6: where this tab's evidence tags lead back to (the Guide's "Back to Mixes" / "Back to Create a mix"). */
+const ORIGIN_LIST = { tab: 'mixes', sheet: null, label: 'Mixes' } as const;
+const ORIGIN_BUILDER = { tab: 'mixes', sheet: null, label: 'Create a mix' } as const;
+
+const SectionHead = ({ section }: { section: MixSection }) => {
+  const lead = SECTION_LEADS[section];
+  return (
+    <>
+      <div className="px-4 pt-5 pb-2 flex items-center gap-2">
+        <h2 id={headId(section)} className="text-xs font-semibold uppercase tracking-widest text-ink-soft">
+          {SECTION_TITLES[section]}
+        </h2>
+      </div>
+      {lead ? (
+        <div data-evidence={lead.tags[0]} data-testid={`mixes-lead-${section}`} className="px-4 pt-1 pb-3 space-y-2">
+          <p className="text-xs text-ink-muted leading-snug">{lead.line}</p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
+            {lead.tags.map((t) => (
+              <EvidenceTag key={t} tier={t} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+};
 
 const RegionCrash = ({ api, text, testId }: { api: FallbackApi; text: string; testId: string }) => (
   <div data-testid={testId} className="mx-4 mt-3">
@@ -174,7 +195,6 @@ const ExperimentalSection = React.memo(({ st, loading, onStart, onMore, onOpenCr
   return (
     <section aria-labelledby={headId('experimental')} data-testid="mixes-experimental">
       <SectionHead section="experimental" />
-      <p className="px-4 pb-3 text-xs text-ink-muted">{EXPERIMENTAL_NOTE}</p>
       <ul role="list" aria-labelledby={headId('experimental')}>
         {mixesIn('experimental').map((def) => {
           const view = mixView(def, st, { loading });
@@ -292,6 +312,7 @@ const MixesTab = ({ inPanel = false }: MixesTabProps) => {
 
   if (builderOpen) {
     return (
+      <EvidenceOrigin.Provider value={ORIGIN_BUILDER}>
       <div data-testid="tab-mixes" className={inPanel ? 'h-full flex flex-col bg-surface-panel border-r border-line-strong' : 'absolute inset-0 flex flex-col bg-surface-deep pointer-events-auto'}>
         <ViewBoundary
           name="mix-builder-view"
@@ -300,10 +321,12 @@ const MixesTab = ({ inPanel = false }: MixesTabProps) => {
           render={() => <MixBuilder inPanel={inPanel} onBack={closeBuilder} />}
         />
       </div>
+      </EvidenceOrigin.Provider>
     );
   }
 
   return (
+    <EvidenceOrigin.Provider value={ORIGIN_LIST}>
     <div
       data-testid="tab-mixes"
       className={inPanel ? 'h-full flex flex-col bg-surface-panel border-r border-line-strong' : 'absolute inset-0 flex flex-col bg-surface-deep pointer-events-auto'}
@@ -400,6 +423,7 @@ const MixesTab = ({ inPanel = false }: MixesTabProps) => {
         return <MixMenu def={def} view={view} dots={dotsFor(def.id, st.available, false)} count={st.counts[def.id] ?? 0} customize onAction={onMenuAction} onClose={closeMenu} />;
       })() : null}
     </div>
+    </EvidenceOrigin.Provider>
   );
 };
 

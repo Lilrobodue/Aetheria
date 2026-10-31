@@ -552,6 +552,26 @@ test('B6. the filter sheet: no crystal group; "Experimental scores" collapsed wi
   await expect(footerName(page)).toHaveText('Same as Grounding in Mixes');
 });
 
+test('B6b. v16.6 decisions 11 and 13: the DNA resonance score filter: its chip sits in a Design choice block with its tag; the mix\'s name says "Experimental resonance score over 30 %", never DNA; no experimental chip, no tag', async ({ page }) => {
+  await openBuilderApp(page);
+  await openBuilder(page);
+  await tapId(page, 'builder-filters-button');
+  const sheet = page.getByTestId('builder-filter-sheet');
+  await press(page, sheet.getByTestId('builder-filters-experimental-toggle'));
+  await press(page, sheet.locator('[data-facet="x-dna"][data-value="over"]'));
+  await expect(footerName(page)).toHaveText('Grounding · Experimental resonance score over 30 %');
+  await press(page, sheet.getByTestId('builder-filters-done'));
+  const block = page.getByTestId('builder-chips-block');
+  await expect(block).toHaveAttribute('data-evidence', 'design');
+  await expect(block.getByRole('button', { name: 'Remove DNA resonance score over 30 %', exact: true })).toBeVisible();
+  await expect(block.locator('[data-evidence-tag="design"]')).toBeVisible();
+  await expect(footerName(page)).not.toContainText('DNA');
+  // Removing the only chip removes the block and its tag.
+  await press(page, block.getByRole('button', { name: 'Remove DNA resonance score over 30 %', exact: true }));
+  await expect(page.getByTestId('builder-chips-block')).toHaveCount(0);
+  await expect(page.getByTestId('builder-filters').locator('[data-evidence-tag]')).toHaveCount(0);
+});
+
 test('B7. the footer follows each tap; a tap renders App 0 times; 3 s of playback renders none of the builder\'s views; at 1,000 tracks a tap ≤ 16 ms of script and no long task over 50 ms', async ({ page }) => {
   test.setTimeout(240_000);
   test.skip(ON_DEVICE, 'the phone\'s budget is D-B1\'s');

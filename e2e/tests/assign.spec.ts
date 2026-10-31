@@ -211,7 +211,7 @@ test.describe('a legacy library (classic, and the new layout to play)', () => {
     await page.locator('aside').getByRole('button', { name: /^Deep Scan/ }).click();
     await expect(page.getByText(/^Analyzing: later-1 \(1\/2\)$/), 'the two new imports, nothing else').toBeVisible({ timeout: 30_000 });
     // It stops after them: the button is idle again, and every assigned track is as it was.
-    await expect(page.locator('aside').getByRole('button', { name: /^Deep Scan/ })).toHaveAttribute('title', 'Start deep fractal analysis (slow but thorough)', { timeout: 60_000 });
+    await expect(page.locator('aside').getByRole('button', { name: /^Deep Scan/ })).toHaveAttribute('title', 'Start Deep Scan (slow)', { timeout: 60_000 }); // v16.6 (F4)
     const after = await libraryState(page);
     const t2 = tally(after.origins);
     expect([t2.assigned, (t2.scan ?? 0) + (t2['scan-failed'] ?? 0)], 'the 130 assigned untouched; the 2 imports scanned').toEqual([130, 102]);
@@ -377,12 +377,12 @@ test.describe('a legacy library, after its first Assign', () => {
     await page.getByRole('button', { name: 'Quick guide', exact: true }).click();
     await page.getByRole('heading', { name: 'Welcome to Aetheria' }).waitFor();
     await expect.poll(async () => { if (await page.getByRole('heading', { name: '2. Scan & Distribute' }).isVisible()) return true; await page.getByRole('button', { name: 'Next', exact: true }).click(); return false; }, { message: 'the Quick guide’s second page', timeout: 10_000 }).toBe(true);
-    await expect(page.getByText('Keeps the frequencies Deep Scan found and gives every other song one of the 27 across the GUT, HEART, and HEAD ranges, empty ones first.')).toBeVisible();
+    await expect(page.getByText('Keeps the crystals Deep Scan gave and gives every other song one of the 27 across the GUT, HEART, and HEAD ranges, empty ones first.')).toBeVisible();
     await expect(page.getByText('Assigns every song to its closest Aetheria frequency')).toHaveCount(0);
     await page.getByText('Quick Guide', { exact: true }).locator('xpath=..').getByRole('button').first().click();
     // The Guidebook's quick start.
     await page.getByRole('button', { name: /The Guidebook/ }).click();
-    await expect(page.getByText('songs Deep Scan measured keep their frequency, and every other song is given one of the 27 Aetheria frequencies')).toHaveCount(1);
+    await expect(page.getByText('songs Deep Scan scanned keep their crystal, and every other song is given one of the 27 Aetheria frequencies')).toHaveCount(1);
     await expect(page.getByText('the player analyzes your music and assigns each song to its closest Aetheria frequency')).toHaveCount(0);
     expect(dialogs).toEqual([]);
   });

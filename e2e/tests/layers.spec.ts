@@ -1556,7 +1556,8 @@ test('v2 sliders read in dB; classic keeps its percent readouts', async ({ page 
 test('v2 copy changes stay in v2', async ({ page }) => {
   const errors = pageErrors(page);
   const dialogs = await openApp(page);
-  const gammaClassic = 'High Processing (30Hz+). Best for peak concentration, binding information, and insight.';
+  // v16.6 (C1): classic's bands name the EEG band (utils/copy BAND_LINES), never "best for".
+  const gammaClassic = 'The band above 30 Hz.';
   const gammaV2 =
     'Gamma (40 Hz) is a design choice: the MIT 40 Hz work used light flicker and click trains, not binaural beats, ' +
     'and above about 30 Hz a binaural beat is heard as two tones rather than a beat.';

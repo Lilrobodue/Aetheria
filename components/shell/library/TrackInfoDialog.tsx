@@ -15,9 +15,11 @@ import Dialog, { ReadoutActions } from '../../ui/Dialog';
 import { PanelFallback, ViewBoundary } from '../../ErrorBoundary';
 import type { Song } from '../../../types';
 import { countRender } from '../devRenders';
-import { useMore } from '../contexts';
+import { useMore, useShell } from '../contexts';
+import { EvidenceOrigin } from '../../guide/evidenceLink';
 import { trackInfoRows, trackInfoText } from './libraryModel';
 import { SCAN_SECTION_LEAD, SCAN_SECTION_TITLE, scanScoreRows, scanScoreText } from './scanScoresModel';
+import EvidenceTag from '../../ui/EvidenceTag';
 
 interface TrackInfoDialogProps {
   song: Song;
@@ -37,16 +39,29 @@ const TrackInfoBody = ({ song, scores }: { song: Song; scores: boolean }) => {
             <dt className="text-ink-muted">{r.label}</dt>
             <dd className="min-w-0 text-ink-strong break-words">
               {r.value}
-              {r.note ? <span className="block text-xs text-ink-faint">{r.note}</span> : null}
+              {r.note && r.tag ? (
+                // v16.6: an assigned crystal is a design choice, not a measured pitch: the note carries its tag.
+                <div data-evidence={r.tag}>
+                  <span className="block text-xs text-ink-faint">{r.note}</span>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-3">
+                    <EvidenceTag tier={r.tag} />
+                  </div>
+                </div>
+              ) : r.note ? (
+                <span className="block text-xs text-ink-faint">{r.note}</span>
+              ) : null}
             </dd>
           </div>
         ))}
       </dl>
       {scoreRows.length ? (
-        <section aria-labelledby="track-info-h-scores" data-testid="track-info-scores" className="mt-4">
-          <h3 id="track-info-h-scores" className="text-xs font-semibold uppercase tracking-widest text-ink-soft">
-            {SCAN_SECTION_TITLE}
-          </h3>
+        <section aria-labelledby="track-info-h-scores" data-testid="track-info-scores" data-evidence="design" className="mt-4">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
+            <h3 id="track-info-h-scores" className="text-xs font-semibold uppercase tracking-widest text-ink-soft">
+              {SCAN_SECTION_TITLE}
+            </h3>
+            <EvidenceTag tier="design" />
+          </div>
           <p className="mt-1 text-xs text-ink-muted leading-snug">{SCAN_SECTION_LEAD}</p>
           <dl className="mt-1">
             {scoreRows.map((r) => (
@@ -67,6 +82,10 @@ const TrackInfoBody = ({ song, scores }: { song: Song; scores: boolean }) => {
 
 const TrackInfoDialog = ({ song, onClose }: TrackInfoDialogProps) => {
   const { scanScores } = useMore();
+  // v16.6 (review D1): its tags lead back here, whichever host opened it (⋯ › Track info, a Library row, a playlist's
+  // entry): the Guide's "Back to Track info" reopens it for this track, on the tab it was on.
+  const { tab } = useShell();
+  const origin = React.useMemo(() => ({ tab, sheet: null, label: 'Track info', trackInfo: song.id }), [tab, song.id]);
   const extra = scanScores ? scanScoreText(song) : '';
   return (
     <Dialog
@@ -83,7 +102,11 @@ ${extra}` : trackInfoText(song, Date.now())} onClose={onClose} />}
         fallback={(api) => (
           <PanelFallback text="Track info hit a problem." switchedOff={api.switchedOff} copyDetails={api.copyDetails} buttonRef={api.buttonRef} onRetry={api.retry} />
         )}
-        render={() => <TrackInfoBody song={song} scores={scanScores} />}
+        render={() => (
+          <EvidenceOrigin.Provider value={origin}>
+            <TrackInfoBody song={song} scores={scanScores} />
+          </EvidenceOrigin.Provider>
+        )}
       />
     </Dialog>
   );

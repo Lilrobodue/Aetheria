@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { 
-  Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
+  Scale, Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, 
   Upload, Settings, Info, Activity, Volume2, Maximize2, Minimize2,
   Circle, Zap, X, Menu, Eye, EyeOff, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Sliders, Wind, Activity as PulseIcon, Waves, Wand2, Search, Video, Mic, Monitor, RefreshCw, Flame, Flower2, Layers, Heart, Smile, Moon, Droplets, FilePlus, RotateCw, ArrowUpCircle, Hexagon, AlertTriangle, CircleHelp, ChevronRight, ChevronLeft, BookOpen, User, Map as MapIcon, Box, Trash2, Target, Shield, Calculator, ExternalLink, Music, Brain, BookMarked, MessageCircle, Mail, Globe, Headphones, CheckCircle2, Library, VolumeX
 } from 'lucide-react';
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings, BandEnvelope } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, toHeardHz, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, LO_SHU_WALK_COMBINED, LO_SHU_WALK_OUROBOROS, OUROBOROS_PHASES, SOURCE_FREQ, getLoShuPosition, type LoShuWalkMode } from './constants';
 import Visualizer from './components/Visualizer';
-import FrequencySelector from './components/FrequencySelector';
-import SafetyProtocols from './components/SafetyProtocols';
+// v16.6 (review C8): FrequencySelector and SafetyProtocols are dead (never rendered; v16.9 removes them), so App no
+// longer imports them; check:copy fails on any import or use of either, or of generateSafetyWarning, outside their files.
 import ExperienceTracker from './components/ExperienceTracker';
 import OfflineIndicator from './components/OfflineIndicator';
 import LoShuMatrix from './components/LoShuMatrix';
@@ -254,6 +254,23 @@ import type { LastImport } from './components/shell/library/libraryModel';
 import { filterStartText } from './components/shell/library/filterViewModel';
 import type { LibraryViewState, MixesViewState, QueueEdit } from './components/shell/contexts';
 import { countRender } from './components/shell/devRenders';
+// v16.6, "How sure are we?": the evidence tags, the Guide's section and the rewritten words (utils/copy).
+import EvidenceTag from './components/ui/EvidenceTag';
+import { EvidenceLink, scrollToEvidence, commitTag, refocusTag, forgetTag } from './components/guide/evidenceLink';
+import type { EvidenceOriginValue } from './components/guide/evidenceLink';
+import type { Tier } from './utils/copy/evidence';
+import { HOW_SURE_JUMP, HOW_SURE_SAFETY_BUTTON } from './utils/copy/evidence';
+import { requestMoreView, requestGuideAnchor } from './components/shell/more/moreModel';
+import { RETUNE_SHORT, BEAT_EVIDENCE, BEAT_HEADING, bandLine, TAGGED_SHAPES } from './utils/copy/crystalCopy';
+import {
+  RANGE_LABEL, COMFORT_HEADING, HIGH_CRYSTALS_LINE, TRADITIONAL_SOLFEGGIO, CLASSIC_LEVEL_OPTIONS, highCrystalHumLine, READOUT_TITLE, readoutReading,
+  readoutCrystal, readoutDistance, READOUT_PEAKS, READOUT_NUMBER_YES, READOUT_NUMBER_NO, READOUT_COMFORT, READOUT_SCORES, readoutScoreLines,
+  CARD_PEAKS, CARD_SCORES_TITLE, DIAG_SCORES, diagScoreLines, diagNoRangeLine, SCAN_NOTICE_TITLE, scanNoticeLine, scanStartToast, SCAN_BUTTON_TITLE,
+  BADGE_GOLDEN_TITLE, BADGE_111_TITLE, BADGE_DNA_TITLE, journalSavedToast, SCAN_SCORES_LEAD,
+} from './utils/copy/soundCopy';
+import { place } from './utils/copy/places';
+import { heardLine, COMFORT_LEVELS } from './components/shell/layers/layersModel';
+import { regimeOf, regimeName } from './components/shell/shellModel';
 
 // --- Helpers ---
 
@@ -776,27 +793,16 @@ const analyzeExtendedOctaveRanges = (frequencyData: Float32Array, binSize: numbe
 
 // Enhanced analysis reporting function
 const getFrequencyAnalysisReport = (detectedFreq: number, solfeggioMatch: number, deviation: number): string => {
-    const octaveRange = getOctaveRange(detectedFreq);
     const harmonicRelationship = getHarmonicRelationship(detectedFreq, solfeggioMatch);
     const regime = getFrequencyRegime(solfeggioMatch);
     
-    let report = `🎵 FREQUENCY ANALYSIS REPORT\n\n`;
-    report += `📊 Detected: ${detectedFreq.toFixed(1)}Hz (${octaveRange})\n`;
-    report += `🎯 Matched: ${solfeggioMatch}Hz (${regime} regime)\n`;
-    report += `📏 Deviation: ±${deviation.toFixed(1)}Hz\n`;
-    report += `🔗 Relationship: ${harmonicRelationship}\n\n`;
-    
-    // Add accuracy assessment
-    if (deviation < 5) {
-        report += `✅ EXCELLENT match - Near perfect alignment\n`;
-    } else if (deviation < 20) {
-        report += `✅ GOOD match - Strong harmonic relationship\n`;
-    } else if (deviation < 50) {
-        report += `⚠️ FAIR match - Moderate alignment\n`;
-    } else {
-        report += `❌ WEAK match - Consider manual adjustment\n`;
-    }
-    
+    // v16.6 (R8, the detector artefact): Deep Scan's number is its reading, not the music's pitch, and a crystal is an
+    // assignment, so the report names the reading, the crystal and the distance between them, and grades nothing.
+    let report = `${READOUT_TITLE}\n\n`;
+    report += `${readoutReading(detectedFreq)}\n`;
+    report += `${readoutCrystal(solfeggioMatch, regime)}\n`;
+    report += `${readoutDistance(deviation)}\n`;
+    report += `🔗 Relationship: ${harmonicRelationship}\n`;
     return report;
 };
 
@@ -936,7 +942,7 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             desc: "An advanced music player that takes the songs you already love and does three things.",
             content: (
                 <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
-                    <li className="flex gap-2">🎵 <strong className="text-gold-200">Retunes to 432 Hz:</strong> A natural tuning many listeners find warmer than standard 440 Hz.</li>
+                    <li className="flex gap-2">🎵 <strong className="text-gold-200">Retunes to 432 Hz:</strong> {RETUNE_SHORT}</li>
                     <li className="flex gap-2">✨ <strong className="text-gold-200">Sorts into 27 frequencies:</strong> Each song is assigned to one of three ranges — GUT, HEART, or HEAD.</li>
                     <li className="flex gap-2">🎧 <strong className="text-gold-200">Layers binaural beats:</strong> A subtle layer underneath your music. Headphones recommended.</li>
                 </ul>
@@ -957,11 +963,11 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         {
             title: "2. Scan & Distribute",
             icon: <Search className="text-purple-400 w-12 h-12" />,
-            desc: "Two clicks let the player understand your library and sort it into the 27 frequencies.",
+            desc: "One click gives every song a crystal: one of the 27 frequencies. You don't need to run Deep Scan first.",
             content: (
                 <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
-                    <li className="flex gap-2">🔍 <strong className="text-gold-200">Deep Scan:</strong> Click this in the sidebar. The engine analyzes each song's frequency content.</li>
-                    <li className="flex gap-2">🎯 <strong className="text-gold-200">Auto-Distribute Frequencies:</strong> Keeps the frequencies Deep Scan found and gives every other song one of the 27 across the GUT, HEART, and HEAD ranges, empty ones first.</li>
+                    <li className="flex gap-2">🔍 <strong className="text-gold-200">Deep Scan:</strong> Click this in the sidebar. It reads each song and gives it a crystal (slow, and optional).</li>
+                    <li className="flex gap-2">🎯 <strong className="text-gold-200">Auto-Distribute Frequencies:</strong> Keeps the crystals Deep Scan gave and gives every other song one of the 27 across the GUT, HEART, and HEAD ranges, empty ones first.</li>
                     <li className="flex gap-2">⏳ <strong className="text-gold-200">One-time:</strong> Once assigned, your library is ready for any listening mode.</li>
                 </ul>
             )
@@ -981,7 +987,7 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         {
             title: "4. Lo Shu Walks (Optional)",
             icon: <Box className="text-emerald-400 w-12 h-12" />,
-            desc: "An ancient pattern from a 4,000-year-old Chinese magic square — six different paths through the 27 frequencies.",
+            desc: "A pattern from the Lo Shu, a Chinese magic square that legend dates back more than 4,000 years: six different paths through the 27 frequencies.",
             content: (
                 <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
                     <li className="flex gap-2">🏔️ <strong className="text-emerald-300">Layer Ascent:</strong> 27 tracks. One range at a time, in Lo Shu order instead of numerical order.</li>
@@ -990,7 +996,7 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                     <li className="flex gap-2">🚖 <strong className="text-gold-300">Calling a CAB:</strong> 81 tracks. Vortex → Ascent → Pillar — the cube traced from every angle in one journey.</li>
                     <li className="flex gap-2">♾️ <strong className="text-cyan-300">Ouroboros:</strong> 29 tracks. Closed figure-8 through all 27 frequencies, crossing SOURCE three times. The dragon eats its tail.</li>
                     <li className="flex gap-2">⚛️ <strong className="text-gold-300">Calling a CABI:</strong> 110 tracks. CAB + Ouroboros — open every channel, then close the loop into infinity.</li>
-                    <li className="flex gap-2">🎛️ <strong className="text-gold-200">Where to find it:</strong> Cube icon in the player controls (next to repeat). Music must be scanned and distributed first.</li>
+                    <li className="flex gap-2">🎛️ <strong className="text-gold-200">Where to find it:</strong> Cube icon in the player controls (next to repeat). Music needs crystals first (Auto-Distribute Frequencies).</li>
                 </ul>
             )
         },
@@ -1330,7 +1336,12 @@ const App: React.FC = () => {
   const exportStoppingLongRef: { current: boolean } = useRef(false);
   const exportStoppingTimerRef: { current: number | null } = useRef(null);
   const [exportStoppingLong, setExportStoppingLong] = useState(false);
-  const guideViewRef: { current: { view: GuideView; top: number } } = useRef({ view: 'plain', top: 0 });
+  const guideViewRef: { current: { view: GuideView; top: number; anchor?: Tier | 'section' | null } } = useRef({ view: 'plain', top: 0 });
+  // v16.6: where the evidence tag that opened the Guide was (the Guide's "Back to …" chip; session only), and classic's
+  // pending anchor for the Guidebook modal (scrolled to once it is open), and that modal's scroller.
+  const evidenceOriginRef: { current: EvidenceOriginValue | null } = useRef(null);
+  const pendingEvidenceRef: { current: Tier | 'section' | null } = useRef(null);
+  const guidebookScrollRef: { current: HTMLDivElement | null } = useRef(null);
   const [videoCapable] = useState<boolean>(
     () => typeof MediaRecorder === 'function' && typeof HTMLCanvasElement !== 'undefined' && typeof (HTMLCanvasElement.prototype as any).captureStream === 'function'
   );
@@ -4084,7 +4095,7 @@ const App: React.FC = () => {
     if (S.saveTimer !== null) { window.clearTimeout(S.saveTimer); S.saveTimer = null; }
     if (!log || log.flush() || S.warned) return;
     S.warned = true;
-    showStatusToast(SOUND_LOG_SAVE_FAILED);
+    showStatusToast(place('soundLog', shellOnRef.current ? 'new' : 'classic'));
   }, [showStatusToast]);
   const saveSoundLogSoon = useCallback(() => {
     const S = soundSessionRef.current;
@@ -4624,7 +4635,7 @@ const App: React.FC = () => {
       ? `${Math.round(estimatedMinutes / 60)}h ${estimatedMinutes % 60}m`
       : `${estimatedMinutes}m`;
 
-    const notificationMsg = `Starting deep fractal analysis of ${total} unscanned songs. Estimated time: ${timeEstimate}. This will be thorough but slow - you can cancel anytime.`;
+    const notificationMsg = scanStartToast(total, timeEstimate);
 
     setAnalysisNotification(notificationMsg);
     setTimeout(() => setAnalysisNotification(null), 8000);
@@ -5289,17 +5300,12 @@ Run Deep Scan to analyse this track.
       
       // Add fractal analysis if available
       if (currentSong.fractalAnalysis) {
-        analysisInfo += `\n🧬 ADVANCED FRACTAL ANALYSIS:\n`;
-        analysisInfo += `• Golden Ratio Alignment: ${Math.round(currentSong.fractalAnalysis.goldenRatioAlignment * 100)}%\n`;
-        analysisInfo += `• 111Hz Pattern Presence: ${Math.round(currentSong.fractalAnalysis.pattern111Presence * 100)}%\n`;
-        analysisInfo += `• DNA Resonance Score: ${Math.round(currentSong.fractalAnalysis.dnaResonanceScore * 100)}%\n`;
-        analysisInfo += `• Safety Level: ${currentSong.fractalAnalysis.safetyLevel}\n`;
-        analysisInfo += `• Recommended Volume: ${Math.round(currentSong.fractalAnalysis.recommendedVolume * 100)}%\n`;
-        analysisInfo += `• Sacred Geometry Alignment: ${Math.round(currentSong.fractalAnalysis.sacredGeometryAlignment * 100)}%\n`;
-        analysisInfo += `• Schumann Resonance Harmony: ${Math.round(currentSong.fractalAnalysis.schumannResonanceHarmony * 100)}%\n`;
-        
+        // v16.6 (R9): scores are scores, named and marked experimental; no safety level, no recommended volume.
+        analysisInfo += `\n${READOUT_SCORES}\n`;
+        analysisInfo += readoutScoreLines(currentSong.fractalAnalysis).join('\n') + '\n';
+
         if (currentSong.fractalAnalysis.infiniteOrderHarmonics.length > 0) {
-          analysisInfo += `\n🌀 DETECTED HARMONICS (first 10):\n`;
+          analysisInfo += `\n${READOUT_PEAKS}\n`;
           const harmonics = currentSong.fractalAnalysis.infiniteOrderHarmonics.slice(0, 10);
           analysisInfo += harmonics.map(h => `${h.toFixed(1)}Hz`).join(', ') + '\n';
         }
@@ -5316,31 +5322,16 @@ Run Deep Scan to analyse this track.
       }
 
       if (currentSong.isAetheriaCandidate !== undefined) {
-        analysisInfo += `\n🎯 AETHERIA CANDIDATE: ${currentSong.isAetheriaCandidate
-          ? 'YES — dominant frequency is itself an Aetheria number'
-          : 'No — matched via harmonic relationship'}\n`;
+        analysisInfo += `\n${currentSong.isAetheriaCandidate ? READOUT_NUMBER_YES : READOUT_NUMBER_NO}\n`;
       }
       
-      // Add recommendations
-      analysisInfo += `\n💡 RECOMMENDATIONS:\n`;
-      const regime = getFrequencyRegime(currentSong.closestSolfeggio || 396);
-      
-      if (regime === 'GUT') {
-        analysisInfo += `• Safe for extended listening\n`;
-        analysisInfo += `• Good for meditation and healing\n`;
-        analysisInfo += `• Can be used at comfortable volume\n`;
-      } else if (regime === 'HEART') {
-        analysisInfo += `• Use subtle resonance mode\n`;
-        analysisInfo += v2Active ? `${KEEP_COMFORTABLE_V2}\n` : `• Keep volume low (feeling vs hearing)\n`;
-        analysisInfo += `• Limit sessions to 20-30 minutes\n`;
-        analysisInfo += `• Good for emotional and energetic work\n`;
-      } else {
-        analysisInfo += `⚠️ EXPERT LEVEL FREQUENCY\n`;
-        analysisInfo += `• Requires advanced experience\n`;
-        analysisInfo += `• Use minimal volume (5-10%)\n`;
-        analysisInfo += `• Limit to 5-15 minute sessions\n`;
-        analysisInfo += `• Stop if any discomfort occurs\n`;
-      }
+      // v16.6 (R6, G3): comfort, not safety: what the layers play for this crystal (the Layers tab's own words) and
+      // the one comfort line. No frequency is "safe", has a level, a minute limit or a volume percentage.
+      analysisInfo += `\n${READOUT_COMFORT}\n`;
+      const readHz = applyLoShuPerfectMap(currentSong.closestSolfeggio || 396);
+      const heardMode = shellHeardHz === null ? 'off' : v2Active ? 'v2' : 'classic';
+      analysisInfo += `• ${heardLine(heardMode, readHz, readHz === applyLoShuPerfectMap(selectedSolfeggio) ? shellHeardHz : null)}\n`;
+      analysisInfo += `• ${COMFORT_LEVELS}\n`;
     } else {
       analysisInfo += `❌ This track has not been analyzed yet.\n\n`;
       analysisInfo += `To analyze this track:\n`;
@@ -5388,14 +5379,13 @@ Run Deep Scan to analyse this track.
       `🎵 FREQUENCY BREAKDOWN:\n` +
       `${frequencyCounts.slice(0, 15).join('\n')}\n` +
       `${frequencyCounts.length > 15 ? `\n...and ${frequencyCounts.length - 15} more frequencies` : ''}\n\n` +
-      `🎵 ADVANCED ANALYSIS:\n` +
-      `• Golden Ratio tracks (>30%): ${goldenTracks}\n` +
-      `• 111 Pattern tracks (>20%): ${pattern111Tracks}\n` +
-      `• DNA Resonance tracks (>30%): ${dnaTracks}\n\n` +
+      `${DIAG_SCORES}\n` +
+      `${diagScoreLines(goldenTracks, pattern111Tracks, dnaTracks).join('\n')}\n\n` +
       `💡 RECOMMENDATIONS:\n` +
       `${scanQueueTracks > 0 ? `• Scan ${scanQueueTracks} remaining tracks\n` : ''}` +
-      `${heartTracks === 0 ? '• No HEART frequencies - use Test Distribution for 27-track playlists\n' : ''}` +
-      `${headTracks === 0 ? '• No HEAD frequencies - use Test Distribution for 27-track playlists\n' : ''}`;
+      // v16.6 (P9): the advice names the button that exists in this layout (it named "Test Distribution", long gone).
+      `${heartTracks === 0 ? `${diagNoRangeLine('HEART', shellOnRef.current ? 'new' : 'classic')}\n` : ''}` +
+      `${headTracks === 0 ? `${diagNoRangeLine('HEAD', shellOnRef.current ? 'new' : 'classic')}\n` : ''}`;
       
     // v15.4: in the readout dialog, as Current Track Analysis.
     setInfoDialog({ title: 'Library diagnostics', body: diagnosticMessage });
@@ -7024,16 +7014,6 @@ registerProcessor('wav-capture', WavCapture);
     if (currentFreq <= 6000) return { shape: 'Infinite Unity Hypersphere', element: 'SOURCE Field' };
     
     return { shape: 'SOURCE Unity Sphere', element: 'Infinite SOURCE' };
-  };
-
-  const getSafetyLevelColor = (level: string) => {
-    switch (level) {
-      case 'SAFE': return 'text-green-500';
-      case 'CAUTION': return 'text-yellow-500';
-      case 'EXPERT': return 'text-orange-500';
-      case 'RESEARCH': return 'text-red-500';
-      default: return 'text-gray-500';
-    }
   };
 
   const getExperienceLevelColor = (level: string) => {
@@ -8859,6 +8839,7 @@ registerProcessor('wav-capture', WavCapture);
       mixesViewRef,
       moreViewRef, // v16.4
       guideViewRef, // v16.5
+      evidenceOriginRef, // v16.6
       trackInfoId: shellTrackInfoId,
     }),
     [shellTab, shellSheet, sheetFocus, classicPeek, carLayout, desktopShell, shellZen, shellZenHidden, shellTrackInfoId]
@@ -8938,7 +8919,7 @@ registerProcessor('wav-capture', WavCapture);
       setCurrentEffectsSession(null);
       
       // Show success message
-      setAnalysisNotification(`Experience documented! Your ${selectedSolfeggio}Hz session data has been saved for research.`);
+      setAnalysisNotification(journalSavedToast(selectedSolfeggio));
       setTimeout(() => setAnalysisNotification(null), 5000);
     }
   };
@@ -9559,6 +9540,8 @@ registerProcessor('wav-capture', WavCapture);
       },
       stopRecording: () => A().stopRecording(),
       setTab: (t: ShellTab) => {
+        evidenceOriginRef.current = null; // v16.6: visiting a tab ends the Guide's way back
+        forgetTag(); // v16.6 (re-review): and the tag that focus would have gone back to
         setShellTab(t);
         setShellSheet(null);
         setSheetFocus(null);
@@ -9752,10 +9735,71 @@ registerProcessor('wav-capture', WavCapture);
       journalEnd: (data: any) => more2ApiRef.current?.journalEnd(data),
       journalNote: (note: string) => more2ApiRef.current?.journalNote(note),
       closeTrackInfo: () => setShellTrackInfoId(null),
+      // v16.6, "How sure are we?": an evidence tag opens More › Guide at its tier, in one tap (the open sheet or Track
+      // info closes; the Guide's view is kept); the Guide's chip goes back to where the tag was. Setters and refs only.
+      openEvidence: (tier: Tier | 'section', origin: EvidenceOriginValue | null) => {
+        // Review D2: a tag tapped over the More tab (a sheet, Track info) goes back to the page that was showing.
+        evidenceOriginRef.current = origin && origin.tab === 'more' && !origin.more ? { ...origin, more: moreViewRef.current.view } : origin;
+        guideViewRef.current = { ...guideViewRef.current, top: 0, anchor: tier };
+        setShellSheet(null);
+        setSheetFocus(null);
+        setShellTrackInfoId(null);
+        requestMoreView(moreViewRef, 'guide');
+        setShellTab('more');
+        requestGuideAnchor();
+      },
+      backFromEvidence: () => {
+        const o = evidenceOriginRef.current;
+        evidenceOriginRef.current = null;
+        if (!o) return;
+        if (o.tab === 'more') requestMoreView(moreViewRef, o.more ?? 'root');
+        setShellTab(o.tab);
+        setSheetFocus(null);
+        setShellSheet(o.sheet);
+        if (o.trackInfo) setShellTrackInfoId(o.trackInfo);
+        refocusTag(); // review D5
+      },
     };
   }, []);
 
+  // v16.6: where an evidence tag's tap goes (components/guide/evidenceLink.ts), one stable function for the whole app:
+  // the new layout's More › Guide (shellActions.openEvidence), or classic's Guidebook modal opened at the tier
+  // (openEvidenceClassic: the view kept; the effect on showInfo below scrolls the anchor into the modal's scroller and
+  // focuses it). The Guide's own content provides a nested link that scrolls in place.
+  const evidenceOpen = useMemo(
+    () => (tier: Tier | 'section', origin: EvidenceOriginValue | null) => {
+      commitTag(); // review D5: the tapped tag (if a tag) gets the focus back after Back / the Guidebook's close
+      if (shellOnRef.current) {
+        shellActions.openEvidence(tier, origin);
+        return;
+      }
+      pendingEvidenceRef.current = tier;
+      setShowInfo(true);
+    },
+    []
+  );
+  // Classic's Guidebook: inside it a tag scrolls in place (the modal's scroller, no header inside it).
+  const guidebookInPlace = useMemo(() => (tier: Tier | 'section') => scrollToEvidence(guidebookScrollRef.current, tier === 'section' ? null : tier, 0), []);
+  // v16.6: while classic's Guidebook is open, Escape closes it (a kit overlay above it answers Escape first and stops
+  // it); and a tag's anchor, left before it opened, is scrolled to once it has rendered.
+  useEffect(() => {
+    if (!showInfo) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key === 'Escape' || e.key === 'Esc') && !e.defaultPrevented) setShowInfo(false);
+    };
+    window.addEventListener('keydown', onKey);
+    const pending = pendingEvidenceRef.current;
+    pendingEvidenceRef.current = null;
+    const raf = pending ? requestAnimationFrame(() => scrollToEvidence(guidebookScrollRef.current, pending === 'section' ? null : pending, 0)) : 0;
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (raf) cancelAnimationFrame(raf);
+      refocusTag(); // review D5: the Guidebook closed: back to the tag that opened it (if a tag did)
+    };
+  }, [showInfo]);
+
   return (
+    <EvidenceLink.Provider value={evidenceOpen}>
     <div
       onClick={uiHidden ? (e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) zenRevealRef.current?.(); } : undefined}
       className={`relative min-h-screen bg-black text-slate-200 font-sans overflow-hidden ${isFullScreen ? 'h-screen' : ''}`}
@@ -10008,12 +10052,12 @@ registerProcessor('wav-capture', WavCapture);
                   <Activity className={`w-5 h-5 text-blue-400 mt-0.5 ${isScanning ? 'animate-pulse' : ''}`} />
                   <div className="flex-1">
                     <div className="font-bold text-sm mb-1">
-                      {isScanning ? 'Deep Analysis In Progress' : 'Analysis Status'}
+                      {isScanning ? SCAN_NOTICE_TITLE : 'Analysis Status'}
                     </div>
                     <div className="text-xs leading-relaxed">{analysisNotification}</div>
                     {isScanning && (
                       <div className="mt-2 text-[10px] text-blue-300">
-                        Progress: {scanProgress}% • This may take a while but provides the most accurate results
+                        {scanNoticeLine(scanProgress)}
                       </div>
                     )}
                   </div>
@@ -10134,7 +10178,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.5</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.6</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -10207,7 +10251,7 @@ registerProcessor('wav-capture', WavCapture);
               <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowRecordOptions(false)}>
                   <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-md w-full shadow-2xl max-h-[calc(100vh-120px)] overflow-y-auto my-auto" onClick={e => e.stopPropagation()}>
                       <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Circle className="text-red-500" size={20}/> Start Recording</h3>
-                      <p className="text-sm text-slate-400 mb-6">Choose a recording mode. Audio-only is recommended for long sessions to prevent crashes.</p>
+                      <p className="text-sm text-slate-400 mb-6">Choose a recording mode.</p>
                       
                       <div className="grid grid-cols-3 gap-3 mb-4">
                           <button disabled={recordStarting} onClick={() => startRecording('audio')} className="p-4 border border-slate-700 bg-slate-800 hover:bg-slate-700 rounded-xl flex flex-col items-center gap-2 transition-all active:scale-95 hover:border-blue-500">
@@ -10251,6 +10295,16 @@ registerProcessor('wav-capture', WavCapture);
                               </div>
                           </div>
                           <div className="flex items-center gap-3">
+                              {/* v16.6: "How sure are we?" (the section at the end of both views). On a phone it sits in the
+                                  mobile toggle row below. */}
+                              <button
+                                  type="button"
+                                  onClick={() => scrollToEvidence(guidebookScrollRef.current, null, 0)}
+                                  data-testid="guidebook-how-sure"
+                                  className="hidden sm:inline-flex items-center min-h-touch px-3 rounded-full border border-slate-700 text-xs text-slate-300 hover:text-white hover:border-slate-500 transition-colors"
+                              >
+                                  {HOW_SURE_JUMP}
+                              </button>
                               {/* View Toggle */}
                               <div className="hidden sm:flex items-center bg-slate-900/80 border border-slate-700 rounded-full p-1">
                                   <button
@@ -10282,8 +10336,8 @@ registerProcessor('wav-capture', WavCapture);
                           </div>
                       </div>
 
-                      {/* Mobile-only toggle (header is too narrow on small screens) */}
-                      <div className="sm:hidden flex items-center justify-center bg-slate-900/50 border-b border-slate-800 px-4 py-2">
+                      {/* Mobile-only toggle (header is too narrow on small screens); v16.6: and "How sure are we?" */}
+                      <div className="sm:hidden flex flex-wrap items-center justify-center gap-2 bg-slate-900/50 border-b border-slate-800 px-4 py-2">
                           <div className="flex items-center bg-slate-900/80 border border-slate-700 rounded-full p-1">
                               <button
                                   onClick={() => setGuidebookView('accessible')}
@@ -10308,13 +10362,21 @@ registerProcessor('wav-capture', WavCapture);
                                   Technical
                               </button>
                           </div>
+                          <button
+                                  type="button"
+                                  onClick={() => scrollToEvidence(guidebookScrollRef.current, null, 0)}
+                                  data-testid="guidebook-how-sure"
+                                  className="inline-flex items-center min-h-touch px-3 rounded-full border border-slate-700 text-xs text-slate-300 hover:text-white hover:border-slate-500 transition-colors"
+                              >
+                                  {HOW_SURE_JUMP}
+                              </button>
                       </div>
 
                       {/* Modal Content - Scrollable */}
-                      <div className="flex-1 overflow-y-auto custom-scrollbar">
-
+                      <div ref={guidebookScrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
+                          <EvidenceLink.Provider value={guidebookInPlace}>
                           {guidebookView === 'accessible' ? (
-                              <AccessibleGuidebook />
+                              <AccessibleGuidebook layout="classic" />
                           ) : (
                           <TechnicalGuide
                               currentFrequency={selectedSolfeggio}
@@ -10325,8 +10387,10 @@ registerProcessor('wav-capture', WavCapture);
                               activeWalkMode={loShuWalkMode}
                               colorMode={frequencyColorMode}
                               onColorModeChange={setFrequencyColorMode}
+                              layout="classic"
                           />
                           )}
+                          </EvidenceLink.Provider>
                       </div>
                   </div>
               </div>
@@ -10511,7 +10575,7 @@ registerProcessor('wav-capture', WavCapture);
                         ? 'bg-blue-900/30 border-blue-500 text-blue-400 animate-pulse hover:bg-red-900/30 hover:border-red-500 hover:text-red-400'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-600'
                     }${pass.phase !== 'idle' ? ' opacity-40' : ''}`}
-                    title={exportHeld && !isScanning ? (exportRunning ? exportWords.BUSY_EXPORT : exportStoppingLong ? exportWords.BUSY_STOPPING_LONG : exportWords.BUSY_STOPPING) : pass.phase !== 'idle' ? 'Unavailable while Analyse tracks runs' : isScanning ? 'Click to cancel deep analysis' : 'Start deep fractal analysis (slow but thorough)'}
+                    title={exportHeld && !isScanning ? (exportRunning ? exportWords.BUSY_EXPORT : exportStoppingLong ? exportWords.BUSY_STOPPING_LONG : exportWords.BUSY_STOPPING) : pass.phase !== 'idle' ? 'Unavailable while Analyse tracks runs' : isScanning ? 'Click to cancel deep analysis' : SCAN_BUTTON_TITLE}
                    >
                      <Search size={16} className="mb-1" />
                      {isScanning ? (
@@ -10747,17 +10811,17 @@ registerProcessor('wav-capture', WavCapture);
                                 </span>
                               ) : null}
                               {song.fractalAnalysis && song.fractalAnalysis.goldenRatioAlignment > 0.7 && (
-                                <span className="text-[8px] px-1 rounded bg-purple-800 text-purple-300 h-fit" title="High Golden Ratio Alignment">
+                                <span className="text-[8px] px-1 rounded bg-purple-800 text-purple-300 h-fit" title={BADGE_GOLDEN_TITLE}>
                                   Φ{Math.round(song.fractalAnalysis.goldenRatioAlignment * 100)}%
                                 </span>
                               )}
                               {song.fractalAnalysis && song.fractalAnalysis.pattern111Presence > 0.5 && (
-                                <span className="text-[8px] px-1 rounded bg-blue-800 text-blue-300 h-fit" title="111Hz Pattern Present">
+                                <span className="text-[8px] px-1 rounded bg-blue-800 text-blue-300 h-fit" title={BADGE_111_TITLE}>
                                   111
                                 </span>
                               )}
                               {song.fractalAnalysis && song.fractalAnalysis.dnaResonanceScore > 0.6 && (
-                                <span className="text-[8px] px-1 rounded bg-green-800 text-green-300 h-fit" title="DNA Resonance Detected">
+                                <span data-classic-badge="dna" className="text-[8px] px-1 rounded bg-green-800 text-green-300 h-fit" title={BADGE_DNA_TITLE}>
                                   DNA
                                 </span>
                               )}
@@ -10765,17 +10829,6 @@ registerProcessor('wav-capture', WavCapture);
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-[10px] text-slate-600">{song.duration === 0 ? '...' : formatDuration(song.duration || 0)}</span>
-                          {song.fractalAnalysis && (
-                            <div className="flex gap-1 text-[8px]">
-                              <span className={`${
-                                song.fractalAnalysis.safetyLevel === 'SAFE' ? 'text-green-500' :
-                                song.fractalAnalysis.safetyLevel === 'CAUTION' ? 'text-yellow-500' :
-                                song.fractalAnalysis.safetyLevel === 'EXPERT' ? 'text-orange-500' : 'text-red-500'
-                              }`}>
-                                {song.fractalAnalysis.safetyLevel}
-                              </span>
-                            </div>
-                          )}
                         </div>
                     </div>
                     <button
@@ -10857,14 +10910,15 @@ registerProcessor('wav-capture', WavCapture);
                    {v2Active && <KeyFitRow on={keyFitOn} status={keyFitRowLine} onToggle={toggleKeyFit} />}
 
                    {/* Phi Integration Panel */}
-                   <div className="border border-purple-500/30 rounded-xl overflow-hidden bg-slate-900/50 shadow-[0_0_15px_rgba(147,51,234,0.1)]">
+                   <div data-evidence="design" className="border border-purple-500/30 rounded-xl overflow-hidden bg-slate-900/50 shadow-[0_0_15px_rgba(147,51,234,0.1)]">
                       <div className="p-4 bg-purple-900/20">
                           <div className="flex justify-between items-center">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                   <Target className="text-purple-400 w-5 h-5" />
                                   <h4 className="text-purple-400 font-bold uppercase tracking-widest text-xs">
                                       PHI (φ) INTEGRATION
                                   </h4>
+                                  <EvidenceTag tier="design" />
                               </div>
                               <button 
                                   onClick={() => setEnablePhiMode(!enablePhiMode)}
@@ -11338,7 +11392,7 @@ registerProcessor('wav-capture', WavCapture);
                     {/* Traditional Solfeggio (First-Third Order) — these are the
                         GUT band, so display values swap when Lo Shu Perfect is on. */}
                     <div className="mb-4">
-                      <div className="text-[10px] text-slate-400 mb-2 uppercase tracking-widest">Traditional Scale (Safe)</div>
+                      <div className="text-[10px] text-slate-400 mb-2 uppercase tracking-widest">{TRADITIONAL_SOLFEGGIO}</div>
                       <div className="grid grid-cols-3 gap-2">
                         {SOLFEGGIO_INFO.filter(s => ['First', 'Second', 'Third'].includes(s.order)).map((s) => (
                           <button
@@ -11370,8 +11424,8 @@ registerProcessor('wav-capture', WavCapture);
                     {(userExperienceLevel === 'advanced' || userExperienceLevel === 'expert') && (
                       <div className="mb-4">
                         <div className="text-[10px] text-yellow-400 mb-2 uppercase tracking-widest flex items-center gap-1">
-                          <AlertTriangle size={10} />
-                          Fourth Order (Advanced)
+                          <Sparkles size={10} />
+                          Fourth Order
                         </div>
                         <div className="grid grid-cols-3 gap-2">
                           {SOLFEGGIO_INFO.filter(s => s.order === 'Fourth').map((s) => (
@@ -11392,8 +11446,8 @@ registerProcessor('wav-capture', WavCapture);
                         {/* Fifth Order */}
                         <div className="mb-4">
                           <div className="text-[10px] text-orange-400 mb-2 uppercase tracking-widest flex items-center gap-1">
-                            <AlertTriangle size={10} />
-                            Fifth Order (Expert Only)
+                            <Sparkles size={10} />
+                            Fifth Order
                           </div>
                           <div className="grid grid-cols-3 gap-2">
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Fifth').map((s) => (
@@ -11411,8 +11465,8 @@ registerProcessor('wav-capture', WavCapture);
                         {/* Sixth Order */}
                         <div className="mb-4">
                           <div className="text-[10px] text-red-400 mb-2 uppercase tracking-widest flex items-center gap-1">
-                            <AlertTriangle size={10} />
-                            Sixth Order (Research Level)
+                            <Sparkles size={10} />
+                            Sixth Order
                           </div>
                           <div className="grid grid-cols-3 gap-2">
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Sixth').map((s) => (
@@ -11430,8 +11484,8 @@ registerProcessor('wav-capture', WavCapture);
                         {/* Seventh Order */}
                         <div className="mb-4">
                           <div className="text-[10px] text-violet-400 mb-2 uppercase tracking-widest flex items-center gap-1">
-                            <AlertTriangle size={10} />
-                            Seventh Order (Master Level)
+                            <Sparkles size={10} />
+                            Seventh Order
                           </div>
                           <div className="grid grid-cols-3 gap-2">
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Seventh').map((s) => (
@@ -11449,7 +11503,7 @@ registerProcessor('wav-capture', WavCapture);
                         {/* Eighth Order - Transpersonal Realm */}
                         <div className="mb-4">
                           <div className="text-[10px] text-cyan-400 mb-2 uppercase tracking-widest flex items-center gap-1">
-                            <AlertTriangle size={10} />
+                            <Sparkles size={10} />
                             Eighth Order (Transpersonal Gates 1-3)
                           </div>
                           <div className="grid grid-cols-3 gap-2">
@@ -11468,7 +11522,6 @@ registerProcessor('wav-capture', WavCapture);
                         {/* Ninth Order - Ascension */}
                         <div className="mb-4">
                           <div className="text-[10px] text-pink-400 mb-2 uppercase tracking-widest flex items-center gap-1">
-                            <AlertTriangle size={10} />
                             <Sparkles size={10} />
                             Ninth Order (Ascension - Gates 4-6)
                           </div>
@@ -11487,7 +11540,7 @@ registerProcessor('wav-capture', WavCapture);
                             ))}
                           </div>
                           <div className="mt-2 text-[9px] text-pink-300 bg-pink-900/20 p-2 rounded border border-pink-800">
-                            ⚠️ Maximum caution required. These are theoretical transpersonal frequencies. Use extremely low volumes and short sessions.
+                            {HIGH_CRYSTALS_LINE}
                           </div>
                         </div>
                       </>
@@ -11529,7 +11582,7 @@ registerProcessor('wav-capture', WavCapture);
 
                   <div>
                     <div className="flex justify-between items-center mb-4">
-                        <label className="text-xs uppercase tracking-widest text-slate-500 font-bold">Binaural Entrainment</label>
+                        <label className="text-xs uppercase tracking-widest text-slate-500 font-bold">{BEAT_HEADING}</label>
                          <button 
                             onClick={() => setIsAdaptiveBinaural(!isAdaptiveBinaural)}
                             className={`text-[10px] px-2 py-1 rounded border flex items-center gap-1 transition-colors ${isAdaptiveBinaural ? 'bg-blue-500/20 text-blue-400 border-blue-500' : 'border-slate-700 text-slate-500'}`}
@@ -11537,7 +11590,11 @@ registerProcessor('wav-capture', WavCapture);
                             <Sparkles size={10} /> {isAdaptiveBinaural ? 'Adaptive ON' : 'Adaptive OFF'}
                         </button>
                     </div>
-                    {v2Active && <p className="-mt-2 mb-3 text-[10px] text-slate-500 leading-snug">{HEADPHONES_HINT}</p>}
+                    <div data-evidence={BEAT_EVIDENCE.tag} className="-mt-2 mb-3 space-y-2">
+                      <p className="text-[10px] text-slate-400 leading-snug">{BEAT_EVIDENCE.line}</p>
+                      <EvidenceTag tier={BEAT_EVIDENCE.tag} />
+                    </div>
+                    {v2Active && <p className="-mt-1 mb-3 text-[10px] text-slate-500 leading-snug">{HEADPHONES_HINT}</p>}
 
                     <div className="space-y-3">
                        {BINAURAL_PRESETS.map((p) => (
@@ -11551,7 +11608,7 @@ registerProcessor('wav-capture', WavCapture);
                             </div>
                             <div className="flex-1">
                                 <span className="block text-sm font-bold text-slate-200">{p.name} ({p.delta}Hz)</span>
-                                <span className="text-[10px] text-slate-400">{v2Active && p.name === 'Gamma' ? GAMMA_DESCRIPTION_V2 : p.description}</span>
+                                <span className="text-[10px] text-slate-400">{v2Active && p.name === 'Gamma' ? GAMMA_DESCRIPTION_V2 : `${bandLine(p.name) ?? p.name}.`}</span>
                             </div>
                           </div>
                        ))}
@@ -11576,45 +11633,43 @@ registerProcessor('wav-capture', WavCapture);
                         onChange={(e) => setUserExperienceLevel(e.target.value as any)}
                         className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white text-sm"
                       >
-                        <option value="beginner">Beginner (Safe frequencies only)</option>
-                        <option value="intermediate">Intermediate (Up to 2000 Hz)</option>
-                        <option value="advanced">Advanced (Up to 5000 Hz)</option>
-                        <option value="expert">Expert (All frequencies)</option>
+                        {CLASSIC_LEVEL_OPTIONS.map((o) => (
+                          <option key={o.id} value={o.id}>{o.label}</option>
+                        ))}
                       </select>
                     </div>
                     
                     {/* Fractal Analysis Display */}
                     {fractalAnalysis && (
-                      <div className="bg-slate-800 p-4 rounded-lg mb-4">
-                        <h4 className="text-sm font-bold text-blue-400 mb-3">Fractal Analysis Results</h4>
+                      <div data-evidence="design" className="bg-slate-800 p-4 rounded-lg mb-4">
+                        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-3">
+                          <h4 className="text-sm font-bold text-blue-400">{CARD_SCORES_TITLE}</h4>
+                          <EvidenceTag tier="design" />
+                        </div>
+                        <p className="mb-3 text-[10px] text-slate-400 leading-snug">{SCAN_SCORES_LEAD}</p>
                         <div className="grid grid-cols-2 gap-3 text-xs">
                           <div className="bg-slate-900 p-2 rounded">
-                            <div className="text-gold-400 mb-1">Golden Ratio Alignment</div>
+                            <div className="text-gold-400 mb-1">Golden ratio score</div>
                             <div className="text-white font-bold text-lg">{Math.round(fractalAnalysis.goldenRatioAlignment * 100)}%</div>
                           </div>
                           <div className="bg-slate-900 p-2 rounded">
-                            <div className="text-purple-400 mb-1">111 Hz Pattern</div>
+                            <div className="text-purple-400 mb-1">111 pattern score</div>
                             <div className="text-white font-bold text-lg">{Math.round(fractalAnalysis.pattern111Presence * 100)}%</div>
                           </div>
                           <div className="bg-slate-900 p-2 rounded">
-                            <div className="text-green-400 mb-1">DNA Resonance</div>
+                            <div className="text-green-400 mb-1">DNA resonance score</div>
                             <div className="text-white font-bold text-lg">{Math.round(fractalAnalysis.dnaResonanceScore * 100)}%</div>
                           </div>
                           <div className="bg-slate-900 p-2 rounded">
-                            <div className="text-red-400 mb-1">Safety Level</div>
-                            <div className={`font-bold text-lg ${
-                              fractalAnalysis.safetyLevel === 'SAFE' ? 'text-green-500' :
-                              fractalAnalysis.safetyLevel === 'CAUTION' ? 'text-yellow-500' :
-                              fractalAnalysis.safetyLevel === 'EXPERT' ? 'text-orange-500' : 'text-red-500'
-                            }`}>
-                              {fractalAnalysis.safetyLevel}
-                            </div>
+                            <div className="text-red-400 mb-1">Sacred geometry score</div>
+                            <div className="text-white font-bold text-lg">{Math.round(fractalAnalysis.sacredGeometryAlignment * 100)}%</div>
+                            <div className="text-[10px] text-slate-500 leading-snug">Higher for noisy sound than for pure tones.</div>
                           </div>
                         </div>
                         
                         {fractalAnalysis.infiniteOrderHarmonics.length > 0 && (
                           <div className="mt-3 pt-3 border-t border-slate-700">
-                            <div className="text-xs text-slate-400 mb-2">Detected Harmonics (first 10):</div>
+                            <div className="text-xs text-slate-400 mb-2">{CARD_PEAKS}</div>
                             <div className="flex flex-wrap gap-1">
                               {fractalAnalysis.infiniteOrderHarmonics.slice(0, 10).map((freq, i) => (
                                 <span key={i} className="text-xs bg-slate-700 text-gold-400 px-2 py-1 rounded">
@@ -11628,7 +11683,7 @@ registerProcessor('wav-capture', WavCapture);
                     )}
                     
                     {/* Effects Documentation */}
-                    <div className="mb-4">
+                    <div className="mb-4" data-testid="harmonic-journal">
                       <ExperienceTracker
                         isDocumenting={isDocumentingEffects}
                         onToggleDocumentation={toggleJournal}
@@ -11654,7 +11709,7 @@ registerProcessor('wav-capture', WavCapture);
                         <div className="text-xs text-yellow-200">
                           {v2Active && layer.f > 0
                             ? feltLineV2(selectedSolfeggio, toneOf(layer.f, planOutput))
-                            : <>High frequency detected ({selectedSolfeggio}Hz). Focus on feeling rather than hearing.</>}
+                            : highCrystalHumLine(selectedSolfeggio)}
                         </div>
                       </div>
                     )}
@@ -11664,12 +11719,14 @@ registerProcessor('wav-capture', WavCapture);
           )}
           />
           
-          {/* Advanced Frequency Selector Modal */}
+          {/* Advanced Frequency Selector Modal. v16.6 (review D4): it sits above the Guidebook (z-[150] over z-[100]), so no
+              evidence tag lives in it (a tag here would open the Guidebook underneath it); evidence.spec checks that. */}
           <ViewBoundary
             name="frequency-lab"
             fallback={modalFallback(showFrequencySelector, () => setShowFrequencySelector(false), 'fixed inset-0 z-dialog flex items-center justify-center p-4')}
             render={() => showFrequencySelector && (
             <div 
+              data-testid="frequency-lab"
               className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
               onClick={() => setShowFrequencySelector(false)}
             >
@@ -11732,8 +11789,8 @@ registerProcessor('wav-capture', WavCapture);
                     {(userExperienceLevel === 'advanced' || userExperienceLevel === 'expert') && (
                       <div className="mb-4">
                         <h4 className="text-sm font-bold text-yellow-400 mb-2 flex items-center gap-1">
-                          <AlertTriangle size={14} />
-                          Fourth Order (Advanced)
+                          <Sparkles size={14} />
+                          Fourth Order
                         </h4>
                         <div className="grid grid-cols-3 gap-2">
                           {SOLFEGGIO_INFO.filter(s => s.order === 'Fourth').map((s) => {
@@ -11763,8 +11820,8 @@ registerProcessor('wav-capture', WavCapture);
                       <>
                         <div className="mb-4">
                           <h4 className="text-sm font-bold text-orange-400 mb-2 flex items-center gap-1">
-                            <AlertTriangle size={14} />
-                            Fifth Order (Expert)
+                            <Sparkles size={14} />
+                            Fifth Order
                           </h4>
                           <div className="grid grid-cols-3 gap-2">
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Fifth').map((s) => {
@@ -11791,8 +11848,8 @@ registerProcessor('wav-capture', WavCapture);
 
                         <div className="mb-4">
                           <h4 className="text-sm font-bold text-red-400 mb-2 flex items-center gap-1">
-                            <AlertTriangle size={14} />
-                            Sixth Order (Research)
+                            <Sparkles size={14} />
+                            Sixth Order
                           </h4>
                           <div className="grid grid-cols-3 gap-2">
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Sixth').map((s) => {
@@ -11819,8 +11876,8 @@ registerProcessor('wav-capture', WavCapture);
 
                         <div className="mb-4">
                           <h4 className="text-sm font-bold text-violet-400 mb-2 flex items-center gap-1">
-                            <AlertTriangle size={14} />
-                            Seventh Order (Master)
+                            <Sparkles size={14} />
+                            Seventh Order
                           </h4>
                           <div className="grid grid-cols-3 gap-2">
                             {SOLFEGGIO_INFO.filter(s => s.order === 'Seventh').map((s) => {
@@ -11847,7 +11904,7 @@ registerProcessor('wav-capture', WavCapture);
 
                         <div className="mb-4">
                           <h4 className="text-sm font-bold text-cyan-400 mb-2 flex items-center gap-1">
-                            <AlertTriangle size={14} />
+                            <Sparkles size={14} />
                             Eighth Order (Transpersonal)
                           </h4>
                           <div className="grid grid-cols-3 gap-2">
@@ -11875,7 +11932,6 @@ registerProcessor('wav-capture', WavCapture);
 
                         <div className="mb-4">
                           <h4 className="text-sm font-bold text-pink-400 mb-2 flex items-center gap-1">
-                            <AlertTriangle size={14} />
                             <Sparkles size={14} />
                             Ninth Order (Ascension)
                           </h4>
@@ -11905,7 +11961,7 @@ registerProcessor('wav-capture', WavCapture);
                             })}
                           </div>
                           <div className="mt-2 text-xs text-pink-300 bg-pink-900/20 p-2 rounded border border-pink-800">
-                            ⚠️ Transpersonal frequencies - Use extreme caution
+                            {HIGH_CRYSTALS_LINE}
                           </div>
                         </div>
                       </>
@@ -11978,10 +12034,8 @@ registerProcessor('wav-capture', WavCapture);
                         <span className="text-lg font-bold text-white">{selectedSolfeggio}Hz</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-slate-400">Safety Level</span>
-                        <span className={`text-sm font-bold ${getSafetyLevelColor(assessFrequencySafety(selectedSolfeggio).level)}`}>
-                          {assessFrequencySafety(selectedSolfeggio).level}
-                        </span>
+                        <span className="text-sm text-slate-400">{RANGE_LABEL}</span>
+                        <span className="text-sm font-bold text-slate-200">{regimeName(regimeOf(selectedSolfeggio))}</span>
                       </div>
                     </div>
 
@@ -12028,26 +12082,13 @@ registerProcessor('wav-capture', WavCapture);
                       </div>
                     </div>
 
-                    {/* Safety Recommendations */}
+                    {/* Comfort (v16.6, R6): what the layers play for this crystal (the Layers tab's words) and the one comfort
+                        line, in place of per-frequency "recommendations". */}
                     <div className="bg-slate-800 p-3 rounded-lg">
-                      <div className="text-sm font-medium text-slate-300 mb-2">Recommendations</div>
+                      <div className="text-sm font-medium text-slate-300 mb-2">{COMFORT_HEADING}</div>
                       <div className="space-y-1 text-xs text-slate-400">
-                        {selectedSolfeggio > 963 ? (
-                          <>
-                            <div>{v2Active ? KEEP_COMFORTABLE_V2 : '• Keep volume low (feeling vs hearing)'}</div>
-                            <div>• Focus on subtle body sensations</div>
-                            <div>• Limit session to 15-30 minutes</div>
-                            <div>• Take breaks between sessions</div>
-                            <div>• Stop if you feel uncomfortable</div>
-                          </>
-                        ) : (
-                          <>
-                            <div>• Safe frequency for extended use</div>
-                            <div>• Recommended for beginners</div>
-                            <div>• Good for meditation and healing</div>
-                            <div>• Can be used at comfortable volume</div>
-                          </>
-                        )}
+                        <div>{heardLine(shellHeardHz === null ? 'off' : v2Active ? 'v2' : 'classic', applyLoShuPerfectMap(selectedSolfeggio), shellHeardHz)}</div>
+                        <div>{COMFORT_LEVELS}</div>
                       </div>
                     </div>
 
@@ -12096,6 +12137,20 @@ registerProcessor('wav-capture', WavCapture);
                         className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded border border-slate-600"
                       >
                         Read the disclaimer
+                      </button>
+
+                      {/* v16.6: How sure are we? (the Guidebook opens at the section, over this panel; Close returns here). */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          pendingEvidenceRef.current = 'section';
+                          setShowInfo(true);
+                        }}
+                        data-testid="safety-how-sure"
+                        className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded border border-slate-600 flex items-center justify-center gap-2"
+                      >
+                        <Scale size={14} className="text-slate-400" aria-hidden="true" />
+                        {HOW_SURE_SAFETY_BUTTON}
                       </button>
 
                       {/* Close Button */}
@@ -12167,6 +12222,7 @@ registerProcessor('wav-capture', WavCapture);
                 window.open(href, '_blank', 'noopener,noreferrer');
               }
             }}
+            data-testid="classic-links"
             className={`fixed inset-y-0 right-0 z-[54] w-[340px] sm:w-[380px] bg-black/95 backdrop-blur-xl border-l border-slate-800 flex flex-col shadow-2xl transition-transform duration-300 ${
             showLinks ? 'translate-x-0' : 'translate-x-full'
           }`}>
@@ -12269,7 +12325,7 @@ registerProcessor('wav-capture', WavCapture);
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-medium text-slate-200 group-hover:text-pink-400 transition-colors">Aetheria</h4>
-                      <p className="text-[10px] text-slate-500">The frequency healing system — foundational text</p>
+                      <p className="text-[10px] text-slate-500">The foundational text of the frequency system</p>
                     </div>
                     <ChevronRight size={14} className="text-slate-700 group-hover:text-pink-500 transition-colors shrink-0" />
                   </a>
@@ -12279,7 +12335,7 @@ registerProcessor('wav-capture', WavCapture);
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-medium text-slate-200 group-hover:text-blue-400 transition-colors">Aetheria: The Science</h4>
-                      <p className="text-[10px] text-slate-500">A research-driven deep dive — the evidence behind the system</p>
+                      <p className="text-[10px] text-slate-500">A research-driven deep dive — the ideas behind the system</p>
                     </div>
                     <ChevronRight size={14} className="text-slate-700 group-hover:text-blue-500 transition-colors shrink-0" />
                   </a>
@@ -12315,7 +12371,7 @@ registerProcessor('wav-capture', WavCapture);
                   </div>
                   <div className="flex-1 min-w-0">
                     <h4 className="text-sm font-medium text-slate-200 group-hover:text-green-400 transition-colors">Aetheria on Spotify</h4>
-                    <p className="text-[10px] text-slate-500">Lyric-aligned healing music</p>
+                    <p className="text-[10px] text-slate-500">Lyric-aligned music</p>
                   </div>
                   <ChevronRight size={14} className="text-slate-700 group-hover:text-green-500 transition-colors shrink-0" />
                 </a>
@@ -12331,7 +12387,7 @@ registerProcessor('wav-capture', WavCapture);
                     { href: 'https://lilrobodue.github.io/Unified-Scale-Navigator/', icon: '🔬', title: 'Unified Scale Navigator', sub: 'Quantum to cosmic' },
                     { href: 'https://lilrobodue.github.io/HRV-Coherence-Visualizer/', icon: '💓', title: 'HRV Coherence Visualizer', sub: 'Heart rate variability' },
                     { href: 'https://lilrobodue.github.io/Schumann-Biology-Simulator/', icon: '🌍', title: 'Schumann Biology Simulator', sub: "Earth's resonance" },
-                    { href: 'https://lilrobodue.github.io/Cellular-Voltage-Frequency-Model/', icon: '⚡', title: 'Cellular Voltage Model', sub: 'Frequency & cell health' },
+                    { href: 'https://lilrobodue.github.io/Cellular-Voltage-Frequency-Model/', icon: '⚡', title: 'Cellular Voltage Model', sub: 'A model of cell voltage and frequency' },
                     { href: 'https://lilrobodue.github.io/Galactic-Scale-Vortex-Formation/', icon: '🌌', title: 'Galactic Vortex Formation', sub: 'Cosmic scale structure' },
                   ].map((sim) => (
                     <a key={sim.href} href={sim.href} target="_blank" rel="noopener noreferrer" className="p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-blue-500/30 transition-all text-center group">
@@ -12353,7 +12409,7 @@ registerProcessor('wav-capture', WavCapture);
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-medium text-slate-200 group-hover:text-indigo-400 transition-colors">Th3 L0unG3 — Discord</h4>
-                      <p className="text-[10px] text-slate-500">365+ healing frequency songs · community · resources</p>
+                      <p className="text-[10px] text-slate-500">365+ frequency songs · community · resources</p>
                     </div>
                     <ChevronRight size={14} className="text-slate-700 group-hover:text-indigo-500 transition-colors shrink-0" />
                   </a>
@@ -12470,7 +12526,12 @@ registerProcessor('wav-capture', WavCapture);
                         
                         {/* Key fit (v15.2, review B2): with its chip shown the chips wrap whole onto a second line on a
                             phone (the chip never breaks mid-label); without it, the row is exactly v15.1's. */}
-                        <div className={keyFitChipShown ? 'flex flex-wrap justify-center items-center gap-x-2 gap-y-1' : 'flex items-center gap-2'}>
+                        {/* v16.6 (decision 8, review C1): a geometry whose name holds a health word (5274 Hz's Healing Mandala)
+                            makes the pill row a Tradition block with its tag (the pills' titles name it too). */}
+                        <div
+                          data-evidence={TAGGED_SHAPES.has(getCurrentSacredGeometry().shape) ? 'tradition' : undefined}
+                          className={keyFitChipShown ? 'flex flex-wrap justify-center items-center gap-x-2 gap-y-1' : 'flex items-center gap-2'}
+                        >
                          {(() => {
                            // Footer Hz pill — reflects Lo Shu Perfect mode by displaying
                            // the swapped GUT counterpart and tinting the pill emerald, so
@@ -12607,9 +12668,10 @@ registerProcessor('wav-capture', WavCapture);
                          {/* Sacred Geometry Status */}
                          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20"
                            title={`${getCurrentSacredGeometry().shape} manifesting`}>
-                           <Box size={8} /> 
+                           <Box size={8} />
                            {getCurrentSacredGeometry().element}
                          </span>
+                         {TAGGED_SHAPES.has(getCurrentSacredGeometry().shape) ? <EvidenceTag tier="tradition" /> : null}
 
                          {/* Advanced Features Status */}
                          {fractalAnalysis && (
@@ -12916,6 +12978,7 @@ registerProcessor('wav-capture', WavCapture);
       )}
       {classicPeek && <PeekPill onBack={() => setClassicPeek(null)} bottom={uiInsets.bottom} />}
     </div>
+    </EvidenceLink.Provider>
   );
 };
 

@@ -20,6 +20,7 @@ import { PHI_BINAURAL_V2, PHI_ENVELOPE_V2, PHI_LEVELS_V2 } from '../../layers/la
 import { useActions, useSound, useTuning } from '../contexts';
 import { countRender } from '../devRenders';
 import SectionCard from './SectionCard';
+import EvidenceTag from '../../ui/EvidenceTag';
 import { EXPERIENCE_LEVELS, NEEDS_PHI, PHI_CLASSIC_LINE, TRACK_SHAPE_CLASSIC_LINE, advancedStatus, trackPeakLine } from './layersModel';
 
 export const FILTER_LABEL = 'Filter the crystals by experience level';
@@ -33,13 +34,18 @@ const AdvancedSection = () => {
   const shapeNote = !t.phiMode ? NEEDS_PHI : t.phiTiming ? trackPeakLine(t.trackPeakS) : null;
   return (
     <SectionCard section="advanced" title="Advanced" status={advancedStatus(t.phiMode)}>
-      <Toggle
-        label="φ integration"
-        description={s.v2Active ? `${PHI_LEVELS_V2}. ${PHI_BINAURAL_V2}.` : PHI_CLASSIC_LINE}
-        checked={t.phiMode}
-        onChange={actions.setPhiMode}
-        data-testid="layers-phi"
-      />
+      <div data-evidence="design" className="space-y-2">
+        <Toggle
+          label="φ integration"
+          description={s.v2Active ? `${PHI_LEVELS_V2}. ${PHI_BINAURAL_V2}.` : PHI_CLASSIC_LINE}
+          checked={t.phiMode}
+          onChange={actions.setPhiMode}
+          data-testid="layers-phi"
+        />
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
+          <EvidenceTag tier="design" />
+        </div>
+      </div>
       <Toggle
         label="Track shape"
         description={s.v2Active ? `${PHI_ENVELOPE_V2}.` : TRACK_SHAPE_CLASSIC_LINE}

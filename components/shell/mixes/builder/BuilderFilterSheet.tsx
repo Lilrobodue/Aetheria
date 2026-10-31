@@ -22,6 +22,7 @@ import { CLEAR_ALL, sheetCountText } from '../../library/filterViewModel';
 import { CONFIDENCE_HELP, FACET_TITLES, NO_FILTERS, NO_KEYS_YET, countOf, filterPass, valueLabel } from '../../../../utils/library/filterModel';
 import type { FacetIndex, FilterResult, FilterSong, Filters } from '../../../../utils/library/filterModel';
 import { SCAN_SCORES, SCAN_SCORES_LEAD, scoreChipText } from '../../../../utils/library/scanScores';
+import EvidenceTag from '../../../ui/EvidenceTag';
 import { BUILDER_FACETS } from '../../../../utils/mix/builder';
 import { EXPERIMENTAL_HIDE, EXPERIMENTAL_MORE, EXPERIMENTAL_SHOW, EXPERIMENTAL_TITLE, FILTERS_DONE, FILTERS_FOOT } from './builderViewModel';
 
@@ -114,10 +115,13 @@ const Body = ({ index, filters, result, onToggle }: Omit<BuilderFilterSheetProps
           </button>
         </div>
         {open ? (
-          <div id="bf-experimental-body">
-            <p data-testid="builder-filters-experimental-lead" className={`pb-3 ${SUB}`}>
+          <div id="bf-experimental-body" data-evidence="design">
+            <p data-testid="builder-filters-experimental-lead" className={`pb-2 ${SUB}`}>
               {SCAN_SCORES_LEAD} {EXPERIMENTAL_MORE}
             </p>
+            <div className="pb-3 flex flex-wrap items-center gap-x-2 gap-y-3">
+              <EvidenceTag tier="design" />
+            </div>
             <div className={WRAP}>{SCORED.map((d) => chip(`x-${d.id}`, 'over', scoreChipText(d)))}</div>
           </div>
         ) : null}

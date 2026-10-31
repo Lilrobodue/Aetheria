@@ -6,12 +6,35 @@
 // keep App's names inside (the destructuring renames), so every moved line reads as it did. Classic's Guidebook renders
 // it with App's own values (parity: the guidebook shots; guide.spec G2: the text nodes); the new layout's Guide renders
 // it with GuideContext's values and the shell's actions, so the cube is interactive in both layouts.
+//
+// v16.6 ("How sure are we?", the copy pass): the words a user reads are rewritten where they stated a claim as fact
+// (the v16.6 spec §3.4): every crystal card reads utils/copy/crystalCopy (its name, its association: "Traditionally
+// associated with …" for GUT, "In the Aetheria framework, …" for HEART and HEAD; no card reads a `benefit` any more);
+// the regimes' and transitions' lines are framed; "The arithmetic of 432 Hz" replaces UNIFIED_THEORY.section1 at the
+// render site (the data table is untouched); the Tesla quote is "often attributed"; the framework's readings say so.
+// Each claim sits in a data-evidence block with its EvidenceTag (Arithmetic, Tradition, Early evidence, Design choice),
+// at most one or two per section. `layout` names the places the guide points to (utils/copy/places); `back` is the new
+// layout's "Back to …" chip in the HowSure section, which closes the view.
 
 import React from 'react';
-import { Activity, AlertTriangle, Box, Calculator, Eye, Heart, Info, Map as MapIcon, Sparkles, Target, User, Waves } from 'lucide-react';
+import { Activity, ArrowRight, Box, Calculator, ChevronsUp, Eye, Heart, Info, Map as MapIcon, Sparkles, Target, User, Waves } from 'lucide-react';
 import { UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, type LoShuWalkMode } from '../../constants';
 import type { FrequencyColorMode } from '../../utils/spectrumColor';
 import LoShuMatrix from '../LoShuMatrix';
+import EvidenceTag from '../ui/EvidenceTag';
+import HowSure from './HowSure';
+import type { HowSureBack } from './HowSure';
+import {
+  crystalCopy, orderLine, REGIME_COPY, TRANSITION_COPY, REGIMES_TITLE, REGIMES_LEAD_START, HEAD_MARK_TITLE, RETUNE_TITLE, RETUNE_LONG, RETUNE_HISTORY,
+} from '../../utils/copy/crystalCopy';
+import { place } from '../../utils/copy/places';
+import type { Layout } from '../../utils/copy/places';
+
+/** A crystal card's name and association (never SOLFEGGIO_INFO's or an inline `benefit`). */
+const nameOf = (hz: number): string => crystalCopy(hz)?.name ?? `${hz} Hz`;
+const meaningOf = (hz: number): string => crystalCopy(hz)?.association ?? '';
+/** A tag on its own row (the density rule: never inside a sentence). */
+const TagRow = ({ children }: { children: React.ReactNode }) => <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-3">{children}</div>;
 
 export interface TechnicalGuideProps {
   /** selectedSolfeggio (raw). */
@@ -25,6 +48,10 @@ export interface TechnicalGuideProps {
   onColorModeChange: (m: FrequencyColorMode) => void;
   /** v16.5 final: the new layout's Guide only: the cube's cells contain their content (LoShuMatrix containCells). */
   containCells?: boolean;
+  /** v16.6: the host's layout, for the places the guide names (classic's Guidebook: 'classic'; the new Guide: 'new'). */
+  layout?: Layout;
+  /** v16.6: the new layout's "Back to …" chip in How sure are we?. */
+  back?: HowSureBack | null;
 }
 
 const TechnicalGuide = ({
@@ -37,14 +64,17 @@ const TechnicalGuide = ({
   colorMode: frequencyColorMode,
   onColorModeChange: setFrequencyColorMode,
   containCells,
+  layout = 'classic',
+  back = null,
 }: TechnicalGuideProps) => (
     <>
     {/* Intro Banner */}
     <div className="p-8 pb-4">
-        <div className="bg-gradient-to-r from-slate-900 to-slate-900/50 border-l-4 border-gold-500 p-6 rounded-r-lg">
+        <div data-evidence="tradition" className="bg-gradient-to-r from-slate-900 to-slate-900/50 border-l-4 border-gold-500 p-6 rounded-r-lg">
           <p className="text-lg text-slate-200 leading-relaxed font-serif italic">
               "{UNIFIED_THEORY.intro}"
           </p>
+          <TagRow><EvidenceTag tier="tradition" /></TagRow>
         </div>
     </div>
 
@@ -54,10 +84,19 @@ const TechnicalGuide = ({
             below (regimes, nadi compression, Tree of Life, sacred geometry)
             is one face of what this single object encodes. */}
         <div>
-          <div className="mb-4 p-5 bg-gradient-to-r from-emerald-900/15 via-slate-900/40 to-slate-900/40 border-l-4 border-emerald-500/60 rounded-r-lg">
-            <p className="text-base text-slate-200 leading-relaxed font-serif">
-              Before the words, the geometry. The 27 Aetheria frequencies are not a list — they are a <strong className="text-emerald-300">3 × 3 × 3 cube</strong> of three Lo Shu magic squares stacked vertically (GUT → HEART → HEAD). Every section that follows is one way of reading this single object: the regimes are its layers, the nadi compression is its count, the Tree of Life is its axis, and the sacred geometries are its faces. Start here and the rest will rhyme.
-            </p>
+          <div className="mb-4 p-5 bg-gradient-to-r from-emerald-900/15 via-slate-900/40 to-slate-900/40 border-l-4 border-emerald-500/60 rounded-r-lg space-y-3">
+            <div data-evidence="arithmetic">
+              <p className="text-base text-slate-200 leading-relaxed font-serif">
+                Before the words, the geometry. The 27 Aetheria frequencies are not a list — they are a <strong className="text-emerald-300">3 × 3 × 3 cube</strong> of three Lo Shu magic squares stacked vertically (GUT → HEART → HEAD).
+              </p>
+              <TagRow><EvidenceTag tier="arithmetic" /></TagRow>
+            </div>
+            <div data-evidence="design">
+              <p className="text-base text-slate-200 leading-relaxed font-serif">
+                Every section that follows is one way of reading this single object: the regimes are its layers, the nadi compression is its count, the Tree of Life is its axis, and the sacred geometries are its faces. Start here and the rest will rhyme.
+              </p>
+              <TagRow><EvidenceTag tier="design" /></TagRow>
+            </div>
           </div>
           <LoShuMatrix
             currentFrequency={selectedSolfeggio}
@@ -69,6 +108,7 @@ const TechnicalGuide = ({
             colorMode={frequencyColorMode}
             onColorModeChange={setFrequencyColorMode}
             containCells={containCells}
+            layout={layout}
           />
         </div>
 
@@ -141,11 +181,12 @@ const TechnicalGuide = ({
             </div>
 
             {/* THE METAPHYSICAL MEANING */}
-            <div className="mb-8 p-6 bg-slate-950/50 border border-slate-700 rounded-xl">
+            <div data-evidence="tradition" className="mb-8 p-6 bg-slate-950/50 border border-slate-700 rounded-xl">
               <h4 className="text-xl font-bold text-gold-400 mb-4 flex items-center gap-2 uppercase tracking-wider">
                 <Sparkles className="text-gold-500" size={24} />
                 ═══ THE METAPHYSICAL MEANING ═══
               </h4>
+              <div className="-mt-2 mb-4 flex flex-wrap items-center gap-x-2 gap-y-3"><EvidenceTag tier="tradition" /></div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 <div className="bg-emerald-900/20 border border-emerald-500/30 rounded-lg p-4">
@@ -167,7 +208,7 @@ const TechnicalGuide = ({
               </div>
 
               <div className="text-center p-4 bg-gradient-to-r from-blue-900/30 to-purple-900/30 border border-blue-500/30 rounded-lg">
-                <div className="text-blue-400 font-bold mb-2">This is literally describing EVOLUTION:</div>
+                <div className="text-blue-400 font-bold mb-2">We read this as a picture of growth:</div>
                 <div className="text-sm text-slate-300 space-y-1">
                   <div><span className="text-emerald-400 font-bold">Seed (static, all 3s)</span> → stores potential</div>
                   <div><span className="text-gold-400 font-bold">Transition (963 Hz)</span> → awakening point</div>
@@ -177,11 +218,12 @@ const TechnicalGuide = ({
             </div>
 
             {/* MATHEMATICAL NOTES */}
-            <div className="p-6 bg-slate-950/50 border border-slate-700 rounded-xl">
+            <div data-evidence="arithmetic" className="p-6 bg-slate-950/50 border border-slate-700 rounded-xl">
               <h4 className="text-xl font-bold text-cyan-400 mb-4 flex items-center gap-2 uppercase tracking-wider">
                 <Calculator className="text-cyan-500" size={24} />
                 ═══ MATHEMATICAL NOTES ═══
               </h4>
+              <div className="-mt-2 mb-4 flex flex-wrap items-center gap-x-2 gap-y-3"><EvidenceTag tier="arithmetic" /></div>
               
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* NADI DISTRIBUTION */}
@@ -192,7 +234,7 @@ const TechnicalGuide = ({
                     <div className="text-cyan-300">(infinite repeating)</div>
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    The .666... represents 'infinite flow' or 'source connection'<br/>
+                    In the framework, the .666… stands for 'infinite flow' or 'source connection'<br/>
                     We do <strong className="text-red-400">NOT</strong> round to 2,667 — we honor the infinite nature.
                   </p>
                 </div>
@@ -229,20 +271,22 @@ const TechnicalGuide = ({
               </div>
             </div>
 
-            <div className="mt-6 text-xs text-slate-500 italic text-center border-t border-slate-800 pt-4">
-              "If you only knew the magnificence of 3, 6, and 9, you would have the key to the universe." — Nikola Tesla
+            <div data-evidence="tradition" className="mt-6 text-xs text-slate-500 italic text-center border-t border-slate-800 pt-4">
+              "If you only knew the magnificence of 3, 6, and 9, you would have the key to the universe." — often attributed to Nikola Tesla
+              <div className="mt-2 flex justify-center not-italic"><EvidenceTag tier="tradition" /></div>
             </div>
         </section>
 
         {/* The 108 and the 27: A Nadi Compression */}
-        <section className="bg-gradient-to-r from-slate-900/50 to-slate-800/30 border border-cyan-500/30 rounded-2xl p-8">
-            <div className="flex items-center gap-3 mb-6">
+        <section data-evidence="tradition" className="bg-gradient-to-r from-slate-900/50 to-slate-800/30 border border-cyan-500/30 rounded-2xl p-8">
+            <div className="flex items-center gap-3 mb-6 flex-wrap">
               <div className="p-3 bg-cyan-500/20 rounded-full border border-cyan-500/30">
                 <Waves className="text-cyan-400" size={28}/>
               </div>
               <div>
                 <h3 className="text-3xl font-bold text-cyan-400 font-serif">The 108 and the 27: A Nadi Compression</h3>
               </div>
+              <EvidenceTag tier="tradition" />
             </div>
 
             <div className="space-y-6">
@@ -295,119 +339,119 @@ const TechnicalGuide = ({
             </div>
         </section>
 
-        {/* Section 0: The Physics (432Hz) */}
+        {/* Section 0: the arithmetic of 432 Hz (v16.6: RETUNE_LONG in place of UNIFIED_THEORY.section1, whose table entry
+            is untouched): the arithmetic and the studies, each with its tag, then the history, untagged (it claims nothing). */}
         <section>
             <div className="flex items-center gap-3 mb-6">
               <div className="p-2 bg-gold-500/10 rounded-full"><Waves className="text-gold-500" size={24}/></div>
-              <h3 className="text-2xl font-bold text-white">{UNIFIED_THEORY.section1.title}</h3>
+              <h3 className="text-2xl font-bold text-white">{RETUNE_TITLE}</h3>
             </div>
-            <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">
-                {UNIFIED_THEORY.section1.content}
-            </p>
+            <div className="space-y-5 max-w-2xl mb-6">
+              {RETUNE_LONG.map((p) => (
+                <div key={p.tag} data-evidence={p.tag}>
+                  <p className="text-slate-400 leading-relaxed">{p.text}</p>
+                  <TagRow><EvidenceTag tier={p.tag} /></TagRow>
+                </div>
+              ))}
+              <p className="text-slate-400 leading-relaxed">{RETUNE_HISTORY}</p>
+            </div>
         </section>
 
         {/* Section 1: The 3 Regimes of Consciousness */}
         <section>
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-2 bg-blue-500/10 rounded-full"><User className="text-blue-400" size={24}/></div>
-              <h3 className="text-2xl font-bold text-white">The 3 Regimes of Consciousness: Complete Harmonic System</h3>
+            <div data-evidence="design" className="mb-6">
+              <div className="flex items-center gap-3 mb-6 flex-wrap">
+                <div className="p-2 bg-blue-500/10 rounded-full"><User className="text-blue-400" size={24}/></div>
+                <h3 className="text-2xl font-bold text-white">{REGIMES_TITLE}</h3>
+                <EvidenceTag tier="design" />
+              </div>
+              <p className="text-slate-400 leading-relaxed max-w-2xl">
+                {REGIMES_LEAD_START} <strong className="text-emerald-300">Lo Shu cube</strong> at the top of this guide — GUT is the bottom layer, HEART the middle, HEAD the crown. The 111 / 243 / 354 intervals are the magic constants that make each layer a self-summing square.
+              </p>
             </div>
-            <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">
-              The Complete Harmonic Frequency System encompasses 3 distinct regimes of consciousness following the sacred 111-243-354 mathematical pattern. Orders 4-9 expand from the traditional Solfeggio foundation through precise mathematical intervals, creating 27 frequencies that span from physical foundation to SOURCE consciousness. Each regime below is a single horizontal slice of the <strong className="text-emerald-300">Lo Shu cube</strong> at the top of this guide — GUT is the bottom layer, HEART the middle, HEAD the crown. The 111 / 243 / 354 intervals are the magic constants that make each layer a self-summing square.
-            </p>
 
             {/* Group by Regime */}
             <div className="space-y-8">
               {/* GUT REGIME - Physical Body */}
-              <div className="border border-red-500/30 rounded-2xl overflow-hidden bg-red-500/5">
-                <div className="bg-red-500/10 p-4 border-b border-red-500/30">
-                  <h4 className="text-xl font-bold text-red-400 flex items-center gap-2">
-                    <Heart className="text-red-500" size={20} />
-                    GUT REGIME — Physical Foundation
-                  </h4>
-                  <p className="text-sm text-red-300 mt-1">Body Systems: Digestive, nervous, skeletal, reproductive | Focus: Grounding, healing, security</p>
+              <div data-evidence="tradition" className="border border-red-500/30 rounded-2xl overflow-hidden bg-red-500/5">
+                <div className="bg-red-500/10 p-4 border-b border-red-500/30 flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <h4 className="text-xl font-bold text-red-400 flex items-center gap-2">
+                      <Heart className="text-red-500" size={20} />
+                      GUT REGIME — Physical Foundation
+                    </h4>
+                    <p className="text-sm text-red-300 mt-1">{REGIME_COPY[0].line}</p>
+                  </div>
+                  <EvidenceTag tier="tradition" />
                 </div>
                 <div className="p-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {[
-                      { freq: 174, benefit: 'Foundation, pain relief', color: '#8B0000' },
-                      { freq: 285, benefit: 'Tissue repair, quantum cognition', color: '#FF0000' },
-                      { freq: 396, benefit: 'Liberating fear and guilt', color: '#FF4500' },
-                      { freq: 417, benefit: 'Facilitating change, undoing situations', color: '#FF8C00' },
-                      { freq: 528, benefit: 'Transformation, miracles, DNA repair', color: '#FFD700' },
-                      { freq: 639, benefit: 'Connecting relationships, harmony', color: '#008000' },
-                      { freq: 741, benefit: 'Awakening intuition, problem solving', color: '#00BFFF' },
-                      { freq: 852, benefit: 'Returning to spiritual order', color: '#4B0082' },
-                      { freq: 963, benefit: 'Divine consciousness, pineal activation', color: '#EE82EE' }
+                      { freq: 174, color: '#8B0000' },
+                      { freq: 285, color: '#FF0000' },
+                      { freq: 396, color: '#FF4500' },
+                      { freq: 417, color: '#FF8C00' },
+                      { freq: 528, color: '#FFD700' },
+                      { freq: 639, color: '#008000' },
+                      { freq: 741, color: '#00BFFF' },
+                      { freq: 852, color: '#4B0082' },
+                      { freq: 963, color: '#EE82EE' }
                     ].map(f => (
                       <div key={f.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-red-500/50 transition-colors group">
                           <div className="flex justify-between items-center mb-2">
                               <span className="text-xl font-bold font-mono" style={{color: f.color}}>{f.freq} Hz</span>
                               <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-red-500/20 px-2 py-1 rounded">GUT</span>
                           </div>
-                          <h5 className="text-white font-medium mb-1">{f.benefit}</h5>
-                          <p className="text-xs text-slate-400 mb-3 leading-relaxed">
-                            {f.freq === 174 && "Foundation frequency that acts as natural anesthetic and provides security to organs."}
-                            {f.freq === 285 && "Powerful tissue repair frequency with quantum cognition enhancement effects."}
-                            {f.freq === 396 && "Cleanses guilt and fear, enabling direct achievement of goals without obstacles."}
-                            {f.freq === 417 && "Facilitates major life changes and undoes negative situations and patterns."}
-                            {f.freq === 528 && "The miracle tone - repairs DNA and brings transformation into your life."}
-                            {f.freq === 639 && "Connects and harmonizes relationships with self, others, and community."}
-                            {f.freq === 741 && "Awakens intuition and helps solve problems through inner guidance."}
-                            {f.freq === 852 && "Returns consciousness to spiritual order and awakens inner strength."}
-                            {f.freq === 963 && "Activates pineal gland and connects to divine consciousness and unity."}
-                          </p>
+                          <h5 className="text-white font-medium mb-1">{nameOf(f.freq)}</h5>
+                          <p className="text-xs text-slate-400 mb-3 leading-relaxed">{meaningOf(f.freq)}</p>
                       </div>
                     ))}
                   </div>
                   <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-500/50 rounded-lg">
                     <div className="flex items-center gap-2 text-yellow-400 text-sm font-bold mb-1">
-                      <AlertTriangle size={16} />
-                      TRANSITION: 963 Hz → 1206 Hz (GUT → HEART Regime Activation)
+                      <ArrowRight size={16} aria-hidden="true" />
+                      {TRANSITION_COPY[0].heading}
                     </div>
-                    <p className="text-xs text-yellow-300">Consciousness elevation threshold - prepare for emotional and energetic expansion</p>
+                    <p className="text-xs text-yellow-300">{TRANSITION_COPY[0].line}</p>
                   </div>
                 </div>
               </div>
 
               {/* HEART REGIME - Emotional Body */}
-              <div className="border border-green-500/30 rounded-2xl overflow-hidden bg-green-500/5">
-                <div className="bg-green-500/10 p-4 border-b border-green-500/30">
-                  <h4 className="text-xl font-bold text-green-400 flex items-center gap-2">
-                    <Heart className="text-green-500" size={20} />
-                    HEART REGIME — Emotional & Energetic Body
-                  </h4>
-                  <p className="text-sm text-green-300 mt-1">Body Systems: Cardiovascular, respiratory, immune | Focus: Love, compassion, connection, harmony</p>
+              <div data-evidence="tradition" className="border border-green-500/30 rounded-2xl overflow-hidden bg-green-500/5">
+                <div className="bg-green-500/10 p-4 border-b border-green-500/30 flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <h4 className="text-xl font-bold text-green-400 flex items-center gap-2">
+                      <Heart className="text-green-500" size={20} />
+                      HEART REGIME — Emotional & Energetic Body
+                    </h4>
+                    <p className="text-sm text-green-300 mt-1">{REGIME_COPY[1].line}</p>
+                  </div>
+                  <EvidenceTag tier="tradition" />
                 </div>
                 <div className="p-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {[
-                      { freq: 1206, benefit: 'Gateway integration', color: '#FF69B4', order: '4th', step: '+243' },
-                      { freq: 1449, benefit: 'Harmonic bridging', color: '#FF1493', order: '4th', step: '+243' },
-                      { freq: 1692, benefit: 'Heart completion', color: '#DC143C', order: '4th', step: '+243' },
-                      { freq: 1935, benefit: 'Stellar alignment', color: '#8A2BE2', order: '5th', step: '+243' },
-                      { freq: 2178, benefit: 'SOURCE — Compassion Activation', color: '#9370DB', order: '5th', step: '+243' },
-                      { freq: 2421, benefit: 'Dimensional awareness', color: '#4B0082', order: '5th', step: '+243' },
-                      { freq: 2664, benefit: 'Universal love', color: '#6A5ACD', order: '6th', step: '+243' },
-                      { freq: 2907, benefit: 'Divine source connection', color: '#483D8B', order: '6th', step: '+243' },
-                      { freq: 3150, benefit: 'Unity consciousness bridge', color: '#2E1B8B', order: '6th', step: '+243' }
+                      { freq: 1206, color: '#FF69B4', order: '4th', step: '+243', n: 4 },
+                      { freq: 1449, color: '#FF1493', order: '4th', step: '+243', n: 4 },
+                      { freq: 1692, color: '#DC143C', order: '4th', step: '+243', n: 4 },
+                      { freq: 1935, color: '#8A2BE2', order: '5th', step: '+243', n: 5 },
+                      { freq: 2178, color: '#9370DB', order: '5th', step: '+243', n: 5 },
+                      { freq: 2421, color: '#4B0082', order: '5th', step: '+243', n: 5 },
+                      { freq: 2664, color: '#6A5ACD', order: '6th', step: '+243', n: 6 },
+                      { freq: 2907, color: '#483D8B', order: '6th', step: '+243', n: 6 },
+                      { freq: 3150, color: '#2E1B8B', order: '6th', step: '+243', n: 6 }
                     ].map(f => (
                       <div key={f.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-green-500/50 transition-colors group">
                           <div className="flex justify-between items-center mb-2">
                               <span className="text-xl font-bold font-mono" style={{color: f.color}}>{f.freq} Hz</span>
                               <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-green-500/20 px-2 py-1 rounded">{f.order} {f.step}</span>
                           </div>
-                          <h5 className="text-white font-medium mb-1">{f.benefit}</h5>
+                          <h5 className="text-white font-medium mb-1">{nameOf(f.freq)}</h5>
+                          <p className="text-xs font-mono text-slate-500 mb-1">{orderLine(f.n, f.freq - 243, 243)}</p>
                           <p className="text-xs text-slate-400 mb-3 leading-relaxed">
-                            {f.freq === 1206 && "Fourth Order +243 (963+243) - Opens gateway between physical and emotional realms."}
-                            {f.freq === 1449 && "Fourth Order +243 (1206+243) - Creates harmonic bridges between emotional states."}
-                            {f.freq === 1692 && "Fourth Order +243 (1449+243) - Completes the fourth order heart integration cycle."}
-                            {f.freq === 1935 && "Fifth Order +243 (1692+243) - Aligns consciousness with stellar and galactic energies."}
-                            {f.freq === 2178 && "Fifth Order +243 (1935+243) — Position 5 of the HEART layer and the geometric centre of the entire Lo Shu cube. The point where every row, column, diagonal, and the central vertical axis (528 → 2178 → 4920) intersects. Compassion as the SOURCE field from which the 27 frequencies radiate outward."}
-                            {f.freq === 2421 && "Fifth Order +243 (2178+243) - Opens awareness to multiple dimensions simultaneously."}
-                            {f.freq === 2664 && "Sixth Order +243 (2421+243) - Transmits universal love energy across dimensions."}
-                            {f.freq === 2907 && "Sixth Order +243 (2664+243) - Connects to divine source code of creation."}
-                            {f.freq === 3150 && "Sixth Order +243 (2907+243) - Bridges into unity consciousness and mental clarity."}
+                            {meaningOf(f.freq)}
+                            {f.freq === 2178 && " Position 5 of the HEART layer: the centre, where the middle row, the middle column, both diagonals and the central vertical axis (528 → 2178 → 4920) meet."}
                           </p>
                           {f.freq === 2178 && (
                             <div className="mt-2 p-2 bg-gold-500/20 border border-gold-500/50 rounded text-center">
@@ -422,66 +466,64 @@ const TechnicalGuide = ({
                       <Target size={20} />
                       2178 Hz — SOURCE: The Centre of the Cube
                     </div>
-                    <p className="text-sm text-gold-300">Compassion Activation. Position 5 of the HEART layer — the cell that simultaneously sits on every row, every column, both diagonals, and the central vertical pillar (528 → 2178 → 4920). All 27 frequencies radiate outward from this point. SOURCE is not the highest, it is the centre.</p>
+                    <p className="text-sm text-gold-300">Compassion Activation. Position 5 of the HEART layer — the centre cell, on the middle row, the middle column, both diagonals and the central vertical pillar (528 → 2178 → 4920). All 27 frequencies radiate outward from this point. SOURCE is not the highest, it is the centre.</p>
                   </div>
-                  <div className="mt-4 p-3 bg-blue-900/20 border border-blue-500/50 rounded-lg">
-                    <div className="flex items-center gap-2 text-blue-400 text-sm font-bold mb-1">
+                  <div data-evidence="arithmetic" className="mt-4 p-3 bg-blue-900/20 border border-blue-500/50 rounded-lg">
+                    <div className="flex items-center gap-2 text-blue-400 text-sm font-bold mb-1 flex-wrap">
                       <Calculator size={16} />
                       MATHEMATICAL PATTERN: Orders 4-6 follow 243 steady progression
+                      <EvidenceTag tier="arithmetic" />
                     </div>
                     <p className="text-xs text-blue-300">Order 4: 1206→1449→1692 | Order 5: 1935→2178→2421 | Order 6: 2664→2907→3150</p>
                   </div>
                   <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-500/50 rounded-lg">
                     <div className="flex items-center gap-2 text-yellow-400 text-sm font-bold mb-1">
-                      <AlertTriangle size={16} />
-                      TRANSITION: 3150 Hz → 3504 Hz (HEART → HEAD Regime Activation)
+                      <ArrowRight size={16} aria-hidden="true" />
+                      {TRANSITION_COPY[1].heading}
                     </div>
-                    <p className="text-xs text-yellow-300">Mental body activation threshold - prepare for cognitive and consciousness expansion</p>
+                    <p className="text-xs text-yellow-300">{TRANSITION_COPY[1].line}</p>
                   </div>
                 </div>
               </div>
 
               {/* HEAD REGIME - Mental & Spiritual Body */}
-              <div className="border border-purple-500/30 rounded-2xl overflow-hidden bg-purple-500/5">
-                <div className="bg-purple-500/10 p-4 border-b border-purple-500/30">
-                  <h4 className="text-xl font-bold text-purple-400 flex items-center gap-2">
-                    <Eye className="text-purple-500" size={20} />
-                    HEAD REGIME — Mental & Spiritual Body
-                  </h4>
-                  <p className="text-sm text-purple-300 mt-1">Body Systems: Neurological, endocrine, consciousness centers | Focus: Clarity, wisdom, transcendence</p>
+              <div data-evidence="tradition" className="border border-purple-500/30 rounded-2xl overflow-hidden bg-purple-500/5">
+                <div className="bg-purple-500/10 p-4 border-b border-purple-500/30 flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <h4 className="text-xl font-bold text-purple-400 flex items-center gap-2">
+                      <Eye className="text-purple-500" size={20} />
+                      HEAD REGIME — Mental & Spiritual Body
+                    </h4>
+                    <p className="text-sm text-purple-300 mt-1">{REGIME_COPY[2].line}</p>
+                  </div>
+                  <EvidenceTag tier="tradition" />
                 </div>
                 <div className="p-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {[
-                      { freq: 3504, benefit: 'Mental clarity', color: '#1E0066', order: '7th', step: '+354' },
-                      { freq: 3858, benefit: 'Sacred geometry', color: '#0D0040', order: '7th', step: '+354' },
-                      { freq: 4212, benefit: 'Consciousness mastery', color: '#000033', order: '7th', step: '+354' },
-                      { freq: 4566, benefit: 'Soul star connection', color: '#330066', order: '8th', step: '+354' },
-                      { freq: 4920, benefit: 'Spirit realm access', color: '#4B0082', order: '8th', step: '+354' },
-                      { freq: 5274, benefit: 'Universal mind access', color: '#6600CC', order: '8th', step: '+354' },
-                      { freq: 5628, benefit: 'Galactic consciousness', color: '#7700FF', order: '9th', step: '+354' },
-                      { freq: 5982, benefit: 'Divine source portal', color: '#8800FF', order: '9th', step: '+354' },
-                      { freq: 6336, benefit: 'Completion of the ascent', color: '#9933FF', order: '9th', step: '+354' }
+                      { freq: 3504, color: '#1E0066', order: '7th', step: '+354', n: 7 },
+                      { freq: 3858, color: '#0D0040', order: '7th', step: '+354', n: 7 },
+                      { freq: 4212, color: '#000033', order: '7th', step: '+354', n: 7 },
+                      { freq: 4566, color: '#330066', order: '8th', step: '+354', n: 8 },
+                      { freq: 4920, color: '#4B0082', order: '8th', step: '+354', n: 8 },
+                      { freq: 5274, color: '#6600CC', order: '8th', step: '+354', n: 8 },
+                      { freq: 5628, color: '#7700FF', order: '9th', step: '+354', n: 9 },
+                      { freq: 5982, color: '#8800FF', order: '9th', step: '+354', n: 9 },
+                      { freq: 6336, color: '#9933FF', order: '9th', step: '+354', n: 9 }
                     ].map(f => (
                       <div key={f.freq} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 hover:border-purple-500/50 transition-colors group relative">
                           <div className="absolute top-2 right-2">
-                            <AlertTriangle size={12} className="text-red-400" title="Expert Level Required" />
+                            <ChevronsUp size={12} className="text-slate-500" title={HEAD_MARK_TITLE} />
                           </div>
                           <div className="flex justify-between items-center mb-2 pr-6">
                               <span className="text-xl font-bold font-mono" style={{color: f.color}}>{f.freq} Hz</span>
                               <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-purple-500/20 px-2 py-1 rounded">{f.order} {f.step}</span>
                           </div>
-                          <h5 className="text-white font-medium mb-1">{f.benefit}</h5>
+                          <h5 className="text-white font-medium mb-1">{nameOf(f.freq)}</h5>
+                          <p className="text-xs font-mono text-slate-500 mb-1">{orderLine(f.n, f.freq - 354, 354)}</p>
                           <p className="text-xs text-slate-400 mb-3 leading-relaxed">
-                            {f.freq === 3504 && "Seventh Order +354 (3150+354) - Clears mental fog and brings crystalline clarity."}
-                            {f.freq === 3858 && "Seventh Order +354 (3504+354) - Embodies divine architectural principles of creation."}
-                            {f.freq === 4212 && "Seventh Order +354 (3858+354) - Achieves mastery of consciousness and awareness."}
-                            {f.freq === 4566 && "Eighth Order +354 (4212+354) - Opens first transpersonal gate, soul star connection."}
-                            {f.freq === 4920 && "Eighth Order +354 (4566+354) - Opens second transpersonal gate to spirit realm."}
-                            {f.freq === 5274 && "Eighth Order +354 (4920+354) - Opens third transpersonal gate to universal mind."}
-                            {f.freq === 5628 && "Ninth Order +354 (5274+354) - Connects to galactic center consciousness."}
-                            {f.freq === 5982 && "Ninth Order +354 (5628+354) - Creates direct portal to divine source consciousness."}
-                            {f.freq === 6336 && "Ninth Order +354 (5982+354) — completion of the ascent and the outermost vertex of the cube. Mirror number reducing to 9. The path that began at 174 Hz returns home through this corner; SOURCE itself sits one layer down at 2178 Hz, the cube's centre."}
+                            {meaningOf(f.freq)}
+                            {f.freq === 6336 && " The outermost vertex of the cube; a mirror number reducing to 9. The path that began at 174 Hz returns home through this corner; SOURCE itself sits one layer down at 2178 Hz, the cube's centre."}
                           </p>
                           {f.freq === 6336 && (
                             <div className="mt-2 p-2 bg-violet-500/20 border border-violet-500/50 rounded text-center">
@@ -491,10 +533,11 @@ const TechnicalGuide = ({
                       </div>
                     ))}
                   </div>
-                  <div className="mt-4 p-3 bg-blue-900/20 border border-blue-500/50 rounded-lg">
-                    <div className="flex items-center gap-2 text-blue-400 text-sm font-bold mb-1">
+                  <div data-evidence="arithmetic" className="mt-4 p-3 bg-blue-900/20 border border-blue-500/50 rounded-lg">
+                    <div className="flex items-center gap-2 text-blue-400 text-sm font-bold mb-1 flex-wrap">
                       <Calculator size={16} />
                       MATHEMATICAL PATTERN: Orders 7-9 follow 354 steady progression
+                      <EvidenceTag tier="arithmetic" />
                     </div>
                     <p className="text-xs text-blue-300">Order 7: 3504→3858→4212 | Order 8: 4566→4920→5274 | Order 9: 5628→5982→6336</p>
                   </div>
@@ -510,14 +553,15 @@ const TechnicalGuide = ({
             </div>
         </section>
 
-        {/* Section 2: The Map (Tree of Life) */}
-        <section>
-            <div className="flex items-center gap-3 mb-6">
+        {/* Section 2: The Map (Tree of Life). v16.6: the section is a Tradition block (SEPHIROT_INFO untouched). */}
+        <section data-evidence="tradition">
+            <div className="flex items-center gap-3 mb-6 flex-wrap">
               <div className="p-2 bg-purple-500/10 rounded-full"><MapIcon className="text-purple-400" size={24}/></div>
               <h3 className="text-2xl font-bold text-white">The Map: Tree of Life (Complete 12-Node System)</h3>
+              <EvidenceTag tier="tradition" />
             </div>
             <p className="text-slate-400 mb-4 leading-relaxed max-w-2xl">
-              The complete blueprint of creation. A map of how the Divine manifests through the physical world via twelve distinct nodes,
+              In the Kabbalistic tradition, a map of creation. Aetheria's version uses twelve nodes (adding Ain Soph and Daat): a map of how the Divine manifests through the physical world,
               forming a complete energy circuit to SOURCE. The Tree's central pillar is the same axis that runs through the centre of the <strong className="text-emerald-300">Lo Shu cube</strong> — Position 5 of every layer (528 → 2178 → 4920) — connecting Earth-Star to Crown along a single vertical thread.
             </p>
 
@@ -587,7 +631,7 @@ const TechnicalGuide = ({
 
             {/* Circuit Visualization Note */}
             <div className="mt-6 p-4 bg-slate-950/50 border border-slate-700 rounded-xl text-center">
-              <div className="text-purple-400 font-bold mb-2">🌳 Enable "Tree of Life" in Visualization Engine</div>
+              <div className="text-purple-400 font-bold mb-2">{place('tree', layout)}</div>
               <div className="text-sm text-slate-300">
                 Watch the complete 12-node energy circuit flow in real-time, with supercharged energy streams 
                 connecting all levels of consciousness to the infinite SOURCE.
@@ -595,14 +639,15 @@ const TechnicalGuide = ({
             </div>
         </section>
 
-        {/* Section 3: The Form (Geometry) */}
-        <section>
-            <div className="flex items-center gap-3 mb-6">
+        {/* Section 3: The Form (Geometry). v16.6: a Tradition block (GEOMETRY_INFO untouched). */}
+        <section data-evidence="tradition">
+            <div className="flex items-center gap-3 mb-6 flex-wrap">
               <div className="p-2 bg-red-500/10 rounded-full"><Box className="text-red-400" size={24}/></div>
               <h3 className="text-2xl font-bold text-white">The Form: Sacred Geometry</h3>
+              <EvidenceTag tier="tradition" />
             </div>
             <p className="text-slate-400 mb-6 leading-relaxed max-w-2xl">
-              Each frequency has a corresponding geometric form. Read together they spell out the faces of the <strong className="text-emerald-300">Lo Shu cube</strong> — the lower geometries (Circle, Vesica, Triangle) anchor the GUT layer, the middle forms (Flower of Life, Tube Torus) bridge HEART, and the higher geometries open HEAD.
+              Each crystal is paired with a geometric form: Aetheria's pairings, drawing on sacred-geometry traditions. Read together they spell out the faces of the <strong className="text-emerald-300">Lo Shu cube</strong> — the lower geometries (Circle, Vesica, Triangle) anchor the GUT layer, the middle forms (Flower of Life, Tube Torus) bridge HEART, and the higher geometries open HEAD.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -618,6 +663,8 @@ const TechnicalGuide = ({
                 ))}
             </div>
         </section>
+
+        <HowSure view="technical" layout={layout} back={back} />
 
         <div className="p-8 mt-4 bg-gradient-to-br from-slate-900 to-black border border-gold-500/20 rounded-2xl text-center relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent opacity-50"></div>

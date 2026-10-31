@@ -63,7 +63,7 @@ import {
   backLabel,
   backTarget,
   isMoreView,
-  onMoreRootRequest,
+  onMoreRootRequest, onMoreViewRequest,
   openerOf,
 } from './moreModel';
 import type { MoreView } from './moreModel';
@@ -264,6 +264,9 @@ const MoreTab = ({ inPanel = false }: MoreTabProps) => {
 
   // A tap on the active More tab: the root.
   useEffect(() => onMoreRootRequest(() => go('root')), []);
+  // v16.6: a page asked for from outside while this tab is mounted (an evidence tag on Advanced opens the Guide; the
+  // Guide's "Back to Advanced" returns): go there, as a row's tap would.
+  useEffect(() => onMoreViewRequest((v) => go(v)), []);
 
   // The page's scroll: where it was left on mount; a page from its top; the root where it was.
   useLayoutEffect(() => {

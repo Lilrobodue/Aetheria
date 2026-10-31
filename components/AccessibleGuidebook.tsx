@@ -1,11 +1,62 @@
-import React from 'react';
-import { Heart, Music, Sparkles, Box, Headphones, Compass, Flag, AlertTriangle, BookOpen, Mountain, Columns3, Wind, Activity } from 'lucide-react';
+// components/AccessibleGuidebook.tsx: the Guide's Plain language view (classic's Guidebook and, from v16.5, the new
+// layout's More › Guide render this one component).
+//
+// v16.6 ("How sure are we?", the copy pass; the v16.6 spec §3.4): the authors' structure, sources and voice are kept;
+// only the sentences that went past the evidence are rewritten (decision 5 A: the opening section is "What research says
+// about music", its four over-reaching sentences rewritten), and each claim carries its evidence tag inside a
+// data-evidence block (Well studied, Open question, Design choice, Arithmetic, Early evidence, Tradition, Mixed
+// evidence). The places it names follow its host's `layout` (utils/copy/places). It ends with the How sure are we?
+// section; `back` is the new layout's "Back to …" chip there.
 
-const AccessibleGuidebook: React.FC = () => {
-  // Shared style for outbound reference links in the "Music Is Medicine" section.
+import React from 'react';
+import { Heart, Music, Sparkles, Box, Headphones, Compass, Flag, AlertTriangle, BookOpen, Mountain, Columns3, Wind, Activity, ChevronRight } from 'lucide-react';
+import EvidenceTag from './ui/EvidenceTag';
+import { useEvidenceLink } from './guide/evidenceLink';
+import { HOW_SURE_JUMP } from '../utils/copy/evidence';
+import HowSure from './guide/HowSure';
+import type { HowSureBack } from './guide/HowSure';
+import { place } from '../utils/copy/places';
+import type { Layout } from '../utils/copy/places';
+
+/** A tag on its own row (the density rule: never inside a sentence). */
+const TagRow = ({ children, className = 'mt-2' }: { children: React.ReactNode; className?: string }) => (
+  <div className={`${className} flex flex-wrap items-center gap-x-2 gap-y-3`}>{children}</div>
+);
+
+/** I5's "How sure are we? ›": the section, through the Guide's own link (a scroll in place in both layouts). */
+const HowSureLink = () => {
+  const open = useEvidenceLink();
+  if (!open) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => open('section', null)}
+      data-testid="guide-i5-how-sure"
+      className="mt-1 min-h-touch inline-flex items-center gap-1 text-sm text-sky-300 underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+    >
+      {HOW_SURE_JUMP}
+      <ChevronRight size={16} aria-hidden="true" />
+    </button>
+  );
+};
+
+/** "Click "Deep Scan" — wait …": the part before the dash is bold, as the list always set it. */
+const Place = ({ text }: { text: string }) => {
+  const at = text.indexOf(' — ');
+  if (at < 0) return <strong className="text-gold-200">{text}</strong>;
+  return (
+    <>
+      <strong className="text-gold-200">{text.slice(0, at)}</strong>
+      {text.slice(at)}
+    </>
+  );
+};
+
+const AccessibleGuidebook = ({ layout = 'classic', back = null }: { layout?: Layout; back?: HowSureBack | null }) => {
+  // Shared style for outbound reference links in the "What research says about music" section.
   const linkCls = "text-sky-400 hover:text-sky-300 underline decoration-sky-500/40 hover:decoration-sky-300 transition-colors";
   return (
-    <div className="px-8 pb-12 space-y-10">
+    <div className="px-8 pb-12 space-y-10" data-guide-root="plain">
       {/* Title block */}
       <div className="text-center pt-2">
         <h1 className="text-3xl md:text-4xl font-serif text-gold-300 tracking-wide">The Aetheria Guidebook</h1>
@@ -27,17 +78,17 @@ const AccessibleGuidebook: React.FC = () => {
         </p>
       </section>
 
-      {/* Music Is Medicine — bridge grounding readers in established research */}
-      <section>
-        <div className="flex items-center gap-2 mb-4">
+      {/* What research says about music — grounding readers in established research (v16.6: decision 5 A) */}
+      <section data-evidence="tier1">
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
           <Activity size={20} className="text-sky-400" />
-          <h2 className="text-2xl font-serif text-sky-300">Music Is Medicine. The Science Already Knows This.</h2>
+          <h2 className="text-2xl font-serif text-sky-300">What research says about music</h2>
+          <EvidenceTag tier="tier1" />
         </div>
         <p className="text-slate-300 leading-relaxed mb-4">
-          Before we discuss anything specific about the Aetheria approach to frequency, it's worth pausing to
-          recognize what mainstream medicine has already established about music itself. The healing effects of
-          music are not fringe ideas. They are documented, replicated, and accepted at some of the most respected
-          medical institutions in the world.
+          Before anything specific to Aetheria, it's worth knowing what research has found about music itself.
+          Music's effects on stress, anxiety, pain and mood are not fringe ideas: they are studied, replicated and
+          used in some of the most respected hospitals in the world.
         </p>
 
         <div className="p-5 bg-sky-900/15 border border-sky-500/30 rounded-lg mb-3">
@@ -87,7 +138,7 @@ const AccessibleGuidebook: React.FC = () => {
             <><strong className="text-slate-100">Reduce anxiety symptoms</strong> in clinical and non-clinical populations, with effects measurable through both subjective scales and physiological markers</>,
             <><strong className="text-slate-100">Ease depression</strong>, with most randomized controlled trials showing significant reduction in depressive symptoms after structured music therapy</>,
             <><strong className="text-slate-100">Decrease perceived pain</strong> in post-operative patients and people managing chronic conditions</>,
-            <><strong className="text-slate-100">Lower blood pressure and slow heart rate</strong>, with sustained effects observable beyond the listening session itself</>,
+            <><strong className="text-slate-100">Lower blood pressure and heart rate</strong> in many studies</>,
             <><strong className="text-slate-100">Engage the brain's reward system</strong>, releasing dopamine in patterns similar to other pleasurable and life-supporting activities</>,
             <><strong className="text-slate-100">Support recovery from neurological injury</strong> through rhythm-based therapies that help retrain motor function</>,
           ].map((content, i) => (
@@ -99,22 +150,25 @@ const AccessibleGuidebook: React.FC = () => {
         </ul>
 
         <p className="text-slate-300 leading-relaxed mb-3">
-          This is not alternative medicine. This is mainstream medicine acknowledging what the human body
-          already knows.
+          These findings are about music in general, often music the listener chose, and about music therapy led by
+          trained therapists. They are not findings about any particular frequency or tuning.
         </p>
-        <p className="text-slate-300 leading-relaxed mb-4">
-          The question Aetheria asks is not <em>whether</em> sound and frequency affect human health — that
-          question has been answered, by Harvard, by Johns Hopkins, and by hundreds of other institutions. The
-          question Aetheria asks is <em>how specifically</em>: which frequencies, in which combinations, organized
-          in which patterns, produce which effects, in which people? That question is more particular, and the
-          research is younger. But it begins from a foundation that is already solid.
-        </p>
+        <div data-evidence="open" className="mb-4 p-4 bg-slate-900/60 border-l-4 border-gold-500 rounded-r-lg">
+          <p className="text-slate-300 leading-relaxed">
+            Research has shown that music can help people relax and feel better. The question Aetheria explores is
+            narrower, and still open: whether particular frequencies, combinations and patterns add anything of their
+            own, and for whom. Very little research has tested that yet.
+          </p>
+          <TagRow>
+            <EvidenceTag tier="open" />
+          </TagRow>
+          <HowSureLink />
+        </div>
         <div className="p-4 bg-sky-900/10 border-l-4 border-sky-500/60 rounded-r-lg">
           <p className="text-sm text-slate-300 leading-relaxed">
-            If you find yourself wondering whether sound can really change how a body feels, you are not asking a
-            strange question. You are asking a question that respected medical institutions have already begun to
-            answer. Aetheria simply extends the inquiry into territory that mainstream research has not yet had
-            time to fully map.
+            If you wonder whether sound can change how your body feels, you are not asking a strange question: for
+            music, research has begun to answer it. Aetheria explores territory research hasn't mapped yet, and your
+            own experience is the best guide there.
           </p>
         </div>
 
@@ -161,31 +215,39 @@ const AccessibleGuidebook: React.FC = () => {
           love — and does three things:
         </p>
         <ol className="space-y-3 mb-4">
-          <li className="flex gap-3 p-4 bg-slate-900/50 border border-slate-800 rounded-lg">
+          <li data-evidence="arithmetic" className="flex gap-3 p-4 bg-slate-900/50 border border-slate-800 rounded-lg">
             <span className="flex-shrink-0 w-7 h-7 rounded-full bg-gold-600/20 text-gold-300 text-sm font-bold flex items-center justify-center">1</span>
-            <span className="text-slate-300 leading-relaxed">
-              <strong className="text-gold-200">Retunes it to 432 Hz</strong> — a natural tuning that many
-              listeners find warmer and more relaxing than the standard 440 Hz tuning used in most modern music
+            <span className="min-w-0 text-slate-300 leading-relaxed">
+              <strong className="text-gold-200">Retunes it to 432 Hz</strong> — every note about a third of a
+              semitone lower than the standard 440 Hz used in most modern music. Some listeners find it warmer; the
+              few small studies so far point both ways.
+              <TagRow>
+                <EvidenceTag tier="arithmetic" />
+                <EvidenceTag tier="tier3" />
+              </TagRow>
             </span>
           </li>
-          <li className="flex gap-3 p-4 bg-slate-900/50 border border-slate-800 rounded-lg">
+          <li data-evidence="design" className="flex gap-3 p-4 bg-slate-900/50 border border-slate-800 rounded-lg">
             <span className="flex-shrink-0 w-7 h-7 rounded-full bg-gold-600/20 text-gold-300 text-sm font-bold flex items-center justify-center">2</span>
-            <span className="text-slate-300 leading-relaxed">
-              <strong className="text-gold-200">Analyzes each song's frequency content</strong> and assigns
-              it to one of 27 specific frequencies
+            <span className="min-w-0 text-slate-300 leading-relaxed">
+              <strong className="text-gold-200">Gives each song one of 27 crystals</strong>: an assignment that
+              organises your library, not a measurement of the song's pitch
+              <TagRow>
+                <EvidenceTag tier="design" />
+              </TagRow>
             </span>
           </li>
           <li className="flex gap-3 p-4 bg-slate-900/50 border border-slate-800 rounded-lg">
             <span className="flex-shrink-0 w-7 h-7 rounded-full bg-gold-600/20 text-gold-300 text-sm font-bold flex items-center justify-center">3</span>
             <span className="text-slate-300 leading-relaxed">
-              <strong className="text-gold-200">Layers binaural beats</strong> underneath your music, tuned
-              to match the assigned frequency
+              <strong className="text-gold-200">Layers a tone and a binaural beat</strong> underneath your music,
+              built on that crystal
             </span>
           </li>
         </ol>
         <p className="text-slate-300 leading-relaxed">
-          The result is your favorite music, enhanced with precise frequency layering that you can feel but
-          might not consciously hear. What you experience while listening is personal and different for everyone.
+          The result is your favourite music with a quiet layer underneath, at the level you choose. What you
+          experience while listening is personal and different for everyone.
         </p>
       </section>
 
@@ -232,9 +294,9 @@ const AccessibleGuidebook: React.FC = () => {
           {[
             <><strong className="text-gold-200">Open the Aetheria 432Hz Player</strong> at aetheria432.com</>,
             <><strong className="text-gold-200">Add your music</strong> — import songs or folders from your device</>,
-            <><strong className="text-gold-200">Click "Deep Scan"</strong> — wait for your music to be processed</>,
-            <><strong className="text-gold-200">Click "Auto-Distribute Frequencies"</strong> — songs Deep Scan measured keep their frequency, and every other song is given one of the 27 Aetheria frequencies</>,
-            <><strong className="text-gold-200">Pick a listening mode</strong> — try "Full Alignment" to hear your library played across all 27 frequencies in order, or choose just the GUT, HEART, HEAD range, or all regimes by selecting the Ultimate all orders playlist.</>,
+            <Place text={place('deepScan', layout)} />,
+            <Place text={place('assign', layout)} />,
+            <Place text={place('modes', layout)} />,
             <><strong className="text-gold-200">Press play and enjoy your music</strong></>
           ].map((content, i) => (
             <li key={i} className="flex gap-3 p-3 bg-slate-900/40 border border-slate-800 rounded-lg">
@@ -302,11 +364,16 @@ const AccessibleGuidebook: React.FC = () => {
         <div className="space-y-5">
           <div>
             <h3 className="text-lg font-serif text-emerald-200 mb-2">What Is the Lo Shu?</h3>
-            <p className="text-slate-300 leading-relaxed mb-4">
-              Over 4,000 years ago in China, someone noticed a pattern on the back of a turtle emerging from
-              the Lo River. The pattern was a grid of nine numbers arranged so that every row, every column,
-              and every diagonal added up to the same total: 15.
-            </p>
+            <div data-evidence="tradition" className="mb-4">
+              <p className="text-slate-300 leading-relaxed">
+                Chinese legend tells of a turtle that rose from the Lo River more than 4,000 years ago, with a
+                pattern on its shell: a grid of nine numbers arranged so that every row, every column, and every
+                diagonal added up to the same total: 15.
+              </p>
+              <TagRow>
+                <EvidenceTag tier="tradition" />
+              </TagRow>
+            </div>
             <div className="my-4 flex justify-center">
               <pre className="font-mono text-emerald-200 text-lg leading-relaxed bg-slate-900/70 border border-emerald-500/20 px-8 py-4 rounded-lg">
 {`4  9  2
@@ -314,23 +381,33 @@ const AccessibleGuidebook: React.FC = () => {
 8  1  6`}
               </pre>
             </div>
-            <p className="text-slate-300 leading-relaxed">
-              This is called a "magic square." It's one of the oldest mathematical discoveries in human history.
-            </p>
+            <div data-evidence="arithmetic">
+              <p className="text-slate-300 leading-relaxed">
+                This is called a "magic square", and the Lo Shu is one of the oldest known.
+              </p>
+              <TagRow>
+                <EvidenceTag tier="arithmetic" />
+              </TagRow>
+            </div>
           </div>
 
           <div>
             <h3 className="text-lg font-serif text-emerald-200 mb-2">The Aetheria Connection</h3>
-            <p className="text-slate-300 leading-relaxed mb-3">
-              Here's the interesting part: the 27 Aetheria frequencies, when arranged in groups of nine
-              (one group per range), naturally form their own magic squares. This wasn't designed on purpose —
-              the frequencies were built using a consistent musical interval pattern, and the magic square
-              structure emerged on its own.
-            </p>
-            <p className="text-slate-300 leading-relaxed">
-              The HEART and HEAD ranges form mathematically perfect magic squares. The GUT range comes
-              within one line of perfection.
-            </p>
+            <div data-evidence="arithmetic">
+              <p className="text-slate-300 leading-relaxed mb-3">
+                Here's the interesting part: the 27 Aetheria frequencies, when arranged in groups of nine
+                (one group per range), form their own magic squares. That follows from how they were built: any nine
+                evenly spaced numbers make a magic square when placed in the Lo Shu's order, and HEART and HEAD rise
+                in even steps (243 Hz and 354 Hz).
+              </p>
+              <p className="text-slate-300 leading-relaxed">
+                The HEART and HEAD ranges form mathematically perfect magic squares. The GUT range comes
+                within one line of perfection.
+              </p>
+              <TagRow>
+                <EvidenceTag tier="arithmetic" />
+              </TagRow>
+            </div>
           </div>
 
           <div>
@@ -339,10 +416,7 @@ const AccessibleGuidebook: React.FC = () => {
               When you listen to the frequencies in the Lo Shu order instead of the standard numerical order,
               you're hearing them in an arrangement that follows one of the oldest mathematical harmonies known
               to humanity. Whether this creates a different experience is something each listener discovers for
-              themselves. You can find the Lo Shu quick settings in the media player controls as a cube icon
-              next to the repeat button, and the Lo Shu Visual settings card can be found in the Visual settings
-              by clicking the gear icon in the app header. Music must first be added/imported, scanned, and
-              assigned, to select one of the Lo Shu Walks.
+              themselves. {place('walks', layout)}, {place('cubeVisual', layout)} {place('walksFirst', layout)}
             </p>
           </div>
         </div>
@@ -384,8 +458,7 @@ const AccessibleGuidebook: React.FC = () => {
             </div>
             <p className="text-emerald-300/80 italic text-xs mb-3">"Start in the center, spiral outward"</p>
             <p className="text-sm text-slate-300 leading-relaxed">
-              This follows the traditional path that Daoist practitioners used when walking through the
-              "nine palaces." It starts at the CENTER frequency of each range and spirals outward through all
+              This follows a path a Chinese tradition traces through the "nine palaces." It starts at the CENTER frequency of each range and spirals outward through all
               nine positions. This is a non-linear path — the frequencies don't climb or descend in a straight
               line, they spiral.
             </p>
@@ -399,14 +472,25 @@ const AccessibleGuidebook: React.FC = () => {
         <p className="text-slate-300 leading-relaxed mb-3">
           The player has a toggle called "Perfect GUT." Here's what it does:
         </p>
-        <p className="text-slate-300 leading-relaxed mb-3">
-          The original GUT frequencies come from an ancient musical scale called the Solfeggio. These frequencies
-          are well-known in music and sound traditions, but they don't form a mathematically perfect magic square.
-        </p>
-        <p className="text-slate-300 leading-relaxed mb-4">
-          "Perfect GUT" mode shifts the lower frequencies by small amounts so the magic square becomes
-          mathematically exact. The change is subtle — most listeners can't hear the difference.
-        </p>
+        <div data-evidence="tradition" className="mb-3">
+          <p className="text-slate-300 leading-relaxed">
+            The GUT frequencies are the nine "Solfeggio frequencies": a modern set, popularised in the 1990s and
+            named after the medieval singing syllables (ut, re, mi…). They are well known in sound-meditation
+            circles, but they don't form a perfect magic square.
+          </p>
+          <TagRow>
+            <EvidenceTag tier="tradition" />
+          </TagRow>
+        </div>
+        <div data-evidence="arithmetic" className="mb-4">
+          <p className="text-slate-300 leading-relaxed">
+            Perfect GUT moves three crystals by 99 Hz (174 → 75, 285 → 186, 396 → 297) and three by 9 Hz, so the
+            square becomes exact; the top three stay.
+          </p>
+          <TagRow>
+            <EvidenceTag tier="arithmetic" />
+          </TagRow>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
           <div className="p-4 bg-slate-900/50 border border-slate-800 rounded-lg">
             <h3 className="text-gold-200 font-bold mb-1">Solfeggio mode</h3>
@@ -418,7 +502,7 @@ const AccessibleGuidebook: React.FC = () => {
           </div>
         </div>
         <p className="text-slate-400 italic text-sm">
-          Try both and see if you notice a difference. Many people don't, and that's fine.
+          Try both. You may hear the change on the low crystals.
         </p>
       </section>
 
@@ -431,22 +515,31 @@ const AccessibleGuidebook: React.FC = () => {
         <p className="text-slate-300 leading-relaxed mb-3">
           One of Aetheria's key features is the binaural beat layer underneath your music.
         </p>
-        <p className="text-slate-300 leading-relaxed mb-3">
-          A binaural beat happens when your left ear hears one frequency and your right ear hears a slightly
-          different one. Your brain processes the difference between the two tones, creating a perceived "beat"
-          at that difference frequency. This is why headphones are recommended — the two ears need to receive
-          slightly different signals for the effect to work.
-        </p>
+        <div data-evidence="tier1" className="mb-3">
+          <p className="text-slate-300 leading-relaxed">
+            A binaural beat happens when your left ear hears one frequency and your right ear hears a slightly
+            different one. Your brain processes the difference between the two tones, creating a perceived "beat"
+            at that difference frequency. This is why headphones are recommended — the two ears need to receive
+            slightly different signals for the effect to work.
+          </p>
+          <TagRow>
+            <EvidenceTag tier="tier1" />
+          </TagRow>
+        </div>
         <p className="text-slate-300 leading-relaxed mb-4">
           Aetheria generates these binaural layers automatically based on which frequency position is currently
           playing. You don't need to configure anything — just use headphones for the best experience.
         </p>
-        <div className="p-4 bg-amber-900/15 border-l-4 border-amber-500/60 rounded-r-lg">
+        <div data-evidence="tier2" className="p-4 bg-amber-900/15 border-l-4 border-amber-500/60 rounded-r-lg">
           <p className="text-sm text-slate-300 leading-relaxed">
-            <strong className="text-amber-300">Important:</strong> Binaural beats are an area of active research.
-            Some studies suggest they may influence brainwave patterns, while others show mixed results. Aetheria
-            uses them as part of the listening experience, not as a medical treatment.
+            <strong className="text-amber-300">Important:</strong> Whether binaural beats change brainwaves is still
+            debated: a 2023 review of 14 studies with brain recordings (EEG) found 5 that support it, 8 that don't and
+            1 mixed.
+            Aetheria uses them as part of the listening experience, not as a treatment.
           </p>
+          <TagRow>
+            <EvidenceTag tier="tier2" />
+          </TagRow>
         </div>
       </section>
 
@@ -510,6 +603,9 @@ const AccessibleGuidebook: React.FC = () => {
           </p>
         </div>
       </section>
+
+      {/* v16.6: How sure are we? (the evidence tags' definitions and what research has found) */}
+      <HowSure view="plain" layout={layout} back={back} />
 
       {/* The Deeper Guide */}
       <section className="bg-gradient-to-r from-slate-900 to-slate-900/50 border-l-4 border-gold-500 p-6 rounded-r-lg">

@@ -297,7 +297,13 @@ test('2. in six states the Sound section shows exactly the words of classic’s 
       await expect(layersSection(page, 'sound').getByTestId('layers-v2-unavailable'), `${st.name}: v2 failed`).toBeVisible();
     }
     await expect(page.getByTestId('tab-layers').getByRole('switch', { name: 'Music only' }), `${st.name}: one Music-only switch`).toHaveCount(1);
-    const ours = squeeze(await page.getByTestId('layers-sound-body').textContent());
+    // v16.6: the tab's drone row carries its Design-choice tag (spec §3.7: Layers › Sound only); the words compared are
+    // the panel's own, so the tag's text is left out.
+    const ours = squeeze(await page.getByTestId('layers-sound-body').evaluate((el) => {
+      const c = el.cloneNode(true) as HTMLElement;
+      c.querySelectorAll('[data-evidence-tag]').forEach((t) => t.remove());
+      return c.textContent;
+    }));
     await peekHarmonic(page);
     const classic = squeeze(await page.getByTestId('layer-sound-panel').first().textContent());
     test.info().annotations.push({ type: `words, ${st.name}`, description: classic.slice(0, 160) });

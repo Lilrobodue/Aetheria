@@ -357,10 +357,10 @@ export async function openHarmonicControl(page: Page): Promise<void> {
   await page.getByRole('heading', { name: 'Harmonic Control', exact: true }).waitFor();
 }
 
-/** Tap a frequency in Harmonic Control's "Traditional Scale (Safe)" grid. */
+/** Tap a frequency in Harmonic Control's "Traditional Solfeggio" grid (v16.6: it was "Traditional Scale (Safe)"). */
 export async function tapTraditional(page: Page, hz: number): Promise<void> {
   await page
-    .getByText('Traditional Scale (Safe)', { exact: true })
+    .getByText('Traditional Solfeggio', { exact: true })
     .locator('xpath=..')
     .getByRole('button', { name: String(hz), exact: true })
     .click();

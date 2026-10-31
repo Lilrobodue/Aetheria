@@ -14,6 +14,7 @@ import { REGIME_DOT, regimeName, regimeOf } from '../shellModel';
 import SectionCard from './SectionCard';
 import CrystalPicker from './CrystalPicker';
 import { crystalStatus, heardLine, trackCrystalLine } from './layersModel';
+import CrystalMeaning from '../../guide/CrystalMeaning';
 
 const CrystalSection = () => {
   countRender('LayersCrystal');
@@ -42,6 +43,8 @@ const CrystalSection = () => {
           </div>
         </div>
       </div>
+      {/* v16.6: the crystal's meaning, tagged (the new layout's first): one block, per crystal, never the clock. */}
+      <CrystalMeaning host="section" />
       {trackLine ? <div className="text-xs text-ink-muted">{trackLine}</div> : null}
       <CrystalPicker host="section" />
     </SectionCard>

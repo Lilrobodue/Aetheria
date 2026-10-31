@@ -31,7 +31,7 @@ import { MIXES, ORDER_FIRSTS } from './catalog.ts';
 import type { MixId } from './catalog.ts';
 import { LIBRARY_FACETS, NO_FILTERS, activeChips, buildFacetIndex, filterPass, parseFilters, serializeFilters, filtersOn } from '../library/filterModel.ts';
 import type { FacetDef, FacetIndex, Filters } from '../library/filterModel.ts';
-import { EXPERIMENTAL_FACETS, SCAN_SCORES, scoreChipText } from '../library/scanScores.ts';
+import { EXPERIMENTAL_FACETS, SCAN_SCORES, scoreNameText } from '../library/scanScores.ts';
 
 // ---------------------------------------------------------------------------------------------------------------
 // Settings
@@ -333,11 +333,13 @@ export function followName(f: Follow): string {
   const c = setCrystals(f);
   return c.length ? `Custom: ${c.length > 4 ? `${c.length} crystals` : `${c.join(' · ')} Hz`}` : 'Custom';
 }
-/** The picked filters as words, up to three, then "+N more" (filterModel's rule; the scores in scanScores' words). */
+/** The picked filters as words, up to three, then "+N more" (filterModel's rule; the scores in scanScores' words).
+ *  v16.6 (decision 13): a name outlives the builder and its tag, so a score whose name holds a gate word is named
+ *  "Experimental resonance score over 30 %" (scoreNameText); the builder's chip keeps the tagged name. */
 export function filterWords(f: Filters): string {
   const chips = activeChips(f, BUILDER_FACETS).map((c) => {
     const d = c.facet.startsWith('x-') ? SCAN_SCORES.find((x) => `x-${x.id}` === c.facet) : null;
-    return d ? scoreChipText(d) : c.label;
+    return d ? scoreNameText(d) : c.label;
   });
   const shown = chips.slice(0, 3);
   return `${shown.join(' · ')}${chips.length > 3 ? ` +${chips.length - 3} more` : ''}`;

@@ -421,8 +421,8 @@ check(formatDb(gainToDb(MAX_BOOST)!) === '+12.0 dB' && formatDb(gainToDb(MAX_BOO
     === 'High-order frequency (2178 Hz). v2 plays its octave 544.5 Hz: an audible tone under the music.'
     && copy.feltLineV2(4920, toneOf(4920, 'phone')) === 'High-order frequency (4920 Hz). v2 plays its octave 615 Hz: an audible tone under the music.',
     'felt line, v2: the octave v2 plays (2178 → 544.5 Hz, 4920 → 615 Hz)');
-  check(copy.feltLineV2(2178, 0) === 'High frequency detected (2178Hz). Focus on feeling rather than hearing.',
-    'felt line: no tone (layer.f 0) gives the classic line');
+  check(copy.feltLineV2(2178, 0) === 'High crystal (2178 Hz): classic plays it as a low hum under the music. Keep the layers comfortable.',
+    'felt line: no tone (layer.f 0) gives the classic line (v16.6: what classic plays, not "feeling rather than hearing")');
 
   // Status and tooltip, from player states shaped like layerPlayer's (the p528 plan, headphones, alpha).
   const p = plan(528, 'headphones', 'binaural', 10)!;
@@ -501,7 +501,7 @@ check(formatDb(gainToDb(MAX_BOOST)!) === '+12.0 dB' && formatDb(gainToDb(MAX_BOO
       === "v2 unavailable on this device. For Car output the layers are off and the music can't be recorded here, so this recording will be silent.",
     "copy: the Car fallback's beat slider title, tone-tap toast and recording warning");
   check(copy.SHEET_HEADING === 'What are you listening on?'
-    && copy.SHEET_BODY === 'The layers are shaped for your output. Change it any time with the layers button in the player.'
+    && copy.SHEET_BODY === 'The layers are shaped for your output. You can change it any time.'
     && copy.SHEET_LATER === 'Ask me later' && copy.QUICK_SWITCH_LABEL === 'Layer sound and output',
     "copy: the sheet ('Ask me later', never the orphan banner's 'Not now') and the quick switch");
   check(copy.TONE_LEVEL_LABEL === 'Tone level'

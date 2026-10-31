@@ -31,10 +31,15 @@ export interface ScanScoreDef {
   short: string;
   /** A one-line caution, where the name alone would mislead. */
   note?: string;
+  /** v16.6 (decision 13): the words a mix's name uses (saved playlists, queue labels, toasts outlive the builder and
+   *  its tag), where the score's own name holds a gate word. */
+  nameWords?: string;
   /** A track "has" the score above this (exclusive); null: no cut-off (shown in Track info only, never filtered). */
   over: number | null;
   /** 0..1 (a yes/no reading is 1 or 0); null with no Deep Scan reading. */
   read: (s: ScoreSong) => number | null;
+  /** v16.6: the evidence tag (the scores are the app's own design, not measurements: Design choice). */
+  tag: 'design';
 }
 
 const field = (s: ScoreSong, k: string): number | null => {
@@ -45,13 +50,14 @@ const field = (s: ScoreSong, k: string): number | null => {
 };
 
 export const SCAN_SCORES: readonly ScanScoreDef[] = [
-  { id: 'golden', name: 'Golden ratio score', short: 'Φ', over: 0.3, read: (s) => field(s, 'goldenRatioAlignment') },
-  { id: 'p111', name: '111 pattern score', short: '111', over: 0.2, read: (s) => field(s, 'pattern111Presence') },
-  { id: 'dna', name: 'DNA resonance score', short: 'DNA', note: 'A name for a score, not a biological measure.', over: 0.3, read: (s) => field(s, 'dnaResonanceScore') },
-  { id: 'geometry', name: 'Sacred geometry score', short: 'Geometry', note: 'Higher for noisy sound than for pure tones.', over: null, read: (s) => field(s, 'sacredGeometryAlignment') },
-  { id: 'schumann', name: 'Schumann harmony score', short: 'Schumann', over: null, read: (s) => field(s, 'schumannResonanceHarmony') },
+  { id: 'golden', name: 'Golden ratio score', short: 'Φ', over: 0.3, read: (s) => field(s, 'goldenRatioAlignment'), tag: 'design' },
+  { id: 'p111', name: '111 pattern score', short: '111', over: 0.2, read: (s) => field(s, 'pattern111Presence'), tag: 'design' },
+  { id: 'dna', name: 'DNA resonance score', short: 'DNA', note: 'A name for a score, not a biological measure.', nameWords: 'Experimental resonance score', over: 0.3, read: (s) => field(s, 'dnaResonanceScore'), tag: 'design' },
+  { id: 'geometry', name: 'Sacred geometry score', short: 'Geometry', note: 'Higher for noisy sound than for pure tones.', over: null, read: (s) => field(s, 'sacredGeometryAlignment'), tag: 'design' },
+  { id: 'schumann', name: 'Schumann harmony score', short: 'Schumann', over: null, read: (s) => field(s, 'schumannResonanceHarmony'), tag: 'design' },
   {
     id: 'candidate',
+    tag: 'design',
     name: 'Aetheria number',
     short: 'Aetheria',
     note: "Deep Scan's reading is a multiple of 3 between 150 and 6500 Hz whose digits sum to 3, 6 or 9.",
@@ -67,6 +73,11 @@ export const SCAN_SCORES_LEAD = "Scores from Deep Scan's reading of the spectrum
 export function scoreChipText(d: ScanScoreDef): string {
   if (d.id === 'candidate' || d.over === null) return d.name;
   return `${d.name} over ${Math.round(d.over * 100)} %`;
+}
+/** The score in a mix's name (decision 13): "Experimental resonance score over 30 %" for the DNA score, else its chip. */
+export function scoreNameText(d: ScanScoreDef): string {
+  if (!d.nameWords) return scoreChipText(d);
+  return d.over === null || d.id === 'candidate' ? d.nameWords : `${d.nameWords} over ${Math.round(d.over * 100)} %`;
 }
 /** A track has the score (over the cut-off); null without a reading or a cut-off. */
 export function hasScore(d: ScanScoreDef, s: ScoreSong): boolean | null {

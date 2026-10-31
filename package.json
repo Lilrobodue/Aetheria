@@ -1,7 +1,7 @@
 {
-  "name": "v16.5-aetheria:-harmonic-resonance-player",
+  "name": "v16.6-aetheria:-harmonic-resonance-player",
   "private": true,
-  "version": "16.5.0",
+  "version": "16.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -24,6 +24,7 @@
     "check:queue": "node utils/queue/queueModel.check.ts",
     "check:builder": "node utils/mix/builder.check.ts",
     "check:mix": "node utils/mix/mix.check.ts && node utils/mix/distribution.check.ts && node utils/mix/builder.check.ts && node scripts/check-mix-golden.mjs && node scripts/check-mix-golden.mjs --via=builder",
+    "check:copy": "node scripts/check-copy.mjs && node scripts/check-copy.mjs --self-test && node utils/copy/copy.check.ts",
     "parity:chroma": "node tools/chroma-parity.ts"
   },
   "dependencies": {

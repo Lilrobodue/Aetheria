@@ -35,9 +35,12 @@ export interface MoreViewState {
   from?: MoreView;
 }
 
-/** The opener a page remembers when `current` opens `next`: About for Links opened from About's row; else none. */
+/** The opener a page remembers when `current` opens `next`: About for Links opened from About's row; v16.6: Safety &
+ *  comfort for the Guide opened from its "How sure are we?" row; else none. */
 export function openerOf(current: MoreView, next: MoreView): MoreView | undefined {
-  return next === 'links' && current === 'about' ? 'about' : undefined;
+  if (next === 'links' && current === 'about') return 'about';
+  if (next === 'guide' && current === 'safety') return 'safety';
+  return undefined;
 }
 
 /**
@@ -47,6 +50,7 @@ export function openerOf(current: MoreView, next: MoreView): MoreView | undefine
 export function backTarget(view: MoreView, from?: MoreView | null): MoreView {
   if (view === 'statement') return 'safety';
   if (view === 'links' && from === 'about') return 'about';
+  if (view === 'guide' && from === 'safety') return 'safety';
   return 'root';
 }
 
@@ -264,8 +268,12 @@ export const ADVANCED_EXPERIMENTAL = 'Experimental';
 export const ADVANCED_LAYOUT = 'Layout';
 export const ADVANCED_TESTING = 'For testing';
 export const SCAN_SCORES_TITLE = 'Show experimental scan scores';
-export const SCAN_SCORES_LINE =
-  "Deep Scan's golden-ratio, 111 and DNA scores, on Library rows and in Track info. They are scores from an unreliable reading of the spectrum, not measurements.";
+/** v16.6: the line carries its evidence tag (Design choice: the scores are the app's own; check:copy's T2). */
+export const SCAN_SCORES_NOTE = {
+  line: "Deep Scan's golden-ratio, 111 and DNA scores, on Library rows and in Track info. They are scores from an unreliable reading of the spectrum, not measurements.",
+  tag: 'design',
+} as const;
+export const SCAN_SCORES_LINE = SCAN_SCORES_NOTE.line;
 export const LAYOUT_STATUS = 'new (beta)';
 export const LAYOUT_LINE = 'The classic layout has every control on one screen. The music keeps playing when you switch.';
 export const USE_CLASSIC = 'Use the classic layout';
@@ -301,3 +309,46 @@ export function requestMoreRoot(viewRef?: { current: MoreViewState } | null): vo
   }
   if (viewRef) viewRef.current = { view: 'root', top: 0 };
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// v16.6, "How sure are we?": an evidence tag opens More › Guide at a tier (App's actions.openEvidence). A mounted More
+// tab answers by going to the page (as a tap on the active More tab does for the root); a mounted Guide answers by
+// scrolling to the anchor App left in guideViewRef. With none mounted, the refs are read when they mount.
+// ---------------------------------------------------------------------------------------------------------------
+
+const viewListeners = new Set<(view: MoreView) => void>();
+
+/** The More tab, while mounted: called when something outside it asks for a page. */
+export function onMoreViewRequest(fn: (view: MoreView) => void): () => void {
+  viewListeners.add(fn);
+  return () => {
+    viewListeners.delete(fn);
+  };
+}
+
+/** Show this More page: the mounted More tab goes there; with none mounted, it is where More opens (from its top). */
+export function requestMoreView(viewRef: { current: MoreViewState } | null | undefined, view: MoreView): void {
+  if (viewListeners.size > 0) {
+    for (const fn of Array.from(viewListeners)) fn(view);
+    return;
+  }
+  if (viewRef) viewRef.current = { view, top: 0 };
+}
+
+const anchorListeners = new Set<() => void>();
+
+/** The Guide, while mounted: called when App has left it an anchor (guideViewRef.current.anchor). */
+export function onGuideAnchorRequest(fn: () => void): () => void {
+  anchorListeners.add(fn);
+  return () => {
+    anchorListeners.delete(fn);
+  };
+}
+
+/** A mounted Guide scrolls to the anchor now (an unmounted one reads it on mount). */
+export function requestGuideAnchor(): void {
+  for (const fn of Array.from(anchorListeners)) fn();
+}
+
+/** The Safety & comfort row's line, and the Guide's jump button (utils/copy/evidence's words). */
+export { HOW_SURE_TITLE as HOW_SURE_ROW_TITLE, HOW_SURE_ROW_LINE } from '../../../utils/copy/evidence.ts';
