@@ -749,3 +749,42 @@ export function recoverWords(fresh: number, duplicates: number): { head: string;
     recover: f > 0 ? `Recover ${f}` : 'Remove copies',
   };
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// v16.7, desktop polish: "/" asks for Library › Tracks with the search field focused (spec §3.6; moreModel's
+// requestMoreView pattern). The mounted Library tab answers (it shows Tracks; its Tracks body focuses and selects the
+// field); with none mounted, the view and a focus flag are left in App's libraryViewRef, read when the body mounts.
+// ---------------------------------------------------------------------------------------------------------------
+
+/** What the request writes (contexts.ts LibraryViewState's fields). */
+export interface LibrarySearchView {
+  view?: 'tracks' | 'playlists';
+  focusSearch?: boolean;
+}
+
+const searchListeners = new Set<() => void>();
+
+/** The Library tab and its Tracks body, while mounted: called when "/" asks for the search. */
+export function onLibrarySearchRequest(fn: () => void): () => void {
+  searchListeners.add(fn);
+  return () => {
+    searchListeners.delete(fn);
+  };
+}
+
+/** Library › Tracks with the search field focused: the view and the flag first (a body mounting reads them), then the
+ *  mounted listeners. */
+export function requestLibrarySearch(viewRef?: { current: LibrarySearchView } | null): void {
+  if (viewRef) {
+    viewRef.current.view = 'tracks';
+    viewRef.current.focusSearch = true;
+  }
+  for (const fn of Array.from(searchListeners)) fn();
+}
+
+/** The Tracks body: whether the field is to take the focus now (the flag is cleared: it acts once). */
+export function takeSearchFocus(viewRef?: { current: LibrarySearchView } | null): boolean {
+  if (!viewRef || !viewRef.current.focusSearch) return false;
+  viewRef.current.focusSearch = false;
+  return true;
+}

@@ -9868,18 +9868,10 @@ registerProcessor('wav-capture', WavCapture);
           {/* Offline Indicator */}
           <OfflineIndicator showWhenOnline={true} />
 
-          {/* Restore toast — brief confirmation that the cached library is back. */}
-          {isRestoring && restoredCount > 0 && (
-            <div
-              className={
-                !shellOn
-                  ? "fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-900/90 border border-emerald-500/30 text-emerald-200 text-xs px-4 py-2 rounded-full backdrop-blur shadow-lg"
-                  : desktopShell
-                    ? 'fixed right-4 z-50 bg-emerald-900/90 border border-emerald-500/30 text-emerald-200 text-xs px-4 py-2 rounded-full shadow-lg'
-                    : 'fixed left-1/2 -translate-x-1/2 z-50 bg-emerald-900/90 border border-emerald-500/30 text-emerald-200 text-xs px-4 py-2 rounded-full shadow-lg'
-              }
-              style={shellOn ? shellNoticeStyle : undefined}
-            >
+          {/* Restore toast — brief confirmation that the cached library is back. Classic's pill, as it was; v16.7: the
+              new layout's is a card in the notices stack below (it peeked out behind the other cards there). */}
+          {!shellOn && isRestoring && restoredCount > 0 && (
+            <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-900/90 border border-emerald-500/30 text-emerald-200 text-xs px-4 py-2 rounded-full backdrop-blur shadow-lg">
               ✓ Restored {restoredCount} tracks from cache
             </div>
           )}
@@ -9909,6 +9901,23 @@ registerProcessor('wav-capture', WavCapture);
             style={shellOn ? shellNoticeStyle : undefined}
             data-testid={shellOn ? 'notices' : undefined}
           >
+              {/* v16.7: the restore card, at the stack's head where it grows up from the bottom (the desktop, the phone's
+                  other tabs) and at its foot where it hangs from the top (the phone's Now Playing), so its going moves
+                  no other card. In the live region: read once per launch with a saved library. Review fix: ONE element,
+                  moved by its flex order, so a tab switch within its 2 s never reads it out again. */}
+              {shellOn && isRestoring && restoredCount > 0 && (
+                <div
+                  data-testid="restore-card"
+                  className={
+                    !desktopShell && shellTab === 'now'
+                      ? 'order-last flex items-center gap-3 bg-slate-900/95 border border-emerald-500/40 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-lg'
+                      : 'flex items-center gap-3 bg-slate-900/95 border border-emerald-500/40 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-lg'
+                  }
+                >
+                  <CheckCircle2 size={16} aria-hidden="true" className="shrink-0 text-emerald-400" />
+                  <span className="flex-1 leading-snug">Restored {restoredCount} {restoredCount === 1 ? 'track' : 'tracks'} from cache.</span>
+                </div>
+              )}
               {/* v16.4: in the new layout the Ready Offline notice is a card here, first in the stack (so an Undo toast
                   keeps its place at the stack's foot above the mini-player), clear of the controls as every notice is;
                   classic keeps its own banner (below). It stays until its X is tapped, as the update banner does. Not
@@ -10178,7 +10187,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.6</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.7</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

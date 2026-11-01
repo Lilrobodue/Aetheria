@@ -366,6 +366,8 @@ export interface LibraryViewState {
   refocus?: 'import' | 'review' | null;
   /** v16.1: the "Tracks · Playlists" switch (decision 1 A; session only). Absent: Tracks. */
   view?: 'tracks' | 'playlists';
+  /** v16.7: "/" asked for the search field; Library › Tracks focuses it as it mounts, then clears this. */
+  focusSearch?: boolean;
   /** v16.2 review: the smart filters' picks as the latest tap set them, and whether saving them failed (full or blocked
    *  storage). Library › Tracks remounts on every switch: with `unsaved` (or an unreadable store) these come back, not
    *  the stored value. Absent: no tap this session. */

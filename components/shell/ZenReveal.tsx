@@ -33,7 +33,7 @@ const ZenReveal = () => {
         type="button"
         onClick={showControls}
         data-testid="zen-show-controls"
-        className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-toast focus:px-4 focus:min-h-touch focus:rounded-control focus:bg-surface-panel focus:text-ink"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-toast focus:px-4 focus:min-h-touch focus:rounded-control focus:bg-surface-panel focus:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
       >
         Show controls
       </button>

@@ -7,6 +7,8 @@
 // A drag shows its position here and seeks once, when the finger lifts: a seek per pointermove was a media seek and an
 // App render 60-120 times a second, and dragging through the track's last seconds could start auto-advances mid-drag.
 // A tap seeks on release, the keys at once.
+// v16.7: on the desktop the transport's buttons row overlaps its top 5 px; DesktopTransport draws its keyboard-focus ring
+// over that row (a non-interactive layer), so the bar itself never rises over Play.
 
 import React, { useRef, useState } from 'react';
 import { useActions, useTime } from './contexts';

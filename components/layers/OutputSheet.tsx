@@ -39,7 +39,11 @@ const OutputSheet: React.FC<Props> = ({ open, insets, onChoose, onLater }) => {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onLater();
+      if (e.key !== 'Escape') return;
+      // v16.7: this Escape is spent: the new layout's desktop keys and classic's Guidebook leave it alone (one Escape, one
+      // thing), whichever listener ran first.
+      e.preventDefault();
+      onLater();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);

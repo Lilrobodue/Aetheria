@@ -7,6 +7,7 @@
 // v15.6: `disabled` greys the row (opacity-50) and disables the button; `note` is a reason line under the description
 // ("Needs φ integration", "This track peaks at 2:00"), read out with the switch (aria-describedby).
 // v16.4: React.memo (it is pure): the Visuals sheet passes stable handlers, so a setting re-renders its own switch only.
+// v16.7 (additive; absent, as before): `describe` reads the description out with the switch too (aria-describedby).
 
 import React, { useId } from 'react';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
@@ -19,17 +20,25 @@ interface ToggleProps {
   disabled?: boolean;
   /** A reason or a detail under the description (ink-faint). */
   note?: string | null;
+  /** v16.7: the description is the switch's accessible description too. */
+  describe?: boolean;
   'data-testid'?: string;
 }
 
-const Toggle = ({ label, description, checked, onChange, disabled = false, note, 'data-testid': testId }: ToggleProps) => {
+const Toggle = ({ label, description, checked, onChange, disabled = false, note, describe = false, 'data-testid': testId }: ToggleProps) => {
   const reduced = usePrefersReducedMotion();
   const noteId = useId();
+  const descId = useId();
+  const describedBy = [describe && description ? descId : null, note ? noteId : null].filter(Boolean).join(' ') || undefined;
   return (
     <div className={disabled ? 'flex items-center justify-between gap-3 py-2 opacity-50' : 'flex items-center justify-between gap-3 py-2'} data-testid={testId}>
       <div className="min-w-0">
         <div className="text-sm text-ink-strong">{label}</div>
-        {description ? <div className="text-xs text-ink-muted">{description}</div> : null}
+        {description ? (
+          <div id={describe ? descId : undefined} className="text-xs text-ink-muted">
+            {description}
+          </div>
+        ) : null}
         {note ? (
           <div id={noteId} className="text-xs text-ink-faint">
             {note}
@@ -41,7 +50,7 @@ const Toggle = ({ label, description, checked, onChange, disabled = false, note,
         role="switch"
         aria-checked={checked}
         aria-label={label}
-        aria-describedby={note ? noteId : undefined}
+        aria-describedby={describedBy}
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={

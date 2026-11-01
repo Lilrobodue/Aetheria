@@ -12,9 +12,11 @@
 // v16.5 review (A5): while a recording runs, "Stop recording" takes Record's own slot, so no row moves: it used to
 // come after "Save as a playlist…", the rows above it shifting up by one, so a tap meant for Save as a playlist
 // stopped the recording.
+// v16.7 (desktop polish): on the desktop shell only, "Keyboard shortcuts" before Back to classic: the menu closes, then
+// the shortcuts dialog opens (a Dialog never sits on a Sheet).
 
 import React from 'react';
-import { ArrowLeftRight, Circle, Eye, EyeOff, FileAudio, Info, ListPlus, OctagonX, Save, SlidersHorizontal } from 'lucide-react';
+import { ArrowLeftRight, Circle, Eye, EyeOff, FileAudio, Info, Keyboard, ListPlus, OctagonX, Save, SlidersHorizontal } from 'lucide-react';
 import Sheet from '../../ui/Sheet';
 import ListRow from '../../ui/ListRow';
 import { ViewBoundary } from '../../ErrorBoundary';
@@ -25,13 +27,15 @@ import { zenMenuRow } from '../zenModel';
 import { addRowLine, saveRowLine } from '../playlists/playlistsViewModel';
 import { countRender } from '../devRenders';
 import { sheetFallback } from './sheetFallback';
+import { requestShortcuts } from '../shortcuts/shortcutsStore';
+import { SHORTCUTS_MENU_SUBTITLE, SHORTCUTS_TITLE } from '../shortcuts/keysModel';
 
 const MenuBody = () => {
   countRender('MenuBody');
   const actions = useActions();
   const exportActions = useExportActions();
   const { isRecording, hasTrack, trackId, title } = usePlayer();
-  const { zen } = useShell();
+  const { zen, phoneShell } = useShell();
   const zenRow = zenMenuRow(zen.on);
   const saving = actions.saveSourceInfo(); // v16.1: what Save as a playlist would save (read as the menu opens)
   return (
@@ -107,6 +111,18 @@ const MenuBody = () => {
           icon={<Save size={20} />}
           onClick={() => actions.savePlaylist('playing')}
           data-testid="menu-save-playlist"
+        />
+      ) : null}
+      {!phoneShell ? (
+        <ListRow
+          title={SHORTCUTS_TITLE}
+          subtitle={SHORTCUTS_MENU_SUBTITLE}
+          icon={<Keyboard size={20} />}
+          onClick={() => {
+            actions.closeSheet();
+            requestShortcuts();
+          }}
+          data-testid="menu-shortcuts"
         />
       ) : null}
       <ListRow

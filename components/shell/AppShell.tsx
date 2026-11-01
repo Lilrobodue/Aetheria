@@ -12,6 +12,8 @@
 // tap into a reveal). It sits outside the shell region and outside the inert shell root, as the announcer does, so the
 // shell's own fallback is covered by it too (the first tap only reveals).
 // v16.5: TrackInfoHost, the ⋯ menu's honest Track info for the playing track (a kit Dialog, modal on both shells).
+// v16.7: on the desktop shell, KeyFeedback (a key's 1.2 s pill and the shortcuts' live line), also outside the shell
+// region and the inert root, so it shows while Zen (or full screen) hides the controls. In its own region.
 
 import React from 'react';
 import { ViewBoundary } from '../ErrorBoundary';
@@ -22,6 +24,7 @@ import DesktopShell from './DesktopShell';
 import TrackAnnouncer from './TrackAnnouncer';
 import ZenReveal from './ZenReveal';
 import TrackInfoHost from './TrackInfoHost';
+import KeyFeedback from './shortcuts/KeyFeedback';
 import { ShellCrash } from './fallbacks';
 
 const AppShell = () => {
@@ -30,6 +33,7 @@ const AppShell = () => {
   return (
     <>
       {zen.hidden ? <ZenReveal /> : null}
+      {!phoneShell ? <ViewBoundary name="key-feedback" fallback={() => null} render={() => <KeyFeedback />} /> : null}
       <ViewBoundary
         name="shell"
         fallback={(api) => <ShellCrash api={api} />}

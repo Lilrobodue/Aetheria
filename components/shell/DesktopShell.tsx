@@ -9,11 +9,17 @@
 // v15.7: Library shows the Library tab in the panel; an Escape in its search field with text clears the text and stops
 // there (the field handles it first); the Import sheet takes the panel until closed.
 // v16.4: More shows the More tab in the panel (its pages too); the Visuals sheet takes the panel until closed.
+// v16.7 (desktop polish): the panel sits beside the side nav at every width (x = 72, and 200 from 1280 px where the nav
+// is labelled: CSS only). Two skip links come first (Skip to the player; Skip to the panel while one is open). The
+// keyboard shortcuts' leaf (DesktopKeys) lives here, in its own region. A tab change still focuses the view's heading,
+// unless the focus is already inside the panel ("/" puts it in the Library's search field). As Zen hides the shell, any
+// tooltip hides with it. Leaving this shell (classic, a peek, a phone-sized window) leaves the full screen entered here.
 
 import React, { useEffect, useRef } from 'react';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
 import { ViewBoundary } from '../ErrorBoundary';
 import { overlayDepth } from '../ui/overlayStack';
+import { hideTooltips } from '../ui/Tooltip';
 import { useActions, useShell } from './contexts';
 import { countRender } from './devRenders';
 import SideNav from './SideNav';
@@ -26,6 +32,21 @@ import LayersTab from './layers/LayersTab';
 import LibraryTab from './library/LibraryTab';
 import { TabCrash, TransportCrash } from './fallbacks';
 import { focusViewHeading } from './PhoneShell';
+import DesktopKeys from './shortcuts/DesktopKeys';
+import { leaveIfEnteredHere } from './shortcuts/immersive';
+
+const SKIP =
+  'sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-toast focus:px-4 focus:min-h-touch focus:rounded-control focus:bg-surface-panel focus:text-ink focus:pointer-events-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400';
+
+/** Skip to the panel: the open sheet's or the section's heading. */
+function focusPanelHeading(): void {
+  const h = document.querySelector('[data-testid="desktop-panel"] [data-view-heading], [data-testid="desktop-panel"] h2[tabindex="-1"]');
+  if (h instanceof HTMLElement) h.focus();
+}
+function focusPlay(): void {
+  const play = document.querySelector('[data-testid="new-shell"] [data-testid="desktop-play"]');
+  if (play instanceof HTMLElement) play.focus();
+}
 
 const DesktopShell = () => {
   countRender('DesktopShell');
@@ -41,10 +62,12 @@ const DesktopShell = () => {
     if (!stubOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' && e.key !== 'Esc') return;
+      if (e.repeat) return; // v16.7: a held Esc closes one thing (a sheet over this panel), never this too
       if (overlayDepth() > 0 || document.querySelector('[data-testid="output-sheet"]')) return;
       // A search field with text clears first (its own handler stops the event; this is the second guard).
       const field = document.activeElement;
       if (field instanceof HTMLInputElement && field.type === 'search' && field.value) return;
+      e.preventDefault(); // v16.7: this Escape is spent (the desktop keys leave it alone, whichever listener ran first)
       actions.setTab('now');
     };
     document.addEventListener('keydown', onKey);
@@ -55,8 +78,19 @@ const DesktopShell = () => {
   useEffect(() => {
     if (shownTab.current === tab) return;
     shownTab.current = tab;
-    if (tab !== 'now') focusViewHeading();
+    if (tab === 'now') return;
+    // v16.7: "/" has already put the focus in the Library's search field: it stays there.
+    const panel = document.querySelector('[data-testid="desktop-panel"]');
+    if (panel && panel.contains(document.activeElement)) return;
+    focusViewHeading();
   }, [tab]);
+
+  // v16.7: Zen hides the shell (inert): a tooltip showing goes with it.
+  useEffect(() => {
+    if (zen.hidden) hideTooltips();
+  }, [zen.hidden]);
+  // v16.7: classic has no way out of a full screen entered here.
+  useEffect(() => () => leaveIfEnteredHere(), []);
 
   return (
     <div
@@ -72,9 +106,17 @@ const DesktopShell = () => {
             : 'fixed inset-0 z-10 pointer-events-none text-ink font-sans opacity-0 transition-opacity duration-slow'
       }
     >
+      <button type="button" data-testid="skip-player" onClick={focusPlay} className={SKIP}>
+        Skip to the player
+      </button>
+      {panelSheet || stubOpen ? (
+        <button type="button" data-testid="skip-panel" onClick={focusPanelHeading} className={SKIP}>
+          Skip to the panel
+        </button>
+      ) : null}
       <SideNav />
       {panelSheet || stubOpen ? (
-        <div data-testid="desktop-panel" className="absolute left-[72px] top-0 bottom-transport w-[420px] pointer-events-auto">
+        <div data-testid="desktop-panel" className="absolute left-[72px] xl:left-[200px] top-0 bottom-transport w-[420px] pointer-events-auto">
           {panelSheet ? (
             <SheetHost presentation="panel" only="panel" />
           ) : (
@@ -110,6 +152,7 @@ const DesktopShell = () => {
       />
       {sheet === 'menu' || sheet === 'playlist-add' ? <SheetHost presentation="sheet" only="menu" /> : null}
       <PlaylistDialogs />
+      <ViewBoundary name="desktop-keys" fallback={() => null} render={() => <DesktopKeys />} />
     </div>
   );
 };

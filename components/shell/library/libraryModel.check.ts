@@ -39,6 +39,9 @@ import {
   assignNeedsConfirm,
   lastImportLines,
   recoverWords,
+  onLibrarySearchRequest,
+  requestLibrarySearch,
+  takeSearchFocus,
 } from './libraryModel.ts';
 import type { LibSong, HealthInput } from './libraryModel.ts';
 import { countAnalysable, capsFor, passButtonText, passEta, passEtaMinutes, PASS_IDLE } from '../../../utils/library/analysePass.ts';
@@ -489,6 +492,32 @@ eq(recoverWords(0, 1).recover, 'Remove copies', 'copies only');
     if (a.length === b.length && a.every((s, i) => s === b[i])) same++;
   }
   eq(same, rounds, 'the filters’ text equals the search on 2,000 random libraries, sorts and queries');
+}
+
+// ---- v16.7: the "/" request ---------------------------------------------------------------------------------------
+{
+  // Nothing mounted: the view becomes Tracks and the flag waits for the body.
+  const ref = { current: { view: 'playlists' as 'tracks' | 'playlists', focusSearch: false as boolean | undefined } };
+  requestLibrarySearch(ref);
+  eq(ref.current, { view: 'tracks', focusSearch: true }, 'unmounted: Tracks, and the flag set');
+  eq(takeSearchFocus(ref), true, 'the body takes the focus once');
+  eq(takeSearchFocus(ref), false, 'and only once');
+  eq(ref.current.focusSearch, false, 'the flag is cleared');
+  // Mounted: each listener is called once per request, after the ref is written; an unsubscribed one never.
+  const seen: string[] = [];
+  const offA = onLibrarySearchRequest(() => seen.push(`a:${ref.current.view}:${ref.current.focusSearch}`));
+  const offB = onLibrarySearchRequest(() => seen.push('b'));
+  ref.current.view = 'playlists';
+  requestLibrarySearch(ref);
+  eq(seen, ['a:tracks:true', 'b'], 'mounted: both listeners, after the ref');
+  offA();
+  offB();
+  requestLibrarySearch(ref);
+  eq(seen.length, 2, 'unsubscribed: not called');
+  requestLibrarySearch(null);
+  requestLibrarySearch();
+  eq(takeSearchFocus(null), false, 'no ref: nothing to take');
+  check(true, 'no ref: no throw');
 }
 
 if (failures.length) {

@@ -44,3 +44,8 @@ export function zenMenuRow(on: boolean): { title: string; subtitle: string } {
 export function zenButtonTitle(on: boolean): string {
   return on ? 'Leave Zen: the controls stay' : 'Hide the controls until you tap';
 }
+
+/** v16.7: the desktop transport's tooltip for it (a mouse move, not a tap, brings the controls back there). */
+export function zenButtonTitleDesktop(on: boolean): string {
+  return on ? 'Leave Zen: the controls stay' : 'Hide the controls until you move the mouse';
+}

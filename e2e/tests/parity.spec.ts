@@ -36,6 +36,9 @@ import { importTones, openHarmonicControl, openSafety } from './helpers';
 // v15.7: the Library tab (phone) and the desktop Library panel are reviewed shots, no longer compared.
 // v16.4: More's pages, the Visuals sheet and the tour are reviewed shots (absent before v16.4: the walk skips them there,
 // so it still runs against the previous release's build); the ⋯ menu (one row more) and More stay reviewed.
+// v16.7 (desktop polish): every desktop shot is reviewed: at 1280 the side nav is the labelled 200 px nav (decision 1 A)
+// with the active bar (2 A), the panels sit at x = 200, and the transport has its 400 px centre and the Full screen
+// button. The phone's shots are compared as before (the phone shell is unchanged).
 
 const VIEWPORTS = {
   desktop: { width: 1280, height: 800 },
@@ -554,16 +557,16 @@ async function walkNew(page: Page, vp: Viewport): Promise<void> {
   } else {
     await page.getByTestId('desktop-play').click();
     await page.getByRole('button', { name: 'Play', exact: true }).first().waitFor();
-    await shot('now-playing', { compare: true, masks: [transport] });
+    await shot('now-playing', { compare: false, masks: [transport] }); // v16.7: reviewed (the labelled nav)
     await shot('transport', { compare: false });
     await page.getByTestId('desktop-crystal').click();
     await page.getByRole('region', { name: 'Crystal', exact: true }).waitFor();
     const headTop = await page.locator('section[aria-label^="HEAD "]').evaluate((el) => el.getBoundingClientRect().top);
-    await shot('panel-crystal-above-head', { compare: true, masks: [transport], clip: { x: 0, y: 0, width: VIEWPORTS.desktop.width, height: Math.min(VIEWPORTS.desktop.height, Math.floor(headTop)) } });
+    await shot('panel-crystal-above-head', { compare: false, masks: [transport], clip: { x: 0, y: 0, width: VIEWPORTS.desktop.width, height: Math.min(VIEWPORTS.desktop.height, Math.floor(headTop)) } });
     await page.keyboard.press('Escape');
     await page.getByTestId('desktop-walks').click();
     await page.getByRole('region', { name: 'Walks', exact: true }).waitFor();
-    await shot('panel-walks', { compare: true, masks: [transport] });
+    await shot('panel-walks', { compare: false, masks: [transport] }); // v16.7: reviewed (the nav, the panel at 200)
     await page.keyboard.press('Escape');
     for (const t of ['library', 'mixes'] as const) {
       await page.getByTestId(`nav-${t}`).click();

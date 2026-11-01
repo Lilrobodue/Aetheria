@@ -2,7 +2,7 @@
 // Run with: node components/shell/zenModel.check.ts   (npm run check:shell; Node 22.18+ strips the types)
 // Exits non-zero on any failure.
 
-import { zenActive, zenMenuRow, zenButtonTitle, ZEN_HIDE_MS, ZEN_NON_TEXT_INPUTS } from './zenModel.ts';
+import { zenActive, zenMenuRow, zenButtonTitle, zenButtonTitleDesktop, ZEN_HIDE_MS, ZEN_NON_TEXT_INPUTS } from './zenModel.ts';
 import type { ZenInputs } from './zenModel.ts';
 
 let passed = 0;
@@ -51,6 +51,8 @@ eq(zenMenuRow(false), { title: 'Hide the controls (Zen)', subtitle: 'Tap anywher
 eq(zenMenuRow(true), { title: 'Leave Zen', subtitle: 'The controls stay' }, 'menu row, on');
 eq(zenButtonTitle(false), 'Hide the controls until you tap', 'button title, off');
 eq(zenButtonTitle(true), 'Leave Zen: the controls stay', 'button title, on');
+eq(zenButtonTitleDesktop(false), 'Hide the controls until you move the mouse', 'desktop tooltip, off (v16.7)');
+eq(zenButtonTitleDesktop(true), 'Leave Zen: the controls stay', 'desktop tooltip, on (v16.7)');
 
 // Classic's timing and its non-text inputs (App.tsx ZEN_NON_TEXT_INPUTS), unchanged.
 eq(ZEN_HIDE_MS, 3000, '3 s, as classic');

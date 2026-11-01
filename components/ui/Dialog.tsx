@@ -9,6 +9,8 @@
 // and goes back to what opened it). Focus starts on `initialFocusRef`, else the first action button. The body scrolls
 // (`preformatted` keeps a readout's line breaks and emoji); a scrolling body takes focus too, so a keyboard can
 // scroll it. No enter animation: nothing new runs per frame, and nothing moves.
+// v16.7 (additive; absent, the markup is v15.4's): size="wide", up to 672 px from 640 px wide (the keyboard
+// shortcuts' two columns).
 
 import React, { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -32,6 +34,8 @@ interface DialogProps {
   preformatted?: boolean;
   initialFocusRef?: { current: HTMLElement | null };
   returnFocusFallback?: HTMLElement | null;
+  /** v16.7: 'wide' (sm:max-w-2xl) for a two-column body. */
+  size?: 'wide';
   'data-testid'?: string;
 }
 
@@ -47,6 +51,7 @@ const Dialog = ({
   preformatted = false,
   initialFocusRef,
   returnFocusFallback,
+  size,
   'data-testid': testId,
 }: DialogProps) => {
   const panelRef: { current: HTMLDivElement | null } = useRef(null);
@@ -76,7 +81,11 @@ const Dialog = ({
         aria-labelledby={titleId}
         aria-describedby={role === 'alertdialog' ? bodyId : undefined}
         tabIndex={-1}
-        className="relative w-full sm:max-w-lg max-h-[85dvh] flex flex-col bg-surface-panel border border-line-strong rounded-t-sheet sm:rounded-sheet shadow-overlay pb-[max(0.75rem,env(safe-area-inset-bottom))] outline-none"
+        className={
+          size === 'wide'
+            ? 'relative w-full sm:max-w-2xl max-h-[85dvh] flex flex-col bg-surface-panel border border-line-strong rounded-t-sheet sm:rounded-sheet shadow-overlay pb-[max(0.75rem,env(safe-area-inset-bottom))] outline-none'
+            : 'relative w-full sm:max-w-lg max-h-[85dvh] flex flex-col bg-surface-panel border border-line-strong rounded-t-sheet sm:rounded-sheet shadow-overlay pb-[max(0.75rem,env(safe-area-inset-bottom))] outline-none'
+        }
       >
         <h2 id={titleId} className="text-base font-bold text-ink-strong px-4 pt-4">
           {title}

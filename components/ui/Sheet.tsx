@@ -81,7 +81,9 @@ const Sheet = ({
     if (!open || modal) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' && e.key !== 'Esc') return;
+      if (e.repeat) return; // v16.7: a held Esc closes one thing, never the panel under it too
       if (overlayDepth() > 0 || document.querySelector('[data-testid="output-sheet"]')) return;
+      e.preventDefault(); // v16.7: this Escape is spent (the desktop keys leave it alone, whichever listener ran first)
       closeRef.current();
     };
     document.addEventListener('keydown', onKey);

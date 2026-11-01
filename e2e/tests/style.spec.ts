@@ -36,14 +36,15 @@ async function collectClasses(page: Page, state: string, seen: Map<string, strin
 async function stylesheetClasses(page: Page): Promise<Set<string>> {
   const list = await page.evaluate(() => {
     const out = new Set<string>();
-    const re = /\.((?:\\.|[\w-])+)/g;
+    // v16.7: a class that starts with a digit (2xl:…) is written with a hex escape and its space (".\32 xl\:w-…").
+    const re = /\.((?:\\[0-9a-fA-F]{1,6} ?|\\.|[\w-])+)/g;
     const walk = (rules: CSSRuleList) => {
       for (const rule of Array.from(rules)) {
         const sel = (rule as CSSStyleRule).selectorText;
         if (sel) {
           re.lastIndex = 0;
           let m: RegExpExecArray | null;
-          while ((m = re.exec(sel))) out.add(m[1].replace(/\\(.)/g, '$1'));
+          while ((m = re.exec(sel))) out.add(m[1].replace(/\\([0-9a-fA-F]{1,6}) ?|\\(.)/g, (_, hex, ch) => (hex ? String.fromCodePoint(parseInt(hex, 16)) : ch)));
         }
         const inner = (rule as CSSGroupingRule).cssRules;
         if (inner) walk(inner);
@@ -1208,6 +1209,115 @@ test.describe('style foundation (v15.3)', () => {
     expect(seen.size, 'the walk saw Export').toBeGreaterThan(100);
     expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
     expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
+  });
+
+  test('m. desktop polish (v16.7): the rail at both widths, the transport from 1024, tooltips, the "?" dialog, the key pill, the skip links and the restore card: every class has a rule, no blur, no endless animation, every target 44 × 44', async ({ page }) => {
+    test.setTimeout(240_000);
+    const seen = new Map<string, string>();
+    const effects = new Set<string>();
+    const small = new Set<string>();
+    const census = async (state: string) => {
+      await page.waitForTimeout(250);
+      await collectClasses(page, state, seen);
+      const found = await page.evaluate(() => {
+        const roots = Array.from(document.querySelectorAll('[data-testid="new-shell"], [role="dialog"], [data-testid="notices"], [data-testid="key-feedback"]'));
+        const out: string[] = [];
+        for (const root of roots) {
+          for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+            const cs = getComputedStyle(el);
+            const tag = `${el.tagName.toLowerCase()}.${(el.getAttribute('class') || '').split(/\s+/).slice(0, 3).join('.')}`;
+            if (cs.backdropFilter && cs.backdropFilter !== 'none') out.push(`backdrop-filter ${cs.backdropFilter} on ${tag}`);
+            if (cs.animationName && cs.animationName !== 'none' && /infinite/.test(cs.animationIterationCount)) out.push(`infinite animation ${cs.animationName} on ${tag}`);
+          }
+        }
+        return out;
+      });
+      for (const f of found) effects.add(`${f} (${state})`);
+      // The rail's and the transport's targets (the new Shortcuts and Full screen buttons, the compact Output and Walks).
+      const tiny = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-testid="side-nav"] button, [data-testid="desktop-transport"] button, [data-testid="desktop-transport"] input'))
+          .filter((el) => {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && (r.width < 43.5 || r.height < 43.5);
+          })
+          .map((el) => el.getAttribute('aria-label') || el.tagName)
+      );
+      for (const t of tiny) small.add(`${t} (${state})`);
+    };
+    await seedLibraryRecords(page, 6, { real: 6, seconds: 40 });
+    // Hold the restore card up (App drops it 2 s after the restore), so the census sees it.
+    await page.addInitScript(() => {
+      const st = window.setTimeout;
+      (window as any).setTimeout = function (fn: any, ms?: number, ...rest: any[]) {
+        if (typeof fn === 'function' && ms === 2000 && String(fn).includes('setIsRestoring')) ms = 60_000;
+        return st(fn, ms, ...rest);
+      };
+    });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openNewLayout(page, { engine: 'v2', output: 'headphones' });
+    await page.getByTestId('restore-card').waitFor();
+    await census('desktop 1280, the restore card');
+    await page.getByTestId('nav-library').click();
+    await page.getByRole('button', { name: /^tone-0001/ }).first().click();
+    await page.getByTestId('nav-layers').click();
+    await page.getByTestId('tab-layers').waitFor();
+    await census('desktop 1280, the labelled nav, Layers');
+    await page.getByTestId('desktop-play').hover();
+    await page.locator('[data-tooltip]').waitFor();
+    await census('desktop 1280, a tooltip');
+    await page.getByTestId('nav-now').click();
+    await page.getByTestId('nav-shortcuts').focus();
+    await page.keyboard.press('Tab'); // the rail's Shortcuts → the transport; focus rings and a focus tooltip
+    await page.getByTestId('skip-player').focus();
+    await census('desktop 1280, a skip link');
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.());
+    await page.keyboard.press('Space');
+    await page.getByTestId('key-feedback').waitFor();
+    await census('desktop 1280, the key pill');
+    await page.keyboard.press('?');
+    await page.getByRole('dialog', { name: 'Keyboard shortcuts', exact: true }).waitFor();
+    await census('desktop 1280, the "?" dialog');
+    await page.getByRole('switch', { name: 'Keyboard shortcuts' }).click();
+    await census('desktop 1280, the "?" dialog, shortcuts off');
+    await page.getByRole('switch', { name: 'Keyboard shortcuts' }).click();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'More options', exact: true }).click();
+    await page.getByTestId('menu-shortcuts').waitFor();
+    await census('desktop 1280, the ⋯ menu with Keyboard shortcuts');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('fullscreen-button').click();
+    await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+    await page.mouse.move(600, 300);
+    await page.mouse.move(610, 320);
+    await census('desktop 1280, full screen');
+    await page.getByTestId('fullscreen-button').click();
+    await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(false);
+    for (const width of [1024, 1100, 1279]) {
+      await page.setViewportSize({ width, height: width === 1024 ? 700 : 800 });
+      await page.getByTestId('nav-library').click();
+      await page.getByTestId('tab-library').waitFor();
+      await census(`desktop ${width}, the 72 px rail, the compact transport`);
+      await page.getByTestId('nav-shortcuts').hover();
+      await page.locator('[data-tooltip]').waitFor();
+      await census(`desktop ${width}, the rail's tooltip`);
+      await page.getByTestId('nav-now').click();
+    }
+    await page.setViewportSize({ width: 1536, height: 900 });
+    await census('desktop 1536, the 520 px centre');
+    const centre = async () => page.getByTestId('desktop-transport').evaluate((f) => Math.round((f.children[1] as HTMLElement).getBoundingClientRect().width));
+    expect(await centre(), 'from 1536 px the centre is 520 px').toBe(520);
+    await page.setViewportSize({ width: 1535, height: 900 });
+    await expect.poll(centre, { message: 'below, 400 px' }).toBe(400);
+
+    const styled = await stylesheetClasses(page);
+    const unstyled = [...seen]
+      .filter(([t]) => !styled.has(t) && !LUCIDE.test(t) && !INERT.has(t))
+      .map(([t, state]) => `${t} (${state})`)
+      .sort();
+    expect(seen.size, 'the walk saw the desktop').toBeGreaterThan(150);
+    expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
+    expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
+    expect([...small], 'rail and transport targets under 44 × 44').toEqual([]);
   });
 
   test('d. the --ae-* CSS variables equal the tailwind.config.js tokens', async ({ page }) => {

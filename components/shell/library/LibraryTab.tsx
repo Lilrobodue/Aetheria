@@ -9,6 +9,7 @@
 // v15.7's tab, unchanged below the switch; Playlists shows the saved playlists' list, or a playlist's own view, which
 // takes the whole tab (its own header: Back, the name, ⋯). With PLAYLISTS_HOME another tab, this tab is v16.0's.
 // React.memo; nothing here reads the time.
+// v16.7 (desktop polish): "/" (libraryModel.requestLibrarySearch) shows Tracks, whose body then focuses its search field.
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, X } from 'lucide-react';
@@ -18,6 +19,7 @@ import { useActions, useLibraryList, usePlaylists, useShell } from '../contexts'
 import { countRender } from '../devRenders';
 import { PLAYLISTS_HOME } from '../shellModel';
 import LibraryTracks from './LibraryTracks';
+import { onLibrarySearchRequest } from './libraryModel';
 import LibrarySegment from '../playlists/LibrarySegment';
 import PlaylistsView from '../playlists/PlaylistsView';
 import PlaylistDetail from '../playlists/PlaylistDetail';
@@ -39,6 +41,8 @@ const LibraryTab = ({ inPanel = false }: LibraryTabProps) => {
     libraryViewRef.current.view = v;
     setViewState(v);
   }, []);
+  // v16.7: "/" asks for Tracks (the request has set the ref; a playlist's view was closed by the caller).
+  useEffect(() => onLibrarySearchRequest(() => setView('tracks')), []);
   // A playlist opened from elsewhere (a save's Open, a new playlist): the switch follows.
   useEffect(() => {
     if (withPlaylists && pls.openId !== null && view !== 'playlists') setView('playlists');

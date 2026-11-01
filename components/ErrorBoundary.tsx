@@ -30,7 +30,7 @@ import { waitForBlobSaves } from '../utils/playlistCache';
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 /** The version the error log records. Bump it with the header badge (App.tsx); isolation.spec checks the two agree. */
-export const APP_VERSION = 'v16.6';
+export const APP_VERSION = 'v16.7';
 
 export type ViewName =
   | 'visualizer'
@@ -105,7 +105,10 @@ export type ViewName =
   | 'more-advanced'
   | 'sheet-record'
   // v16.5, Export with layers: the Export sheet's body.
-  | 'sheet-export';
+  | 'sheet-export'
+  // v16.7, desktop polish: the keyboard shortcuts' leaf (its listener and the "?" dialog), and the key feedback pill.
+  | 'desktop-keys'
+  | 'key-feedback';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The error log

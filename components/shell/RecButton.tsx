@@ -6,13 +6,15 @@
 // desktop transport) opens the Record sheet, with the time so far and Stop and save, so a near-miss of Play can't end a
 // recording; 'stop' (the Car screen: a driver needs one tap) stops it at once through classic's own stopRecording, as
 // v15.5 did. The name says what a tap does.
+// v16.7 review: `compact` (the desktop transport): below 1280 px a 44 × 44 dot (its name kept, the word from `xl`), so a
+// recording leaves the title column its room at 1024 px. Absent, the markup is as before.
 
 import React from 'react';
 import { useActions, usePlayer } from './contexts';
 import { recPillLabel } from './more/recordModel';
 import type { RecPillMode } from './more/recordModel';
 
-const RecButton = ({ mode = 'open' }: { mode?: RecPillMode }) => {
+const RecButton = ({ mode = 'open', compact = false }: { mode?: RecPillMode; compact?: boolean }) => {
   const { isRecording } = usePlayer();
   const actions = useActions();
   if (!isRecording) return null;
@@ -24,10 +26,14 @@ const RecButton = ({ mode = 'open' }: { mode?: RecPillMode }) => {
       title={stop ? 'Stop recording' : 'Recording: open Record'}
       data-testid={stop ? 'rec-stop' : 'rec-open'}
       onClick={stop ? actions.stopRecording : actions.openRecord}
-      className="shrink-0 h-touch px-3 inline-flex items-center gap-1.5 rounded-pill border border-line-strong bg-surface-panel/80 text-caption font-bold uppercase tracking-wider text-ink-strong hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+      className={
+        compact
+          ? 'shrink-0 h-touch min-w-touch justify-center xl:px-3 inline-flex items-center gap-1.5 rounded-pill border border-line-strong bg-surface-panel/80 text-caption font-bold uppercase tracking-wider text-ink-strong hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400'
+          : 'shrink-0 h-touch px-3 inline-flex items-center gap-1.5 rounded-pill border border-line-strong bg-surface-panel/80 text-caption font-bold uppercase tracking-wider text-ink-strong hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400'
+      }
     >
       <span aria-hidden="true" className="w-2 h-2 rounded-pill bg-status-error" />
-      Rec
+      {compact ? <span className="hidden xl:inline">Rec</span> : 'Rec'}
     </button>
   );
 };

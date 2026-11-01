@@ -493,6 +493,32 @@ test.describe('phone, renders', () => {
   });
 });
 
+test.describe('desktop, renders', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('7b. while playing on the desktop (v16.7), the rail, the transport, the keys, the key pill and the full-screen button never re-render; the time readers do', async ({ page }) => {
+    test.setTimeout(120_000);
+    await instrumentAudio(page);
+    const dialogs = await playingInNewLayout(page);
+    await page.waitForTimeout(2500);
+    await resetRenders(page);
+    await page.waitForTimeout(3000);
+    const now = await renders(page);
+    test.info().annotations.push({ type: 'renders on the desktop, 3 s', description: JSON.stringify(now) });
+    for (const view of ['DesktopShell', 'SideNav', 'DesktopTransport', 'DesktopKeys', 'KeyFeedback', 'FullscreenButton', 'AppShell']) {
+      expect.soft(now[view] ?? 0, `${view} renders`).toBe(0);
+    }
+    expect.soft(now.SeekBar ?? 0, 'SeekBar renders').toBeGreaterThanOrEqual(8);
+    // They are there: a pause renders the keys' leaf once (it reads the player), never the pill or the button.
+    await page.getByTestId('desktop-play').click();
+    await page.waitForTimeout(500);
+    const paused = await renders(page);
+    expect.soft(paused.DesktopKeys ?? 0, 'DesktopKeys renders on a pause').toBeGreaterThan(0);
+    expect.soft(paused.KeyFeedback ?? 0, 'KeyFeedback does not').toBe(0);
+    expect(dialogs).toEqual([]);
+  });
+});
+
 // ---------------------------------------------------------------------------------------------------------------
 // 8. The heat guard
 // ---------------------------------------------------------------------------------------------------------------

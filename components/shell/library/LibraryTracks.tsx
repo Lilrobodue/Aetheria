@@ -24,6 +24,8 @@
 // chip on, a search and a row's tap are v15.7's. The row menu's Play from here stays "your library" (its own words). The
 // health card hides while filtered, as while searching. Filters narrow only what this list shows: the library, the
 // play order (until an action's tap), the switch's count and every other view see every track.
+// v16.7 (desktop polish): "/" focuses the search field and selects its text: at once while mounted (the request's
+// listener), or as it mounts (the request's flag in libraryViewRef, taken once).
 
 import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { SearchX } from 'lucide-react';
@@ -71,6 +73,8 @@ import {
   playingFromText,
   sortLibrary,
   summaryText,
+  onLibrarySearchRequest,
+  takeSearchFocus,
 } from './libraryModel';
 import type { LibrarySort } from './libraryModel';
 
@@ -209,6 +213,19 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
   const onReset = useCallback(() => {
     libraryViewRef.current.top = 0;
   }, []);
+
+  // v16.7: "/" puts the focus in the search field, its text selected (an empty library has no field: the flag goes).
+  const focusSearch = useCallback(() => {
+    if (!takeSearchFocus(libraryViewRef)) return;
+    const field = inputRef.current;
+    if (!field) return;
+    field.focus();
+    field.select();
+  }, []);
+  useLayoutEffect(() => {
+    focusSearch();
+  }, []);
+  useEffect(() => onLibrarySearchRequest(focusSearch), []);
 
   // Desktop: the Import sheet takes the panel, so this tab unmounts; when the sheet closes and the tab comes back, the
   // focus returns to the button that opened it (Import, or the health card's Review).
