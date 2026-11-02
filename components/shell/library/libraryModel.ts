@@ -15,7 +15,7 @@ import { passButtonText, passEta, passEtaMinutes } from '../../../utils/library/
 import type { PassProgress } from '../../../utils/library/analysePass.ts';
 import { CHROMA_VERSION } from '../../../utils/soundV2/keyAnalysis.ts';
 import { BUSY_EXPORT, BUSY_STOPPING, BUSY_STOPPING_LONG } from '../../../utils/export/exportWords.ts';
-import { ALL_CRYSTALS, crystalOrigin, deepScanQueue, scanCrystalChanged } from '../../../utils/mix/distribution.ts';
+import { ALL_CRYSTALS, crystalOrigin, deepScanQueue, readByDeepScan, scanCrystalChanged, spreadFromScan } from '../../../utils/mix/distribution.ts';
 import type { CrystalSource } from '../../../utils/mix/distribution.ts';
 
 /** What the tab reads of a track (types.ts Song; `file` only for Track info). */
@@ -381,7 +381,9 @@ export function crystalSource(s: LibSong): string {
   const o = crystalOrigin(s);
   if (o === 'scan-failed') return "Deep Scan couldn't read this track; a placeholder crystal";
   if (crystalFromDeepScan(s)) return 'From Deep Scan';
-  if (o === 'scan-replaced') return "Deep Scan's crystal was replaced by an older Auto-Distribute; Assign crystals puts it back";
+  // v16.7.1: Assign crystals spreads every track, so it no longer puts Deep Scan's crystal back.
+  if (spreadFromScan(s)) return "Spread by Assign crystals; Deep Scan's own reading is kept";
+  if (o === 'scan-replaced') return "Deep Scan's crystal was replaced by an older Auto-Distribute";
   return 'Assigned, not scanned yet';
 }
 
@@ -444,12 +446,12 @@ export interface LibraryHealth {
   assignedToScan: number;
   /** Deep Scan ran on it (deepScanned). */
   scanned: number;
-  /** Deep Scan crystals an older Auto-Distribute changed (scanCrystalChanged): Assign puts them back. */
+  /** Deep Scan crystals an older Auto-Distribute changed (scanCrystalChanged). (v16.7.1: Assign spreads them with the rest.) */
   scanReplaced: number;
   /** Of the 27 crystals, how many no track has. */
   emptyCrystals: number;
-  /** Tracks with a crystal that Assign would still place (an older Auto-Distribute's placeholders, failed scans): an
-   *  empty crystal can be filled only when there is one of these, or a track with no crystal. */
+  /** Tracks with a crystal that v15.8's Assign would still place (an older Auto-Distribute's placeholders, failed
+   *  scans). v16.7.1: the health line no longer reads it (a spread places every track). */
   placeable: number;
 }
 
@@ -469,7 +471,7 @@ export function libraryHealth(songs: readonly LibSong[]): LibraryHealth {
     if (!s.closestSolfeggio) noCrystal++;
     else used.add(s.closestSolfeggio);
     const o = crystalOrigin(s);
-    if (o === 'scan' || o === 'scan-replaced' || o === 'scan-failed') scanned++;
+    if (readByDeepScan(s) || o === 'scan-failed') scanned++; // v16.7.1 (from v16.8): a spread track was read too
     if (scanCrystalChanged(s)) scanReplaced++;
     // Assign's own rule (planAssign): it keeps scans, put-backs and anchors (a recorded assigned crystal of the 27).
     const anchor = s.crystalSource === 'assigned' && ALL_CRYSTALS.includes(s.closestSolfeggio as number);
@@ -541,10 +543,10 @@ export function healthModel(i: HealthInput): HealthModel {
   const lines: HealthLine[] = [];
   const analysing = i.pass.phase !== 'idle';
 
-  // Crystals (Assign = Auto-Distribute). v15.8: Assign keeps Deep Scan's crystals and the ones it placed before, and
-  // works on any library size (no 27-track minimum). Its button shows only when it would change something: a track has
-  // no crystal or can get Deep Scan's back (to do), or an empty crystal can be filled from a track it still places
-  // (optional). Otherwise the line only informs.
+  // Crystals (Assign = Auto-Distribute). v16.7.1: Assign spreads every track, scanned ones too, over the 27 crystals
+  // (planAssign(lib, 'spread')), on any library size. Its button shows when a track has no crystal (to do), or when
+  // crystals have no track while another crystal has two or more (optional: a spread fills more of them). Otherwise the
+  // line only informs. (v15.8's "can get Deep Scan's crystal back" is gone: a spread doesn't put crystals back.)
   const all = h.total === 1 ? 'The track has one' : `All ${h.total} have one`;
   const assignAction = (todo: boolean, line: string): HealthLine => ({
     id: 'crystals',
@@ -558,9 +560,7 @@ export function healthModel(i: HealthInput): HealthModel {
   const gaps = `${h.emptyCrystals} ${plural(h.emptyCrystals, 'crystal has', 'crystals have')} no track`;
   if (h.noCrystal > 0) {
     lines.push(assignAction(true, `${h.noCrystal} of ${h.total} tracks have none`));
-  } else if (h.scanReplaced > 0) {
-    lines.push(assignAction(true, `${all} · ${h.scanReplaced} can get Deep Scan's crystal back`));
-  } else if (h.emptyCrystals > 0 && h.placeable > 0 && h.total > 0) {
+  } else if (h.emptyCrystals > 0 && h.total > 27 - h.emptyCrystals) {
     lines.push(assignAction(false, `${all} · ${gaps}`));
   } else {
     lines.push({

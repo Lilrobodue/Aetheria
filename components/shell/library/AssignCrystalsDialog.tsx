@@ -1,8 +1,8 @@
 // components/shell/library/AssignCrystalsDialog.tsx (v15.7, the Library tab, stage B; v15.8 the new Assign)
 //
-// The health card's Assign asks first only when crystals tracks already have would change (v15.8: Deep Scan's crystals
-// stay; one an older Auto-Distribute replaced is put back, and assigned crystals may move once). The words come from the
-// plan the tap computed (utils/mix/distribution.ts planAssign). A kit Dialog (alertdialog): Cancel takes the first focus,
+// The health card's Assign asks first only when crystals tracks already have would change (v16.7.1: Assign spreads every
+// track over the 27 crystals, so scanned tracks can move off Deep Scan's crystal, their reading kept). The words come
+// from the plan the tap computed (utils/mix/distribution.ts planAssign(lib, 'spread')). A kit Dialog (alertdialog): Cancel takes the first focus,
 // Assign runs the existing autoDistribute. New-layout UI only; classic's button is unchanged.
 
 import React, { useRef } from 'react';

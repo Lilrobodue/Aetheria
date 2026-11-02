@@ -219,7 +219,7 @@ for (const n of [NaN, Infinity, -Infinity, -1, '1', null]) eq(formatBytes(n), nu
 // always stored isAetheriaCandidate and fractalAnalysis, and deviation = |harmonicFreq − crystal|; the old
 // Auto-Distribute kept a scanned harmonicFreq but stored its own score).
 const scannedTrack = { fractalAnalysis: {}, harmonicFreq: 530.5, closestSolfeggio: 528, harmonicDeviation: 2.5 };
-const REPLACED = "Deep Scan's crystal was replaced by an older Auto-Distribute; Assign crystals puts it back";
+const REPLACED = "Deep Scan's crystal was replaced by an older Auto-Distribute"; // v16.7.1: Assign no longer puts it back
 eq(crystalSource(S('x', 'x', scannedTrack)), 'From Deep Scan', 'source: Deep Scan');
 eq(crystalSource(S('x', 'x', { harmonicFreq: 530.5, closestSolfeggio: 528, harmonicDeviation: 2.5, isAetheriaCandidate: false })), 'From Deep Scan', 'source: Deep Scan, its fractal step failed (the candidate flag marks the scan)');
 eq(crystalSource(S('x', 'x', { ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0 })), REPLACED, 'source: replaced by an older Auto-Distribute');
@@ -329,13 +329,19 @@ eq(mSmall.lines[0], { id: 'crystals', title: 'Crystals', line: '12 of 12 tracks 
 const allDone = mk(30, (i) => ({ fractalAnalysis: {}, closestSolfeggio: ALL_CRYSTALS[i % 27], harmonicFreq: ALL_CRYSTALS[i % 27] + 2.5, harmonicDeviation: 2.5, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
 const mDone = healthModel(base({ health: libraryHealth(allDone), analyseCounts: countAnalysable(allDone as never, CAPS) }));
 eq(mDone.lines.map((l) => [l.line, l.done]), [['All 30 tracks have one', true], ['All analysed', true], ['All 30 tracks scanned', true]], 'all done');
-// Every track scanned at 528 only: crystals have no track, but Assign has nothing to place there: no button (fix 4).
+// v16.7.1: every track scanned at 528 only: Assign spreads scanned tracks too, so it can fill the gaps: offered, optional.
 const oneCrystal = mk(30, () => ({ ...scannedTrack, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
 const mOne = healthModel(base({ health: libraryHealth(oneCrystal), analyseCounts: countAnalysable(oneCrystal as never, CAPS) }));
-eq(mOne.lines[0], { id: 'crystals', title: 'Crystals', line: 'All 30 tracks have one', sub: '26 crystals have no track.', done: true, todo: false }, 'gaps Assign can’t fill: an informational line, no Assign');
+eq(mOne.lines[0], { id: 'crystals', title: 'Crystals', line: 'All 30 have one · 26 crystals have no track', done: false, todo: false, action: { label: 'Assign', kind: 'assign', blocked: false } }, 'v16.7.1: a bunched scanned library: Assign (a spread fills the gaps), optional');
 eq([mOne.status, mOne.toDo], ['All set', 0], 'all set');
 const anchorsGap = mk(30, () => ({ closestSolfeggio: 528, harmonicFreq: 528, harmonicDeviation: 3, crystalSource: 'assigned' as const }));
-eq(healthModel(base({ health: libraryHealth(anchorsGap) })).lines[0].action, undefined, 'gaps among anchors only: no Assign (it would keep them all)');
+eq(healthModel(base({ health: libraryHealth(anchorsGap) })).lines[0].action?.kind, 'assign', 'v16.7.1: gaps among anchors: Assign (a spread re-places them too)');
+// v16.7.1: fewer tracks than crystals, each on its own crystal (as a spread leaves them): nothing a spread could fill.
+eq(healthModel(base({ health: libraryHealth(mk(5, (i) => ({ closestSolfeggio: ALL_CRYSTALS[i * 3], harmonicFreq: ALL_CRYSTALS[i * 3], harmonicDeviation: 3, crystalSource: 'assigned' as const }))) })).lines[0], { id: 'crystals', title: 'Crystals', line: 'All 5 tracks have one', sub: '22 crystals have no track.', done: true, todo: false }, 'v16.7.1: 5 tracks on 5 crystals: no Assign');
+// v16.7.1 (from v16.8): a spread scanned track (its reading kept, marked) counts as scanned and says where its crystal came from.
+const spreadTrack = { harmonicFreq: 530.5, closestSolfeggio: 852, harmonicDeviation: 1000 + Math.abs(530.5 - 852), crystalSource: 'assigned' as const };
+eq(crystalSource(S('x', 'x', spreadTrack)), "Spread by Assign crystals; Deep Scan's own reading is kept", 'source: spread by Assign');
+eq([libraryHealth(mk(3, () => spreadTrack)).scanned, libraryHealth(mk(3, () => spreadTrack)).unscanned], [3, 0], 'a spread track was read by Deep Scan: scanned, not queued');
 // An older Auto-Distribute's placeholders at 528: Assign would place them, filling the gaps: offered, optional.
 const legacyGap = mk(30, () => ({ closestSolfeggio: 528, harmonicFreq: 512.3, harmonicDeviation: 4, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
 const mLegacy = healthModel(base({ health: libraryHealth(legacyGap), analyseCounts: countAnalysable(legacyGap as never, CAPS) }));
@@ -345,8 +351,10 @@ eq([mLegacy.status, mLegacy.toDo], ['All set', 0], 'optional Assign is not to do
 const replacedSet = mk(30, (i) => ({ fractalAnalysis: {}, closestSolfeggio: ALL_CRYSTALS[i % 27], harmonicFreq: 530.5, harmonicDeviation: i < 5 ? 0 : Math.abs(530.5 - ALL_CRYSTALS[i % 27]), chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
 const mRep = healthModel(base({ health: libraryHealth(replacedSet), analyseCounts: countAnalysable(replacedSet as never, CAPS) }));
 // (Of the five with a broken relation, the one at 528 still shows Deep Scan's crystal for 530.5 Hz: not counted, fix 3.)
-eq(mRep.lines[0], { id: 'crystals', title: 'Crystals', line: "All 30 have one · 4 can get Deep Scan's crystal back", done: false, todo: true, action: { label: 'Assign', kind: 'assign', blocked: false } }, 'replaced crystals: Assign to do, only the real differences counted');
-eq(healthModel(base({ health: libraryHealth(mk(1, () => ({ ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0 }))) })).lines[0].line, "The track has one · 1 can get Deep Scan's crystal back", 'one track');
+// v16.7.1: Assign spreads (it no longer puts Deep Scan's crystals back): every crystal covered, nothing to offer.
+eq(mRep.lines[0], { id: 'crystals', title: 'Crystals', line: 'All 30 tracks have one', done: true, todo: false }, 'v16.7.1: replaced crystals: no put-back line');
+eq(libraryHealth(replacedSet).scanReplaced, 4, 'still counted (only the real differences)');
+eq(healthModel(base({ health: libraryHealth(mk(1, () => ({ ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0 }))) })).lines[0].line, 'The track has one', 'one track');
 eq(healthModel(base({ health: libraryHealth(mk(1, () => ({ ...scannedTrack, harmonicDeviation: 0 }))) })).lines[0], { id: 'crystals', title: 'Crystals', line: 'The track has one', sub: '26 crystals have no track.', done: true, todo: false }, 'a re-stored scan on its own crystal: nothing to put back');
 eq(healthModel(base({ health: libraryHealth([]) })).lines[0], { id: 'crystals', title: 'Crystals', line: 'All 0 tracks have one', done: true, todo: false }, 'an empty library: as v15.7');
 // After an Assign and no Deep Scan: every track has an assigned crystal; all of them are still Deep Scan's to do.

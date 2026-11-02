@@ -23,26 +23,35 @@ import {
   PHONE_VIEWPORT,
   type LibraryState,
 } from './helpers';
-import { planAssign, assignConfirmText, assignDoneText, assignNothingText, scanCrystalChanged } from '../../utils/mix/distribution.ts';
+import { planAssign, assignConfirmText, assignDoneText, assignNothingText, crystalOrigin, scanCrystalChanged, scanCrystalOf, spreadFromScan, ALL_CRYSTALS, SPREAD_ORDER } from '../../utils/mix/distribution.ts';
 import type { AssignPlan } from '../../utils/mix/distribution.ts';
+import { patchById } from '../../utils/library/listOps.ts';
+import { GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS } from '../../utils/crystalData.ts';
 
 // v15.8, Assign crystals (classic: Auto-Distribute Frequencies), decisions 2026-10-26: Deep Scan's crystals stay (one
 // an older Auto-Distribute replaced is put back), every other track is placed the same way on every press, and placed
 // tracks stay "not scanned" yet play at once. On FLEG, a v15.7 library replayed with v15.7's own code (Deep Scan, the
 // old Auto-Distribute, later imports and scans; synthetic names, scripts/mix-golden/fixtures-fleg.json), seeded straight
 // into IndexedDB with short tones. The expectation is utils/mix/distribution.ts's own plan, computed here in Node.
+// v16.7.1 (the hotfix): every press spreads (planAssign(lib, 'spread'), v16.8's): every track, scanned ones too, over
+// all 27 crystals; a scanned track moved off Deep Scan's crystal keeps its reading and counts as scanned.
 
 const FLEG: any[] = JSON.parse(readFileSync(new URL('../../scripts/mix-golden/fixtures-fleg.json', import.meta.url), 'utf8')).library;
 /** FLEG as seeded: every length stored (no probe; a missing one as 200 s), so the app's stand-ins see the same. */
 const SEEDED = FLEG.map(({ file, ...m }) => ({ ...m, duration: m.duration || 200 }));
 const quietly = <T,>(f: () => T): T => { const log = console.log; console.log = () => {}; try { return f(); } finally { console.log = log; } };
-const PLAN: AssignPlan = quietly(() => planAssign(SEEDED));
+const PLAN: AssignPlan = quietly(() => planAssign(SEEDED, 'spread'));
+/** FLEG after the spread, as Node computes it: the origins and the stored crystalSource the page must show. */
+const AFTER: any[] = patchById(SEEDED as never[], PLAN.patches as never) as any[];
+const AFTER_ORIGINS = AFTER.map((s) => crystalOrigin(s)).reduce((m: Record<string, number>, x) => ((m[x] = (m[x] ?? 0) + 1), m), {});
+const AFTER_STORED = AFTER.map((s) => String(s.crystalSource)).reduce((m: Record<string, number>, x) => ((m[x] = (m[x] ?? 0) + 1), m), {});
+const AFTER_READ = AFTER.filter((s) => ['scan', 'scan-replaced'].includes(crystalOrigin(s)) || spreadFromScan(s)).length;
 const crystalAfter = (id: string) => PLAN.patches.get(id)?.closestSolfeggio ?? SEEDED.find((s) => s.id === id)!.closestSolfeggio;
 const tally = (xs: readonly string[]) => xs.reduce((m: Record<string, number>, x) => ((m[x] = (m[x] ?? 0) + 1), m), {});
 const ASSIGN = /^Auto-Distribute Frequencies/;
 
 /** FLEG into this origin's IndexedDB, as an earlier session would have saved it (6 s tones). */
-async function seedFleg(page: Page): Promise<void> {
+async function seedFleg(page: Page, library: any[] = SEEDED): Promise<void> {
   await page.goto('/manifest.json');
   await page.evaluate(async (lib) => {
     const db: IDBDatabase = await new Promise((resolve, reject) => {
@@ -71,7 +80,7 @@ async function seedFleg(page: Page): Promise<void> {
     await put('meta', lib);
     await put('playlist-state', [{ key: 'current', playlistOrder: lib.map((s: any) => s.id), originalOrder: lib.map((s: any) => s.id), currentSongIndex: -1, loShuWalkMode: null, selectedSolfeggio: 528, savedAt: Date.now() }]);
     db.close();
-  }, SEEDED);
+  }, library);
 }
 
 /** From the next load on: decodeAudioData calls (window.__decodes) and IndexedDB puts into 'meta' (window.__metaPuts). */
@@ -88,7 +97,7 @@ async function countDecodesAndMetaPuts(page: Page): Promise<void> {
 }
 
 /** FLEG seeded, then the app in `layout` (the classic engine: no output question), the library restored. */
-async function openFleg(page: Page, layout: 'classic' | 'new'): Promise<string[]> {
+async function openFleg(page: Page, layout: 'classic' | 'new', library: any[] = SEEDED): Promise<string[]> {
   const dialogs = watchNativeDialogs(page);
   await page.addInitScript(({ layout, keys }) => {
     try {
@@ -105,11 +114,11 @@ async function openFleg(page: Page, layout: 'classic' | 'new'): Promise<string[]
     const pause = HTMLMediaElement.prototype.pause;
     HTMLMediaElement.prototype.pause = function (this: HTMLMediaElement) { w.__pauseCount++; return pause.call(this); };
   }, { layout, keys: { engine: LAYER_ENGINE_KEY, output: LAYER_OUTPUT_KEY, layout: LAYOUT_KEY } });
-  await seedFleg(page);
+  await seedFleg(page, library);
   await page.goto('/');
   if (layout === 'new') await acceptDisclaimerNew(page);
   else await acceptDisclaimer(page);
-  await expect.poll(async () => (await libraryState(page)).libraryIds.length, { message: 'FLEG restores', timeout: 60_000 }).toBe(FLEG.length);
+  await expect.poll(async () => (await libraryState(page)).libraryIds.length, { message: 'FLEG restores', timeout: 60_000 }).toBe(library.length);
   return dialogs;
 }
 
@@ -129,38 +138,40 @@ test.beforeEach(async ({ page, viewport }) => {
 });
 
 test.describe('a legacy library (classic, and the new layout to play)', () => {
-  test('1. Assign on a legacy library: Deep Scan’s crystals kept or put back, every other track placed as planned, the notice; a second press writes nothing; a reload keeps the crystals and their origins', async ({ page }) => {
+  test('1. Assign on a legacy library: every track spread over all 27 crystals as planned (v16.7.1), the notice; a second press writes nothing; a reload keeps the crystals and their origins', async ({ page }) => {
     test.setTimeout(240_000);
     await countDecodesAndMetaPuts(page);
     const dialogs = await openFleg(page, 'classic');
     const s0 = await libraryState(page);
     expect(tally(s0.origins), 'FLEG as its history left it').toEqual({ 'scan-replaced': 90, assigned: 110, scan: 10, none: 20 });
+    expect(PLAN.spread, 'the plan moves scanned tracks off Deep Scan’s crystal').toBeGreaterThan(0);
     await page.locator('aside').getByRole('button', { name: ASSIGN }).click();
-    await expect.poll(async () => tally((await libraryState(page)).origins), { message: 'after: 100 scan, 130 assigned', timeout: 15_000 }).toEqual({ scan: 100, assigned: 130 });
+    await expect.poll(async () => tally((await libraryState(page)).origins), { message: 'after: as the spread says', timeout: 15_000 }).toEqual(AFTER_ORIGINS);
     const s1 = await libraryState(page);
     expect(asPlanned(s1), 'every crystal as planAssign says').toEqual([]);
+    expect(ALL_CRYSTALS.filter((f) => !s1.crystals.includes(f)), 'every one of the 27 crystals has a track').toEqual([]);
     expect(s1.scanned.every(Boolean), 'every track playback-ready (harmonicFreq)').toBe(true);
     await expect(page.getByText(assignDoneText(PLAN), { exact: true }), 'the notice').toBeVisible();
     // The save settles (a debounced meta save), then a second press: nothing to do, nothing written.
-    await expect.poll(() => storedSources(page), { message: 'the meta save', timeout: 15_000 }).toEqual({ assigned: 130, scan: 90, undefined: 10 });
+    await expect.poll(() => storedSources(page), { message: 'the meta save', timeout: 15_000 }).toEqual(AFTER_STORED);
     await page.waitForTimeout(2500);
     const puts = await page.evaluate(() => (window as any).__metaPuts);
     await page.locator('aside').getByRole('button', { name: ASSIGN }).click();
-    await expect(page.getByText('Every track already has its crystal (100 from Deep Scan, 130 assigned).', { exact: true })).toBeVisible();
+    await expect(page.getByText('Every track is already spread over all 27 crystals.', { exact: true })).toBeVisible();
     await page.waitForTimeout(3500);
     expect(await page.evaluate(() => (window as any).__metaPuts) - puts, 'no meta write after the second press').toBe(0);
     expect((await libraryState(page)).crystals, 'the crystals are the same').toEqual(s1.crystals);
-    // A reload: the same crystals and origins (crystalSource stored where Assign wrote it, derived for the 10 untouched).
+    // A reload: the same crystals and origins (crystalSource stored where Assign wrote it).
     await page.reload();
     await acceptDisclaimer(page);
     await expect.poll(async () => (await libraryState(page)).libraryIds.length, { timeout: 60_000 }).toBe(FLEG.length);
     const s2 = await libraryState(page);
-    expect([s2.crystals, tally(s2.origins)], 'after the reload').toEqual([s1.crystals, { scan: 100, assigned: 130 }]);
+    expect([s2.crystals, tally(s2.origins)], 'after the reload').toEqual([s1.crystals, AFTER_ORIGINS]);
     // The restored tracks carry the field: the next save (a play rewrites every meta record) stores it again.
     const putsBefore = await page.evaluate(() => (window as any).__metaPuts);
     await page.locator('aside').getByText(s2.libraryNames[0], { exact: true }).first().click();
     await expect.poll(() => page.evaluate(() => (window as any).__metaPuts), { message: 'a meta save after the reload', timeout: 15_000 }).toBeGreaterThan(putsBefore + 200);
-    await expect.poll(() => storedSources(page), { message: 'and it keeps crystalSource', timeout: 15_000 }).toEqual({ assigned: 130, scan: 90, undefined: 10 });
+    await expect.poll(() => storedSources(page), { message: 'and it keeps crystalSource', timeout: 15_000 }).toEqual(AFTER_STORED);
     expect(dialogs).toEqual([]);
   });
 
@@ -179,7 +190,7 @@ test.describe('a legacy library (classic, and the new layout to play)', () => {
     expect(before.scanned.slice(i, i + 3), 'no harmonicFreq before Assign').toEqual([false, false, false]);
     await page.getByTestId('health-crystals-action').click();
     await page.getByRole('alertdialog', { name: 'Assign crystals?', exact: true }).getByRole('button', { name: 'Assign', exact: true }).click();
-    await expect.poll(async () => tally((await libraryState(page)).origins), { timeout: 15_000 }).toEqual({ scan: 100, assigned: 130 });
+    await expect.poll(async () => tally((await libraryState(page)).origins), { timeout: 15_000 }).toEqual(AFTER_ORIGINS);
     const s = await libraryState(page);
     expect(s.origins.slice(i, i + 3), 'now assigned').toEqual(['assigned', 'assigned', 'assigned']);
     const name = s.libraryNames[i];
@@ -204,7 +215,7 @@ test.describe('a legacy library (classic, and the new layout to play)', () => {
     test.setTimeout(180_000);
     const dialogs = await openFleg(page, 'classic');
     await page.locator('aside').getByRole('button', { name: ASSIGN }).click();
-    await expect.poll(async () => tally((await libraryState(page)).origins), { timeout: 15_000 }).toEqual({ scan: 100, assigned: 130 });
+    await expect.poll(async () => tally((await libraryState(page)).origins), { timeout: 15_000 }).toEqual(AFTER_ORIGINS);
     await addFiles(page, [{ name: 'later-1.wav', mimeType: 'audio/wav', buffer: toneWav(3, 300) }, { name: 'later-2.wav', mimeType: 'audio/wav', buffer: toneWav(3, 360) }]);
     await expect.poll(async () => (await libraryState(page)).libraryIds.length, { timeout: 20_000 }).toBe(FLEG.length + 2);
     const before = await libraryState(page);
@@ -214,7 +225,8 @@ test.describe('a legacy library (classic, and the new layout to play)', () => {
     await expect(page.locator('aside').getByRole('button', { name: /^Deep Scan/ })).toHaveAttribute('title', 'Start Deep Scan (slow)', { timeout: 60_000 }); // v16.6 (F4)
     const after = await libraryState(page);
     const t2 = tally(after.origins);
-    expect([t2.assigned, (t2.scan ?? 0) + (t2['scan-failed'] ?? 0)], 'the 130 assigned untouched; the 2 imports scanned').toEqual([130, 102]);
+    // v16.7.1: the spread's assigned tracks (130 placed, and the scanned ones it moved, their reading kept) untouched.
+    expect([t2.assigned, (t2.scan ?? 0) + (t2['scan-failed'] ?? 0)], 'the assigned untouched; the 2 imports scanned').toEqual([AFTER_ORIGINS.assigned, AFTER_ORIGINS.scan + 2]);
     const assignedIds = before.libraryIds.filter((_, i) => before.origins[i] === 'assigned');
     expect(assignedIds.map((id) => after.crystals[after.libraryIds.indexOf(id)]), 'their crystals unchanged').toEqual(assignedIds.map((id) => before.crystals[before.libraryIds.indexOf(id)]));
     // Pressed again: nothing left in its scope, and it says why, without claiming the assigned tracks are scanned.
@@ -286,7 +298,7 @@ test.describe('phone, the new layout', () => {
     const replaced = s0.libraryNames.find((n, i) => s0.origins[i] === 'scan-replaced' && scanCrystalChanged(byName(n)))!;
     const reStored = s0.libraryNames.find((n, i) => s0.origins[i] === 'scan-replaced' && !scanCrystalChanged(byName(n)))!;
     expect(await crystalNote(page, nameOf('scan'))).toBe('From Deep Scan. An assigned crystal, not a measured pitch.');
-    expect(await crystalNote(page, replaced)).toBe("Deep Scan's crystal was replaced by an older Auto-Distribute; Assign crystals puts it back. An assigned crystal, not a measured pitch.");
+    expect(await crystalNote(page, replaced)).toBe("Deep Scan's crystal was replaced by an older Auto-Distribute. An assigned crystal, not a measured pitch.");
     expect(await crystalNote(page, reStored), 'Deep Scan’s crystal, re-stored').toBe('From Deep Scan. An assigned crystal, not a measured pitch.');
     expect(await crystalNote(page, nameOf('assigned'))).toBe('Assigned, not scanned yet. An assigned crystal, not a measured pitch.');
     // Assign asks first (crystals tracks have would change), with the plan's counts; Cancel changes nothing.
@@ -307,11 +319,14 @@ test.describe('phone, the new layout', () => {
     await expect(healthAction(page, 'scan'), 'nothing left in Scan’s default scope').toHaveCount(0);
     await expect(healthLine(page, 'scan-assigned')).toHaveText('Also scan the 130 assigned tracks (about 5 h 25 min)');
     expect(asPlanned(await libraryState(page)), 'every crystal as planned').toEqual([]);
-    expect(await crystalNote(page, replaced), 'the put-back crystal is Deep Scan’s again').toBe('From Deep Scan. An assigned crystal, not a measured pitch.');
+    // v16.7.1: a scanned track the spread moved says so (and counts as scanned: "100 of 230 scanned" above).
+    const spreadName = s0.libraryNames.find((_, k) => spreadFromScan(AFTER[k]))!;
+    expect(AFTER_READ, 'Node: every measured track still read by Deep Scan').toBe(100);
+    expect(await crystalNote(page, spreadName), 'a spread track').toBe("Spread by Assign crystals; Deep Scan's own reading is kept. An assigned crystal, not a measured pitch.");
     expect(dialogs).toEqual([]);
   });
 
-  test('5. fewer than 27 tracks: Assign gives three tones three crystals, the lowest empty ones, without asking; then the card only informs (no Assign it couldn’t use)', async ({ page }) => {
+  test('5. fewer than 27 tracks: Assign gives three tones three crystals, one in each range (v16.7.1: the spread’s order), without asking; then the card only informs (no Assign it couldn’t use)', async ({ page }) => {
     test.setTimeout(150_000);
     const dialogs = await openSeededNewLayout(page, 3, { crystals: 'none' });
     await phoneSize(page);
@@ -319,7 +334,7 @@ test.describe('phone, the new layout', () => {
     await expect(healthLine(page, 'crystals')).toHaveText('3 of 3 tracks have none');
     await healthAction(page, 'crystals').click();
     await expect(page.getByTestId('assign-dialog'), 'no question: only new crystals').toHaveCount(0);
-    await expect.poll(async () => [...(await libraryState(page)).crystals].sort((a, b) => (a ?? 0) - (b ?? 0)), { timeout: 10_000 }).toEqual([174, 285, 396]);
+    await expect.poll(async () => [...(await libraryState(page)).crystals].sort((a, b) => (a ?? 0) - (b ?? 0)), { timeout: 10_000 }).toEqual([...SPREAD_ORDER.slice(0, 3)].sort((a, b) => a - b));
     expect((await libraryState(page)).origins).toEqual(['assigned', 'assigned', 'assigned']);
     await expect(healthLine(page, 'crystals')).toHaveText('All 3 tracks have one');
     await expect(page.getByTestId('health-crystals')).toContainText('24 crystals have no track.');
@@ -329,46 +344,41 @@ test.describe('phone, the new layout', () => {
 });
 
 test.describe('a legacy library, after its first Assign', () => {
-  test('6. decision 5: an import then Assign places only the new track (0 existing crystals move); a delete then Assign writes nothing', async ({ page }) => {
+  test('6. v16.7.1: an import then Assign spreads again with the new track (every crystal keeps a track); a second press writes nothing', async ({ page }) => {
     test.setTimeout(240_000);
     await countDecodesAndMetaPuts(page);
     const dialogs = await openFleg(page, 'classic');
     await page.locator('aside').getByRole('button', { name: ASSIGN }).click();
-    await expect.poll(async () => tally((await libraryState(page)).origins), { timeout: 15_000 }).toEqual({ scan: 100, assigned: 130 });
-    const s1 = await libraryState(page);
-    // +1 import, then Assign: only the new track is placed; no question in classic either way.
+    await expect.poll(async () => tally((await libraryState(page)).origins), { timeout: 15_000 }).toEqual(AFTER_ORIGINS);
+    // +1 import, then Assign: the spread takes the new track in (v16.7.1: every press spreads every track); no question
+    // in classic. (v15.8's "a delete then Assign writes nothing" was Keep's rule: a spread re-places the rest.)
     await addFiles(page, [{ name: 'later-x.wav', mimeType: 'audio/wav', buffer: toneWav(3, 300) }]);
     await expect.poll(async () => (await libraryState(page)).libraryIds.length, { timeout: 20_000 }).toBe(FLEG.length + 1);
     await page.waitForTimeout(3000); // the import's saves settle
     await page.locator('aside').getByRole('button', { name: ASSIGN }).click();
     await expect.poll(async () => { const s = await libraryState(page); return s.crystals[s.libraryNames.indexOf('later-x')]; }, { message: 'the new track gets a crystal', timeout: 15_000 }).toBeGreaterThan(0);
     const s2 = await libraryState(page);
-    const moved = s1.libraryIds.filter((id, i) => s2.crystals[s2.libraryIds.indexOf(id)] !== s1.crystals[i]);
-    expect(moved, 'no existing track moves').toEqual([]);
-    await expect(page.getByText(/^Crystals assigned: 1 track got a crystal\. Deep Scan's crystals: 100 kept\. 130 crystals Assign placed before stay\./)).toBeVisible();
-    // A delete, then Assign: nothing to do, nothing written, nothing moves.
-    const victim = s2.libraryNames[0];
-    await rowOf(page, victim).first().getByTitle('Delete song').evaluate((b) => (b as HTMLElement).click());
-    await confirmDelete(page);
-    await expect.poll(async () => (await libraryState(page)).libraryIds.length, { timeout: 15_000 }).toBe(FLEG.length);
-    await page.waitForTimeout(3500); // the delete's saves settle
+    expect(ALL_CRYSTALS.filter((f) => !s2.crystals.includes(f)), 'every crystal still has a track').toEqual([]);
+    await expect(page.getByText(/^Tracks spread over all 27 crystals: (.+, )?1 track got a crystal[,.]/)).toBeVisible();
+    // A second press: nothing to do, nothing written, nothing moves.
+    await page.waitForTimeout(3500); // the Assign's saves settle
     const puts = await page.evaluate(() => (window as any).__metaPuts);
-    const s3 = await libraryState(page);
     await page.locator('aside').getByRole('button', { name: ASSIGN }).click();
-    await expect(page.getByText(/^Every track already has its crystal \(\d+ from Deep Scan, 131 assigned\)\.$/)).toBeVisible();
+    await expect(page.getByText('Every track is already spread over all 27 crystals.', { exact: true })).toBeVisible();
     await page.waitForTimeout(3500);
     expect(await page.evaluate(() => (window as any).__metaPuts) - puts, 'no meta write').toBe(0);
-    expect((await libraryState(page)).crystals, 'nothing moved').toEqual(s3.crystals);
+    expect((await libraryState(page)).crystals, 'nothing moved').toEqual(s2.crystals);
     expect(dialogs).toEqual([]);
   });
 
-  test('7. classic’s words don’t fake a scan: Library diagnostics count Deep Scan’s measurements, the Quick guide and the Guidebook say what Assign does', async ({ page }) => {
+  test('7. classic’s words don’t fake a scan: Library diagnostics count Deep Scan’s measurements (spread tracks too), the Quick guide and the Guidebook say what Assign does', async ({ page }) => {
     test.setTimeout(180_000);
     const dialogs = await openFleg(page, 'classic');
     await page.locator('aside').getByRole('button', { name: ASSIGN }).click();
-    await expect.poll(async () => tally((await libraryState(page)).origins), { timeout: 15_000 }).toEqual({ scan: 100, assigned: 130 });
+    await expect.poll(async () => tally((await libraryState(page)).origins), { timeout: 15_000 }).toEqual(AFTER_ORIGINS);
     await page.getByRole('button', { name: /^Library\s*Diagnostics/ }).click();
     const readout = page.getByRole('dialog', { name: 'Library diagnostics', exact: true });
+    // v16.7.1 (from v16.8): a spread track (its reading kept) is analysed, not assigned.
     await expect(readout).toContainText('Analyzed tracks: 100');
     await expect(readout).toContainText('Unanalyzed tracks: 130 (130 with an assigned crystal)');
     await expect(readout, 'Deep Scan has nothing in its scope: no "Scan N remaining"').not.toContainText('remaining tracks');
@@ -377,12 +387,13 @@ test.describe('a legacy library, after its first Assign', () => {
     await page.getByRole('button', { name: 'Quick guide', exact: true }).click();
     await page.getByRole('heading', { name: 'Welcome to Aetheria' }).waitFor();
     await expect.poll(async () => { if (await page.getByRole('heading', { name: '2. Scan & Distribute' }).isVisible()) return true; await page.getByRole('button', { name: 'Next', exact: true }).click(); return false; }, { message: 'the Quick guide’s second page', timeout: 10_000 }).toBe(true);
-    await expect(page.getByText('Keeps the crystals Deep Scan gave and gives every other song one of the 27 across the GUT, HEART, and HEAD ranges, empty ones first.')).toBeVisible();
+    await expect(page.getByText("Spreads every song, scanned ones too, over the 27 crystals across the GUT, HEART, and HEAD ranges in turn. Deep Scan's own reading stays with each scanned song.")).toBeVisible();
     await expect(page.getByText('Assigns every song to its closest Aetheria frequency')).toHaveCount(0);
     await page.getByText('Quick Guide', { exact: true }).locator('xpath=..').getByRole('button').first().click();
     // The Guidebook's quick start.
     await page.getByRole('button', { name: /The Guidebook/ }).click();
-    await expect(page.getByText('songs Deep Scan scanned keep their crystal, and every other song is given one of the 27 Aetheria frequencies')).toHaveCount(1);
+    await expect(page.getByText('every song, scanned ones too, is spread over the 27 Aetheria frequencies across the GUT, HEART and HEAD ranges')).toHaveCount(1);
+    await expect(page.getByText('songs Deep Scan scanned keep their crystal')).toHaveCount(0);
     await expect(page.getByText('the player analyzes your music and assigns each song to its closest Aetheria frequency')).toHaveCount(0);
     expect(dialogs).toEqual([]);
   });
@@ -404,7 +415,7 @@ test.describe('v16.3, Assign without the per-track console lines', () => {
       const m = records.find((r) => r.id === id)!;
       return { id: m.id, name: m.name, duration: m.duration ?? undefined } as any;
     });
-    const plan = quietly(() => planAssign(songs));
+    const plan = quietly(() => planAssign(songs, 'spread'));
     expect(plan.patches.size, 'every tone gets a crystal').toBe(60);
     const lines = countConsole(page, 'Analyzing frequency');
     const anyLog = countConsole(page, '');
@@ -416,6 +427,55 @@ test.describe('v16.3, Assign without the per-track console lines', () => {
     await page.waitForTimeout(500);
     expect(lines(), 'no "Analyzing frequency" line').toBe(0);
     test.info().annotations.push({ type: 'console lines during the Assign (all kinds)', description: String(anyLog()) });
+    expect(dialogs).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// v16.7.1 (the hotfix): "we do need auto distribute working like it did". A library Deep Scan read in full, bunched on
+// three GUT crystals (HEART and HEAD empty): classic's Auto-Distribute spreads it over all 27 crystals and the three
+// ranges, as planAssign(lib, 'spread') says, and a reload (after the stored meta has it) keeps it.
+// ---------------------------------------------------------------------------------------------------------------
+const BUNCH = [174, 396, 528];
+const BUNCHED: any[] = Array.from({ length: 36 }, (_, i) => {
+  const hf = BUNCH[i % 3] + 1.5 + (i % 4) * 0.25; // a reading near its crystal (Deep Scan's crystal is scanCrystalOf it)
+  const cc = quietly(() => scanCrystalOf(hf));
+  return { id: `1771700000000-b${String(i).padStart(2, '0')}`, name: `tone-${String(i + 1).padStart(2, '0')}`, duration: 200, harmonicFreq: hf, closestSolfeggio: cc, harmonicDeviation: Math.abs(hf - cc), crystalSource: 'scan', isAetheriaCandidate: false };
+});
+const BUNCHED_PLAN: AssignPlan = quietly(() => planAssign(BUNCHED, 'spread'));
+const rangesOf = (crystals: readonly (number | null)[]) => (['GUT', 'HEART', 'HEAD'] as const).filter((r, k) => [GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS][k].some((f) => crystals.includes(f)));
+
+test.describe('v16.7.1, Auto-Distribute after a full Deep Scan', () => {
+  test('S1. a fully scanned library bunched on 3 GUT crystals: Auto-Distribute spreads it so every one of the 27 crystals and all 3 ranges have tracks; Deep Scan’s readings kept; a reload keeps it', async ({ page }) => {
+    test.setTimeout(180_000);
+    expect(new Set(BUNCHED.map((s) => s.closestSolfeggio)).size, 'Node: the fixture bunches on 3 crystals').toBe(3);
+    const dialogs = await openFleg(page, 'classic', BUNCHED);
+    const s0 = await libraryState(page);
+    expect([new Set(s0.crystals).size, rangesOf(s0.crystals), tally(s0.origins)], 'before: 3 crystals, the GUT range only, every track scanned').toEqual([3, ['GUT'], { scan: 36 }]);
+    await page.locator('aside').getByRole('button', { name: ASSIGN }).click();
+    await expect.poll(async () => { const c = (await libraryState(page)).crystals; return ALL_CRYSTALS.filter((f) => !c.includes(f)).length; }, { message: 'every one of the 27 crystals has a track', timeout: 15_000 }).toBe(0);
+    const s1 = await libraryState(page);
+    expect(rangesOf(s1.crystals), 'all 3 ranges have tracks').toEqual(['GUT', 'HEART', 'HEAD']);
+    expect(s1.crystals, 'as planAssign(lib, "spread") says').toEqual(s1.libraryIds.map((id) => BUNCHED_PLAN.patches.get(id)?.closestSolfeggio ?? BUNCHED.find((s) => s.id === id)!.closestSolfeggio));
+    await expect(page.getByText(assignDoneText(BUNCHED_PLAN), { exact: true }), 'the notice').toBeVisible();
+    expect(assignDoneText(BUNCHED_PLAN)).toMatch(/^Tracks spread over all 27 crystals: \d+ scanned tracks moved off Deep Scan's crystal\. Every crystal has a track/);
+    // The stored meta has it (the debounced save), each track's reading kept, before the reload.
+    const want = new Map(s1.libraryIds.map((id, i) => [id, s1.crystals[i]]));
+    await expect.poll(async () => (await metaRecords(page)).filter((m) => m.closestSolfeggio !== want.get(m.id)).length, { message: 'the meta save', timeout: 20_000 }).toBe(0);
+    const stored = await metaRecords(page);
+    expect(stored.map((m) => m.harmonicFreq), "Deep Scan's readings kept").toEqual(stored.map((m) => BUNCHED.find((s) => s.id === m.id)!.harmonicFreq));
+    await page.reload();
+    await acceptDisclaimer(page);
+    await expect.poll(async () => (await libraryState(page)).libraryIds.length, { timeout: 60_000 }).toBe(BUNCHED.length);
+    const s2 = await libraryState(page);
+    expect([s2.libraryIds, s2.crystals], 'after the reload: the same crystals').toEqual([s1.libraryIds, s1.crystals]);
+    expect([ALL_CRYSTALS.filter((f) => !s2.crystals.includes(f)), rangesOf(s2.crystals)], 'after the reload: all 27, all 3 ranges').toEqual([[], ['GUT', 'HEART', 'HEAD']]);
+    // Classic's diagnostics still count all 36 as read by Deep Scan (a spread track keeps its reading).
+    await page.getByRole('button', { name: /^Library\s*Diagnostics/ }).click();
+    const readout = page.getByRole('dialog', { name: 'Library diagnostics', exact: true });
+    await expect(readout).toContainText('Analyzed tracks: 36');
+    await expect(readout).toContainText('Unanalyzed tracks: 0');
+    await readout.getByRole('button', { name: 'Close', exact: true }).click();
     expect(dialogs).toEqual([]);
   });
 });

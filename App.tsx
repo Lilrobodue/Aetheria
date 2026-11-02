@@ -78,7 +78,7 @@ import { countCommit, reportPassWork } from './utils/perfHud';
 // v15.8: the mix recipes (pure; selection copied verbatim from here) and the crystal data they share.
 import { gutAlignment, heartAlignment, headAlignment, fullAlignment, crystalSetMix, goldenRatioMix, sequence111, sourceField, ultimateAlignment, loShuWalk } from './utils/mix/recipes';
 import type { MixInput, MixResult } from './utils/mix/recipes';
-import { planAssign, assignDoneText, assignNothingText, deepScanQueue, crystalOrigin } from './utils/mix/distribution';
+import { planAssign, assignDoneText, assignNothingText, deepScanQueue, crystalOrigin, readByDeepScan, spreadFromScan } from './utils/mix/distribution';
 import { getHarmonicSolfeggio, PRESETS } from './utils/crystalData';
 // v15.9: the mix catalogue (names, sub-lines, counts) and the Undo toast's words.
 import { mixStartText } from './utils/mix/catalog';
@@ -967,7 +967,7 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             content: (
                 <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
                     <li className="flex gap-2">🔍 <strong className="text-gold-200">Deep Scan:</strong> Click this in the sidebar. It reads each song and gives it a crystal (slow, and optional).</li>
-                    <li className="flex gap-2">🎯 <strong className="text-gold-200">Auto-Distribute Frequencies:</strong> Keeps the crystals Deep Scan gave and gives every other song one of the 27 across the GUT, HEART, and HEAD ranges, empty ones first.</li>
+                    <li className="flex gap-2">🎯 <strong className="text-gold-200">Auto-Distribute Frequencies:</strong> Spreads every song, scanned ones too, over the 27 crystals across the GUT, HEART, and HEAD ranges in turn. Deep Scan's own reading stays with each scanned song.</li>
                     <li className="flex gap-2">⏳ <strong className="text-gold-200">One-time:</strong> Once assigned, your library is ready for any listening mode.</li>
                 </ul>
             )
@@ -5284,7 +5284,7 @@ const App: React.FC = () => {
     let analysisInfo = `🎵 EXTENDED OCTAVE RANGE ANALYSIS\n\n`;
     analysisInfo += `📀 Track: "${currentSong.name}"\n\n`;
     
-    if (currentSong.harmonicFreq && crystalOrigin(currentSong) === 'assigned') {
+    if (currentSong.harmonicFreq && crystalOrigin(currentSong) === 'assigned' && !spreadFromScan(currentSong)) {
       // v15.8: an assigned crystal is not a detection; say so instead of a "Detected" report.
       analysisInfo += `🎯 Crystal: ${currentSong.closestSolfeggio} Hz, assigned (not scanned).
 
@@ -5294,7 +5294,8 @@ Run Deep Scan to analyse this track.
       const report = getFrequencyAnalysisReport(
         currentSong.harmonicFreq,
         currentSong.closestSolfeggio || 396,
-        currentSong.harmonicDeviation || 0
+        // v16.7.1 (from v16.8): a spread track's deviation is its mark; the report gets the reading's own distance.
+        spreadFromScan(currentSong) ? Math.abs(currentSong.harmonicFreq - (currentSong.closestSolfeggio || 396)) : currentSong.harmonicDeviation || 0
       );
       analysisInfo += report;
       
@@ -5348,9 +5349,10 @@ Run Deep Scan to analyse this track.
     const totalTracks = originalPlaylist.length;
     // v15.8: analysed = measured by Deep Scan (an assigned crystal is not a scan); "Scan N remaining" names what the
     // Deep Scan button does (deepScanQueue's default scope).
-    const analyzedTracks = originalPlaylist.filter(s => { const o = crystalOrigin(s); return o === 'scan' || o === 'scan-replaced'; }).length;
+    // v16.7.1 (from v16.8): a spread track (its reading kept) counts as analysed, not as assigned.
+    const analyzedTracks = originalPlaylist.filter(s => readByDeepScan(s)).length;
     const unanalyzedTracks = totalTracks - analyzedTracks;
-    const assignedTracks = originalPlaylist.filter(s => crystalOrigin(s) === 'assigned').length;
+    const assignedTracks = originalPlaylist.filter(s => crystalOrigin(s) === 'assigned' && !spreadFromScan(s)).length;
     const scanQueueTracks = deepScanQueue(originalPlaylist).length;
     
     // Count tracks by regime
@@ -7149,10 +7151,11 @@ registerProcessor('wav-capture', WavCapture);
       showStatusToast('Auto-Distribute is unavailable while Deep Scan runs.');
       return;
     }
-    // v15.8: Assign crystals. Deep Scan's crystals stay (one an older Auto-Distribute replaced is put back); every other
-    // track gets a crystal, empty crystals first, the same one on every press (utils/mix/distribution.ts planAssign).
-    // Only the crystal fields change, by id, in the library and the play order; assigned tracks stay unscanned.
-    const plan = planAssign(originalPlaylist);
+    // v16.7.1: every press spreads (v16.8's planAssign(lib, 'spread')): every track, scanned ones too, over all 27
+    // crystals, the GUT, HEART and HEAD ranges in turn, the same result on every press. A scanned track moved off Deep
+    // Scan's crystal keeps its reading (harmonicFreq) and is marked (crystalSource 'assigned', harmonicDeviation
+    // SPREAD_MARK + its distance). Only the crystal fields change, by id, in the library and the play order.
+    const plan = planAssign(originalPlaylist, 'spread');
     if (plan.patches.size === 0) {
       showStatusToast(assignNothingText(plan));
       return;
@@ -10187,7 +10190,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.7</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.7.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

@@ -18,8 +18,8 @@ export const PLACES: Readonly<Record<PlaceKey, { classic: string; new: string }>
   },
   // P2: step 4
   assign: {
-    classic: 'Click "Auto-Distribute Frequencies" — songs Deep Scan scanned keep their crystal, and every other song is given one of the 27 Aetheria frequencies',
-    new: 'In Library’s health card, tap Assign — songs Deep Scan scanned keep their crystal, and every other song is given one of the 27',
+    classic: 'Click "Auto-Distribute Frequencies" — every song, scanned ones too, is spread over the 27 Aetheria frequencies across the GUT, HEART and HEAD ranges',
+    new: 'In Library’s health card, tap Assign — every song, scanned ones too, is spread over the 27 crystals across the GUT, HEART and HEAD ranges',
   },
   // P3: step 5
   modes: {

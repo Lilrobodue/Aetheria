@@ -25,6 +25,7 @@ import {
   SOLFEGGIO_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, LO_SHU_WALK_COMBINED, LO_SHU_WALK_OUROBOROS, OUROBOROS_PHASES, SOURCE_FREQ,
 } from '../crystalData.ts';
 import type { LoShuWalkMode } from '../crystalData.ts';
+import { spreadFromScan } from './distribution.ts';
 
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced' | 'expert';
 
@@ -692,8 +693,9 @@ export function sourceField(input: MixInput): MixResult {
       const highQualityTracks = pure2178Tracks.filter(s =>
         ((usingGeometry ? s.fractalAnalysis?.sacredGeometryAlignment : s.fractalAnalysis?.goldenRatioAlignment) || 0) > 0.3).length;
 
+      // v16.8: a spread track stores a marked deviation (distribution SPREAD_MARK); its true distance is |reading − crystal|.
       const avgAccuracy = pure2178Tracks.reduce((sum, song) =>
-        sum + (song.harmonicDeviation || 0), 0) / pure2178Tracks.length;
+        sum + (spreadFromScan(song) ? Math.abs((song.harmonicFreq as number) - 2178) : (song.harmonicDeviation || 0)), 0) / pure2178Tracks.length;
 
       r.notices.push({
         text: `Pure 2178Hz SOURCE Field Filter activated! ${pure2178Tracks.length} tracks found. Average ${rankedBy} alignment: ${(avgRankScore * 100).toFixed(1)}%, ${highQualityTracks} high-alignment tracks, avg accuracy: ±${avgAccuracy.toFixed(1)}Hz from pure 2178Hz.${usingGeometry ? '' : ' (Re-scan to rank by sacred geometry.)'}`,

@@ -8,6 +8,13 @@
 //   scanCrystalChanged(s)  an older Auto-Distribute put another crystal on a scanned track (Assign puts it back)
 //   planAssign(lib)        the patches Assign applies by id, and the counts its dialog and notice show
 //   assign…Text(plan)      the confirmation, the notice after it, and the toast when there is nothing to do
+//   v16.8 (decision 6):    planAssign(lib, 'spread' | 'restore'), assignChoice(lib) (whether Assign asks first) and
+//                          assignChoiceText(choice) (the question's words), spreadFromScan / spreadAway (see below)
+//   v16.7.1 (hotfix):      the spread taken from v16.8 alone: Auto-Distribute (classic) and Assign crystals (the new
+//                          layout) run planAssign(lib, 'spread') on every press (App.tsx autoDistribute), so a scanned
+//                          library spreads over all 27 crystals again. 'keep' (the rule below) is unchanged, byte for
+//                          byte (check-mix-golden); assignChoice / assignChoiceText and 'restore' are not used by the app
+//                          in v16.7.1 (spread.check keeps them checked for v16.8).
 //
 // What Assign does (decisions 2026-10-26, 5 and 6 after the review): Deep Scan's crystals stay, and one an older
 // Auto-Distribute replaced is put back from the track's own stored measurement. A crystal Assign placed before (recorded
@@ -70,6 +77,8 @@ export function crystalOrigin(s: CrystalFields): CrystalOrigin {
  *  placed it (it is then 'assigned'). */
 export function needsDeepScan(s: CrystalFields): boolean {
   if (!s.harmonicFreq) return true;
+  // v16.8: a spread scanned track is Assign's, but Deep Scan has read it (its harmonicFreq is the reading): not again.
+  if (spreadFromScan(s)) return false;
   const o = crystalOrigin(s);
   return o === 'assigned' || o === 'none';
 }
@@ -181,6 +190,10 @@ export interface AssignPlan {
   perCrystal: number[];          // after, in ALL_CRYSTALS order
   emptyBefore: number;           // crystals with no track before
   emptyAfter: number;
+  /** v16.8: 'spread' or 'restore' (absent: Assign's own rule, 'keep'). */
+  mode?: AssignMode;
+  /** v16.8, a spread: scanned tracks moved off Deep Scan's crystal (Assign's from then on, their reading kept). */
+  spread?: number;
 }
 
 /**
@@ -188,7 +201,9 @@ export interface AssignPlan {
  * crystals Assign placed before (anchors). Placed: the tracks with no crystal, failed scans and an older
  * Auto-Distribute's placeholders, empty crystals first, then balanced.
  */
-export function planAssign(library: readonly AssignSong[]): AssignPlan {
+export function planAssign(library: readonly AssignSong[], mode: AssignMode = 'keep'): AssignPlan {
+  // v16.8 (decision 6): the spread and its way back are their own plans; Assign's own rule below is unchanged.
+  if (mode === 'spread' || mode === 'restore') return spreadOrRestore(library, mode);
   const seen = new Set<string>();
   const lib: AssignSong[] = [];
   for (const s of library) if (!seen.has(s.id)) { seen.add(s.id); lib.push(s); }
@@ -272,6 +287,274 @@ export function planAssign(library: readonly AssignSong[]): AssignPlan {
   };
 }
 
+
+// ---- v16.8, decision 6: Auto-Distribute after scanning ("Ask me, offer both") ----------------------------------------
+//
+// Deep Scan's reading is not the music's pitch, so a fully scanned library can bunch into a few crystals, which today's
+// Assign keeps. When it would (assignChoice), Assign asks, in both layouts, between keeping Deep Scan's crystals (the
+// rule above, unchanged: planAssign(lib) or planAssign(lib, 'keep')) and spreading every track over all 27 crystals
+// (planAssign(lib, 'spread')). A spread track is recorded as Assign's ('assigned'), so a later Assign keeps it where it
+// is (an anchor, never "put back" as 'scan-replaced' would be), and keeps Deep Scan's measurement as data: its
+// harmonicFreq stays the scan's, unlike Assign's own placements, whose harmonicFreq is their crystal (the playback-ready
+// marker). So "spread from a scan" is exactly: recorded 'assigned' with a harmonicFreq that is not its crystal. The way
+// back, planAssign(lib, 'restore'), gives each of those Deep Scan's crystal again (as the 'scan-replaced' path does).
+
+export type AssignMode = 'keep' | 'spread' | 'restore';
+
+/** A scanned track a spread placed (on any crystal): recorded as Assign's, its harmonicFreq still Deep Scan's reading. */
+export function spreadFromScan(s: CrystalFields): boolean {
+  return (
+    s.crystalSource === 'assigned' &&
+    Number.isFinite(s.harmonicFreq) &&
+    (s.harmonicFreq as number) > 0 &&
+    !!s.closestSolfeggio &&
+    Number.isFinite(s.harmonicDeviation) &&
+    (s.harmonicDeviation as number) >= SPREAD_MARK
+  );
+}
+
+/**
+ * Review 3: the spread's own mark, in a field the library store keeps (harmonicDeviation): SPREAD_MARK plus the distance
+ * from the reading to its new crystal. Assign's own placements store a fit score (well under 100), Deep Scan the
+ * reading's distance (or 999 for "couldn't read"), so recognising a spread track never depends on its reading differing
+ * from its crystal. The mixes that rank by it (lower first) rank a spread track last: it is far from its own reading.
+ */
+export const SPREAD_MARK = 1000;
+
+/** Deep Scan has read it: its crystal kept or put back, or a spread placed it with the reading kept (review 3: counted as
+ *  scanned everywhere: the filters, the health card, classic's readout and diagnostics). */
+export function readByDeepScan(s: CrystalFields): boolean {
+  const o = crystalOrigin(s);
+  return o === 'scan' || o === 'scan-replaced' || spreadFromScan(s);
+}
+
+/** One a spread moved off the crystal Deep Scan gave it (the way back offers to put it back). */
+export function spreadAway(s: CrystalFields): boolean {
+  return spreadFromScan(s) && scanCrystalOf(s.harmonicFreq as number) !== s.closestSolfeggio;
+}
+
+/** Deep Scan measured it (its crystal kept, put back, or spread): a spread scores it from its own reading. */
+function measured(s: CrystalFields): boolean {
+  // Review 3: a reading of 0 (or none) is no reading: such a scan is never spread (see spreadOrRestore).
+  return readByDeepScan(s) && Number.isFinite(s.harmonicFreq) && (s.harmonicFreq as number) > 0;
+}
+
+export type RegimeName = 'GUT' | 'HEART' | 'HEAD';
+const REGIMES: ReadonlyArray<[RegimeName, readonly number[]]> = [['GUT', GUT_CRYSTALS], ['HEART', HEART_CRYSTALS], ['HEAD', HEAD_CRYSTALS]];
+/** A spread fills the crystals with the ranges in turn (GUT, HEART, HEAD, GUT, ...), so 3 tracks reach every range and
+ *  27 every crystal (Assign's own rule fills in ALL_CRYSTALS order, GUT first: unchanged). */
+export const SPREAD_ORDER: readonly number[] = GUT_CRYSTALS.flatMap((g, i) => [g, HEART_CRYSTALS[i], HEAD_CRYSTALS[i]]);
+
+export interface AssignChoice {
+  total: number;
+  /** Keeping Deep Scan's crystals (today's Assign) would leave crystals or ranges with no track. */
+  bunched: boolean;
+  /** Crystals with no track after today's Assign. */
+  emptyCrystals: number;
+  /** Ranges with no track after today's Assign. */
+  emptyRegimes: RegimeName[];
+  /** Tracks a spread moved off Deep Scan's crystal (the way back). */
+  spreadAway: number;
+  /** Assign asks first (bunched; decision 7: never just to offer the way back). */
+  ask: boolean;
+  /** Review 3: badly uneven under Keep (UNEVEN_MIN_TRACKS, UNEVEN_FACTOR), and its fullest and emptiest crystal. */
+  uneven: boolean;
+  heaviest: number;
+  lightest: number;
+  /** Review 3: what Keep also does (the question says so): Deep Scan's crystals put back, and tracks it places. */
+  keepPutBack: number;
+  keepPlaces: number;
+}
+
+/** The crystals' counts after today's Assign, without placing anyone: its rule keeps scans, put-backs and anchors; its
+ *  three rounds give the crystals with fewer than 1, 2, 3 tracks one more each (in ALL_CRYSTALS order) while open tracks
+ *  last; the rest go one by one to a crystal with the fewest. Which tracks go where the scores decide, but not the counts:
+ *  the empty crystals are exactly Assign's, and the counts are Assign's up to which of the fewest gets the next (the same
+ *  multiset; spread.check proves both against planAssign on every fixture). O(n x 27), for the health card's every
+ *  library change. Also the open tracks' count (what Keep places). */
+function keepCoverage(lib: readonly AssignSong[]): { per: number[]; open: number } {
+  const counts = new Map<number, number>(ALL_CRYSTALS.map((f) => [f, 0]));
+  let open = 0;
+  // As planAssign counts: a kept crystal outside the 27 gets a key of its own (and then counts for an anchor's test).
+  const bump = (f: number) => counts.set(f, (counts.get(f) ?? 0) + 1);
+  for (const s of lib) {
+    const o = crystalOrigin(s);
+    if (o === 'scan') bump(s.closestSolfeggio!);
+    else if (o === 'scan-replaced') bump(scanCrystalOf(s.harmonicFreq as number));
+    else if (s.crystalSource === 'assigned' && counts.has(s.closestSolfeggio as number)) bump(s.closestSolfeggio!);
+    else open++;
+  }
+  const placing = open;
+  for (let level = 1; level <= 3; level++) {
+    for (const f of ALL_CRYSTALS) {
+      if (!open) break;
+      if (counts.get(f)! >= level) continue;
+      counts.set(f, counts.get(f)! + 1);
+      open--;
+    }
+  }
+  while (open > 0) {
+    let min = Infinity;
+    let at = ALL_CRYSTALS[0];
+    for (const f of ALL_CRYSTALS) {
+      const c = counts.get(f)!;
+      if (c < min) { min = c; at = f; }
+    }
+    counts.set(at, min + 1);
+    open--;
+  }
+  return { per: ALL_CRYSTALS.map((f) => counts.get(f)!), open: placing };
+}
+
+/** Review 3 (decision 6's "badly uneven"): from 54 tracks (two a crystal on average), Assign also asks when keeping Deep
+ *  Scan's crystals would leave one crystal with 3 times the even share (tracks / 27) or more while another has a third
+ *  of it or less. */
+export const UNEVEN_MIN_TRACKS = 54;
+export const UNEVEN_FACTOR = 3;
+
+/**
+ * v16.8, decision 6: whether Assign asks, and what about. It asks when keeping Deep Scan's crystals would leave a
+ * crystal with no track while the library has 27 tracks or more, or a range (GUT, HEART, HEAD) with no track while it has
+ * 3 or more, with Deep Scan's crystals among the kept (without any, "Keep Deep Scan's crystals" means nothing: a library
+ * nothing scanned is Assign's as it always was). Decision 7: after a spread it does not ask again (nothing bunches; a
+ * press keeps the spread, Assign's anchors); the way back (spreadAway) is the new layout's health line, and classic's
+ * question offers it when it asks. Otherwise nothing changes: Assign runs as it always has.
+ */
+export function assignChoice(library: readonly AssignSong[]): AssignChoice {
+  const seen = new Set<string>();
+  const lib: AssignSong[] = [];
+  for (const s of library) if (s && !seen.has(s.id)) { seen.add(s.id); lib.push(s); }
+  const { per, open } = keepCoverage(lib);
+  const emptyCrystals = per.filter((c) => c === 0).length;
+  const emptyRegimes = REGIMES.filter(([, list]) => list.every((f) => per[ALL_CRYSTALS.indexOf(f)] === 0)).map(([n]) => n);
+  const total = lib.length;
+  const scans = lib.some((s) => {
+    const o = crystalOrigin(s);
+    return o === 'scan' || o === 'scan-replaced';
+  });
+  const share = total / 27;
+  const heaviest = Math.max(...per);
+  const lightest = Math.min(...per);
+  const uneven = total >= UNEVEN_MIN_TRACKS && heaviest >= UNEVEN_FACTOR * share && lightest <= share / UNEVEN_FACTOR;
+  const bunched = scans && ((total >= 27 && emptyCrystals > 0) || (total >= 3 && emptyRegimes.length > 0) || uneven);
+  const away = lib.filter(spreadAway).length;
+  const keepPutBack = lib.filter(scanCrystalChanged).length;
+  return { total, bunched, emptyCrystals, emptyRegimes, spreadAway: away, ask: bunched, uneven, heaviest, lightest, keepPutBack, keepPlaces: open };
+}
+
+/** v16.8: the plan of a spread or a way back (planAssign's modes); the same shape, with the mode and its own counts. */
+function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'restore'): AssignPlan {
+  const seen = new Set<string>();
+  const lib: AssignSong[] = [];
+  for (const s of library) if (!seen.has(s.id)) { seen.add(s.id); lib.push(s); }
+  const before = new Map<number, number>(ALL_CRYSTALS.map((f) => [f, 0]));
+  for (const s of lib) if (s.closestSolfeggio && before.has(s.closestSolfeggio)) before.set(s.closestSolfeggio, before.get(s.closestSolfeggio)! + 1);
+  const counts = new Map<number, number>(ALL_CRYSTALS.map((f) => [f, 0]));
+  const patches = new Map<string, CrystalPatch>();
+  const plan = { kept: 0, restored: 0, anchored: 0, given: 0, moved: 0, movedFailed: 0, unchanged: 0, spread: 0 };
+  /** Only the fields that differ: a second press (or a spread already spread) writes nothing. */
+  const want = (s: AssignSong, w: CrystalPatch) => {
+    const p: CrystalPatch = {};
+    let any = false;
+    for (const k of Object.keys(w) as (keyof CrystalPatch)[]) {
+      if (s[k] !== w[k]) {
+        (p as Record<string, unknown>)[k] = w[k];
+        any = true;
+      }
+    }
+    if (any) patches.set(s.id, p);
+    return any;
+  };
+  if (mode === 'restore') {
+    for (const s of lib) {
+      let c = s.closestSolfeggio;
+      if (spreadFromScan(s)) {
+        const f = s.harmonicFreq as number;
+        c = scanCrystalOf(f);
+        const changed = c !== s.closestSolfeggio;
+        want(s, { closestSolfeggio: c, harmonicDeviation: Math.abs(f - c), crystalSource: 'scan' });
+        if (changed) plan.restored++;
+        else plan.kept++;
+      }
+      if (c !== undefined && counts.has(c)) counts.set(c, counts.get(c)! + 1);
+    }
+  } else {
+    // Every track is open (decision 8: Assign's earlier placements too), but a scan with no usable reading: Assign's own
+    // rule keeps it where it is, and so does a spread (review 3). A measured one is scored from its own reading's crystal;
+    // any other from the old stand-in.
+    const unreadable = (s: AssignSong) => {
+      const o = crystalOrigin(s);
+      return (o === 'scan' || o === 'scan-replaced') && !measured(s);
+    };
+    for (const s of lib) if (unreadable(s) && counts.has(s.closestSolfeggio as number)) counts.set(s.closestSolfeggio!, counts.get(s.closestSolfeggio!)! + 1);
+    const open = lib.filter((s) => !unreadable(s)).map((s) => {
+      const isMeasured = measured(s);
+      const scanCrystal = isMeasured ? scanCrystalOf(s.harmonicFreq as number) : 0;
+      const bestMatch = isMeasured ? scanCrystal : getHarmonicSolfeggio(standInFreq(s), true);
+      return { s, isMeasured, scanCrystal, key: fnv1a('order:' + s.id), scores: new Map(ALL_CRYSTALS.map((f) => [f, compatibility(bestMatch, f)])) };
+    });
+    type Open = (typeof open)[number];
+    const better = (a: Open, b: Open, f: number) => {
+      const d = a.scores.get(f)! - b.scores.get(f)!;
+      return d !== 0 ? d < 0 : a.key !== b.key ? a.key < b.key : a.s.id < b.s.id;
+    };
+    const left = new Set(open);
+    const place = (x: Open, f: number) => {
+      left.delete(x);
+      counts.set(f, counts.get(f)! + 1);
+      const s = x.s;
+      const had = s.closestSolfeggio;
+      if (x.isMeasured) {
+        const hf = s.harmonicFreq as number;
+        if (f === x.scanCrystal) {
+          // Its own Deep Scan crystal: recorded as the scan's.
+          want(s, { closestSolfeggio: f, harmonicDeviation: Math.abs(hf - f), crystalSource: 'scan' });
+          plan.kept++;
+        } else {
+          // Moved off it: Assign's (an anchor from now on), the measurement kept as the track's harmonicFreq, marked.
+          const changed = want(s, { closestSolfeggio: f, harmonicDeviation: SPREAD_MARK + Math.abs(hf - f), crystalSource: 'assigned' });
+          if (had === f && !changed) plan.unchanged++;
+          else plan.spread++;
+        }
+      } else {
+        const changed = want(s, { closestSolfeggio: f, harmonicFreq: f, harmonicDeviation: x.scores.get(f)!, crystalSource: 'assigned' });
+        if (!had) plan.given++;
+        else if (had === f) plan.unchanged++;
+        else if (crystalOrigin(s) === 'scan-failed') plan.movedFailed++;
+        else plan.moved++;
+        void changed;
+      }
+    };
+    for (let level = 1; level <= 3; level++) {
+      for (const f of SPREAD_ORDER) {
+        if (!left.size) break;
+        if (counts.get(f)! >= level) continue;
+        let best: Open | null = null;
+        for (const x of left) if (!best || better(x, best, f)) best = x;
+        if (best) place(best, f);
+      }
+    }
+    const rest = [...left].sort((a, b) => (a.key !== b.key ? a.key - b.key : a.s.id < b.s.id ? -1 : 1));
+    for (const x of rest) {
+      let min = Infinity;
+      for (const f of SPREAD_ORDER) min = Math.min(min, counts.get(f)!);
+      let bestF = SPREAD_ORDER[0], bestScore = Infinity;
+      for (const f of SPREAD_ORDER) {
+        if (counts.get(f) !== min) continue;
+        const sc = x.scores.get(f)!;
+        if (sc < bestScore) { bestScore = sc; bestF = f; }
+      }
+      place(x, bestF);
+    }
+  }
+  const perCrystal = ALL_CRYSTALS.map((f) => counts.get(f)!);
+  return {
+    patches, total: lib.length, ...plan, perCrystal, mode,
+    emptyBefore: ALL_CRYSTALS.filter((f) => before.get(f) === 0).length,
+    emptyAfter: perCrystal.filter((c) => c === 0).length,
+  };
+}
+
 // ---- the words ------------------------------------------------------------------------------------------------------
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 /** Tracks this Assign places (they become assigned, not scanned). */
@@ -279,11 +562,14 @@ const placed = (p: AssignPlan) => p.given + p.moved + p.movedFailed + p.unchange
 
 /** Assign asks first only when crystals that tracks already have would change. */
 export function assignNeedsConfirm(p: AssignPlan): boolean {
+  // v16.7.1: a spread also moves scanned tracks off Deep Scan's crystal (p.spread).
+  if (p.mode === 'spread') return p.moved + p.movedFailed + (p.spread ?? 0) > 0;
   return p.moved + p.movedFailed + p.restored > 0;
 }
 
 /** The confirmation (the new layout's health card), each sentence only when its count is above 0. */
 export function assignConfirmText(p: AssignPlan): { title: string; body: string } {
+  if (p.mode === 'spread') return spreadConfirmText(p);
   const sentences = [
     p.kept > 0 ? 'Tracks Deep Scan placed keep their crystal.' : '',
     p.anchored > 0 ? 'Crystals Assign placed before stay where they are.' : '',
@@ -301,11 +587,15 @@ export function assignConfirmText(p: AssignPlan): { title: string; body: string 
 /** Nothing to change (a second press, or after a delete): the toast. */
 export function assignNothingText(p: AssignPlan): string {
   if (p.total === 0) return 'Your library is empty.';
+  // v16.7.1: "all 27" only when every crystal has a track (a library of fewer than 27 can't fill them all).
+  if (p.mode === 'spread') return p.emptyAfter === 0 ? 'Every track is already spread over all 27 crystals.' : 'Every track is already spread over the crystals.';
+  if (p.mode === 'restore') return "Deep Scan's crystals are already in place.";
   return `Every track already has its crystal (${p.kept} from Deep Scan, ${p.anchored + p.unchanged} assigned).`;
 }
 
 /** What Assign did: the classic notice (the new layout routes it to the status toast). */
 export function assignDoneText(p: AssignPlan): string {
+  if (p.mode === 'spread' || p.mode === 'restore') return assignModeDoneText(p);
   const parts = [
     p.given ? `${plural(p.given, 'track', 'tracks')} got a crystal` : '',
     p.moved + p.movedFailed ? `${plural(p.moved + p.movedFailed, 'placeholder crystal', 'placeholder crystals')} changed` : '',
@@ -321,4 +611,60 @@ export function assignDoneText(p: AssignPlan): string {
     (cab === 27 ? 'CAB-ready: all 27 crystals have 3 or more. ' : `CAB readiness: ${cab}/27 crystals at 3 or more. `) +
     (cabi === 27 ? 'CABI-ready.' : `CABI readiness: ${cabi}/27.`) +
     (placed(p) > 0 ? ' Assigned tracks stay unscanned: Deep Scan can still analyse them.' : '');
+}
+
+// ---- v16.8, decision 6: the question and what a spread or a way back did --------------------------------------------
+const rangeList = (r: readonly string[]) => (r.length === 1 ? `the ${r[0]} range` : `the ${r.slice(0, -1).join(', ')} and ${r[r.length - 1]} ranges`);
+
+/** The question's words (it asks only when bunched): the title, the body, and each choice's label. `o.restore`: also
+ *  offer the way back when tracks were spread away from Deep Scan's crystal (classic's question, decision 7; the new
+ *  layout's way back is its health line), else null. */
+export function assignChoiceText(c: AssignChoice, o: { restore?: boolean } = {}): { title: string; body: string; keep: string; spread: string; restore: string | null } {
+  const restore = o.restore && c.spreadAway > 0 ? "Put Deep Scan's crystals back" : null;
+  // Review 3: the confirmation Assign asks otherwise is skipped when it asks this, so Keep says what it also does.
+  const also = [
+    c.keepPutBack > 0 ? `gives ${plural(c.keepPutBack, 'track', 'tracks')} Deep Scan's crystal back` : '',
+    c.keepPlaces > 0 ? `places ${plural(c.keepPlaces, 'track', 'tracks')} with no crystal or a placeholder` : '',
+  ].filter(Boolean);
+  const sentences = [
+    c.emptyCrystals > 0 ? `Keeping Deep Scan's crystals leaves ${c.emptyCrystals} of the 27 crystals with no track.` : '',
+    c.emptyRegimes.length > 0 ? `Nothing would play in ${rangeList(c.emptyRegimes)}.` : '',
+    c.emptyCrystals === 0 && c.uneven ? `Keeping Deep Scan's crystals leaves them very uneven: one crystal has ${plural(c.heaviest, 'track', 'tracks')}, another ${c.lightest}.` : '',
+    also.length ? `Keeping them also ${also.join(' and ')}.` : '',
+    `Spreading places every track, scanned ones too, so ${c.total >= 27 ? 'every crystal and every range' : 'every range'} has tracks. Deep Scan's own reading stays with each track, and Assign keeps them where they are from then on.`,
+    restore ? `${plural(c.spreadAway, 'track is', 'tracks are')} already spread away from Deep Scan's crystal.` : '',
+  ];
+  return { title: 'How should Assign place your tracks?', body: sentences.filter(Boolean).join(' '), keep: "Keep Deep Scan's crystals", spread: 'Spread every track over all 27 crystals', restore };
+}
+
+/** v16.7.1: the spread's confirmation (the new layout's health card asks first when crystals tracks have would move). */
+function spreadConfirmText(p: AssignPlan): { title: string; body: string } {
+  // (A spread's unchanged count mixes scanned and assigned tracks, so only the ones it places now.)
+  const unmeasured = p.given + p.moved + p.movedFailed;
+  const sentences = [
+    p.emptyAfter === 0 ? 'Every track is spread over all 27 crystals, the GUT, HEART and HEAD ranges in turn.' : 'Every track is spread over the crystals, the GUT, HEART and HEAD ranges in turn.',
+    p.spread ? `${plural(p.spread, 'scanned track moves', 'scanned tracks move')} off the crystal Deep Scan gave ${p.spread === 1 ? 'it' : 'them'}; Deep Scan's reading is kept.` : '',
+    p.given > 0 ? `${plural(p.given, 'track without one gets', 'tracks without one get')} a crystal.` : '',
+    p.moved + p.movedFailed > 0 ? `${plural(p.moved + p.movedFailed, 'assigned crystal moves', 'assigned crystals move')}.` : '',
+    p.emptyBefore > 0 && p.emptyAfter === 0 ? 'Afterwards every crystal has a track.' : '',
+    unmeasured > 0 ? "Assigned crystals aren't a scan: Deep Scan can still analyse those tracks." : '',
+    'Keys and visual sync are kept.',
+  ];
+  return { title: 'Assign crystals?', body: sentences.filter(Boolean).join(' ') };
+}
+
+/** What a spread or a way back did (the notice, as assignDoneText for Assign's own rule). */
+function assignModeDoneText(p: AssignPlan): string {
+  const cab = p.perCrystal.filter((c) => c >= 3).length;
+  const cover = p.emptyAfter === 0 ? 'Every crystal has a track, so walks have no gaps. ' : `${plural(p.emptyAfter, 'crystal still has', 'crystals still have')} no track. `;
+  const ready = cab === 27 ? 'CAB-ready: all 27 crystals have 3 or more.' : `CAB readiness: ${cab}/27 crystals at 3 or more.`;
+  if (p.mode === 'restore') return `Deep Scan's crystals are back on ${plural(p.restored, 'track', 'tracks')}. ` + cover + ready;
+  const parts = [
+    p.spread ? `${plural(p.spread, 'scanned track', 'scanned tracks')} moved off Deep Scan's crystal` : '',
+    p.given ? `${plural(p.given, 'track', 'tracks')} got a crystal` : '',
+    p.moved + p.movedFailed ? `${plural(p.moved + p.movedFailed, 'assigned crystal', 'assigned crystals')} moved` : '',
+  ].filter(Boolean);
+  // v16.7.1: no way back in this release, so none is promised.
+  const head = p.emptyAfter === 0 ? 'Tracks spread over all 27 crystals' : 'Tracks spread over the crystals';
+  return `${head}: ${parts.length ? parts.join(', ') : 'every track keeps its crystal'}. ` + cover + ready + " Deep Scan's readings are kept.";
 }

@@ -18,7 +18,7 @@
 // experimental facets (utils/library/scanScores.ts) to the list: a facet is data (FacetDef), not code here.
 // No word in these comments may read as a style name: tailwind.config.js scans utils/.
 
-import { ALL_CRYSTALS, crystalOrigin } from '../mix/distribution.ts';
+import { ALL_CRYSTALS, crystalOrigin, readByDeepScan } from '../mix/distribution.ts';
 import type { CrystalSource } from '../mix/distribution.ts';
 import { GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS } from '../crystalData.ts';
 import { CHROMA_VERSION } from '../soundV2/keyAnalysis.ts';
@@ -79,11 +79,12 @@ export function lengthValue(s: FilterSong): number {
   return i;
 }
 
-/** Deep Scan: measured (its crystal, or one an older Auto-Distribute replaced), not measured, or it couldn't read it. */
+/** Deep Scan: measured (its crystal, one an older Auto-Distribute replaced, or v16.7.1 a spread one, its reading kept),
+ *  not measured, or it couldn't read it. */
 const SCAN_VALUES: readonly string[] = ['scanned', 'unscanned', 'failed'];
 export function scanValue(s: FilterSong): number {
   const o = crystalOrigin(s);
-  return o === 'scan' || o === 'scan-replaced' ? 0 : o === 'scan-failed' ? 2 : 1;
+  return readByDeepScan(s) ? 0 : o === 'scan-failed' ? 2 : 1;
 }
 
 /** Visual sync: a band envelope from Deep Scan or from Analyse tracks (Track info's rule, analysePass.hasEnvelope). */

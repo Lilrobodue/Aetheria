@@ -61,7 +61,7 @@ const HealthCard = () => {
     if (a.kind === 'assign') {
       // Blocked (Deep Scan runs): Auto-Distribute's own toast says why. When crystals tracks have would change: ask
       // first, with the plan's counts. Otherwise it runs at once (its notice, or its toast when there is nothing to do).
-      const plan = a.blocked ? null : planAssign(songs);
+      const plan = a.blocked ? null : planAssign(songs, 'spread'); // v16.7.1: Assign spreads (autoDistribute's plan)
       if (plan && assignNeedsConfirm(plan)) setConfirming(plan);
       else actions.assignCrystals();
     } else if (a.kind === 'analyse') actions.analyse();

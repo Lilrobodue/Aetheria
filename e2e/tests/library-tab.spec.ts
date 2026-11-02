@@ -210,7 +210,7 @@ async function seededPlan(page: Page) {
   }));
   const log = console.log;
   console.log = () => {};
-  try { return planAssign(lib); } finally { console.log = log; }
+  try { return planAssign(lib, 'spread'); } finally { console.log = log; } // v16.7.1: Assign spreads
 }
 
 // On the phone the page fixture sets the desktop runs' size (fixtures.ts), and test.use's viewport doesn't reach a
@@ -1680,19 +1680,25 @@ test.describe('phone, after Assign', () => {
     expect(await crystalNote('tone-0003'), 'the scanned track, before').toContain('From Deep Scan. An assigned crystal, not a measured pitch.');
     const before = await libraryState(page);
     await healthAction(page, 'crystals').click();
-    await expect(page.getByTestId('assign-dialog'), 'no question: no crystal a track has would change').toHaveCount(0);
+    // v16.7.1: Assign spreads every track, the scanned one too (the ids, so its place, are random per run): it asks
+    // first only when the spread moves it off Deep Scan's crystal.
+    const ask = page.getByRole('alertdialog', { name: 'Assign crystals?' });
+    await expect.poll(async () => (await ask.count()) > 0 || (await libraryState(page)).crystals.every((c) => c !== null), { timeout: 10_000 }).toBe(true);
+    const asked = (await ask.count()) > 0;
+    if (asked) await ask.getByRole('button', { name: 'Assign', exact: true }).click();
     await expect(healthLine(page, 'crystals')).toHaveText('All 30 tracks have one');
     const after = await libraryState(page);
-    expect(after.crystals[2], 'the scanned track keeps Deep Scan’s crystal').toBe(before.crystals[2]);
+    const kept = after.crystals[2] === before.crystals[2];
+    expect(asked, 'it asks exactly when the scanned track moves').toBe(!kept);
     expect(after.scanned.every(Boolean), 'every track playback-ready (an assigned crystal’s harmonicFreq is the crystal)').toBe(true);
-    expect([after.origins[2], after.origins.filter((o) => o === 'assigned').length], 'one scan, 29 assigned').toEqual(['scan', 29]);
-    await expect(healthLine(page, 'scan'), 'not "All 30 tracks scanned"').toHaveText('1 of 30 scanned');
+    expect([after.origins[2], after.origins.filter((o) => o === 'assigned').length], 'one scan, 29 assigned (or 30, the scan spread)').toEqual(kept ? ['scan', 29] : ['assigned', 30]);
+    await expect(healthLine(page, 'scan'), 'not "All 30 tracks scanned"; a spread scan still counts').toHaveText('1 of 30 scanned');
     await expect(healthAction(page, 'scan'), 'nothing left in Scan’s default scope').toHaveCount(0);
     await expect(healthLine(page, 'scan-assigned'), 'Deep Scan can still measure them, explicitly').toHaveText('Also scan the 29 assigned tracks (about 1 h 12 min)');
     await expect(healthAction(page, 'scan-assigned')).toHaveText('Scan');
     const assigned = await crystalNote('tone-0005');
     expect(assigned, 'an assigned track').toContain('Assigned, not scanned yet. An assigned crystal, not a measured pitch.');
-    expect(await crystalNote('tone-0003'), 'the scanned track, kept').toContain('From Deep Scan. An assigned crystal, not a measured pitch.');
+    expect(await crystalNote('tone-0003'), 'the scanned track, kept or spread').toContain(kept ? 'From Deep Scan. An assigned crystal, not a measured pitch.' : "Spread by Assign crystals; Deep Scan's own reading is kept. An assigned crystal, not a measured pitch.");
     expect(dialogs).toEqual([]);
   });
 });
@@ -1911,7 +1917,7 @@ test.describe('phone, an Undo chain', () => {
     const plan = await seededPlan(page);
     await healthAction(page, 'crystals').click();
     if (assignNeedsConfirm(plan)) await page.getByRole('alertdialog', { name: 'Assign crystals?' }).getByRole('button', { name: 'Assign', exact: true }).click();
-    await expect(page.getByTestId('notices')).toContainText('Crystals assigned:');
+    await expect(page.getByTestId('notices')).toContainText('Tracks spread over'); // v16.7.1: the spread's notice
     await expect(undoToast(page)).toHaveCount(0);
     await tapRow(page, 'tone-0007');
     await expectPlaying(page, 'tone-0007');

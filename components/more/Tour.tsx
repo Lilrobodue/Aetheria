@@ -56,7 +56,7 @@ export function tourCards(desktop: boolean): TourCard[] {
         { label: 'Scan:', text: 'Reads each song and gives it a crystal (slow, and optional).' },
         {
           label: 'Assign crystals:',
-          text: 'Keeps the crystals Deep Scan gave and gives every other song one of the 27 across the GUT, HEART, and HEAD ranges, empty ones first.',
+          text: "Spreads every song, scanned ones too, over the 27 crystals across the GUT, HEART, and HEAD ranges in turn. Deep Scan's own reading stays with each scanned song.",
         },
         { label: 'One-time:', text: 'Once assigned, your library is ready for any listening mode.' },
       ],
