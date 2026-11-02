@@ -9643,6 +9643,15 @@ registerProcessor('wav-capture', WavCapture);
         setSheetFocus(null);
         setShellSheet((s: ShellSheet | null) => (s === 'queue' ? null : 'queue'));
       },
+      // v16.7.2, Up next's row tap: classic's list-row tap, the same two calls (playTrack at that entry of the play order
+      // as it is, then noteQueueStart); the play order, its walk and its queue marks are left to them, as classic's are.
+      // A row from an older render (its entry moved since) does nothing.
+      playQueueRow: (index: number, id: string) => {
+        if (stateRef.current.playlist[index]?.id !== id) return;
+        const before = playRequestSeqRef.current;
+        playTrackRef.current(index);
+        noteQueueStart(before, index, stateRef.current.playlist);
+      },
       // v16.1, saved playlists: references to App's playlist functions (playlistApiRef, their own layout effect; their
       // one writer, commitPlaylists, never the library), and the Library tools (libraryToolsRef: Clear, Diagnostics).
       openPlaylist: (id: string | null) => PL().open(id),
@@ -10190,7 +10199,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.7.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.7.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

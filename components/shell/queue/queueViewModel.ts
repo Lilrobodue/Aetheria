@@ -147,6 +147,11 @@ export function handleName(name: string, position: number, total: number): strin
   return `Reorder ${name}, ${count(position)} of ${count(total)}`;
 }
 
+/** v16.7.2: a row's title button (its tap plays the track at once). */
+export function playNowName(name: string): string {
+  return `Play ${name} now`;
+}
+
 /** The live region while a row is lifted with the keyboard, and when it is dropped or put back. */
 export function movingText(name: string, position: number, total: number): string {
   return `Moving ${name}, position ${count(position)} of ${count(total)}`;

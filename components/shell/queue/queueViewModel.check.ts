@@ -23,6 +23,7 @@ import {
   endLine,
   queuedFacts,
   handleName,
+  playNowName,
   movingText,
   droppedText,
   cancelledText,
@@ -107,6 +108,7 @@ eq(endLine('stop', 0, lib, false, false), 'That’s the end of the play order.',
 eq(queuedFacts({ id: 'a', name: 'a', duration: 159, closestSolfeggio: 639 } as any), { text: '2:39 · 639 Hz', alert: false }, 'a queued row with a crystal');
 eq(queuedFacts({ id: 'a', name: 'a', duration: 159 } as any), { text: 'No crystal yet · may stop here on a locked phone', alert: true }, 'a queued row with no crystal');
 eq(handleName('tone-0117', 1, 3), 'Reorder tone-0117, 1 of 3', 'the handle');
+eq(playNowName('tone-0117'), 'Play tone-0117 now', 'v16.7.2: the title button');
 eq(movingText('tone-0117', 2, 3), 'Moving tone-0117, position 2 of 3', 'moving');
 eq(droppedText(2), 'Dropped at position 2', 'dropped');
 eq(cancelledText('tone-0117', 1), 'tone-0117 back at position 1', 'cancelled');

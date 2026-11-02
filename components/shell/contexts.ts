@@ -613,6 +613,9 @@ export interface ShellActions {
   undoQueue: () => void;
   /** The Up next sheet (the desktop's panel); a second call closes it. */
   toggleQueue: () => void;
+  /** v16.7.2: an Up next row's tap: play that entry of the play order now (classic's list-row tap: playTrack, then
+   *  noteQueueStart). `id` is the row's track: a row from an older render, its entry moved since, does nothing. */
+  playQueueRow: (index: number, id: string) => void;
   // v16.1, saved playlists (references to App's playlist functions: their one writer, commitPlaylists; never the
   // library) and the Library tools (the health card's Clear and Diagnostics).
   /** A playlist's view (Library › Playlists › it), or the list with null. */

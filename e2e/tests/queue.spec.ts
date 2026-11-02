@@ -17,6 +17,7 @@ import {
   LAYER_ENGINE_KEY,
   LAYOUT_KEY,
   PHONE_VIEWPORT,
+  phoneSize,
 } from './helpers';
 
 // v16.0, the queue, Stage A (spec §5.5): driven through the dev hook window.__aetheriaQueue, in both layouts. Queued
@@ -1085,5 +1086,113 @@ test.describe('Q12. the carry', () => {
     await expect(undoToast(page)).toContainText('Your queued track plays next.');
     await nextPlays(page, toneName(11));
     await nextPlays(page, toneName(10));
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Q17 (v16.7.2). Up next's row tap plays that entry of the play order now: classic's list-row tap (playTrack, then
+// noteQueueStart), so the play order and its walk stay, and a queued entry's mark goes as classic's pick takes it.
+// ---------------------------------------------------------------------------------------------------------------
+/** Order [1, 10, 11, 12, 2 … 12] with the pick of the queued tone-11 (entry 2): tone-10 and tone-11 played, tone-12 waits. */
+const Q17_MARKS = [0, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+const upNext = (page: Page) => page.getByTestId('sheet-queue');
+async function openUpNext(page: Page): Promise<void> {
+  if (await page.getByTestId('desktop-queue').isVisible().catch(() => false)) await page.getByTestId('desktop-queue').click();
+  else {
+    await tab(page, 'now');
+    await page.getByTestId('np-upnext').click();
+  }
+  await expect(upNext(page)).toBeVisible();
+}
+/** The new layout's Library tab: tap a row (the whole library from it), and wait until it plays. */
+async function libraryTap(page: Page, k: number): Promise<void> {
+  await tab(page, 'library');
+  await page.getByTestId('library-row').filter({ hasText: toneName(k) }).locator('button[data-row-index]').click();
+  await expectHeard(page, toneName(k));
+}
+const queuedPlay = (page: Page, k: number) => upNext(page).getByTestId('queue-row').filter({ hasText: toneName(k) }).getByTestId('queue-row-play');
+
+test.describe('Q17. Up next: tap a track to play it now', () => {
+  test.describe('the phone', () => {
+    test.use({ viewport: PHONE_VIEWPORT, hasTouch: true });
+    test('Q17a. the 3rd row plays now: the play order and its marks unchanged, the sheet closes, Now Playing and the card name it, car Next goes on from it @mobile', async ({ page }) => {
+      test.setTimeout(150_000);
+      await phoneSize(page);
+      await open(page, { n: 12 }, { layout: 'new' });
+      await libraryTap(page, 1);
+      const before = await libraryState(page);
+      const marks = (await qstate(page)).marks;
+      await openUpNext(page);
+      const third = upNext(page).getByTestId('queue-next-play').nth(2);
+      await expect(third).toHaveAttribute('aria-label', `Play ${toneName(4)} now`);
+      expect((await third.boundingBox())!.height, 'a 44 px target at least').toBeGreaterThanOrEqual(44);
+      const n = await playsCount(page);
+      await third.click();
+      await expectNextPlay(page, n, toneName(4));
+      await expect(upNext(page), 'the sheet closes').toHaveCount(0);
+      await expect(page.getByTestId('np-title')).toHaveText(toneName(4));
+      const after = await libraryState(page);
+      expect(after.ids, 'the play order is unchanged').toEqual(before.ids);
+      expect(after.cursor).toBe(3);
+      expect((await qstate(page)).marks, 'its marks too').toEqual(marks);
+      await carPlays(page, toneName(5));
+    });
+  });
+
+  test('Q17b. a queued row plays now; its mark (and the skipped one before it) go as classic’s pick takes them (Q17c); the panel stays; the queue goes on @mobile', async ({ page }) => {
+    test.setTimeout(150_000);
+    await open(page, { n: 12 }, { layout: 'new' });
+    await libraryTap(page, 1);
+    await queue(page, [10, 11, 12].map(toneName), 'queue');
+    await expect.poll(() => namesNow(page)).toEqual([1, 10, 11, 12, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(toneName));
+    const ids = (await libraryState(page)).ids;
+    await openUpNext(page);
+    await expect(queuedPlay(page, 11)).toHaveAttribute('aria-label', `Play ${toneName(11)} now`);
+    const n = await playsCount(page);
+    await queuedPlay(page, 11).click();
+    await expectNextPlay(page, n, toneName(11));
+    await expect(upNext(page), 'the desktop panel stays').toBeVisible();
+    expect((await libraryState(page)).ids, 'the play order is unchanged').toEqual(ids);
+    expect((await libraryState(page)).cursor).toBe(2);
+    await expect.poll(async () => (await qstate(page)).marks).toEqual(Q17_MARKS);
+    await nextPlays(page, toneName(12));
+    await nextPlays(page, toneName(2));
+  });
+
+  test('Q17c. classic’s list: the same pick of the queued tone-11 leaves the same marks @mobile', async ({ page }) => {
+    test.setTimeout(150_000);
+    await open(page, { n: 12 });
+    await playClassic(page, toneName(1));
+    await queue(page, [10, 11, 12].map(toneName), 'queue');
+    await expect.poll(() => namesNow(page)).toEqual([1, 10, 11, 12, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(toneName));
+    await playClassic(page, toneName(11));
+    expect((await libraryState(page)).cursor).toBe(2);
+    await expect.poll(async () => (await qstate(page)).marks).toEqual(Q17_MARKS);
+  });
+
+  test('Q17d. a row with its actions open: its title does nothing; Enter on a focused title plays it @mobile', async ({ page }) => {
+    test.setTimeout(150_000);
+    await open(page, { n: 12 }, { layout: 'new' });
+    await libraryTap(page, 1);
+    await queue(page, [10, 11].map(toneName), 'queue');
+    await expect.poll(async () => (await qstate(page)).waitingNames).toEqual([10, 11].map(toneName));
+    await openUpNext(page);
+    const row = upNext(page).getByTestId('queue-row').filter({ hasText: toneName(10) });
+    await row.getByTestId('queue-row-menu').click();
+    await expect(row.getByTestId('queue-row-actions')).toBeVisible();
+    const n = await playsCount(page);
+    await queuedPlay(page, 10).click();
+    await page.waitForTimeout(1500);
+    expect(await playsCount(page), 'nothing started').toBe(n);
+    await expectHeard(page, toneName(1));
+    expect((await qstate(page)).waitingNames).toEqual([10, 11].map(toneName));
+    await row.getByTestId('queue-row-menu').click();
+    await expect(row.getByTestId('queue-row-actions')).toHaveCount(0);
+    await queuedPlay(page, 10).focus();
+    await page.keyboard.press('Enter');
+    await expectNextPlay(page, n, toneName(10));
+    await expect(upNext(page).locator('#queue-queued-heading'), 'the focus goes to the queue’s heading').toBeFocused();
+    expect((await qstate(page)).waitingNames).toEqual([toneName(11)]);
+    await nextPlays(page, toneName(11));
   });
 });

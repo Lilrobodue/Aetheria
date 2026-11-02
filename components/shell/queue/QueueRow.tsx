@@ -3,8 +3,9 @@
 // One queued track: the drag handle (44 × 60, GripVertical: "Reorder tone-0117, 1 of 3", a drag handle by its role
 // description), the regime tile, the title and its facts ("No crystal yet · may stop here on a locked phone" for a track
 // the gapless swap can't take), and ⋯, which opens the row's actions INLINE under it (Move up, Move down, Play next,
-// Remove; never a sheet on a sheet). The row itself is not a button (no jump in v16.0). React.memo: its props are the
-// row, its place and its state; it never reads the clock.
+// Remove; never a sheet on a sheet). v16.7.2: the title and its facts are a button, "Play tone-0117 now" (44 px tall at
+// least; Enter / Space by its nature): onPlay, which plays it at once; with the row's actions open or a row lifted it does
+// nothing. React.memo: its props are the row, its place and its state; it never reads the clock.
 
 import React from 'react';
 import { ArrowDown, ArrowUp, EllipsisVertical, GripVertical, ListStart, ListX } from 'lucide-react';
@@ -12,7 +13,7 @@ import type { Song } from '../../../types';
 import { countRender } from '../devRenders';
 import { REGIME_DOT } from '../shellModel';
 import { rowRegime } from '../library/libraryModel';
-import { handleName, queuedFacts } from './queueViewModel';
+import { handleName, playNowName, queuedFacts } from './queueViewModel';
 
 const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gold-400';
 const ACTION =
@@ -36,9 +37,11 @@ interface QueueRowProps {
   describedBy: string;
   onToggle: (key: string) => void;
   onAction: (key: string, a: QueueRowAction) => void;
+  /** v16.7.2: the title's tap (the list checks for a lift). */
+  onPlay: (key: string) => void;
 }
 
-const QueueRow = ({ rowKey, song, position, total, open, lifted, offset, liftOffset, handle, describedBy, onToggle, onAction }: QueueRowProps) => {
+const QueueRow = ({ rowKey, song, position, total, open, lifted, offset, liftOffset, handle, describedBy, onToggle, onAction, onPlay }: QueueRowProps) => {
   countRender('QueueRow');
   const regime = rowRegime(song);
   const facts = queuedFacts(song);
@@ -74,12 +77,20 @@ const QueueRow = ({ rowKey, song, position, total, open, lifted, offset, liftOff
         <span aria-hidden="true" className="shrink-0 w-10 h-10 rounded-control bg-surface-raised flex items-center justify-center">
           {regime ? <span className={`w-3 h-3 rounded-pill ${REGIME_DOT[regime]}`} /> : <span className="w-3 h-3 rounded-pill border border-ink-faint" />}
         </span>
-        <span className="ml-3 flex-1 min-w-0">
-          <span data-row-title="" className="block text-sm text-ink-strong truncate">{song.name}</span>
-          <span data-row-facts="" className="block text-xs text-ink-muted truncate tabular-nums">
+        <button
+          type="button"
+          data-testid="queue-row-play"
+          aria-label={playNowName(song.name)}
+          onClick={() => {
+            if (!open && !lifted) onPlay(rowKey);
+          }}
+          className={`ml-3 flex-1 min-w-0 min-h-touch self-stretch flex flex-col justify-center text-left rounded-control ${FOCUS}`}
+        >
+          <span data-row-title="" className="block w-full text-sm text-ink-strong truncate">{song.name}</span>
+          <span data-row-facts="" className="block w-full text-xs text-ink-muted truncate tabular-nums">
             {facts.alert ? <span className="text-status-alert">{facts.text}</span> : facts.text}
           </span>
-        </span>
+        </button>
         <button
           type="button"
           data-testid="queue-row-menu"

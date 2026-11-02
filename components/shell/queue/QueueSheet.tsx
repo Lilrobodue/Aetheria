@@ -15,6 +15,9 @@
 // music and the rest of the shell. Every edit is one editQueue (one App commit); a drag writes only on its drop.
 // v16.1 (mockup save-upnext-phone): "Save as playlist" before Clear in the first "Queued · n" heading: the waiting
 // tracks in queue order (the sheet closes, then the name Dialog).
+// v16.7.2: every row's title (queued or not) is a button that plays that entry of the play order now (playQueueRow:
+// classic's list-row tap); the phone's sheet then closes, the desktop's panel stays. With the row's actions open or a
+// row of its run lifted, a queued row's title does nothing.
 // Nothing here reads the clock.
 
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -55,10 +58,12 @@ interface QueueListProps {
   names: { current: Map<string, string> };
   /** Every queued row's place in the queue, this render (all runs). */
   places: { current: Map<string, number> };
+  /** v16.7.2: a row's title tap: play that entry now. */
+  playRow: (index: number, id: string) => void;
 }
 
 /** One run of queued rows: reorder by the handle (useSortable), the row's inline actions, focus kept on what moved. */
-const QueueList = ({ rows, offset, total, labelledBy, scrollRef, openKey, setOpenKey, onToggle, focusRef, say, cancels, names, places }: QueueListProps) => {
+const QueueList = ({ rows, offset, total, labelledBy, scrollRef, openKey, setOpenKey, onToggle, focusRef, say, cancels, names, places, playRow }: QueueListProps) => {
   countRender('QueueList');
   const actions = useActions();
   const listRef: { current: HTMLUListElement | null } = useRef(null);
@@ -151,6 +156,15 @@ const QueueList = ({ rows, offset, total, labelledBy, scrollRef, openKey, setOpe
     }
   }, []);
 
+  // v16.7.2: a title's tap plays its entry, unless a row of this run is lifted.
+  const liftedRef: { current: boolean } = useRef(false);
+  liftedRef.current = !!sortable.lifted;
+  const onPlay = useCallback((key: string) => {
+    const r = rowsRef.current.find((x: QueueRowValue) => x.key === key);
+    if (!r || liftedRef.current) return;
+    playRow(r.index, r.song.id);
+  }, []);
+
   const l = sortable.lifted;
   return (
     <div className="relative">
@@ -172,6 +186,7 @@ const QueueList = ({ rows, offset, total, labelledBy, scrollRef, openKey, setOpe
               describedBy={HANDLE_HELP_ID}
               onToggle={onToggle}
               onAction={onAction}
+              onPlay={onPlay}
             />
           );
         })}
@@ -188,7 +203,7 @@ const QueueList = ({ rows, offset, total, labelledBy, scrollRef, openKey, setOpe
   );
 };
 
-const QueueBody = ({ scrollRef, cancelRef }: { scrollRef: { current: HTMLDivElement | null }; cancelRef: LiftCancel }) => {
+const QueueBody = ({ scrollRef, cancelRef, closeOnPlay }: { scrollRef: { current: HTMLDivElement | null }; cancelRef: LiftCancel; closeOnPlay: boolean }) => {
   countRender('QueueBody');
   const q = useQueue();
   const actions = useActions();
@@ -202,6 +217,28 @@ const QueueBody = ({ scrollRef, cancelRef }: { scrollRef: { current: HTMLDivElem
     if (liveRef.current) liveRef.current.textContent = text;
   }, []);
   const onToggle = useCallback((key: string) => setOpenKey((k: string | null) => (k === key ? null : key)), []);
+  // v16.7.2: a row's title tap plays that entry now; the phone's sheet closes after it. The desktop's panel stays, and
+  // the focus goes to the queue's heading once the list comes back without the row (it plays now).
+  const closeRef: { current: boolean } = useRef(closeOnPlay);
+  closeRef.current = closeOnPlay;
+  const playRow = useCallback((index: number, id: string) => {
+    actions.playQueueRow(index, id);
+    if (closeRef.current) actions.closeSheet();
+    else focusRef.current = `#${FIRST_HEADING_ID}`;
+  }, []);
+  // The play order's own rows (no lift, no actions): by key, from this render's runs.
+  const runsRef: { current: typeof q.runs } = useRef(q.runs);
+  runsRef.current = q.runs;
+  const onNextPlay = useCallback((key: string) => {
+    for (const r of runsRef.current) {
+      if (r.queued) continue;
+      const x = r.rows.find((y: QueueRowValue) => y.key === key);
+      if (x) {
+        playRow(x.index, x.song.id);
+        return;
+      }
+    }
+  }, []);
   // The sheet's close asks every list's lift first.
   useLayoutEffect(() => {
     cancelRef.current = () => {
@@ -311,6 +348,7 @@ const QueueBody = ({ scrollRef, cancelRef }: { scrollRef: { current: HTMLDivElem
             cancels={cancels}
             names={names}
             places={places}
+            playRow={playRow}
           />
           {last && q.waiting > total ? <p className="px-4 py-2 text-xs text-ink-muted">and {q.waiting - total} more queued</p> : null}
         </section>
@@ -329,7 +367,7 @@ const QueueBody = ({ scrollRef, cancelRef }: { scrollRef: { current: HTMLDivElem
         </div>
         <ul role="list" aria-labelledby={id}>
           {r.rows.map((x) => (
-            <NextRow key={x.key} song={x.song} />
+            <NextRow key={x.key} rowKey={x.key} song={x.song} onPlay={onNextPlay} />
           ))}
         </ul>
       </section>
@@ -375,7 +413,7 @@ const QueueSheet = ({ presentation }: QueueSheetProps) => {
       bodyRef={bodyRef}
       data-testid="sheet-queue"
     >
-      <ViewBoundary name="queue" fallback={sheetFallback(actions.closeSheet)} render={() => <QueueBody scrollRef={bodyRef} cancelRef={cancelLiftRef} />} />
+      <ViewBoundary name="queue" fallback={sheetFallback(actions.closeSheet)} render={() => <QueueBody scrollRef={bodyRef} cancelRef={cancelLiftRef} closeOnPlay={presentation === 'sheet'} />} />
     </Sheet>
   );
 };
