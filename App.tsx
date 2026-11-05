@@ -967,7 +967,7 @@ const TutorialModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             content: (
                 <ul className="text-sm text-slate-300 space-y-3 text-left bg-slate-800/50 p-5 rounded-lg border border-slate-700">
                     <li className="flex gap-2">🔍 <strong className="text-gold-200">Deep Scan:</strong> Click this in the sidebar. It reads each song and gives it a crystal (slow, and optional).</li>
-                    <li className="flex gap-2">🎯 <strong className="text-gold-200">Auto-Distribute Frequencies:</strong> Spreads every song, scanned ones too, over the 27 crystals across the GUT, HEART, and HEAD ranges in turn. Deep Scan's own reading stays with each scanned song.</li>
+                    <li className="flex gap-2">🎯 <strong className="text-gold-200">Auto-Distribute Frequencies:</strong> Spreads every song, scanned ones too, over the 27 crystals across the GUT, HEART, and HEAD ranges in turn. Deep Scan's own reading stays with each scanned song. Songs Deep Scan placed on 2178 Hz keep the SOURCE crystal.</li>
                     <li className="flex gap-2">⏳ <strong className="text-gold-200">One-time:</strong> Once assigned, your library is ready for any listening mode.</li>
                 </ul>
             )
@@ -10199,7 +10199,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.7.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.7.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

@@ -15,7 +15,8 @@ import { passButtonText, passEta, passEtaMinutes } from '../../../utils/library/
 import type { PassProgress } from '../../../utils/library/analysePass.ts';
 import { CHROMA_VERSION } from '../../../utils/soundV2/keyAnalysis.ts';
 import { BUSY_EXPORT, BUSY_STOPPING, BUSY_STOPPING_LONG } from '../../../utils/export/exportWords.ts';
-import { ALL_CRYSTALS, crystalOrigin, deepScanQueue, readByDeepScan, scanCrystalChanged, spreadFromScan } from '../../../utils/mix/distribution.ts';
+import { ALL_CRYSTALS, crystalOrigin, deepScanQueue, readByDeepScan, scanCrystalChanged, spreadFromScan, spreadRole } from '../../../utils/mix/distribution.ts';
+import { SOURCE_FREQ } from '../../../utils/crystalData.ts';
 import type { CrystalSource } from '../../../utils/mix/distribution.ts';
 
 /** What the tab reads of a track (types.ts Song; `file` only for Track info). */
@@ -453,6 +454,13 @@ export interface LibraryHealth {
   /** Tracks with a crystal that v15.8's Assign would still place (an older Auto-Distribute's placeholders, failed
    *  scans). v16.7.1: the health line no longer reads it (a spread places every track). */
   placeable: number;
+  /** v16.7.3: tracks Deep Scan read at 2178 Hz (distribution.ts sourceTrack) that are on another crystal: Assign puts
+   *  them back on 2178. By the plan's own rule, so it is exactly planAssign(lib, 'spread').restored (source.check). */
+  sourceBack: number;
+  /** v16.7.3 (F1): the crystals a spread would cover: the crystals its pinned tracks hold (spreadRole: Source tracks on
+   *  2178, unreadable scans on their own) and one each for the open tracks while any remain (the fill's first round), at
+   *  most 27. So it is exactly 27 − planAssign(lib, 'spread').emptyAfter (source.check), without running the plan. */
+  spreadCover: number;
 }
 
 /** One O(n) pass, each id once, by each action's own rule (so a number never promises what its button won't do). */
@@ -464,6 +472,9 @@ export function libraryHealth(songs: readonly LibSong[]): LibraryHealth {
   let scanned = 0;
   let scanReplaced = 0;
   let placeable = 0;
+  let sourceBack = 0;
+  const pinned = new Set<number>();
+  let openTracks = 0;
   for (const s of songs) {
     if (!s || seen.has(s.id)) continue;
     seen.add(s.id);
@@ -476,11 +487,19 @@ export function libraryHealth(songs: readonly LibSong[]): LibraryHealth {
     // Assign's own rule (planAssign): it keeps scans, put-backs and anchors (a recorded assigned crystal of the 27).
     const anchor = s.crystalSource === 'assigned' && ALL_CRYSTALS.includes(s.closestSolfeggio as number);
     if (s.closestSolfeggio && o !== 'scan' && o !== 'scan-replaced' && !anchor) placeable++;
+    // v16.7.3: what a spread does with it (distribution.ts spreadRole, the plan's own rule; O(1), the reading's crystal
+    // is memoized): a Source track away from 2178 goes back (sourceBack); the pinned crystals and the open tracks give
+    // the crystals a spread covers (F1).
+    const { role, crystal } = spreadRole(s);
+    if (role === 'open') openTracks++;
+    else if (crystal !== null) pinned.add(crystal);
+    if (role === 'source' && s.closestSolfeggio && s.closestSolfeggio !== SOURCE_FREQ) sourceBack++; // (fix round 2, R4: one with no crystal gets one, it doesn't go back)
   }
   const unscanned = deepScanQueue(unique).length;
   const assignedToScan = deepScanQueue(unique, { assigned: true }).length - unscanned;
   const emptyCrystals = ALL_CRYSTALS.filter((f) => !used.has(f)).length;
-  return { total: unique.length, noCrystal, unscanned, assignedToScan, scanned, scanReplaced, emptyCrystals, placeable };
+  const spreadCover = Math.min(27, pinned.size + openTracks);
+  return { total: unique.length, noCrystal, unscanned, assignedToScan, scanned, scanReplaced, emptyCrystals, placeable, sourceBack, spreadCover };
 }
 
 export type HealthAction = 'assign' | 'analyse' | 'scan' | 'scan-assigned' | 'stop-scan' | 'review';
@@ -545,8 +564,12 @@ export function healthModel(i: HealthInput): HealthModel {
 
   // Crystals (Assign = Auto-Distribute). v16.7.1: Assign spreads every track, scanned ones too, over the 27 crystals
   // (planAssign(lib, 'spread')), on any library size. Its button shows when a track has no crystal (to do), or when
-  // crystals have no track while another crystal has two or more (optional: a spread fills more of them). Otherwise the
+  // a spread would give more crystals a track (optional; v16.7.3, F1: spreadCover, not "some crystal holds two": Source
+  // tracks pinned together on 2178, or unreadable scans on one crystal, can't be spread out). Otherwise the
   // line only informs. (v15.8's "can get Deep Scan's crystal back" is gone: a spread doesn't put crystals back.)
+  // v16.7.3: a spread keeps the tracks Deep Scan read at 2178 Hz on 2178, so one an older spread moved away goes back on
+  // the next press: Assign is to do then (sourceBack, the plan's own count; a library already spread would otherwise read
+  // "All N tracks have one" and offer nothing).
   const all = h.total === 1 ? 'The track has one' : `All ${h.total} have one`;
   const assignAction = (todo: boolean, line: string): HealthLine => ({
     id: 'crystals',
@@ -560,7 +583,9 @@ export function healthModel(i: HealthInput): HealthModel {
   const gaps = `${h.emptyCrystals} ${plural(h.emptyCrystals, 'crystal has', 'crystals have')} no track`;
   if (h.noCrystal > 0) {
     lines.push(assignAction(true, `${h.noCrystal} of ${h.total} tracks have none`));
-  } else if (h.emptyCrystals > 0 && h.total > 27 - h.emptyCrystals) {
+  } else if (h.sourceBack > 0) {
+    lines.push(assignAction(true, `${all} · ${h.sourceBack} can go back to 2178 Hz, the crystal Deep Scan gave ${plural(h.sourceBack, 'it', 'them')}`));
+  } else if (h.emptyCrystals > 0 && h.spreadCover > 27 - h.emptyCrystals) {
     lines.push(assignAction(false, `${all} · ${gaps}`));
   } else {
     lines.push({

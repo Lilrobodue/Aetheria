@@ -268,15 +268,22 @@ for (const [k, lib] of all) {
   // v16.7.1: the spread's confirmation (the health card): asked when a crystal a track has would move, never Keep's words.
   for (const [k, l] of all) {
     const p = planAssign(l, 'spread');
-    eq(assignNeedsConfirm(p), p.moved + p.movedFailed + (p.spread ?? 0) > 0, `${k}: the spread asks first exactly when crystals would move`);
+    // (v16.7.3: a scanned track moving off, again or back, and a Source track going back on 2178, p.restored; a record-only
+    // change does not ask: source.check proves it is exactly "a crystal a track has changes".)
+    eq(assignNeedsConfirm(p), p.moved + p.movedFailed + (p.off ?? 0) + (p.again ?? 0) + (p.back ?? 0) + p.restored > 0, `${k}: the spread asks first exactly when crystals would move`);
     const w = assignConfirmText(p);
-    ok(w.title === 'Assign crystals?' && /^Every track is spread over (all 27 crystals|the crystals), the GUT, HEART and HEAD ranges in turn\./.test(w.body) && w.body.endsWith('Keys and visual sync are kept.'), `${k}: the spread's confirmation`);
+    // (v16.7.3: with Source tracks, their sentence comes first and the spread's says "Every other track": source.check.)
+    ok(w.title === 'Assign crystals?' && /^(Tracks Deep Scan placed on 2178 Hz keep the SOURCE crystal\. Every other track|\d+ tracks? Deep Scan placed on 2178 Hz go(es)? back to the SOURCE crystal\. Every other track|Every track) is spread over (all 27 crystals|the crystals), the GUT, HEART and HEAD ranges in turn\./.test(w.body) && w.body.endsWith('Keys and visual sync are kept.'), `${k}: the spread's confirmation`);
     ok(!/keep their crystal|stay where they are|gets? back/.test(w.body), `${k}: no word of Keep's rule`);
     ok(p.emptyAfter === 0 || !w.body.includes('all 27'), `${k}: "all 27" only when every crystal has a track`);
   }
   {
     const p = planAssign(lib, 'spread');
-    ok(assignNeedsConfirm(p) && assignConfirmText(p).body.includes(`${p.spread} scanned tracks move off the crystal Deep Scan gave them; Deep Scan's reading is kept.`), 'FGUT: the confirmation says how many scanned tracks move');
+    // v16.7.3 (F2): the ones that leave Deep Scan's crystal, and (FGUT has scans an older Auto-Distribute moved) the ones
+    // that move again or go back, each with its own count.
+    // (Fix round 2, R1: the ones already off their Deep Scan crystal "move again".)
+    const moving = [`${p.off} scanned tracks move off the crystal Deep Scan gave them`, p.again ? `${p.again} ${p.again === 1 ? 'already off it moves' : 'already off it move'} again` : ''].filter(Boolean).join('; ');
+    ok(assignNeedsConfirm(p) && (p.off ?? 0) > 1 && assignConfirmText(p).body.includes(`${moving}; Deep Scan's reading is kept.`), `FGUT: the confirmation says how many scanned tracks move (${assignConfirmText(p).body})`);
   }
   eq(assignNothingText(planAssign(lib, 'restore')), "Deep Scan's crystals are already in place.", 'nothing to put back: the toast');
 }

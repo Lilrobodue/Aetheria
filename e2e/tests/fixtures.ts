@@ -1,5 +1,6 @@
 import { test as base, expect, chromium, type Browser, type Page } from '@playwright/test';
 import { DEVICE, TEST_ORIGIN } from './adb';
+import { closeOtherTestTabs } from './leftoverTabs';
 
 // The suite's `test`. Locally it is Playwright's own (a fresh browser context
 // per test). With E2E_DEVICE set it drives the phone's Chrome instead, over the
@@ -50,6 +51,16 @@ export function assertNoDeviceArtifacts(options: { screenshot: unknown; trace: u
   }
 }
 
+/**
+ * v16.7.3 (fix round 1, F5): a device run's own limits, before it touches the phone. The test origin is never port 3100
+ * (the user's dev server: clearing it would wipe the user's library) and the run has exactly one worker (the leftover
+ * guard closes every other tab at the test origin, which a second worker's live test would own).
+ */
+export function assertDeviceRun(testOrigin: string, workers: number): void {
+  if (new URL(testOrigin).port === '3100') throw new Error(`Refusing to run on ${testOrigin}: port 3100 is the user's own dev server.`);
+  if (workers !== 1) throw new Error(`Refusing to run with ${workers} workers on a device: one worker only (another worker's test tab would look like a leftover).`);
+}
+
 const localTest = base.extend({
   page: async ({ page }, use) => {
     const opened = watchNativeDialogs(page);
@@ -60,9 +71,12 @@ const localTest = base.extend({
 
 const deviceTest = base.extend<{}, { phoneChrome: Browser }>({
   phoneChrome: [
-    async ({ screenshot, trace, video }, use) => {
+    async ({ screenshot, trace, video }, use, workerInfo) => {
       // Before connecting: once the phone's context exists, a trace or a screenshot would already record its tabs.
       assertNoDeviceArtifacts({ screenshot, trace, video });
+      // v16.7.3 (fix round 1, F5): never the user's own dev server's origin (its storage is the user's library), and one
+      // worker only (another worker's live test tab would look like a leftover to closeOtherTestTabs).
+      assertDeviceRun(TEST_ORIGIN, workerInfo.config.workers);
       const browser = await chromium.connectOverCDP('http://localhost:9222');
       await use(browser);
       await browser.close(); // disconnects; the phone's Chrome keeps running
@@ -72,34 +86,46 @@ const deviceTest = base.extend<{}, { phoneChrome: Browser }>({
   context: async ({ phoneChrome }, use) => {
     await use(phoneChrome.contexts()[0]);
   },
-  page: async ({ context, baseURL, screenshot, trace, video }, use) => {
+  page: async ({ context, phoneChrome, baseURL, screenshot, trace, video }, use) => {
     assertNoDeviceArtifacts({ screenshot, trace, video });
     const page = await context.newPage();
-    // The phone's existing profile has no baseURL (Playwright applies it only
-    // to contexts it creates), so resolve the tests' relative URLs here.
-    const goto = page.goto.bind(page);
-    page.goto = (url, options) => goto(new URL(url, baseURL).toString(), options);
-    const origin = new URL(baseURL!).origin;
-    if (origin !== TEST_ORIGIN) throw new Error(`Refusing to clear ${origin}: only ${TEST_ORIGIN} is the tests' own.`);
-    const cdp = await context.newCDPSession(page);
-    await cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'all' });
-    await cdp.detach();
-    // The desktop runs' layout, so every selector holds; the engine, the audio
-    // stack, the media session and the (mobile) user agent are the phone's.
-    await page.setViewportSize({ width: 1280, height: 800 });
-    // No service worker, as `serviceWorkers: 'block'` does locally: it would
-    // cache dev modules between runs.
-    await page.addInitScript(() => {
-      if (navigator.serviceWorker) (navigator.serviceWorker as any).register = () => new Promise(() => {});
-      // Every media element the app plays (it keeps them out of the DOM), so
-      // the teardown below can stop them all.
-      const media = ((window as any).__e2eMedia = new Set<HTMLMediaElement>());
-      const play = HTMLMediaElement.prototype.play;
-      HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
-        media.add(this);
-        return play.call(this);
-      };
-    });
+    // v16.7.3 (fix round 1, F5): any throw while setting the tab up (the origin
+    // guard, a leftover that won't close, the clear) closes this tab first, so
+    // no about:blank tab is left in the user's own Chrome.
+    try {
+      // The phone's existing profile has no baseURL (Playwright applies it only
+      // to contexts it creates), so resolve the tests' relative URLs here.
+      const goto = page.goto.bind(page);
+      page.goto = (url, options) => goto(new URL(url, baseURL).toString(), options);
+      const origin = new URL(baseURL!).origin;
+      if (origin !== TEST_ORIGIN) throw new Error(`Refusing to clear ${origin}: only ${TEST_ORIGIN} is the tests' own.`);
+      // v16.7.3: a stopped run's leftover tab at the test origin could save its
+      // stale library over this test's (leftoverTabs.ts). Test-origin tabs only.
+      const closed = await closeOtherTestTabs(phoneChrome, page, TEST_ORIGIN);
+      if (closed) console.log(`[fixtures] closed ${closed} leftover ${TEST_ORIGIN} tab${closed === 1 ? '' : 's'}`);
+      const cdp = await context.newCDPSession(page);
+      await cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'all' });
+      await cdp.detach();
+      // The desktop runs' layout, so every selector holds; the engine, the audio
+      // stack, the media session and the (mobile) user agent are the phone's.
+      await page.setViewportSize({ width: 1280, height: 800 });
+      // No service worker, as `serviceWorkers: 'block'` does locally: it would
+      // cache dev modules between runs.
+      await page.addInitScript(() => {
+        if (navigator.serviceWorker) (navigator.serviceWorker as any).register = () => new Promise(() => {});
+        // Every media element the app plays (it keeps them out of the DOM), so
+        // the teardown below can stop them all.
+        const media = ((window as any).__e2eMedia = new Set<HTMLMediaElement>());
+        const play = HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+          media.add(this);
+          return play.call(this);
+        };
+      });
+    } catch (e) {
+      await page.close().catch(() => {});
+      throw e;
+    }
     const opened = watchNativeDialogs(page);
     await use(page);
     // Stop the app's media and release its media session, then unload it.

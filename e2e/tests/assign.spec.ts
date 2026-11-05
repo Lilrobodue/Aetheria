@@ -14,6 +14,7 @@ import {
   openLibraryTab,
   openSeededNewLayout,
   pauseCount,
+  peekClassicLibrary,
   phoneSize,
   savedState,
   toneWav,
@@ -23,10 +24,12 @@ import {
   PHONE_VIEWPORT,
   type LibraryState,
 } from './helpers';
-import { planAssign, assignConfirmText, assignDoneText, assignNothingText, crystalOrigin, scanCrystalChanged, scanCrystalOf, spreadFromScan, ALL_CRYSTALS, SPREAD_ORDER } from '../../utils/mix/distribution.ts';
+import { planAssign, assignConfirmText, assignDoneText, assignNothingText, crystalOrigin, scanCrystalChanged, scanCrystalOf, sourceTrack, spreadFromScan, ALL_CRYSTALS, SPREAD_MARK, SPREAD_ORDER } from '../../utils/mix/distribution.ts';
 import type { AssignPlan } from '../../utils/mix/distribution.ts';
 import { patchById } from '../../utils/library/listOps.ts';
-import { GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS } from '../../utils/crystalData.ts';
+import { GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS, SOURCE_FREQ } from '../../utils/crystalData.ts';
+// v16.7.3: v16.7.1's spread, frozen (it builds "a library v16.7.1 already spread").
+import { spreadV1671 } from '../../scripts/mix-golden/spread-v1671.ts';
 
 // v15.8, Assign crystals (classic: Auto-Distribute Frequencies), decisions 2026-10-26: Deep Scan's crystals stay (one
 // an older Auto-Distribute replaced is put back), every other track is placed the same way on every press, and placed
@@ -35,6 +38,8 @@ import { GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS } from '../../utils/crystal
 // into IndexedDB with short tones. The expectation is utils/mix/distribution.ts's own plan, computed here in Node.
 // v16.7.1 (the hotfix): every press spreads (planAssign(lib, 'spread'), v16.8's): every track, scanned ones too, over
 // all 27 crystals; a scanned track moved off Deep Scan's crystal keeps its reading and counts as scanned.
+// v16.7.3: a track Deep Scan placed on 2178 Hz (the SOURCE crystal) stays on 2178 (S2, S3 at the end). FLEG, BUNCHED and
+// the fresh tones of tests 5 and A1 have no such track, so their expectations are v16.7.1's (each test says so in Node).
 
 const FLEG: any[] = JSON.parse(readFileSync(new URL('../../scripts/mix-golden/fixtures-fleg.json', import.meta.url), 'utf8')).library;
 /** FLEG as seeded: every length stored (no probe; a missing one as 200 s), so the app's stand-ins see the same. */
@@ -145,6 +150,7 @@ test.describe('a legacy library (classic, and the new layout to play)', () => {
     const s0 = await libraryState(page);
     expect(tally(s0.origins), 'FLEG as its history left it').toEqual({ 'scan-replaced': 90, assigned: 110, scan: 10, none: 20 });
     expect(PLAN.spread, 'the plan moves scanned tracks off Deep Scan’s crystal').toBeGreaterThan(0);
+    expect([SEEDED.filter(sourceTrack).length, PLAN.source], 'v16.7.3: FLEG has no track Deep Scan placed on 2178 Hz (v16.7.1’s placements)').toEqual([0, 0]);
     await page.locator('aside').getByRole('button', { name: ASSIGN }).click();
     await expect.poll(async () => tally((await libraryState(page)).origins), { message: 'after: as the spread says', timeout: 15_000 }).toEqual(AFTER_ORIGINS);
     const s1 = await libraryState(page);
@@ -387,12 +393,13 @@ test.describe('a legacy library, after its first Assign', () => {
     await page.getByRole('button', { name: 'Quick guide', exact: true }).click();
     await page.getByRole('heading', { name: 'Welcome to Aetheria' }).waitFor();
     await expect.poll(async () => { if (await page.getByRole('heading', { name: '2. Scan & Distribute' }).isVisible()) return true; await page.getByRole('button', { name: 'Next', exact: true }).click(); return false; }, { message: 'the Quick guide’s second page', timeout: 10_000 }).toBe(true);
-    await expect(page.getByText("Spreads every song, scanned ones too, over the 27 crystals across the GUT, HEART, and HEAD ranges in turn. Deep Scan's own reading stays with each scanned song.")).toBeVisible();
+    // v16.7.3: and the tracks Deep Scan placed on 2178 Hz keep the SOURCE crystal.
+    await expect(page.getByText("Spreads every song, scanned ones too, over the 27 crystals across the GUT, HEART, and HEAD ranges in turn. Deep Scan's own reading stays with each scanned song. Songs Deep Scan placed on 2178 Hz keep the SOURCE crystal.")).toBeVisible();
     await expect(page.getByText('Assigns every song to its closest Aetheria frequency')).toHaveCount(0);
     await page.getByText('Quick Guide', { exact: true }).locator('xpath=..').getByRole('button').first().click();
     // The Guidebook's quick start.
     await page.getByRole('button', { name: /The Guidebook/ }).click();
-    await expect(page.getByText('every song, scanned ones too, is spread over the 27 Aetheria frequencies across the GUT, HEART and HEAD ranges')).toHaveCount(1);
+    await expect(page.getByText('every song, scanned ones too, is spread over the 27 Aetheria frequencies across the GUT, HEART and HEAD ranges; songs Deep Scan placed on 2178 Hz keep the SOURCE crystal')).toHaveCount(1);
     await expect(page.getByText('songs Deep Scan scanned keep their crystal')).toHaveCount(0);
     await expect(page.getByText('the player analyzes your music and assigns each song to its closest Aetheria frequency')).toHaveCount(0);
     expect(dialogs).toEqual([]);
@@ -449,6 +456,7 @@ test.describe('v16.7.1, Auto-Distribute after a full Deep Scan', () => {
   test('S1. a fully scanned library bunched on 3 GUT crystals: Auto-Distribute spreads it so every one of the 27 crystals and all 3 ranges have tracks; Deep Scan’s readings kept; a reload keeps it', async ({ page }) => {
     test.setTimeout(180_000);
     expect(new Set(BUNCHED.map((s) => s.closestSolfeggio)).size, 'Node: the fixture bunches on 3 crystals').toBe(3);
+    expect(BUNCHED_PLAN.source, 'v16.7.3: no reading at 2178 Hz (v16.7.1’s plan)').toBe(0);
     const dialogs = await openFleg(page, 'classic', BUNCHED);
     const s0 = await libraryState(page);
     expect([new Set(s0.crystals).size, rangesOf(s0.crystals), tally(s0.origins)], 'before: 3 crystals, the GUT range only, every track scanned').toEqual([3, ['GUT'], { scan: 36 }]);
@@ -476,6 +484,153 @@ test.describe('v16.7.1, Auto-Distribute after a full Deep Scan', () => {
     await expect(readout).toContainText('Analyzed tracks: 36');
     await expect(readout).toContainText('Unanalyzed tracks: 0');
     await readout.getByRole('button', { name: 'Close', exact: true }).click();
+    expect(dialogs).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// v16.7.3 (the user's decision 2026-11-04): "i hoped that source tracks would not get displaced if they were scanned at
+// 2178 hz originally". A track Deep Scan placed on 2178 Hz (the SOURCE crystal: a reading scanCrystalOf maps to 2178)
+// stays on 2178, recorded as the scan's, when Auto-Distribute spreads; it counts toward 2178's share; one v16.7.1's
+// spread moved off it goes back on the next press. sourced(prefix): BUNCHED's 36 readings and 4 placed on 2178 Hz, every
+// track scanned, with ids of its own per test (fix round 1, F4.3: S2's and S3's libraries never share an id, so a stale
+// tab of one can't stand in for the other). V1671: S3's library as v16.7.1's own spread left it (the frozen copy): every
+// crystal covered, Source tracks away.
+// ---------------------------------------------------------------------------------------------------------------
+const SOURCE_READINGS = [2180.5, 2179.25, 2182, 2177.25];
+const sourced = (prefix: string): any[] => {
+  const list: any[] = BUNCHED.map((s, i) => ({ ...s, id: `${prefix}-b${String(i).padStart(2, '0')}` }));
+  SOURCE_READINGS.forEach((hf, k) => list.splice(4 + k * 9, 0, { id: `${prefix}-s${k}`, duration: 200, harmonicFreq: hf, closestSolfeggio: SOURCE_FREQ, harmonicDeviation: Math.abs(hf - SOURCE_FREQ), crystalSource: 'scan', isAetheriaCandidate: false }));
+  return list.map((s, i) => ({ ...s, name: `tone-${String(i + 1).padStart(2, '0')}` }));
+};
+const SOURCED: any[] = sourced('1771800000000');
+const SOURCED_PLAN: AssignPlan = quietly(() => planAssign(SOURCED, 'spread'));
+const S3_LIB: any[] = sourced('1771900000000');
+const S3_FIRST: AssignPlan = quietly(() => planAssign(S3_LIB, 'spread'));
+const V1671: any[] = patchById(S3_LIB as never[], quietly(() => spreadV1671(S3_LIB)).patches as never) as any[];
+const V1671_AWAY: any[] = V1671.filter((s) => sourceTrack(s) && s.closestSolfeggio !== SOURCE_FREQ);
+const V1671_PLAN: AssignPlan = quietly(() => planAssign(V1671, 'spread'));
+const AT = ALL_CRYSTALS.indexOf(SOURCE_FREQ);
+const sourceIdsOf = (lib: any[]): string[] => lib.filter((s) => sourceTrack(s)).map((s) => s.id);
+/** Each Source track's crystal and origin, as the page has them. */
+const sourceState = (s: LibraryState, lib: any[]) => sourceIdsOf(lib).map((id) => [s.crystals[s.libraryIds.indexOf(id)], s.origins[s.libraryIds.indexOf(id)]]);
+const ON_2178 = SOURCE_READINGS.map(() => [SOURCE_FREQ, 'scan']);
+/** The stored meta's crystal fields, by id. */
+const storedCrystals = (page: Page) =>
+  page.evaluate(async () => {
+    const db: IDBDatabase = await new Promise((resolve, reject) => { const r = indexedDB.open('aetheria-db'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+    const all: any[] = await new Promise((resolve) => { const r = db.transaction('meta', 'readonly').objectStore('meta').getAll(); r.onsuccess = () => resolve(r.result); });
+    db.close();
+    return Object.fromEntries(all.map((m) => [m.id, [m.closestSolfeggio ?? null, m.crystalSource ?? null, m.harmonicFreq ?? null, m.harmonicDeviation ?? null]]));
+  });
+/** What the stored meta must hold after `plan` on `lib`. */
+const wantStored = (lib: any[], plan: AssignPlan) =>
+  Object.fromEntries(lib.map((s) => { const p = { ...s, ...(plan.patches.get(s.id) ?? {}) }; return [s.id, [p.closestSolfeggio ?? null, p.crystalSource ?? null, p.harmonicFreq ?? null, p.harmonicDeviation ?? null]]; }));
+
+test.describe('v16.7.3, Source tracks keep 2178 Hz', () => {
+  test('S2. a fully scanned library with 4 tracks Deep Scan placed on 2178 Hz: classic’s Auto-Distribute spreads the rest over every crystal and keeps the 4 on 2178 as Deep Scan’s (2178 holds max(Source, share)); the stored meta has it; a reload keeps the ids and the crystals', async ({ page }) => {
+    test.setTimeout(180_000);
+    // Node: 4 Source tracks, already on 2178 (nothing to put back); 2178 keeps them and gets no other (share 2).
+    expect([sourceIdsOf(SOURCED).length, SOURCED.length, SOURCED_PLAN.source, SOURCED_PLAN.restored], 'Node: the fixture').toEqual([4, 40, 4, 0]);
+    expect(SOURCED.some((s) => S3_LIB.some((x) => x.id === s.id)), 'Node: S2 and S3 share no id').toBe(false);
+    const share = Math.ceil(SOURCED.length / 27);
+    expect(SOURCED_PLAN.perCrystal[AT], 'Node: 2178 holds max(Source, share)').toBe(Math.max(4, share));
+    const dialogs = await openFleg(page, 'classic', SOURCED);
+    const s0 = await libraryState(page);
+    expect([[...new Set(s0.crystals)].sort((a, b) => (a ?? 0) - (b ?? 0)), tally(s0.origins)], 'before: 3 GUT crystals and 2178, every track scanned').toEqual([[174, 396, 528, SOURCE_FREQ], { scan: 40 }]);
+    await page.locator('aside').getByRole('button', { name: ASSIGN }).click();
+    await expect.poll(async () => { const c = (await libraryState(page)).crystals; return ALL_CRYSTALS.filter((f) => !c.includes(f)).length; }, { message: 'every one of the 27 crystals has a track', timeout: 15_000 }).toBe(0);
+    const s1 = await libraryState(page);
+    expect(s1.crystals, 'as planAssign(lib, "spread") says').toEqual(s1.libraryIds.map((id) => SOURCED_PLAN.patches.get(id)?.closestSolfeggio ?? SOURCED.find((s) => s.id === id)!.closestSolfeggio));
+    expect(sourceState(s1, SOURCED), 'the 4 placed on 2178 Hz: on 2178, Deep Scan’s').toEqual(ON_2178);
+    expect(s1.crystals.filter((c) => c === SOURCE_FREQ).length, '2178 holds max(Source, share): no other track joins them').toBe(Math.max(4, share));
+    expect(rangesOf(s1.crystals), 'all 3 ranges').toEqual(['GUT', 'HEART', 'HEAD']);
+    await expect(page.getByText(assignDoneText(SOURCED_PLAN), { exact: true }), 'the notice').toBeVisible();
+    expect(assignDoneText(SOURCED_PLAN)).toMatch(/^Tracks spread over all 27 crystals: \d+ scanned tracks moved off Deep Scan's crystal\. .* Tracks Deep Scan placed on 2178 Hz keep the SOURCE crystal\.$/);
+    // The stored meta has it (the debounced save): the crystals, crystalSource 'scan' on the 4, every reading kept.
+    const want = wantStored(SOURCED, SOURCED_PLAN);
+    await expect.poll(async () => { const got = await storedCrystals(page); return SOURCED.filter((s) => JSON.stringify(got[s.id]) !== JSON.stringify(want[s.id])).length; }, { message: 'the meta save', timeout: 20_000 }).toBe(0);
+    const stored = await storedCrystals(page);
+    expect(sourceIdsOf(SOURCED).map((id) => stored[id].slice(0, 3)), 'stored: on 2178, the scan’s, the reading kept').toEqual(sourceIdsOf(SOURCED).map((id) => [SOURCE_FREQ, 'scan', SOURCED.find((s) => s.id === id)!.harmonicFreq]));
+    await page.reload();
+    await acceptDisclaimer(page);
+    await expect.poll(async () => (await libraryState(page)).libraryIds.length, { timeout: 60_000 }).toBe(SOURCED.length);
+    const s2 = await libraryState(page);
+    expect([s2.libraryIds, s2.crystals], 'after the reload: the same ids and crystals').toEqual([s1.libraryIds, s1.crystals]);
+    expect(sourceState(s2, SOURCED), 'after the reload: the 4 on 2178, Deep Scan’s').toEqual(ON_2178);
+    expect(dialogs).toEqual([]);
+  });
+});
+
+test.describe('v16.7.3, phone, the new layout: a library v16.7.1 already spread', () => {
+  test.use({ viewport: PHONE_VIEWPORT });
+  const healthLine = (page: Page, id: string) => page.getByTestId(`health-${id}-line`);
+  const healthAction = (page: Page, id: string) => page.getByTestId(`health-${id}-action`);
+
+  test('S3. Source tracks v16.7.1’s spread moved off 2178: the health card offers Assign (v16.7.2’s said “All 40 tracks have one”), the confirmation says they go back, then they are on 2178 as Deep Scan’s and the rest re-spread; a reload keeps it; a second press writes nothing', async ({ page }) => {
+    test.setTimeout(240_000);
+    // Node: v16.7.1's own spread moved Source tracks off 2178 (Assign's, the reading kept, the mark) and covered every
+    // crystal, so v16.7.2's health card had nothing to offer.
+    const k = V1671_AWAY.length;
+    expect(k, 'Node: v16.7.1 moved Source tracks off 2178').toBeGreaterThan(0);
+    expect(V1671_AWAY.every((s) => spreadFromScan(s) && s.crystalSource === 'assigned' && s.harmonicDeviation >= SPREAD_MARK && S3_LIB.find((x) => x.id === s.id)!.harmonicFreq === s.harmonicFreq), 'Node: as v16.7.1 marks them').toBe(true);
+    expect(ALL_CRYSTALS.filter((f) => !V1671.some((s) => s.closestSolfeggio === f)), 'Node: every crystal covered').toEqual([]);
+    expect([V1671_PLAN.restored, V1671_PLAN.source], 'Node: the press puts them back').toEqual([k, 4]);
+    await countDecodesAndMetaPuts(page);
+    const dialogs = await openFleg(page, 'new', V1671);
+    await phoneSize(page);
+    await openLibraryTab(page);
+    expect(sourceState(await libraryState(page), S3_LIB).filter(([c]) => c !== SOURCE_FREQ).length, 'seeded: away from 2178').toBe(k);
+    await expect(healthLine(page, 'crystals')).toHaveText(`All 40 have one · ${k} can go back to 2178 Hz, the crystal Deep Scan gave ${k === 1 ? 'it' : 'them'}`);
+    await expect(healthAction(page, 'crystals')).toHaveText('Assign');
+    // Assign asks first (crystals tracks have change), and says they go back, first.
+    await healthAction(page, 'crystals').click();
+    const ask = page.getByRole('alertdialog', { name: 'Assign crystals?', exact: true });
+    await expect(ask.getByTestId('dialog-body')).toHaveText(assignConfirmText(V1671_PLAN).body);
+    expect(assignConfirmText(V1671_PLAN).body, 'the words').toMatch(new RegExp(`^${k} ${k === 1 ? 'track Deep Scan placed on 2178 Hz goes' : 'tracks Deep Scan placed on 2178 Hz go'} back to the SOURCE crystal\\. Every other track is spread over all 27 crystals, `));
+    await ask.getByRole('button', { name: 'Assign', exact: true }).click();
+    await expect.poll(async () => sourceState(await libraryState(page), S3_LIB), { message: 'back on 2178, Deep Scan’s', timeout: 15_000 }).toEqual(ON_2178);
+    const s1 = await libraryState(page);
+    expect(s1.crystals, 'as planAssign(lib, "spread") says (the rest re-spread around them)').toEqual(s1.libraryIds.map((id) => V1671_PLAN.patches.get(id)?.closestSolfeggio ?? V1671.find((s) => s.id === id)!.closestSolfeggio));
+    expect(s1.crystals, 'the same crystals as a first v16.7.3 press on the library itself').toEqual(s1.libraryIds.map((id) => S3_FIRST.patches.get(id)?.closestSolfeggio ?? S3_LIB.find((s) => s.id === id)!.closestSolfeggio));
+    expect(ALL_CRYSTALS.filter((f) => !s1.crystals.includes(f)), 'every crystal still has a track').toEqual([]);
+    // The notice (a toast here), in full: "N tracks back on 2178 Hz" in its parts and the closing SOURCE sentence.
+    const done = assignDoneText(V1671_PLAN);
+    expect(done, 'Node: the notice').toMatch(new RegExp(`(: |, )${k} ${k === 1 ? 'track' : 'tracks'} back on 2178 Hz[,.] .* Tracks Deep Scan placed on 2178 Hz keep the SOURCE crystal\\.$`));
+    await expect(page.getByTestId('notices'), 'the notice, as a toast').toContainText(done);
+    await expect(healthLine(page, 'crystals')).toHaveText('All 40 tracks have one');
+    await expect(healthAction(page, 'crystals'), 'nothing left to offer').toHaveCount(0);
+    const want = wantStored(V1671, V1671_PLAN);
+    await expect.poll(async () => { const got = await storedCrystals(page); return V1671.filter((s) => JSON.stringify(got[s.id]) !== JSON.stringify(want[s.id])).length; }, { message: 'the meta save', timeout: 20_000 }).toBe(0);
+    // A reload keeps it.
+    await page.reload();
+    await acceptDisclaimerNew(page);
+    await expect.poll(async () => (await libraryState(page)).libraryIds.length, { timeout: 60_000 }).toBe(V1671.length);
+    const s2 = await libraryState(page);
+    expect([s2.libraryIds, s2.crystals], 'after the reload: the same ids and crystals').toEqual([s1.libraryIds, s1.crystals]);
+    expect(sourceState(s2, S3_LIB), 'after the reload: on 2178, Deep Scan’s').toEqual(ON_2178);
+    // A second press (Auto-Distribute itself, through the classic peek: the card offers none): nothing to do, nothing written.
+    // The count is taken once the restore's own rewrite has landed: a few seconds after a reload the app rewrites every
+    // meta record by itself (a probe saw 0 puts 2 s after the peek, then all 40 by 5 s, with no press). So: until that
+    // rewrite has written every record (puts ≥ the library's size), then until 4 s pass with no write; at most 60 s (it
+    // runs on the phone too).
+    await peekClassicLibrary(page);
+    const metaPuts = () => page.evaluate(() => (window as any).__metaPuts as number);
+    const t0 = Date.now();
+    await expect.poll(metaPuts, { message: 'the restore’s own rewrite of every record', timeout: 60_000 }).toBeGreaterThanOrEqual(V1671.length);
+    let puts = await metaPuts();
+    while (Date.now() - t0 < 60_000) {
+      await page.waitForTimeout(4000);
+      const now = await metaPuts();
+      if (now === puts) break;
+      puts = now;
+    }
+    expect(Date.now() - t0, 'the saves settled within 60 s').toBeLessThan(60_000);
+    await page.locator('aside').getByRole('button', { name: ASSIGN }).click();
+    await expect(page.getByText('Every track is already spread over all 27 crystals.', { exact: true })).toBeVisible();
+    await page.waitForTimeout(3500);
+    expect(await metaPuts() - puts, 'no meta write after the second press').toBe(0);
+    expect((await libraryState(page)).crystals, 'nothing moved').toEqual(s1.crystals);
     expect(dialogs).toEqual([]);
   });
 });

@@ -45,7 +45,7 @@ import {
 } from './libraryModel.ts';
 import type { LibSong, HealthInput } from './libraryModel.ts';
 import { countAnalysable, capsFor, passButtonText, passEta, passEtaMinutes, PASS_IDLE } from '../../../utils/library/analysePass.ts';
-import { removeIdsWithCursor } from '../../../utils/library/listOps.ts';
+import { patchById, removeIdsWithCursor } from '../../../utils/library/listOps.ts';
 import { planAssign, needsDeepScan, deepScanQueue, ALL_CRYSTALS } from '../../../utils/mix/distribution.ts';
 import { buildFacetIndex, filterPass, NO_FILTERS } from '../../../utils/library/filterModel.ts';
 
@@ -289,9 +289,9 @@ const set1 = mk(40, (i) => ({
   visualEnvelope: i % 3 === 0 ? { bass: { length: 5 } } : undefined,
 }));
 const h1 = libraryHealth([...set1, set1[0], set1[1]]);
-eq(h1, { total: 40, noCrystal: 10, unscanned: 16, assignedToScan: 24, scanned: 0, scanReplaced: 0, emptyCrystals: 26, placeable: 30 }, 'libraryHealth: counts by each action’s own rule, each id once');
+eq(h1, { total: 40, noCrystal: 10, unscanned: 16, assignedToScan: 24, scanned: 0, scanReplaced: 0, emptyCrystals: 26, placeable: 30, sourceBack: 0, spreadCover: 27 }, 'libraryHealth: counts by each action’s own rule, each id once');
 eq(libraryHealth([S('a', 'a', scannedTrack), S('b', 'b', { harmonicDeviation: 999, harmonicFreq: 440 }), S('c', 'c', { harmonicFreq: 400 }), S('d', 'd', {}), S('e', 'e', { ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0 }), S('f', 'f', { ...scannedTrack, closestSolfeggio: 528, harmonicDeviation: 0 })]),
-  { total: 6, noCrystal: 3, unscanned: 2, assignedToScan: 0, scanned: 4, scanReplaced: 1, emptyCrystals: 25, placeable: 0 }, 'libraryHealth: scanned (a scan, the 999 fallback, two the old Auto-Distribute re-stored), the queue, ONE real put-back');
+  { total: 6, noCrystal: 3, unscanned: 2, assignedToScan: 0, scanned: 4, scanReplaced: 1, emptyCrystals: 25, placeable: 0, sourceBack: 0, spreadCover: 6 }, 'libraryHealth: scanned (a scan, the 999 fallback, two the old Auto-Distribute re-stored), the queue, ONE real put-back');
 eq([h1.unscanned, h1.assignedToScan], [deepScanQueue(set1).length, deepScanQueue(set1, { assigned: true }).length - deepScanQueue(set1).length], 'Scan counts = Deep Scan’s two queues');
 eq(h1.unscanned + h1.assignedToScan, set1.filter((s) => needsDeepScan(s)).length, 'together, every unscanned track');
 check(h1.noCrystal !== h1.unscanned, 'the crystal count is not the scan count (a mutant that swaps them fails)');
@@ -357,6 +357,81 @@ eq(libraryHealth(replacedSet).scanReplaced, 4, 'still counted (only the real dif
 eq(healthModel(base({ health: libraryHealth(mk(1, () => ({ ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0 }))) })).lines[0].line, 'The track has one', 'one track');
 eq(healthModel(base({ health: libraryHealth(mk(1, () => ({ ...scannedTrack, harmonicDeviation: 0 }))) })).lines[0], { id: 'crystals', title: 'Crystals', line: 'The track has one', sub: '26 crystals have no track.', done: true, todo: false }, 'a re-stored scan on its own crystal: nothing to put back');
 eq(healthModel(base({ health: libraryHealth([]) })).lines[0], { id: 'crystals', title: 'Crystals', line: 'All 0 tracks have one', done: true, todo: false }, 'an empty library: as v15.7');
+// v16.7.3: tracks Deep Scan read at 2178 Hz that an older spread moved off it (every crystal covered, so v16.7.2's card
+// said "All 30 tracks have one" and offered nothing): Assign is to do, it puts them back. The count is the plan's own.
+{
+  const spreadAwayFrom2178 = (c: number) => ({ fractalAnalysis: {}, harmonicFreq: 2180.5, closestSolfeggio: c, harmonicDeviation: 1000 + Math.abs(2180.5 - c), crystalSource: 'assigned' as const, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } });
+  const covered = (i: number) => ({ fractalAnalysis: {}, closestSolfeggio: ALL_CRYSTALS[i % 27], harmonicFreq: ALL_CRYSTALS[i % 27] + 2.5, harmonicDeviation: 2.5, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } });
+  for (const away of [1, 3]) {
+    const lib = mk(30, (i) => (i >= 27 && i < 27 + away ? spreadAwayFrom2178(ALL_CRYSTALS[i - 27]) : covered(i)));
+    const h = libraryHealth(lib);
+    eq([h.sourceBack, h.emptyCrystals, h.noCrystal], [away, 0, 0], `${away} away from 2178, every crystal covered`);
+    eq(h.sourceBack, planAssign(lib, 'spread').restored, 'sourceBack is the plan’s restored count');
+    const m = healthModel(base({ health: h, analyseCounts: countAnalysable(lib as never, CAPS) }));
+    eq(m.lines[0], { id: 'crystals', title: 'Crystals', line: `All 30 have one · ${away} can go back to 2178 Hz, the crystal Deep Scan gave ${away === 1 ? 'it' : 'them'}`, done: false, todo: true, action: { label: 'Assign', kind: 'assign', blocked: false } }, `v16.7.3: ${away} Source track(s) away: Assign, to do`);
+    eq([m.status, m.toDo, m.autoOpen], ['1 to do', 1, true], 'to do: the card opens');
+    check(assignNeedsConfirm(planAssign(lib, 'spread')), 'and the tap asks first (crystals tracks have change)');
+    eq(healthModel(base({ health: h, isScanning: true })).lines[0].action, { label: 'Assign', kind: 'assign', blocked: true }, 'blocked while Deep Scan runs');
+  }
+  // On 2178 already (a scan, or the spread kept it): nothing to put back. The 2178 track of `allDone` is one (2180.5 Hz).
+  eq(libraryHealth(allDone).sourceBack, 0, 'a Source track on 2178: nothing to put back');
+  eq(mDone.lines[0], { id: 'crystals', title: 'Crystals', line: 'All 30 tracks have one', done: true, todo: false }, 'and the line is done, as before');
+  // A crystal Assign placed on 2178 (no reading) is not a Source track, nor one an older Auto-Distribute moved there.
+  eq(libraryHealth(mk(3, () => ({ closestSolfeggio: 1935, harmonicFreq: 2178, harmonicDeviation: 3, crystalSource: 'assigned' as const }))).sourceBack, 0, 'an assigned crystal is no reading');
+  // No crystal yet takes precedence (the press does both).
+  const mixed = mk(30, (i) => (i === 0 ? {} : i === 1 ? spreadAwayFrom2178(528) : covered(i)));
+  eq(healthModel(base({ health: libraryHealth(mixed) })).lines[0].line, '1 of 30 tracks have none', 'a track with no crystal: its line first');
+}
+// v16.7.3 (F1): the optional Assign shows only when a spread would give more crystals a track (spreadCover, the plan's
+// own spreadRole), not whenever some crystal holds two: SOURCE tracks pinned together on 2178, or unreadable scans on one
+// crystal, can't be spread out, and a tap would write nothing.
+{
+  const sourceScan = (hf: number) => ({ fractalAnalysis: {}, harmonicFreq: hf, closestSolfeggio: 2178, harmonicDeviation: Math.abs(hf - 2178), crystalSource: 'scan' as const });
+  const reads = [2180.5, 2179.25, 2182, 2175.5, 2178, 2177.25];
+  // The review's inputs, after one press: 27 = 2 SOURCE scans + 25 new tracks; 30/6, 54/40, 12/3, 5/2.
+  for (const [size, k] of [[27, 2], [30, 6], [54, 40], [12, 3], [5, 2]]) {
+    const lib0 = mk(size, (i) => (i < k ? sourceScan(reads[i % reads.length]) : {}));
+    const lib = patchById(lib0 as never[], planAssign(lib0, 'spread').patches as never) as unknown as LibSong[];
+    const h = libraryHealth(lib);
+    const m = healthModel(base({ health: h, analyseCounts: countAnalysable(lib as never, CAPS) }));
+    check(planAssign(lib, 'spread').patches.size === 0, `${size}/${k}: a press would write nothing`);
+    check(m.lines[0].action === undefined && m.lines[0].done === true, `${size}/${k}: so no Assign (got ${JSON.stringify(m.lines[0])})`);
+    eq(h.spreadCover, 27 - planAssign(lib, 'spread').emptyAfter, `${size}/${k}: spreadCover is what a spread covers`);
+  }
+  {
+    // The first one in words: "All 27 tracks have one" with the empty crystal as the quiet line, no button.
+    const lib0 = mk(27, (i) => (i < 2 ? sourceScan(reads[i]) : {}));
+    const lib = patchById(lib0 as never[], planAssign(lib0, 'spread').patches as never) as unknown as LibSong[];
+    eq(healthModel(base({ health: libraryHealth(lib), analyseCounts: countAnalysable(lib as never, CAPS) })).lines[0], { id: 'crystals', title: 'Crystals', line: 'All 27 tracks have one', sub: '1 crystal has no track.', done: true, todo: false }, '27 = 2 SOURCE + 25: after a press, the line only informs');
+  }
+  // Unreadable scans stacked on one crystal (v16.7.1's case too): they stay, so the spread can't cover more.
+  const pile = mk(10, (i) => (i < 6 ? { harmonicFreq: 0, closestSolfeggio: 528, harmonicDeviation: 3, crystalSource: 'scan' as const } : { closestSolfeggio: ALL_CRYSTALS[i], harmonicFreq: ALL_CRYSTALS[i], harmonicDeviation: 3, crystalSource: 'assigned' as const }));
+  eq([libraryHealth(pile).emptyCrystals, libraryHealth(pile).spreadCover], [22, 5], 'stacked unreadable scans: 5 crystals now, 5 after a spread');
+  check(healthModel(base({ health: libraryHealth(pile) })).lines[0].action === undefined, 'stacked unreadable scans: no Assign that would do nothing');
+  // Where a spread does cover more, the optional Assign stays (the v16.7.1 cases above: oneCrystal, anchorsGap, legacyGap).
+  check(libraryHealth(oneCrystal).spreadCover === 27 && libraryHealth(anchorsGap).spreadCover === 27, 'a bunched library: a spread covers all 27');
+  // The parity on random libraries: offered exactly when a spread leaves fewer crystals empty.
+  let offered = 0;
+  for (let seed = 1; seed <= 200; seed++) {
+    let x = seed * 2654435761 >>> 0;
+    const rnd = () => ((x = (Math.imul(x ^ (x >>> 15), 2246822507) + 0x9e3779b9) >>> 0) / 4294967296);
+    const lib = mk(1 + (seed % 40), () => {
+      const r = rnd();
+      const c = ALL_CRYSTALS[Math.floor(rnd() * 27)];
+      if (r < 0.25) return sourceScan(reads[Math.floor(rnd() * reads.length)]);
+      if (r < 0.45) return { harmonicFreq: 0, closestSolfeggio: rnd() < 0.5 ? 528 : c, harmonicDeviation: 3, crystalSource: 'scan' as const };
+      if (r < 0.7) return { closestSolfeggio: c, harmonicFreq: c, harmonicDeviation: 3, crystalSource: 'assigned' as const };
+      if (r < 0.85) return { ...scannedTrack, closestSolfeggio: 528 };
+      return {};
+    });
+    const h = libraryHealth(lib);
+    const p = planAssign(lib, 'spread');
+    const offers = h.noCrystal === 0 && h.sourceBack === 0 && h.emptyCrystals > 0 && h.spreadCover > 27 - h.emptyCrystals;
+    if (h.noCrystal === 0 && h.sourceBack === 0) eq(offers, p.emptyAfter < h.emptyCrystals, `random ${seed}: the optional Assign exactly when a spread covers more`);
+    if (offers) offered++;
+  }
+  check(offered > 5, `the parity exercised (${offered} offers)`);
+}
 // After an Assign and no Deep Scan: every track has an assigned crystal; all of them are still Deep Scan's to do.
 const assignedOnly = mk(30, (i) => ({ closestSolfeggio: ALL_CRYSTALS[i % 27], harmonicFreq: ALL_CRYSTALS[i % 27], harmonicDeviation: 3, crystalSource: 'assigned' as const, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
 const mAssigned = healthModel(base({ health: libraryHealth(assignedOnly), analyseCounts: countAnalysable(assignedOnly as never, CAPS) }));
