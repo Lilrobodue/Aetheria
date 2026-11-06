@@ -19,13 +19,33 @@ import { useActions, useExport, useLibraryList, useLibraryStatus, useShell } fro
 import { countRender } from '../devRenders';
 import AssignCrystalsDialog from './AssignCrystalsDialog';
 import ClearLibraryDialog from './ClearLibraryDialog';
-import { HEALTH_FOOTER, assignNeedsConfirm, healthModel, libraryHealth } from './libraryModel';
-import { planAssign } from '../../../utils/mix/distribution';
+import { HEALTH_FOOTER, assignNeedsConfirm, healthModel, libraryHealth, spreadLineReachable, spreadPlanBusy, spreadPlanWanted } from './libraryModel';
+import { crystalMoves, planAssign } from '../../../utils/mix/distribution';
 import type { AssignPlan } from '../../../utils/mix/distribution';
-import type { HealthLine } from './libraryModel';
+import type { HealthLine, LibSong } from './libraryModel';
 
 const BUTTON = 'shrink-0 min-h-touch px-3 rounded-control bg-surface-raised border border-line-strong text-sm text-ink hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400';
 const BUTTON_BLOCKED = 'shrink-0 min-h-touch px-3 rounded-control bg-surface-raised border border-line-strong text-sm text-ink opacity-40 cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400';
+
+// v16.8.1 (D8, fix round 2): the spread plans the card made, by library array (a new array on every change), so a
+// remount (a search clears, a tab comes back) doesn't plan again; and the last count planned while nothing was busy,
+// shown held while something is. Dev builds count the plans in window.__aetheriaSpreadPlans (the dev hook reports it).
+const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
+const spreadPlans: WeakMap<readonly LibSong[], { plan: AssignPlan; moves: number }> = new WeakMap();
+let lastIdleMoves: number | null = null;
+function spreadPlanOf(songs: readonly LibSong[]): { plan: AssignPlan; moves: number } {
+  let p = spreadPlans.get(songs);
+  if (!p) {
+    const plan = planAssign(songs as never, 'spread');
+    p = { plan, moves: crystalMoves(plan) };
+    spreadPlans.set(songs, p);
+    if (IS_DEV_BUILD) {
+      const w = window as unknown as { __aetheriaSpreadPlans?: number };
+      w.__aetheriaSpreadPlans = (w.__aetheriaSpreadPlans ?? 0) + 1;
+    }
+  }
+  return p;
+}
 
 const HealthCard = () => {
   countRender('HealthCard');
@@ -35,7 +55,17 @@ const HealthCard = () => {
   const { libraryViewRef, phoneShell } = useShell();
   const { job, stopping, stoppingLong } = useExport();
   const exporting = !!job && (job.phase === 'running' || job.phase === 'cancelling');
-  const health = useMemo(() => libraryHealth(songs), [songs]);
+  const health = useMemo(() => libraryHealth(songs, st.rescanSkip), [songs, st.rescanSkip]);
+  // v16.8.1 (D8): what a spread would move, planned once per library array (never per render), and only when its line
+  // can show and nothing is busy (fix round 2: no plan while a track has no crystal, while lengths are still read, or
+  // while a pass runs or the library restores). While busy the last idle count shows, held; with none yet, the row is
+  // done. (Fix round 3, revR2-logic S1: never more than the tracks there are: tracks deleted while busy keep the count
+  // planned before them.)
+  const planStatus = { isScanning: st.isScanning, passPhase: st.pass.phase, restoring: st.restoring, durationsLeft: st.durationsLeft };
+  const wanted = spreadPlanWanted(health, planStatus);
+  const spread = useMemo(() => (wanted ? { songs, ...spreadPlanOf(songs) } : null), [songs, wanted]);
+  if (spread) lastIdleMoves = spread.moves;
+  const spreadMoves = spread ? spread.moves : spreadPlanBusy(planStatus) && spreadLineReachable(health) ? Math.min(lastIdleMoves ?? 0, health.total) : 0;
   const model = healthModel({
     health,
     pass: st.pass,
@@ -49,6 +79,9 @@ const HealthCard = () => {
     exporting, // v16.5 review (B10)
     exportStopping: !!stopping, // v16.5 final
     exportStoppingLong: !!stoppingLong, // v16.5 export memory
+    scanRun: st.scanRun, // v16.8.1 (D4): Scan again's progress
+    deviceRate: st.deviceRate, // v16.8.1 (D4): the rate note
+    spreadMoves, // v16.8.1 (D8)
   });
   const [openPref, setOpenPref] = useState<boolean | null>(libraryViewRef.current.healthOpen);
   const open = openPref ?? model.autoOpen;
@@ -61,12 +94,14 @@ const HealthCard = () => {
     if (a.kind === 'assign') {
       // Blocked (Deep Scan runs): Auto-Distribute's own toast says why. When crystals tracks have would change: ask
       // first, with the plan's counts. Otherwise it runs at once (its notice, or its toast when there is nothing to do).
-      const plan = a.blocked ? null : planAssign(songs, 'spread'); // v16.7.1: Assign spreads (autoDistribute's plan)
+      // v16.7.1: Assign spreads (autoDistribute's plan). v16.8.1 (D8): the card's own plan when it is of this library.
+      const plan = a.blocked ? null : spread && spread.songs === songs ? spread.plan : spreadPlanOf(songs).plan;
       if (plan && assignNeedsConfirm(plan)) setConfirming(plan);
       else actions.assignCrystals();
     } else if (a.kind === 'analyse') actions.analyse();
     else if (a.kind === 'scan') actions.scan();
     else if (a.kind === 'scan-assigned') actions.scanAssigned();
+    else if (a.kind === 'rescan') actions.rescan(); // v16.8.1 (D4): Scan again
     else if (a.kind === 'stop-scan') actions.stopScan();
     else {
       if (!phoneShell) libraryViewRef.current.refocus = 'review';
@@ -125,6 +160,7 @@ const HealthCard = () => {
                 <button
                   type="button"
                   data-testid={`health-${l.id}-action`}
+                  aria-label={`${l.action.label}: ${l.title}`}
                   aria-disabled={l.action.blocked || undefined}
                   onClick={() => run(l)}
                   className={l.action.blocked ? BUTTON_BLOCKED : BUTTON}

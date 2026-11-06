@@ -23,10 +23,11 @@ function Select<T extends string>({ label, value, options, onChange, 'data-testi
         <select
           value={value}
           onChange={(e: { target: HTMLSelectElement }) => onChange(e.target.value as T)}
-          className="w-full h-touch appearance-none rounded-control border border-line-strong bg-surface-raised px-3 pr-10 text-sm text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+          className="w-full h-touch appearance-none rounded-control border border-line-strong bg-surface-raised px-3 pr-10 text-sm text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400 [color-scheme:dark]"
         >
+          {/* v16.8.1: its open list is the browser's own: the dark scheme, and the options in the kit's colours. */}
           {options.map((o) => (
-            <option key={o.id} value={o.id}>
+            <option key={o.id} value={o.id} className="bg-surface-raised text-ink">
               {o.label}
             </option>
           ))}

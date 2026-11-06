@@ -405,6 +405,13 @@ export interface LibraryStatusValue {
    *  saved playlists (the new layout's Clear dialog: "Also delete my 5 playlists"). */
   storedTrackCount: number;
   playlistCount: number;
+  /** v16.8.1 (D4): the running Deep Scan's pass (a plain scan or a Scan again) and its tracks done of its queue; null
+   *  when none runs. */
+  scanRun: { mode: 'scan' | 'rescan'; done: number; total: number } | null;
+  /** v16.8.1 (D4): this device's playback rate (the playback AudioContext's sampleRate), null until it exists. */
+  deviceRate: number | null;
+  /** v16.8.1 fix round 1: the tracks Scan again couldn't read in this session (left out of its row until a reload). */
+  rescanSkip: ReadonlySet<string>;
 }
 
 /** v16.1: one row of the saved playlists' list (resolved against the library as it is now). */
@@ -597,6 +604,8 @@ export interface ShellActions {
   scan: () => void;
   /** v15.8: Deep Scan with the assigned tracks too (the health card's explicit "Also scan"). */
   scanAssigned: () => void;
+  /** v16.8.1 (D4): Scan again, the tracks Deep Scan read before v16.8.1 (the same pass, its own queue). */
+  rescan: () => void;
   stopScan: () => void;
   /** The import handler (classic's, unchanged). */
   importFiles: (event: any) => void;

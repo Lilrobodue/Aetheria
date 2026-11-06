@@ -19,6 +19,12 @@
 //                          recorded as the scan's (the user's decision 2026-11-04); one v16.7.1's spread moved away goes
 //                          back. Everything else spreads as in v16.7.1: a library with no such track gets v16.7.1's plan
 //                          exactly (source.check, against a frozen copy in scripts/mix-golden/spread-v1671.ts).
+//   v16.8.1 (devices):     the same files give the same crystals on every device (decisions D2, D3, D3b): the spread
+//                          breaks its ties by the file (fileKey: name and size, the playlists' fingerprint), not by the
+//                          per-device id; 2178 gets a full share of the other tracks on top of its Source tracks (they no
+//                          longer count toward its share), and a library too small to give every crystal one fills the
+//                          empty crystals first (devices.check, source.check). needsRescan / rescanQueue (D4): the tracks
+//                          Deep Scan read before it read at DEEP_SCAN_RATE.
 //
 // What Assign does (decisions 2026-10-26, 5 and 6 after the review): Deep Scan's crystals stay, and one an older
 // Auto-Distribute replaced is put back from the track's own stored measurement. A crystal Assign placed before (recorded
@@ -41,9 +47,12 @@ export interface CrystalFields {
   fractalAnalysis?: unknown;
   isAetheriaCandidate?: boolean;
   crystalSource?: CrystalSource;
+  /** v16.8.1 (D1): the rate Deep Scan decoded at (DEEP_SCAN_RATE); absent on readings made before v16.8.1. */
+  scanRate?: number;
 }
-/** What Assign reads: the crystal fields, the id (its seed and tiebreak), the name and the length (the stand-in). */
-export interface AssignSong extends CrystalFields { id: string; name: string; duration?: number }
+/** What Assign reads: the crystal fields, the id (its seed and tiebreak), the name and the length (the stand-in).
+ *  v16.8.1 (D2): and the file's name and size, the spread's tie-break key (fileKey); a Song's File has both. */
+export interface AssignSong extends CrystalFields { id: string; name: string; duration?: number; file?: { readonly name?: string; readonly size?: number } }
 /** What Assign writes: the four crystal fields, nothing else. */
 export interface CrystalPatch { closestSolfeggio?: number; harmonicFreq?: number; harmonicDeviation?: number; crystalSource?: CrystalSource }
 export type CrystalOrigin = 'scan' | 'scan-replaced' | 'scan-failed' | 'assigned' | 'none';
@@ -105,9 +114,91 @@ export function needsDeepScan(s: CrystalFields): boolean {
  * playback-ready harmonicFreq, never measured) follow them in the same pass.
  */
 export function deepScanQueue<T extends CrystalFields>(library: readonly T[], o: { assigned?: boolean } = {}): T[] {
-  const first = library.filter((s) => needsDeepScan(s) && (!s.harmonicFreq || !s.closestSolfeggio));
+  const first = library.filter(inDeepScanScope);
   if (o.assigned !== true) return first;
   return [...first, ...library.filter((s) => needsDeepScan(s) && !!s.harmonicFreq && !!s.closestSolfeggio)];
+}
+/** Deep Scan's default scope (its plain "Scan"): not measured, and no harmonicFreq or no crystal. */
+function inDeepScanScope(s: CrystalFields): boolean {
+  return needsDeepScan(s) && (!s.harmonicFreq || !s.closestSolfeggio);
+}
+
+/**
+ * v16.8.1 (D1): the one rate Deep Scan decodes at, on every device. It used to decode through the playback context, at
+ * the device's own rate, and the reading depends on it: the same 24 test files read at 44.1 kHz instead of 48 changed
+ * the crystal of 21 (a sample more or less, or another decoder, changed none). 48 kHz rather than 44.1 because PCs'
+ * outputs and Android phones already play at 48 kHz, so the readings made there stay as they are. A successful scan
+ * records it on the track (scanRate).
+ */
+export const DEEP_SCAN_RATE = 48000;
+
+/** v16.8.1 (D4): an older reading: Deep Scan read the track (readByDeepScan: a real measurement, never the failed scan's
+ *  placeholder) before v16.8.1, at whatever rate the device played (no scanRate). Scan again reads it once more.
+ *  Fix round 1 (rev-logic 4e): never one the plain Deep Scan already lists (an unreadable scan, 0 Hz: in its scope, it
+ *  is counted once, on the Deep Scan row). */
+export function needsRescan(s: CrystalFields): boolean {
+  return readByDeepScan(s) && typeof s.scanRate !== 'number' && !inDeepScanScope(s);
+}
+/** v16.8.1 (D4): Scan again's queue, in library order: every track with an older reading, but those Scan again
+ *  couldn't read in this session (`skip`, by id: fix round 1; offered again after a reload). */
+export function rescanQueue<T extends CrystalFields & { id?: string }>(library: readonly T[], skip?: ReadonlySet<string>): T[] {
+  return library.filter((s) => needsRescan(s) && !(skip && s.id !== undefined && skip.has(s.id)));
+}
+/**
+ * v16.8.1 (D4): where a track Scan again read anew (at `hf`, already the heard frequency, as Deep Scan stores it) sits,
+ * and its reading. One on its old scan crystal (Deep Scan's record: a Source track on 2178 included) moves to the new
+ * reading's crystal, the scan's. One Assign moved keeps its crystal: a spread track (the reading kept, the mark) gets its
+ * mark against the new reading (SPREAD_MARK + |hf − crystal|, so it is still a spread track); a legacy scan an older
+ * Auto-Distribute moved keeps its record. So the next Assign spreads every track by its new reading, and a track that
+ * now reads 2178 is a Source track (the health card offers to put it back).
+ */
+export function rescanPatch(s: CrystalFields, hf: number): CrystalPatch {
+  if (spreadFromScan(s)) return { harmonicFreq: hf, harmonicDeviation: SPREAD_MARK + Math.abs(hf - (s.closestSolfeggio as number)) };
+  if (crystalOrigin(s) === 'scan-replaced') return { harmonicFreq: hf };
+  const c = scanCrystalOf(hf);
+  return { harmonicFreq: hf, closestSolfeggio: c, harmonicDeviation: Math.abs(hf - c), crystalSource: 'scan' };
+}
+/** v16.8.1 fix round 2: what one Scan again read gives a track (App's scanLibrary applies it by id). Fix round 3
+ *  (revR2-logic N3): generic in the three results' types (App's: FractalAnalysisResult, IntervalAnalysisResult and
+ *  BandEnvelope), so the patch comes back typed and App's applyResult checks it against Song. */
+export interface RescanRead<F = unknown, I = unknown, E = unknown> {
+  /** The new reading (the heard frequency, as Deep Scan stores it). */
+  hf: number;
+  /** The fractal step's result; null when it fell back to the basic detector (as a first Deep Scan writes it). */
+  fractal: F | null;
+  /** The interval step's result (undefined for fewer than 2 peaks), and whether that step threw. */
+  intervals: I | undefined;
+  intervalsThrew: boolean;
+  /** The band envelope; undefined when it couldn't be made. */
+  envelope: E | undefined;
+  isAetheriaCandidate: boolean;
+}
+/** v16.8.1 fix round 3: the fields rescanReadPatch writes (an older interval result or envelope kept: absent). */
+export interface RescanReadPatch<F = unknown, I = unknown, E = unknown> extends CrystalPatch {
+  fractalAnalysis: F | null;
+  intervalAnalysis?: I;
+  bandEnvelope?: E;
+  isAetheriaCandidate: boolean;
+  scanRate: number;
+}
+/**
+ * v16.8.1 fix round 2: the patch a successful Scan again read writes, one rule (rev-logic 3 and 7 of fix round 1):
+ *  - where the track sits and its reading (rescanPatch), its rate (DEEP_SCAN_RATE) and isAetheriaCandidate;
+ *  - fractalAnalysis as a first Deep Scan writes it, null on the fallback, so both devices hold the same record for the
+ *    same file whichever read it last;
+ *  - the interval data as a first scan writes it (none for fewer than 2 peaks), but the older data kept when the step
+ *    threw;
+ *  - the envelope when one was made; the older one kept otherwise.
+ */
+export function rescanReadPatch<F, I, E>(s: CrystalFields, r: RescanRead<F, I, E>): RescanReadPatch<F, I, E> {
+  return {
+    ...rescanPatch(s, r.hf),
+    fractalAnalysis: r.fractal,
+    ...(r.intervalsThrew ? {} : { intervalAnalysis: r.intervals }),
+    ...(r.envelope !== undefined ? { bandEnvelope: r.envelope } : {}),
+    isAetheriaCandidate: r.isAetheriaCandidate,
+    scanRate: DEEP_SCAN_RATE,
+  };
 }
 
 const scanCrystalMemo = new Map<number, number>();
@@ -136,6 +227,13 @@ function fnv1a(str: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
   return h >>> 0;
+}
+/** v16.8.1 (D2): the track's file, as the saved playlists fingerprint it (utils/playlists/model.ts fpKey: `name|size`),
+ *  the same on every device that holds the file (the id is made at import, per device). A track with no file (the
+ *  checks' fixtures) falls back to its id. */
+export function fileKey(s: AssignSong): string {
+  const f = s.file;
+  return f && typeof f.name === 'string' && typeof f.size === 'number' ? `${f.name}|${f.size}` : s.id;
 }
 function seeded(seed: number): () => number {
   let a = seed >>> 0;
@@ -236,6 +334,9 @@ export interface AssignPlan {
 export function planAssign(library: readonly AssignSong[], mode: AssignMode = 'keep'): AssignPlan {
   // v16.8 (decision 6): the spread and its way back are their own plans; Assign's own rule below is unchanged.
   if (mode === 'spread' || mode === 'restore') return spreadOrRestore(library, mode);
+  // v16.8.1 (D5): Keep is left as it was, its ties still broken by the id: the app never runs it (Auto-Distribute and
+  // Assign crystals run planAssign(lib, 'spread') on every press, App.tsx autoDistribute), so it can't make two devices
+  // differ. Only the spread's key comes from the file.
   const seen = new Set<string>();
   const lib: AssignSong[] = [];
   for (const s of library) if (!seen.has(s.id)) { seen.add(s.id); lib.push(s); }
@@ -557,11 +658,15 @@ function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'resto
     // rule keeps it where it is, and so does a spread (review 3). A measured one is scored from its own reading's crystal;
     // any other from the old stand-in. v16.7.3 (F1): which is which is spreadRole's, the rule the health card reads too.
     // v16.7.3 (the user's decision 2026-11-04): every Source track (Deep Scan read it at 2178 Hz) stays on 2178, or goes
-    // back to it, recorded as the scan's; it is counted on 2178 before the fill (as an unreadable scan is on its crystal)
-    // and is never open. So the Source tracks are 2178's own share, and 2178 gets other tracks only while it is short:
-    // the fill below gives a crystal a track at level L only while it holds fewer than L, and the balance only to a
-    // crystal with the fewest. With k Source tracks, 2178 takes others only at the levels above k and only while it is
-    // among the fewest; a 2178 that already holds more than the rest gets none (source.check: 0, 1, a share, many).
+    // back to it, recorded as the scan's, and is never open.
+    // v16.8.1 (D3, the user's decision 2026-11-05, "full share on top"): the Source tracks no longer count toward 2178's
+    // share. `counts` below is the fill's own count, the 'stays' tracks and the open tracks placed, never a Source track;
+    // the fill gives a crystal a track at level L while that count is under L, and the balance gives each next track to
+    // a crystal with the fewest. So the open tracks spread evenly over all 27, 2178 included, and 2178 holds its Source
+    // tracks besides (270 tracks with 6 Source: about 10 on each crystal, about 16 on 2178). D3b: when the open tracks
+    // can't give every crystal the fill's first round has to cover one (`short`), a 2178 that holds Source tracks
+    // counts as covered in that round, so the empty crystals get the tracks: 27 − emptyAfter stays
+    // min(27, pinned crystals + open tracks), the health card's spreadCover (source.check, devices.check).
     for (const s of lib) {
       const { role, crystal } = spreadRole(s);
       if (role === 'open') { opened.push(s); continue; }
@@ -576,20 +681,33 @@ function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'resto
       if (!s.closestSolfeggio) { plan.given++; sourceGiven++; }
       else if (back) plan.restored++;
       else plan.kept++;
-      counts.set(SOURCE_FREQ, counts.get(SOURCE_FREQ)! + 1);
+      // (v16.8.1, D3: not counted toward 2178's share; perCrystal adds them below.)
     }
+    // v16.8.1 (D2): ranked by the file, the same on every device that holds it (fileKey; the id only for exact
+    // duplicates, the same file imported twice, and for tracks with no file).
+    // v16.8.1 (D5r): and an unmeasured track's stand-in is seeded by its file too (standInFreq itself is unchanged; it
+    // reads the id it is given): seeded by the per-device id, one never-scanned or failed track moved measured tracks
+    // between devices in most libraries. A track with no file gets its id, so it is as before. (Only the spread reads a
+    // stand-in here; the way back, 'restore', never does. Keep, above, still seeds by the id: D5.)
     const open = opened.map((s) => {
       const isMeasured = measured(s);
       if (isMeasured) readings++;
       const scanCrystal = isMeasured ? scanCrystalOf(s.harmonicFreq as number) : 0;
-      const bestMatch = isMeasured ? scanCrystal : getHarmonicSolfeggio(standInFreq(s), true);
-      return { s, isMeasured, scanCrystal, key: fnv1a('order:' + s.id), scores: new Map(ALL_CRYSTALS.map((f) => [f, compatibility(bestMatch, f)])) };
+      const fk = fileKey(s);
+      const bestMatch = isMeasured ? scanCrystal : getHarmonicSolfeggio(standInFreq({ ...s, id: fk }), true);
+      return { s, isMeasured, scanCrystal, fk, key: fnv1a('order:' + fk), scores: new Map(ALL_CRYSTALS.map((f) => [f, compatibility(bestMatch, f)])) };
     });
     type Open = (typeof open)[number];
+    // Order-free: (score, the file's hash, the file key, the id). The file key itself after its hash, so two files whose
+    // hashes collide are still told apart by what every device has.
+    const tie = (a: Open, b: Open) => (a.key !== b.key ? a.key < b.key : a.fk !== b.fk ? a.fk < b.fk : a.s.id < b.s.id);
     const better = (a: Open, b: Open, f: number) => {
       const d = a.scores.get(f)! - b.scores.get(f)!;
-      return d !== 0 ? d < 0 : a.key !== b.key ? a.key < b.key : a.s.id < b.s.id;
+      return d !== 0 ? d < 0 : tie(a, b);
     };
+    // D3b: too few open tracks for every crystal the first round fills (no 'stays' track on it): 2178, holding Source
+    // tracks, counts as covered in that round.
+    const short = source > 0 && open.length < SPREAD_ORDER.filter((f) => counts.get(f) === 0).length;
     const left = new Set(open);
     const place = (x: Open, f: number) => {
       left.delete(x);
@@ -628,13 +746,13 @@ function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'resto
     for (let level = 1; level <= 3; level++) {
       for (const f of SPREAD_ORDER) {
         if (!left.size) break;
-        if (counts.get(f)! >= level) continue;
+        if (counts.get(f)! + (level === 1 && short && f === SOURCE_FREQ ? 1 : 0) >= level) continue;
         let best: Open | null = null;
         for (const x of left) if (!best || better(x, best, f)) best = x;
         if (best) place(best, f);
       }
     }
-    const rest = [...left].sort((a, b) => (a.key !== b.key ? a.key - b.key : a.s.id < b.s.id ? -1 : 1));
+    const rest = [...left].sort((a, b) => (a === b ? 0 : tie(a, b) ? -1 : 1));
     for (const x of rest) {
       let min = Infinity;
       for (const f of SPREAD_ORDER) min = Math.min(min, counts.get(f)!);
@@ -647,7 +765,8 @@ function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'resto
       place(x, bestF);
     }
   }
-  const perCrystal = ALL_CRYSTALS.map((f) => counts.get(f)!);
+  // (v16.8.1, D3: the tracks on each crystal, the Source tracks on 2178 included.)
+  const perCrystal = ALL_CRYSTALS.map((f) => counts.get(f)! + (f === SOURCE_FREQ ? source : 0));
   return {
     patches, total: lib.length, ...plan, perCrystal, mode,
     emptyBefore: ALL_CRYSTALS.filter((f) => before.get(f) === 0).length,
@@ -660,6 +779,15 @@ function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'resto
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 /** Tracks this Assign places (they become assigned, not scanned). */
 const placed = (p: AssignPlan) => p.given + p.moved + p.movedFailed + p.unchanged;
+
+/** v16.8.1 (D8): the tracks whose crystal (closestSolfeggio) a plan changes: a patch carries only the fields that
+ *  differ, so one with a crystal moves it (a record-only change, crystalSource or the stored score alone, is not one).
+ *  A spread is idempotent: after its press, a plan of the result moves none. */
+export function crystalMoves(p: AssignPlan): number {
+  let n = 0;
+  for (const patch of p.patches.values()) if (patch.closestSolfeggio !== undefined) n++;
+  return n;
+}
 
 /** Assign asks first only when crystals that tracks already have would change. */
 export function assignNeedsConfirm(p: AssignPlan): boolean {

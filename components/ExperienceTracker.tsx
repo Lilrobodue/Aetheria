@@ -393,18 +393,20 @@ const ExperienceTracker: React.FC<ExperienceTrackerProps> = ({
                     <Sparkles className="w-4 h-4" />
                     Environment
                   </label>
+                  {/* v16.8.1 fix round 1 (D7, rev-ui 10): the new layout shows this in More › Journal, so its open list is
+                      the dark scheme's, the options in the kit's colours (the closed look unchanged). */}
                   <select
                     value={environment}
                     onChange={(e) => setEnvironment(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white"
+                    className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white [color-scheme:dark]"
                   >
-                    <option value="">Select environment...</option>
-                    <option value="quiet room">Quiet room</option>
-                    <option value="headphones">Headphones</option>
-                    <option value="speakers">Speakers</option>
-                    <option value="meditation space">Meditation space</option>
-                    <option value="nature">Outdoors/Nature</option>
-                    <option value="other">Other</option>
+                    <option value="" className="bg-surface-raised text-ink">Select environment...</option>
+                    <option value="quiet room" className="bg-surface-raised text-ink">Quiet room</option>
+                    <option value="headphones" className="bg-surface-raised text-ink">Headphones</option>
+                    <option value="speakers" className="bg-surface-raised text-ink">Speakers</option>
+                    <option value="meditation space" className="bg-surface-raised text-ink">Meditation space</option>
+                    <option value="nature" className="bg-surface-raised text-ink">Outdoors/Nature</option>
+                    <option value="other" className="bg-surface-raised text-ink">Other</option>
                   </select>
                 </div>
 

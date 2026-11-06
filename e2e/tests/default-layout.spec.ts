@@ -724,7 +724,7 @@ test.describe('phone', () => {
     }
     // About's version line said "new layout (beta)" (the spec's list of labels missed it).
     await openMorePage(page, 'about');
-    await expect(page.getByTestId('about-version')).toHaveText(/^Version v\d+\.\d+ · new layout$/);
+    await expect(page.getByTestId('about-version')).toHaveText(/^Version v\d+\.\d+(\.\d+)? · new layout$/); // (v16.8.1: a patch number too)
     await page.getByRole('button', { name: 'Back to More', exact: true }).click();
     await openMorePage(page, 'advanced');
     const layout = page.getByTestId('advanced-layout');

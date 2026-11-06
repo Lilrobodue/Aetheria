@@ -654,6 +654,24 @@ export interface MetaRecord {
 }
 
 /** Every stored metadata record ('aetheria-db' → meta), in the library's saved order where it has one. */
+/** v16.8.1: each stored track's file, by id: the name and the size the app gives its File on a restore (the blob's),
+ *  the spread's tie-break key (D2). Read from IndexedDB, so it holds on any release. */
+export async function libraryFiles(page: Page): Promise<Map<string, { name: string; size: number }>> {
+  const rows: Array<[string, { name: string; size: number }]> = await page.evaluate(async () => {
+    const db: IDBDatabase = await new Promise((resolve, reject) => {
+      const r = indexedDB.open('aetheria-db');
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    const all: any[] = db.objectStoreNames.contains('blobs')
+      ? await new Promise((resolve, reject) => { const r = db.transaction('blobs', 'readonly').objectStore('blobs').getAll(); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); })
+      : [];
+    db.close();
+    return all.map((b) => [b.id, { name: b.fileName, size: b.fileBlob?.size ?? 0 }]);
+  });
+  return new Map(rows);
+}
+
 export async function metaRecords(page: Page): Promise<MetaRecord[]> {
   return page.evaluate(async () => {
     const db: IDBDatabase = await new Promise((resolve, reject) => {
@@ -1470,6 +1488,13 @@ export interface LibraryState {
   /** Each play-order entry's / library track's length (null: not read yet). */
   durations: Array<number | null>;
   libraryDurations: Array<number | null>;
+  /** v16.8.1: each library track's harmonicFreq (Deep Scan's reading, or Assign's crystal), the rate Deep Scan read it at
+   *  (null: an older reading, or none) and its file (the spread's tie-break key: name|size). */
+  readings: Array<number | null>;
+  scanRates: Array<number | null>;
+  files: Array<{ name: string; size: number } | null>;
+  /** v16.8.1 fix round 2: the spread plans the health card has made (D8; dev builds count them). */
+  spreadPlans: number;
 }
 
 async function libraryHook(page: Page): Promise<void> {

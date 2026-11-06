@@ -142,6 +142,11 @@ export async function launchBuilder(page: Page, o: { layout?: 'new' | 'classic';
   if ((o.layout ?? 'new') === 'new') await acceptDisclaimerNew(page);
   else await acceptDisclaimer(page);
   await expect.poll(async () => (await libraryState(page)).libraryIds.length, { message: 'the library restores', timeout: 60_000 }).toBe(o.n ?? N);
+  // v16.8.1 (D6): and until the restore's "Restored N tracks" card has left the notices (App clears it 2 s after the
+  // restore). The builder's footer sits above the notice spacer, whose height follows the notices: while the card shows
+  // and then goes, the footer moves under a tap that was aimed at it (B3b and R3 on the Note 20: press() saw the tap
+  // land and no click reach the control). Waiting here, before the first press, leaves press() as it is.
+  await expect(page.getByTestId('restore-card'), 'the restore card is gone (the footer no longer moves)').toHaveCount(0, { timeout: 15_000 });
   if (o.hook === false) return;
   await page.waitForFunction(() => typeof (window as any).__aetheriaBuilder?.start === 'function', null, { timeout: 10_000 }).catch(() => {
     throw new Error('window.__aetheriaBuilder is missing: these tests need v16.3 on the dev server');

@@ -78,7 +78,7 @@ import { countCommit, reportPassWork } from './utils/perfHud';
 // v15.8: the mix recipes (pure; selection copied verbatim from here) and the crystal data they share.
 import { gutAlignment, heartAlignment, headAlignment, fullAlignment, crystalSetMix, goldenRatioMix, sequence111, sourceField, ultimateAlignment, loShuWalk } from './utils/mix/recipes';
 import type { MixInput, MixResult } from './utils/mix/recipes';
-import { planAssign, assignDoneText, assignNothingText, deepScanQueue, crystalOrigin, readByDeepScan, spreadFromScan } from './utils/mix/distribution';
+import { planAssign, assignDoneText, assignNothingText, deepScanQueue, crystalOrigin, readByDeepScan, spreadFromScan, DEEP_SCAN_RATE, rescanQueue, rescanReadPatch, scanCrystalOf, crystalMoves } from './utils/mix/distribution';
 import { getHarmonicSolfeggio, PRESETS } from './utils/crystalData';
 // v15.9: the mix catalogue (names, sub-lines, counts) and the Undo toast's words.
 import { mixStartText } from './utils/mix/catalog';
@@ -4687,17 +4687,34 @@ const App: React.FC = () => {
   // flips isScanning off at once (so the button resets) while the run is still
   // inside its current track; a second run must wait for this one to exit.
   const scanLoopActiveRef = useRef(false);
+  // v16.8.1 (D4): the running Deep Scan's pass (a plain scan, or a Scan again) and its tracks done, for the health card.
+  const [scanRun, setScanRun] = useState<{ mode: 'scan' | 'rescan'; done: number; total: number } | null>(null);
+  // v16.8.1 (D4): this device's playback rate, for Scan again's rate note: the playback AudioContext's, once it exists
+  // (initAudio makes it on the first play; read here as playback starts or stops, so initAudio stays as it is).
+  const [deviceRate, setDeviceRate] = useState<number | null>(null);
+  // v16.8.1 fix round 1 (rev-logic 4d, rev-ui 5): the tracks Scan again couldn't read in this session, by id. They are
+  // left out of its row and its queue until a reload (a track that never decodes is not re-read on every run).
+  const [rescanSkip, setRescanSkip] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const rescanSkipRef: { current: ReadonlySet<string> } = useRef(rescanSkip);
+  rescanSkipRef.current = rescanSkip;
+  useEffect(() => {
+    const r = audioCtxRef.current?.sampleRate;
+    if (typeof r === 'number' && Number.isFinite(r) && r > 0) setDeviceRate((prev: number | null) => (prev === r ? prev : r));
+  }, [isPlaying]);
 
-  const scanLibrary = async (opts?: { includeAssigned?: boolean }) => {
+  const scanLibrary = async (opts?: { includeAssigned?: boolean; rescan?: boolean }) => {
     if (scanLoopActiveRef.current) {
-      showStatusToast('The previous scan is still finishing. Try again in a moment.');
+      // v16.8.1 fix round 1 (rev-ui 2): a scan still running (a held Scan tap during a Scan again) says so; the old
+      // words are for a stopped scan still inside its last track.
+      showStatusToast(isScanning ? 'Deep Scan is already running. Stop it first, or wait for it to finish.' : 'The previous scan is still finishing. Try again in a moment.');
       return;
     }
     if (passLoopActiveRef.current) {
       showStatusToast('Deep Scan is unavailable while Analyse tracks runs. Stop it first, or wait for it to finish.');
       return;
     }
-    initAudio();
+    // v16.8.1 (D1): the scan decodes on its own context at DEEP_SCAN_RATE (below), never the playback one, so it no
+    // longer starts the playback AudioContext (it called initAudio here for that decode alone).
     // Deep Scan analyses the LIBRARY, whatever the play order shows. It used to
     // scan the play order and write that list back over the library when it
     // finished — so a scan started from a mix or walk shrank the library to the
@@ -4705,13 +4722,17 @@ const App: React.FC = () => {
     // track is now read fresh from the library and its results are patched in
     // BY ID, so imports and deletes made during a long scan survive as well.
     const libraryAtStart = dedupeById(libraryRef.current);
-    if (!libraryAtStart.length || !audioCtxRef.current) return;
+    if (!libraryAtStart.length) return;
+    // v16.8.1 (D4): Scan again (the health card's "Deep Scan, older readings", new layout only): the same pass over its
+    // own queue, the tracks Deep Scan read before v16.8.1. Classic's button passes its click event: a plain scan.
+    const rescan = opts?.rescan === true;
     // v15.8 (decision 6): the tracks never measured and with no assigned crystal (v15.7's scope); the scan stops after
     // them. The health card's explicit "Also scan the N assigned tracks" adds the assigned ones after them (classic's
     // button passes its click event, never { includeAssigned: true }).
-    const includeAssigned = opts?.includeAssigned === true;
-    const queueIds = deepScanQueue(libraryAtStart, { assigned: includeAssigned }).map(s => s.id);
+    const includeAssigned = !rescan && opts?.includeAssigned === true;
+    const queueIds = (rescan ? rescanQueue(libraryAtStart, rescanSkipRef.current) : deepScanQueue(libraryAtStart, { assigned: includeAssigned })).map(s => s.id);
     const total = queueIds.length;
+    if (rescan && total === 0) return; // (the card offers it only while there are some)
     if (total === 0) {
       const assignedLeft = deepScanQueue(libraryAtStart, { assigned: true }).length;
       setAnalysisNotification(
@@ -4722,13 +4743,27 @@ const App: React.FC = () => {
       setTimeout(() => setAnalysisNotification(null), 6000);
       return;
     }
+    // v16.8.1 (D1): one decoding context for the run (as the key step's keyDecodeCtx), at the one fixed rate, so a track
+    // reads the same on every device (DEEP_SCAN_RATE says why). The analysis below reads the buffer at its own rate.
+    let scanDecodeCtx: OfflineAudioContext;
+    try {
+      scanDecodeCtx = new OfflineAudioContext(1, 1, DEEP_SCAN_RATE);
+    } catch {
+      // No Web Audio here (fix round 1, rev-ui 11: it said nothing).
+      showStatusToast("This browser can't run Deep Scan.");
+      return;
+    }
 
     // Calculate time estimate (1-3 minutes per song for thorough analysis)
     const estimatedMinutes = Math.round(total * 2.5);
+    // (v16.8.1 fix round 1, rev-ui 7: whole hours, then the minutes; it rounded, so 150 min read "3h 30m".)
     const timeEstimate = estimatedMinutes > 60
-      ? `${Math.round(estimatedMinutes / 60)}h ${estimatedMinutes % 60}m`
+      ? `${Math.floor(estimatedMinutes / 60)}h ${estimatedMinutes % 60}m`
       : `${estimatedMinutes}m`;
 
+    // (v16.8.1 fix round 2, rev-logic 3: no start words of Scan again's own. The "Analyzing: …" notice below is set in
+    // the same task, with no await between, so React batches this one away, and the new layout, Scan again's only one,
+    // mutes "Analyzing: …": the row's progress line is what shows, as for a plain Deep Scan (library-tab 27).)
     const notificationMsg = scanStartToast(total, timeEstimate);
 
     setAnalysisNotification(notificationMsg);
@@ -4736,6 +4771,7 @@ const App: React.FC = () => {
 
     setIsScanning(true);
     setScanProgress(0);
+    setScanRun({ mode: rescan ? 'rescan' : 'scan', done: 0, total });
     scanLoopActiveRef.current = true;
 
     const results = new Map<string, Partial<Song>>();
@@ -4743,6 +4779,9 @@ const App: React.FC = () => {
     let shouldCancel = false;
     let keyDecodeCtx: OfflineAudioContext | null = null;
     const startTime = Date.now();
+    // v16.8.1 (D4), a Scan again's tally for its closing toast: read anew, of them read differently (Deep Scan's crystal
+    // for the reading changed), and couldn't be read (left exactly as they were).
+    let rescanned = 0, readDifferently = 0, rescanFailed = 0;
 
     // One track's results, applied by id to the library and the play order
     // (every repeat of the track in a walk included).
@@ -4761,6 +4800,7 @@ const App: React.FC = () => {
       if (opts?.quiet) quietCancel = true;
       setIsScanning(false);
       setScanProgress(0);
+      setScanRun(null);
       console.log(`Analysis cancelled after processing ${processedCount}/${total} files`);
     };
 
@@ -4782,6 +4822,8 @@ const App: React.FC = () => {
         if (!song) {
           processedCount++;
           setScanProgress(Math.round((processedCount / total) * 100));
+          // (v16.8.1 fix round 1, rev-ui 6: "i of N" moves with the percentage.)
+          if (!shouldCancel) setScanRun({ mode: rescan ? 'rescan' : 'scan', done: processedCount, total });
           continue;
         }
 
@@ -4800,7 +4842,8 @@ const App: React.FC = () => {
           // Small yield after file read
           await new Promise(resolve => setTimeout(resolve, 10));
           
-          const audioBuffer = await audioCtxRef.current!.decodeAudioData(arrayBuffer);
+          // v16.8.1 (D1): at DEEP_SCAN_RATE on every device (was the playback context's, at the device's own rate).
+          const audioBuffer = await scanDecodeCtx.decodeAudioData(arrayBuffer);
           decodedSeconds = audioBuffer.duration;
 
           // Another yield after decode
@@ -4838,6 +4881,7 @@ const App: React.FC = () => {
           // Additive: interval/gap analysis on the FFT peak set. Failures here
           // must not break the primary scan, so we swallow errors and proceed.
           let intervalData: IntervalAnalysisResult | undefined;
+          let intervalsThrew = false; // (v16.8.1 fix round 2: Scan again keeps older interval data only then)
           try {
             const peaks = await detectFrequencyPeaks(audioBuffer);
             if (peaks.length >= 2) {
@@ -4852,6 +4896,7 @@ const App: React.FC = () => {
               intervalData = { ...full, intervals: [] };
             }
           } catch (intervalErr) {
+            intervalsThrew = true;
             console.warn('Interval analysis failed for', song.name, intervalErr);
           }
 
@@ -4868,26 +4913,57 @@ const App: React.FC = () => {
           await new Promise(resolve => setTimeout(resolve, 10));
           if (shouldCancel) break;
 
-          applyResult(song.id, {
-            harmonicFreq: freq,
-            closestSolfeggio: solfeggio,
-            harmonicDeviation: deviation,
-            fractalAnalysis: fractalData,
-            intervalAnalysis: intervalData,
-            isAetheriaCandidate: couldBeAetheria(freq),
-            bandEnvelope,
-            crystalSource: 'scan',
-          });
+          if (rescan) {
+            // v16.8.1 (D4): the new reading, and where the track sits now (rescanPatch: on its old scan crystal it moves
+            // to the new reading's; one Assign moved keeps its crystal, its spread mark against the new reading). Read
+            // from the library as it is now.
+            // (Fix round 1, rev-logic 4c: a track deleted while it was read is not written, nor counted.)
+            const now = libraryRef.current.find(s => s.id === song.id);
+            if (now) {
+              const was = now.harmonicFreq;
+              applyResult(song.id, {
+                // (Fix round 2: one pure rule, distribution.ts rescanReadPatch: the fractal reading as a first scan
+                // writes it, null on the fallback; the older interval data kept only when that step threw; the older
+                // envelope kept when none was made; the reading, its crystal and its rate.)
+                ...rescanReadPatch(now, { hf: freq, fractal: fractalData, intervals: intervalData, intervalsThrew, envelope: bandEnvelope, isAetheriaCandidate: couldBeAetheria(freq) }),
+              });
+              rescanned++;
+              if (!(Number.isFinite(was) && (was as number) > 0) || scanCrystalOf(was as number) !== scanCrystalOf(freq)) readDifferently++;
+            }
+          } else {
+            applyResult(song.id, {
+              harmonicFreq: freq,
+              closestSolfeggio: solfeggio,
+              harmonicDeviation: deviation,
+              fractalAnalysis: fractalData,
+              intervalAnalysis: intervalData,
+              isAetheriaCandidate: couldBeAetheria(freq),
+              bandEnvelope,
+              crystalSource: 'scan',
+              scanRate: DEEP_SCAN_RATE, // v16.8.1 (D1): read at the one fixed rate
+            });
+          }
 
         } catch (e) {
           console.warn("Could not analyze", song.name, e);
-          // Set basic fallback values
-          applyResult(song.id, {
-            harmonicFreq: 440,
-            closestSolfeggio: 528,
-            harmonicDeviation: 999,
-            crystalSource: 'scan',
-          });
+          if (rescan) {
+            // v16.8.1 (D4): a track Scan again couldn't read keeps its older reading, exactly as it was; it is left out
+            // of the row and the queue for the rest of the session (fix round 1).
+            // (Fix round 2, rev-logic 6: only a track still in the library: one deleted meanwhile is neither.)
+            const failedId = song.id;
+            if (libraryRef.current.some(s => s.id === failedId)) {
+              rescanFailed++;
+              setRescanSkip((prev: ReadonlySet<string>) => (prev.has(failedId) ? prev : new Set([...prev, failedId])));
+            }
+          } else {
+            // Set basic fallback values (no scanRate: there is no reading)
+            applyResult(song.id, {
+              harmonicFreq: 440,
+              closestSolfeggio: 528,
+              harmonicDeviation: 999,
+              crystalSource: 'scan',
+            });
+          }
         }
 
         // Key data (v15.1), desktop only: a second, 22050 Hz decode. Phones leave it to Analyse tracks (one decode).
@@ -4916,6 +4992,7 @@ const App: React.FC = () => {
         // Update progress
         const progress = Math.round((processedCount / total) * 100);
         setScanProgress(progress);
+        if (!shouldCancel) setScanRun({ mode: rescan ? 'rescan' : 'scan', done: processedCount, total });
 
         // Calculate time remaining
         const elapsed = Date.now() - startTime;
@@ -4951,11 +5028,33 @@ const App: React.FC = () => {
       // id as it finished (applyResult).
       setIsScanning(false);
       setScanProgress(0);
+      setScanRun(null);
 
       const totalTime = Math.round((Date.now() - startTime) / 60000);
       console.log(`Analysis complete: ${processedCount}/${total} files processed in ${totalTime} minutes`);
 
-      if (processedCount > 0 && !quietCancel) {
+      if (rescan) {
+        // v16.8.1 (D4): Scan again's own closing words, as Deep Scan's (a notice the new layout shows as a toast).
+        if (processedCount > 0 && !quietCancel) {
+          // Fix round 1 (rev-ui 4): nothing read: what happened, in words. Fix round 2 (rev-logic 2): when a spread
+          // would now move tracks (D8's Crystals row offers it), the last words ask for the press: the whole library
+          // spreads, not only the tracks read differently (on a 48 kHz device often none). One plan per run, of the
+          // library with this run's results in it. (Rev-logic 5: after a Stop with nothing read, no words at all.)
+          const n = (x: number) => x.toLocaleString();
+          const moves = rescanned > 0 ? crystalMoves(planAssign(patchById(libraryRef.current, results), 'spread')) : 0;
+          const words = rescanned === 0 && rescanFailed > 0
+            ? `Scan again couldn't read ${n(rescanFailed)} ${rescanFailed === 1 ? 'track. It keeps its older reading.' : 'tracks. They keep their older readings.'}`
+            : rescanned === 0
+              ? (shouldCancel ? null : 'Nothing left to scan again.')
+              : `Scanned again: ${n(rescanned)} ${rescanned === 1 ? 'track' : 'tracks'} · ${n(readDifferently)} read differently` +
+                (rescanFailed > 0 ? ` · ${n(rescanFailed)} couldn't be read` : '') +
+                (moves > 0 ? ' · Tap Assign to spread your library by the new readings' : '');
+          if (words) {
+            setAnalysisNotification(words);
+            setTimeout(() => setAnalysisNotification(null), 8000);
+          }
+        }
+      } else if (processedCount > 0 && !quietCancel) {
         // Generate detailed analysis summary from the library as it was when
         // the scan began, with this run's results applied.
         const analyzedSongs = libraryAtStart
@@ -8794,8 +8893,11 @@ registerProcessor('wav-capture', WavCapture);
       analyseMobile: ANALYSE_MOBILE,
       storedTrackCount, // v16.1: the new layout's Clear dialog
       playlistCount: savedPlaylists ? savedPlaylists.length : 0,
+      scanRun, // v16.8.1 (D4): Scan again's progress line
+      deviceRate, // v16.8.1 (D4): its rate note
+      rescanSkip, // v16.8.1 fix round 1: the tracks it couldn't read this session
     }),
-    [isScanning, scanProgress, pass, analyseCounts, isRestoring, pendingDurationAnalysis.length, shellOrphans, orphanBusy, discardArmed, lastImport, storedTrackCount, savedPlaylists]
+    [isScanning, scanProgress, pass, analyseCounts, isRestoring, pendingDurationAnalysis.length, shellOrphans, orphanBusy, discardArmed, lastImport, storedTrackCount, savedPlaylists, scanRun, deviceRate, rescanSkip]
   );
   // v16.1: the saved playlists' slice (PlaylistsContext): the list's rows (summaries, O(total entries)), the open
   // playlist's resolved rows, the name Dialog and the Add sheet. Only while the new layout shows; never the clock (the
@@ -8913,6 +9015,13 @@ registerProcessor('wav-capture', WavCapture);
           crystals: libraryRef.current.map((x: Song) => x.closestSolfeggio ?? null),
           scanned: libraryRef.current.map((x: Song) => !!x.harmonicFreq),
           origins: libraryRef.current.map((x: Song) => crystalOrigin(x)),
+          // v16.8.1: each track's Deep Scan reading, its rate (D1) and its file (D2's key), for the device tests.
+          readings: libraryRef.current.map((x: Song) => (typeof x.harmonicFreq === 'number' ? x.harmonicFreq : null)),
+          // (fix round 1: as the library holds it, so a test sees what a restore kept)
+          scanRates: libraryRef.current.map((x: Song) => (x.scanRate ?? null)),
+          files: libraryRef.current.map((x: Song) => (x.file ? { name: x.file.name, size: x.file.size } : null)),
+          // (fix round 2: how many spread plans the health card has made, D8)
+          spreadPlans: (window as unknown as { __aetheriaSpreadPlans?: number }).__aetheriaSpreadPlans ?? 0,
           durations: s.playlist.map((x: Song) => (typeof x.duration === 'number' ? x.duration : null)),
           libraryDurations: libraryRef.current.map((x: Song) => (typeof x.duration === 'number' ? x.duration : null)),
         };
@@ -9752,6 +9861,18 @@ registerProcessor('wav-capture', WavCapture);
         }
         A().scanLibrary({ includeAssigned: true });
       },
+      // v16.8.1 (D4): Scan again (the health card's "Deep Scan, older readings"): the same pass, its own queue.
+      rescan: () => {
+        if (exportRunRef.current) {
+          more2ApiRef.current?.toast(exportWords.SCAN_WHILE_EXPORTING);
+          return;
+        }
+        if (exportStoppingRef.current.size) {
+          more2ApiRef.current?.toast(exportStoppingLongRef.current ? exportWords.SCAN_WHILE_STOPPING_LONG : exportWords.SCAN_WHILE_STOPPING);
+          return;
+        }
+        A().scanLibrary({ rescan: true });
+      },
       stopScan: () => (window as any).cancelAetheriaAnalysis?.(),
       importFiles: (event: React.ChangeEvent<HTMLInputElement>) => A().handleFileUpload(event),
       recoverOrphans: () => A().recoverOrphans(),
@@ -10367,7 +10488,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.8</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.8.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

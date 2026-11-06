@@ -12,6 +12,13 @@
 // Fix round 1: F1 the health card's spreadCover (the plan's own spreadRole), F2 the moved scans split into off / again /
 // back, F3 the words. (F7, Assign's stored score capped under the spread's mark: scorecap.check; none of these libraries
 // holds a score at the cap or a v16.7.1-shaped record, which that check covers.)
+// v16.8.1 (decisions D2, D3, D3b, 2026-11-05): the Source tracks no longer count toward 2178's share ("full share on
+// top": the other tracks spread evenly over all 27, 2178 included), a library too small to cover every crystal fills
+// the empty ones first, and the spread's ties go by the file, not the id. So section 3's oracle is now the independent
+// restatement (scripts/mix-golden/spread-oracle.ts; v16.7.1 with the Source tracks as unreadable scans stays the
+// oracle only where D3b keeps v16.7.3's plan, the files set aside); section 4 compares v16.7.1 with the files set
+// aside (the key is then the id, as v16.7.1's), the oracle with them, and v16.7.1 keyed by the file where no stand-in is
+// read; section 6 pins the new share. The device question itself is devices.check's.
 // Synthetic tones ("tone-NN") and fixed ids only; no Math.random anywhere.
 import { strict as assert } from 'node:assert';
 import { createHash } from 'node:crypto';
@@ -21,7 +28,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ALL_CRYSTALS, SPREAD_MARK, SPREAD_ORDER, assignConfirmText, assignDoneText, assignNeedsConfirm, assignNothingText, crystalOrigin,
-  planAssign, readByDeepScan, scanCrystalOf, sourceTrack, spreadAway, spreadFromScan, spreadRole,
+  fileKey, planAssign, readByDeepScan, scanCrystalOf, sourceTrack, spreadAway, spreadFromScan, spreadRole,
 } from './distribution.ts';
 import type { AssignPlan, AssignSong } from './distribution.ts';
 import { SOURCE_FREQ } from '../crystalData.ts';
@@ -30,6 +37,7 @@ import { libraryHealth } from '../../components/shell/library/libraryModel.ts';
 // @ts-ignore: the harness's fixture is plain .mjs (no types)
 import { buildFixtures, mulberry32 } from '../../scripts/mix-golden/fixture.mjs';
 import { restoreV1671, spreadV1671, wordsV1671 } from '../../scripts/mix-golden/spread-v1671.ts';
+import { spreadOracle } from '../../scripts/mix-golden/spread-oracle.ts';
 
 let checks = 0;
 const ok = (cond: unknown, msg: string) => { assert.ok(cond, msg); checks++; };
@@ -74,6 +82,12 @@ const measuredOpen = (s: T) => spreadRole(s).role === 'open' && readByDeepScan(s
   } else {
     realLog('source.check: WARNING: git cannot read 666132c here, so the frozen sections are NOT compared with git (the sha256 pin above still holds the file as reviewed)');
   }
+  // v16.8.1: the oracle's score (the only rule it copies) is the frozen copy's, byte for byte; it imports nothing from
+  // distribution.ts but the stand-in (D5).
+  const oracle = readFileSync(fileURLToPath(new URL('../../scripts/mix-golden/spread-oracle.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
+  const copied = oracle.match(/\/\/ ---- 666132c:utils\/mix\/distribution\.ts lines 158-176 \(the old score, as the frozen copy holds it\) ----\n([\s\S]*?)\n\/\/ ---- end of the copied lines ----/);
+  eq(copied?.[1], sections.find((m) => m[1] === '158')?.[3].replace(/\n+$/, ''), "the oracle's score: the frozen copy's lines 158-176");
+  eq([...oracle.matchAll(/^import .* from '([^']+)';$/gm)].map((m) => m[0]), ["import { GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS, getHarmonicSolfeggio } from '../../utils/crystalData.ts';", "import { standInFreq } from '../../utils/mix/distribution.ts';"], "the oracle's imports: crystalData, and distribution.ts's stand-in alone");
 }
 
 // ---- the tracks ---------------------------------------------------------------------------------------------------
@@ -99,6 +113,8 @@ const bunched = (tag: string, i: number) => scan(tag, [174, 396, 528][i % 3] + 1
 const R2178 = [2180.5, 2179.25, 2182, 2175.5, 2178, 1089, 2177.25, 2181];
 for (const f of R2178) eq(scanCrystalOf(f), SOURCE_FREQ, `${f} Hz reads as 2178`);
 const sourceIds = (l: readonly T[]) => l.filter((s) => sourceTrack(s)).map((s) => s.id);
+/** v16.8.1: a track without its file (the golden's fixtures carry one): the spread's key is then its id, as v16.7.1's. */
+const withoutFile = (s: T): T => { const { file, ...rest } = s; void file; return rest as T; };
 
 // ---- 1. Which tracks are Source tracks, and what a spread does with each (spreadRole) ----------------------------
 ok(sourceTrack(scan('a1', 2180.5)), 'a scan on 2178 (read at 2180.5 Hz)');
@@ -146,8 +162,9 @@ const MIXED: T[] = [
   }
   for (const t of ['x1', 'x2']) ok(get(t).crystalSource === 'assigned' && !sourceTrack(get(t)), `MIXED ${t}: placed like any track (Assign's), not made a Source track`);
   ok(!p.patches.has(was('u1').id) && !p.patches.has(was('u2').id), 'MIXED: the unreadable scans are left where they are');
-  // 2178: 4 Source tracks and an unreadable scan before the fill; 34 open tracks over the other 26: none goes to 2178.
-  eq([p.perCrystal[AT], on2178(after), p.emptyAfter], [5, 5, 0], 'MIXED: 2178 holds its own 5, nothing more; every crystal has a track');
+  // 2178: 4 Source tracks and an unreadable scan. v16.8.1 (D3): only the unreadable scan is its fill; the 34 open tracks
+  // give the 25 crystals with no track one each, then 9 more to the spread order's first 9: 2178, the 14th, gets none.
+  eq([p.perCrystal[AT], on2178(after), p.emptyAfter], [5, 5, 0], 'MIXED: 2178 holds its own 5 (a fill of 1, as each crystal past the 9th); every crystal has a track');
   eq(planAssign(after, 'spread').patches.size, 0, 'MIXED: a second press writes nothing');
 }
 
@@ -204,7 +221,7 @@ const f1Inputs: Array<[string, T[]]> = [[27, 2], [30, 6], [54, 40], [12, 3], [5,
 const all: Array<[string, T[]]> = [...fixtures, ...randoms, ['MIXED', MIXED], ...piles, ...alreadySpread, ...f1Inputs];
 
 // ---- 3. The rule on every library -------------------------------------------------------------------------------
-let compared = 0, oracleSource = 0, splitMoves = 0, coverOffers = 0;
+let compared = 0, oracleSource = 0, splitMoves = 0, coverOffers = 0, evenFills = 0, shortSource = 0;
 for (const [k, lib] of all) {
   const u = unique(lib);
   const p = planAssign(lib, 'spread');
@@ -262,23 +279,36 @@ for (const [k, lib] of all) {
   const r = planAssign(lib, 'restore'), r0 = restoreV1671(lib);
   eq([ser(r), { ...r, patches: null }], [ser(r0), { ...r0, patches: null }], `${k}: the way back is v16.7.1's`);
 
-  // F4.1, the oracle: every track but the Source ones gets what v16.7.1 gives the library with each Source track as an
-  // unreadable scan on 2178 (v16.7.1 already pins those).
-  const srcIds = new Set(src.map((s) => s.id));
-  const stand = lib.map((s) => (!s ? s : srcIds.has(s.id) ? ({ id: s.id, name: s.name, duration: s.duration, harmonicFreq: 0, closestSolfeggio: SOURCE_FREQ, harmonicDeviation: 3, crystalSource: 'scan' } as T) : s));
-  const q = spreadV1671(stand);
-  const qAfter = new Map(unique(apply(stand, q)).map((s) => [s.id, s]));
+  // v16.8.1, the oracle (was F4.1's: v16.7.1 with each Source track as an unreadable scan on 2178, the old share rule):
+  // every track's record after, each crystal's count and the empty crystals as the independent restatement of D2, D3
+  // and D3b gives them (scripts/mix-golden/spread-oracle.ts, written from the rule, not from distribution.ts).
+  const o = spreadOracle(lib as never);
   const why: string[] = [];
-  for (const s of u) if (!srcIds.has(s.id) && JSON.stringify(fields(afterOf.get(s.id)!)) !== JSON.stringify(fields(qAfter.get(s.id)!))) why.push(s.id);
-  eq(why, [], `${k}: the oracle: every other track as v16.7.1 places it`);
-  eq(p.perCrystal, q.perCrystal, `${k}: the oracle: the crystals' counts`);
-  const srcBare = src.filter((s) => !s.closestSolfeggio).length;
-  eq([p.spread, p.given, p.moved, p.movedFailed, p.unchanged, p.anchored, p.emptyAfter, p.total], [q.spread, q.given + srcBare, q.moved, q.movedFailed, q.unchanged, q.anchored, q.emptyAfter, q.total], `${k}: the oracle: the counts (R4: a Source track with no crystal is given one)`);
-  eq(p.kept, (q.kept ?? 0) + (src.length - p.restored - srcBare), `${k}: the oracle: kept, the Source tracks on 2178 included`);
+  for (const s of u) if (JSON.stringify(fields(afterOf.get(s.id)!)) !== JSON.stringify(o.after.get(s.id))) why.push(s.id);
+  eq(why, [], `${k}: the oracle: every track as the rule places it`);
+  eq([p.perCrystal, p.emptyAfter, p.open], [o.perCrystal, o.emptyAfter, o.open], `${k}: the oracle: the crystals' counts`);
+  // D3: the fill (the Source tracks aside) is even over all 27 when nothing stays and 27 or more are open; D3b keeps the
+  // card's spreadCover rule (above) and, while too few are open to give every empty crystal one, v16.7.3's plan exactly:
+  // v16.7.1 with the Source tracks as unreadable scans on 2178 (keyed by the id: the files set aside, as v16.7.1 never
+  // read them).
+  const fill = p.perCrystal.map((c, i) => c - (i === AT ? src.length : 0));
+  if ((p.open ?? 0) >= 27 && !u.some((s) => spreadRole(s).role === 'stays')) { ok(Math.max(...fill) - Math.min(...fill) <= 1, `${k}: the fill is even (${fill})`); evenFills++; }
+  if (src.length && (p.open ?? 0) < SPREAD_ORDER.filter((f) => !u.some((s) => spreadRole(s).role === 'stays' && s.closestSolfeggio === f)).length) {
+    const srcIds = new Set(src.map((s) => s.id));
+    const stand = lib.map((s) => (!s ? s : srcIds.has(s.id) ? ({ id: s.id, name: s.name, duration: s.duration, harmonicFreq: 0, closestSolfeggio: SOURCE_FREQ, harmonicDeviation: 3, crystalSource: 'scan' } as T) : withoutFile(s)));
+    const q = spreadV1671(stand);
+    const qAfter = new Map(unique(apply(stand, q)).map((s) => [s.id, s]));
+    const pNoFile = planAssign(lib.map((s) => (s ? withoutFile(s) : s)), 'spread');
+    const aNoFile = new Map(unique(apply(lib.map((s) => (s ? withoutFile(s) : s)), pNoFile)).map((s) => [s.id, s]));
+    eq(u.filter((s) => !srcIds.has(s.id) && JSON.stringify(fields(aNoFile.get(s.id)!)) !== JSON.stringify(fields(qAfter.get(s.id)!))).map((s) => s.id), [], `${k}: D3b (too few open tracks): v16.7.3's plan`);
+    eq(pNoFile.perCrystal, q.perCrystal, `${k}: D3b: v16.7.3's counts`);
+    shortSource++;
+  }
   if (src.length) oracleSource++;
   compared++;
 }
 ok(coverOffers > 20 && splitMoves > 20, `F1 / F2 exercised (${coverOffers} offers, ${splitMoves} libraries with again / back)`);
+ok(evenFills >= 20 && shortSource >= 20, `D3 / D3b exercised (${evenFills} even fills, ${shortSource} small libraries with Source tracks as v16.7.3)`);
 
 // ---- 4. No Source track: v16.7.1's plan, exactly -----------------------------------------------------------------
 const withoutSource = (l: readonly T[]) => l.filter((s) => !sourceTrack(s));
@@ -317,9 +347,30 @@ const unsplit = (text: string) => text
   .replace(/ Deep Scan's readings are kept\./, '')
   .replace(/: \. /, ': every track keeps its crystal. ')
   .replace(/: , /, ': ');
-let identical = 0, sameWords = 0;
-for (const [k, lib] of invariantLibs) {
-  eq(sourceIds(lib), [], `${k}: no Source track`);
+let identical = 0, sameWords = 0, byTheFile = 0;
+for (const [k, withFiles] of invariantLibs) {
+  eq(sourceIds(withFiles), [], `${k}: no Source track`);
+  // v16.8.1 (D2): the spread's key is the file's; v16.7.1's was the id. With the files set aside (the key is then the
+  // id, as v16.7.1's) a library with no Source track gets v16.7.1's plan exactly, below; with them, the oracle's.
+  const lib = withFiles.map((s) => (s ? withoutFile(s) : s));
+  {
+    const o = spreadOracle(withFiles as never);
+    const after = unique(apply(withFiles, planAssign(withFiles, 'spread')));
+    eq(after.filter((s) => JSON.stringify(fields(s)) !== JSON.stringify(o.after.get(s.id))).map((s) => s.id), [], `${k}: with its files: the oracle`);
+    // And v16.7.1 keyed by the file: v16.7.1's plan of the library with each id replaced by its file key, the same
+    // records (fix round 1, D5r: the stand-ins are seeded by the file key too, so libraries with unmeasured tracks
+    // compare as well; F7's stored-score cap aside, and not where a record has a v16.7.1-shaped score at the mark,
+    // which v16.7.1 read as a spread track: scorecap.check's case).
+    const u0 = unique(withFiles);
+    const pseudo = (s: T) => s.crystalSource === 'assigned' && (s.harmonicDeviation as number) >= SPREAD_MARK && !spreadFromScan(s);
+    if (withFiles.some((s) => s && s.file) && !u0.some(pseudo) && new Set(u0.map(fileKey)).size === u0.length) {
+      const renamed = u0.map((s) => ({ ...withoutFile(s), id: fileKey(s) }) as T);
+      const capped = (r: unknown[]) => (r[3] === 'assigned' && r[0] === r[1] && (r[2] as number) > 998 ? [r[0], r[1], 998, r[3]] : r);
+      const v = new Map(apply(renamed, spreadV1671(renamed)).map((s) => [s.id, capped(fields(s))]));
+      eq(u0.filter((s) => JSON.stringify(fields(after.find((x) => x.id === s.id)!)) !== JSON.stringify(v.get(fileKey(s)))).map((s) => s.id), [], `${k}: v16.7.1 keyed by the file`);
+      byTheFile++;
+    }
+  }
   const a = spreadV1671(lib), b = planAssign(lib, 'spread');
   eq(b.source, 0, `${k}: no Source track counted`);
   eq(ser(b), ser(a), `${k}: the same patches as v16.7.1`);
@@ -338,6 +389,7 @@ for (const [k, lib] of invariantLibs) {
   identical++;
 }
 ok(identical >= 300, `the invariant on ${identical} libraries (${sameWords} with the same words)`);
+ok(byTheFile >= 10, `v16.7.1 keyed by the file on ${byTheFile} libraries (fix round 1: stand-ins included, D5r)`);
 
 // ---- 5. Already spread: they come back, and the rest re-spread around them --------------------------------------
 let back = 0;
@@ -360,7 +412,8 @@ let back = 0;
   eq(spreadV1671(MIXED).perCrystal[AT] < 5, true, "MIXED: v16.7.1's spread had moved Source tracks off 2178");
 }
 
-// ---- 6. 2178's share: others only while it is short ------------------------------------------------------------
+// ---- 6. 2178's share: a full share on top of its Source tracks (v16.8.1, D3, D3b) ----------------------------------
+// (Was v16.7.3's: the Source tracks are 2178's share, so others join them only while 2178 is short.)
 {
   /** A clean library: k Source scans and n - k others (bunched scans and new tracks), every one open. */
   const clean = (n0: number, k: number): T[] => [
@@ -368,35 +421,58 @@ let back = 0;
     ...Array.from({ length: n0 - k }, (_, i) => (i % 3 === 2 ? fresh(`c${n0}-${k}-n${i}`, i) : bunched(`c${n0}-${k}-b${i}`, i))),
   ];
   let cases = 0;
-  for (const size of [1, 3, 10, 26, 27, 28, 40, 53, 54, 55, 56, 80, 81, 82, 108, 109, 160]) {
-    for (const k of [0, 1, 2, 3, 4, 5, 10, 30, 80]) {
+  for (const size of [1, 3, 10, 26, 27, 28, 40, 53, 54, 55, 56, 80, 81, 82, 108, 109, 160, 270]) {
+    for (const k of [0, 1, 2, 3, 4, 5, 6, 10, 30, 80]) {
       if (k > size) continue;
       const lib = clean(size, k);
       const p = planAssign(lib, 'spread');
       const at = p.perCrystal[AT];
-      const others = p.perCrystal.filter((_, i) => i !== AT);
+      const open = size - k;
+      // The fill: each crystal's tracks, 2178's Source tracks aside.
+      const fill = p.perCrystal.map((c, i) => c - (i === AT ? k : 0));
       const tag = `${size} tracks, ${k} Source`;
-      ok(at >= k, `${tag}: 2178 keeps its Source tracks`);
-      ok(Math.max(...others) - Math.min(...others) <= 1, `${tag}: the other 26 are even`);
-      ok(at === k || at <= Math.min(...others) + 1, `${tag}: 2178 got others only while it was short`);
-      if (k >= Math.ceil(size / 27)) eq(at, k, `${tag}: at or above the share: no other track on 2178`);
-      if (k <= Math.floor(size / 27)) ok(Math.max(...p.perCrystal) - Math.min(...p.perCrystal) <= 1, `${tag}: under the share: 2178 is filled up to it like the rest`);
+      ok(at >= k && p.source === k, `${tag}: 2178 keeps its Source tracks`);
+      ok(Math.max(...fill.filter((_, i) => i !== AT)) - Math.min(...fill.filter((_, i) => i !== AT)) <= 1, `${tag}: the other 26 are even`);
+      if (open >= 27) {
+        // D3: the open tracks spread evenly over all 27, 2178 included: its fill is a share like any other.
+        ok(Math.max(...fill) - Math.min(...fill) <= 1, `${tag}: the fill is even over all 27 (${fill})`);
+        ok(fill[AT] === Math.floor(open / 27) || fill[AT] === Math.ceil(open / 27), `${tag}: 2178 gets a full share (${fill[AT]}) on top of its ${k}`);
+      } else if (k > 0) {
+        // D3b: too few open tracks to give every crystal one: the empty crystals get them, none joins 2178.
+        eq(at, k, `${tag}: too few open tracks: none joins 2178 while a crystal is empty`);
+      }
       // (With 2 or more Source tracks, 27 tracks can't cover all 27: the Source tracks stay together on 2178.)
-      eq(p.emptyAfter, Math.max(0, (k > 0 ? 26 : 27) - (size - k)), `${tag}: crystals left empty only for want of tracks`);
-      if (k > 0 && size - k >= 26) eq(p.emptyAfter, 0, `${tag}: every crystal has a track`);
+      eq(p.emptyAfter, Math.max(0, (k > 0 ? 26 : 27) - open), `${tag}: crystals left empty only for want of tracks`);
+      if (k > 0 && open >= 26) eq(p.emptyAfter, 0, `${tag}: every crystal has a track`);
+      // The independent restatement agrees.
+      const o = spreadOracle(lib as never);
+      eq([p.perCrystal, unique(apply(lib, p)).map((s) => JSON.stringify(fields(s)) === JSON.stringify(o.after.get(s.id))).every(Boolean)], [o.perCrystal, true], `${tag}: the oracle`);
       // F1: after the press, the card offers no Assign that would do nothing.
       const h = libraryHealth(apply(lib, p) as never);
       ok(!(h.emptyCrystals > 0 && h.spreadCover > 27 - h.emptyCrystals), `${tag}: after a press, no optional Assign is offered`);
       cases++;
     }
   }
-  // The named cases (54 tracks, a share of 2): 0, 1, a share, many.
+  // The named cases (54 tracks, a share of 2), and the review page's (270 tracks, 6 Source: about 10 a crystal, about
+  // 16 on 2178). 2178 is the spread order's 14th, so in a partial round it is among the first 14 crystals to get one.
   eq(planAssign(clean(54, 0), 'spread').perCrystal[AT], 2, '54 tracks, no Source track: 2178 gets its share (2)');
-  eq(planAssign(clean(54, 1), 'spread').perCrystal[AT], 2, '54 tracks, 1 Source track: one other joins it (the share)');
-  eq(planAssign(clean(54, 2), 'spread').perCrystal[AT], 2, '54 tracks, 2 Source tracks (the share): no other');
+  eq(planAssign(clean(54, 1), 'spread').perCrystal[AT], 3, '54 tracks, 1 Source track: 53 open, 2178 gets 2 of them on top (was 2)');
+  eq(planAssign(clean(54, 2), 'spread').perCrystal[AT], 4, '54 tracks, 2 Source tracks: 52 open, 2178 gets 2 on top (was 2)');
   {
     const p = planAssign(clean(54, 10), 'spread');
-    eq([p.perCrystal[AT], p.emptyAfter, Math.min(...p.perCrystal)], [10, 0, 1], '54 tracks, 10 Source tracks: 2178 holds the 10 and nothing more; every crystal still has a track');
+    eq([p.perCrystal[AT], p.emptyAfter, Math.min(...p.perCrystal)], [12, 0, 1], '54 tracks, 10 Source tracks: 44 open, 2178 holds the 10 and 2 more (was 10 and nothing more); every crystal has a track');
+  }
+  {
+    const p = planAssign(clean(270, 6), 'spread');
+    const others = p.perCrystal.filter((_, i) => i !== AT);
+    eq([Math.min(...others), Math.max(...others), p.perCrystal[AT] >= 15 && p.perCrystal[AT] <= 16], [9, 10, true], `270 tracks, 6 Source tracks: 9 or 10 on each crystal, ${p.perCrystal[AT]} on 2178`);
+  }
+  {
+    // D3b at its edge, 1 Source track and: 25 others cover 26 crystals (one stays empty); 26 others cover all 27, none
+    // of them on 2178 (without D3b, 2178 would take one and a crystal would stay empty); 27 others give 2178 one too.
+    const at = (n0: number) => planAssign(clean(n0, 1), 'spread');
+    eq([at(26).emptyAfter, at(26).perCrystal[AT], at(27).emptyAfter, at(27).perCrystal[AT], at(28).emptyAfter, at(28).perCrystal[AT]], [1, 1, 0, 1, 0, 2], 'D3b at its edge: 25, 26 and 27 others');
+    eq([at(20).emptyAfter, at(20).perCrystal[AT]], [7, 1], '1 Source track and 19 others: 20 crystals covered, the 19 on 19 empty ones (none on 2178)');
   }
   ok(cases >= 120, `${cases} share cases`);
   ok(SPREAD_ORDER.indexOf(SOURCE_FREQ) === 13, '2178 is the spread order\'s 14th (HEART, the fifth round)');
@@ -573,4 +649,4 @@ let back = 0;
 
 Math.random = realRandom;
 console.log = realLog;
-console.log(`source.check: ${checks} checks passed (${compared} libraries, ${oracleSource} with Source tracks under the oracle, ${withSource} of ${randoms.length} seeded ones with Source tracks; the v16.7.1 invariant on ${identical}; back from a v16.7.1 spread in ${back})`);
+console.log(`source.check: ${checks} checks passed (${compared} libraries, ${oracleSource} with Source tracks under the oracle, ${withSource} of ${randoms.length} seeded ones with Source tracks; the v16.7.1 invariant on ${identical}, v16.7.1 keyed by the file on ${byTheFile}; back from a v16.7.1 spread in ${back})`);

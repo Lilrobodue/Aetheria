@@ -637,6 +637,61 @@ for (const [where, viewport, eyeId] of [
       expect(dialogs).toEqual([]);
     });
 
+    // v16.8.1 (D6): the desktop's 14 reaches the eye with Shift+Tab, and from there Chrome's own next Tab happens to reach
+    // Show controls with zenFocus's Tab catch removed too (the review's mutation Z1 left it green). Reached with Tab,
+    // forward, only the catch makes one Tab enough.
+    if (where === 'desktop') test(`14b. ${where}: Zen hidden from the keyboard, the eye reached with Tab (forward): no focus move; one Tab reaches Show controls (the Tab catch), and it shows; Enter reveals`, async ({ page }) => {
+      test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
+      test.setTimeout(150_000);
+      await instrumentAudio(page);
+      const dialogs = await playInNewLayout(page);
+      const eye = page.getByTestId(eyeId);
+      await expect(eye).toBeVisible();
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await tabTo(page, 'Zen mode', false);
+      await expect(eye, 'Tab, forward, reached the eye button').toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(eye).toHaveAttribute('aria-pressed', 'true');
+      await expectShellHidden(page);
+      await expectNoFocusMove(page);
+      await expectOneTabToShow(page);
+      await page.keyboard.press('Enter');
+      await expectShown(page, 'Enter reveals');
+      expect(dialogs).toEqual([]);
+    });
+
+    // v16.8.1 (D6, zenFocus records the pointerdown's composedPath): a click on a part of the controls that takes no
+    // focus, which is gone from the page by the hide (as a part React re-renders is): Chrome's starting point stays in
+    // the hidden part, so only the Tab catch makes one Tab enough, and it knows the click was in there by the path's
+    // ancestors (the click's own target is no longer in the page).
+    if (where === 'desktop') test(`15c. ${where}: Zen hidden after a click on a part of the controls that takes no focus and is gone by the hide: one Tab reaches Show controls`, async ({ page }) => {
+      test.skip(ON_DEVICE, 'a mouse and a keyboard');
+      test.setTimeout(150_000);
+      await instrumentAudio(page);
+      const dialogs = await playInNewLayout(page);
+      const eye = page.getByTestId(eyeId);
+      await eye.evaluate((b) => (b as HTMLButtonElement).click()); // Zen on, no pointer and no focus on it
+      await expect(eye).toHaveAttribute('aria-pressed', 'true');
+      // A part that takes no focus, inside the shell, over an empty spot of Now Playing.
+      const at = { x: 640, y: 330 };
+      const hit = await page.evaluate(({ x, y }) => {
+        const host = document.querySelector('[data-testid="new-shell"]')!;
+        const s = document.createElement('span');
+        s.id = 'e2e-gone';
+        s.style.cssText = `position:fixed;left:${x - 20}px;top:${y - 20}px;width:40px;height:40px;z-index:2147483647;pointer-events:auto`;
+        host.appendChild(s);
+        return document.elementFromPoint(x, y) === s;
+      }, at);
+      expect(hit, 'the click lands on it').toBe(true);
+      await page.mouse.click(at.x, at.y);
+      expect(await page.evaluate(() => document.activeElement === document.body), 'it took no focus').toBe(true);
+      await page.evaluate(() => document.getElementById('e2e-gone')!.remove());
+      await expectShellHidden(page);
+      await expectNoFocusMove(page);
+      await expectOneTabToShow(page);
+      expect(dialogs).toEqual([]);
+    });
+
     test(`15. ${where}: Zen hidden after a click on the eye button: nothing new on screen; one Tab reaches Show controls`, async ({ page }) => {
       test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
       test.setTimeout(150_000);

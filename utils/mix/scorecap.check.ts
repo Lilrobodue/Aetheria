@@ -16,7 +16,7 @@
 // Synthetic tones only ("tone-high-N" sends the stand-in high, as the review's input did); no Math.random.
 import { strict as assert } from 'node:assert';
 import {
-  ASSIGN_SCORE_CAP, SPREAD_MARK, crystalOrigin, deepScanQueue, needsDeepScan, planAssign, readByDeepScan, scanCrystalOf, sourceTrack, spreadFromScan,
+  ASSIGN_SCORE_CAP, SPREAD_MARK, crystalOrigin, deepScanQueue, needsDeepScan, planAssign, readByDeepScan, scanCrystalOf, sourceTrack, spreadFromScan, spreadRole,
 } from './distribution.ts';
 import type { AssignPlan, AssignSong } from './distribution.ts';
 import { SOURCE_FREQ } from '../crystalData.ts';
@@ -24,6 +24,7 @@ import { patchById } from '../library/listOps.ts';
 import { scanValue } from '../library/filterModel.ts';
 import { libraryHealth } from '../../components/shell/library/libraryModel.ts';
 import { restoreV1671, spreadV1671, wordsV1671 } from '../../scripts/mix-golden/spread-v1671.ts';
+import { spreadOracle } from '../../scripts/mix-golden/spread-oracle.ts';
 import { assignConfirmText, assignDoneText, assignNothingText } from './distribution.ts';
 
 let checks = 0;
@@ -121,8 +122,19 @@ for (const [k, lib] of libs) {
       ok(!planAssign(lib, 'restore').patches.has(s.id), `${k}: ${s.id}: the way back leaves it alone`);
     }
   }
+  // v16.8.1: the independent restatement of the spread (scripts/mix-golden/spread-oracle.ts: D2, D3, D3b, and F7's
+  // stored cap) places every track, Source ones included, and counts the crystals as the plan does.
+  const o = spreadOracle(lib as never);
+  for (const s of after) eq(fields(s), o.after.get(s.id), `${k}: ${s.id}: as the oracle places it`);
+  eq([p.perCrystal, p.emptyAfter], [o.perCrystal, o.emptyAfter], `${k}: the oracle's counts`);
   // v16.7.1's plan, the stored score aside: every other track as v16.7.1 places it, with each Source track as an
-  // unreadable scan on 2178 (source.check's oracle) and each v16.7.1-shaped record with a score under the mark.
+  // unreadable scan on 2178 (source.check's oracle until v16.8.1) and each v16.7.1-shaped record with a score under the
+  // mark. v16.8.1: still these libraries' plan, as every one is too small to give each crystal a track (D3b keeps
+  // v16.7.3's plan there: source.check checks where that holds), and none has a file (the key is the id, as v16.7.1's).
+  // (Fix round 1, rev-tests 8: D3b's own condition, too few open tracks for the crystals no unreadable scan holds; the
+  // comparison below runs on every library either way.)
+  const emptyOfStays = 27 - new Set(lib.filter((s) => spreadRole(s).role === 'stays').map((s) => s.closestSolfeggio)).size;
+  ok(lib.every((s) => !s.file) && (!src.length || o.open < emptyOfStays), `${k}: small (D3b's case when it holds Source tracks), no file`);
   const srcIds = new Set(src.map((s) => s.id));
   const stand = lib.map((s) => (srcIds.has(s.id) ? ({ id: s.id, name: s.name, duration: s.duration, harmonicFreq: 0, closestSolfeggio: SOURCE_FREQ, harmonicDeviation: 3, crystalSource: 'scan' } as T) : pseudoSpread(s) ? ({ ...s, harmonicDeviation: CAP } as T) : s));
   const q = spreadV1671(stand);
@@ -134,6 +146,7 @@ for (const [k, lib] of libs) {
   eq([p.perCrystal, p.given, p.moved, p.unchanged, p.spread], [q.perCrystal, q.given, q.moved, q.unchanged, q.spread], `${k}: v16.7.1's counts`);
   const hit = apply(stand, q).some((s) => assignPlacement(s) && (s.harmonicDeviation as number) > CAP);
   if (hit) over++;
+  // (v16.8.1: no Source track and no file, so the file key is the id and 2178's share is untouched: v16.7.1's own.)
   if (!hit && !pseudo.length && !src.length) eq(ser(p), ser(spreadV1671(lib)), `${k}: no score at the cap: v16.7.1's patches exactly`);
   // The words: as v16.7.1's (no Source track here moves again or back: the scores change no count).
   if (!src.length && !pseudo.length) {

@@ -42,11 +42,15 @@ import {
   onLibrarySearchRequest,
   requestLibrarySearch,
   takeSearchFocus,
+  rateNote,
+  spreadLineReachable,
+  spreadPlanBusy,
+  spreadPlanWanted,
 } from './libraryModel.ts';
 import type { LibSong, HealthInput } from './libraryModel.ts';
 import { countAnalysable, capsFor, passButtonText, passEta, passEtaMinutes, PASS_IDLE } from '../../../utils/library/analysePass.ts';
 import { patchById, removeIdsWithCursor } from '../../../utils/library/listOps.ts';
-import { planAssign, needsDeepScan, deepScanQueue, ALL_CRYSTALS } from '../../../utils/mix/distribution.ts';
+import { planAssign, needsDeepScan, deepScanQueue, ALL_CRYSTALS, crystalMoves } from '../../../utils/mix/distribution.ts';
 import { buildFacetIndex, filterPass, NO_FILTERS } from '../../../utils/library/filterModel.ts';
 
 let passed = 0;
@@ -289,9 +293,9 @@ const set1 = mk(40, (i) => ({
   visualEnvelope: i % 3 === 0 ? { bass: { length: 5 } } : undefined,
 }));
 const h1 = libraryHealth([...set1, set1[0], set1[1]]);
-eq(h1, { total: 40, noCrystal: 10, unscanned: 16, assignedToScan: 24, scanned: 0, scanReplaced: 0, emptyCrystals: 26, placeable: 30, sourceBack: 0, spreadCover: 27 }, 'libraryHealth: counts by each action’s own rule, each id once');
+eq(h1, { total: 40, noCrystal: 10, unscanned: 16, assignedToScan: 24, scanned: 0, scanReplaced: 0, emptyCrystals: 26, placeable: 30, sourceBack: 0, spreadCover: 27, olderReadings: 0 }, 'libraryHealth: counts by each action’s own rule, each id once');
 eq(libraryHealth([S('a', 'a', scannedTrack), S('b', 'b', { harmonicDeviation: 999, harmonicFreq: 440 }), S('c', 'c', { harmonicFreq: 400 }), S('d', 'd', {}), S('e', 'e', { ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0 }), S('f', 'f', { ...scannedTrack, closestSolfeggio: 528, harmonicDeviation: 0 })]),
-  { total: 6, noCrystal: 3, unscanned: 2, assignedToScan: 0, scanned: 4, scanReplaced: 1, emptyCrystals: 25, placeable: 0, sourceBack: 0, spreadCover: 6 }, 'libraryHealth: scanned (a scan, the 999 fallback, two the old Auto-Distribute re-stored), the queue, ONE real put-back');
+  { total: 6, noCrystal: 3, unscanned: 2, assignedToScan: 0, scanned: 4, scanReplaced: 1, emptyCrystals: 25, placeable: 0, sourceBack: 0, spreadCover: 6, olderReadings: 3 }, 'libraryHealth: scanned (a scan, the 999 fallback, two the old Auto-Distribute re-stored), the queue, ONE real put-back');
 eq([h1.unscanned, h1.assignedToScan], [deepScanQueue(set1).length, deepScanQueue(set1, { assigned: true }).length - deepScanQueue(set1).length], 'Scan counts = Deep Scan’s two queues');
 eq(h1.unscanned + h1.assignedToScan, set1.filter((s) => needsDeepScan(s)).length, 'together, every unscanned track');
 check(h1.noCrystal !== h1.unscanned, 'the crystal count is not the scan count (a mutant that swaps them fails)');
@@ -314,7 +318,7 @@ const plainSet = mk(10, (i) => (i < 4 ? scannedTrack : {}));
 const mPlain = healthModel(base({ health: libraryHealth(plainSet) }));
 eq(mPlain.lines[2], { id: 'scan', title: 'Deep Scan', line: 'Optional · 6 unscanned · about 15 min', done: false, todo: false, action: { label: 'Scan', kind: 'scan', blocked: false } }, 'scan: the mockup');
 check(!mPlain.lines.some((l) => l.id === 'scan-assigned'), 'no assigned track: no explicit line');
-const mOnlyAssigned = healthModel(base({ health: libraryHealth(mk(10, (i) => (i < 4 ? scannedTrack : { closestSolfeggio: 639, harmonicFreq: 639, harmonicDeviation: 3, crystalSource: 'assigned' as const }))) }));
+const mOnlyAssigned = healthModel(base({ health: libraryHealth(mk(10, (i) => (i < 4 ? { ...scannedTrack, scanRate: 48000 } : { closestSolfeggio: 639, harmonicFreq: 639, harmonicDeviation: 3, crystalSource: 'assigned' as const }))) }));
 eq(mOnlyAssigned.lines.slice(2), [
   { id: 'scan', title: 'Deep Scan', line: '4 of 10 scanned', done: false, todo: false },
   { id: 'scan-assigned', title: 'Deep Scan, assigned tracks', line: 'Also scan the 6 assigned tracks (about 15 min)', done: false, todo: false, action: { label: 'Scan', kind: 'scan-assigned', blocked: false } },
@@ -326,7 +330,7 @@ const small = libraryHealth(mk(12, () => ({})));
 const mSmall = healthModel(base({ health: small }));
 eq(mSmall.lines[0], { id: 'crystals', title: 'Crystals', line: '12 of 12 tracks have none', done: false, todo: true, action: { label: 'Assign', kind: 'assign', blocked: false } }, 'under 27 tracks: Assign');
 // Every crystal covered, every track scanned: all done.
-const allDone = mk(30, (i) => ({ fractalAnalysis: {}, closestSolfeggio: ALL_CRYSTALS[i % 27], harmonicFreq: ALL_CRYSTALS[i % 27] + 2.5, harmonicDeviation: 2.5, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
+const allDone = mk(30, (i) => ({ fractalAnalysis: {}, closestSolfeggio: ALL_CRYSTALS[i % 27], harmonicFreq: ALL_CRYSTALS[i % 27] + 2.5, harmonicDeviation: 2.5, scanRate: 48000, chromaVersion: 1, visualEnvelope: { bass: { length: 5 } } }));
 const mDone = healthModel(base({ health: libraryHealth(allDone), analyseCounts: countAnalysable(allDone as never, CAPS) }));
 eq(mDone.lines.map((l) => [l.line, l.done]), [['All 30 tracks have one', true], ['All analysed', true], ['All 30 tracks scanned', true]], 'all done');
 // v16.7.1: every track scanned at 528 only: Assign spreads scanned tracks too, so it can fill the gaps: offered, optional.
@@ -601,6 +605,121 @@ eq(recoverWords(0, 1).recover, 'Remove copies', 'copies only');
   requestLibrarySearch();
   eq(takeSearchFocus(null), false, 'no ref: nothing to take');
   check(true, 'no ref: no throw');
+}
+
+// v16.8.1 (D4, the review page's option A): Scan again, the "Deep Scan, older readings" row.
+{
+  // allDone read before v16.8.1 (no scanRate): every reading is an older one.
+  const older = allDone.map((s) => ({ ...s, scanRate: undefined }));
+  const failedOne = S('f', 'f', { harmonicFreq: 440, closestSolfeggio: 528, harmonicDeviation: 999, crystalSource: 'scan' });
+  const assignedOne = S('a', 'a', { harmonicFreq: 639, closestSolfeggio: 639, harmonicDeviation: 3, crystalSource: 'assigned' });
+  const spreadOne = S('s', 's', { harmonicFreq: 530.5, closestSolfeggio: 852, harmonicDeviation: 1000 + Math.abs(530.5 - 852), crystalSource: 'assigned' });
+  eq(libraryHealth(older).olderReadings, 30, 'olderReadings: every reading without its rate');
+  eq(libraryHealth(allDone).olderReadings, 0, 'olderReadings: none once read at 48 kHz');
+  eq(libraryHealth([...older.slice(0, 3), failedOne, assignedOne, spreadOne, older[0]]).olderReadings, 4, "olderReadings: Deep Scan's readings (a spread track's kept one too), each id once; never a failed scan's placeholder or Assign's placement");
+  const hOld = libraryHealth(older);
+  const counts = countAnalysable(older as never, CAPS);
+  const at = (o: Partial<HealthInput> = {}) => healthModel(base({ health: hOld, analyseCounts: counts, ...o }));
+  const row = (m: ReturnType<typeof healthModel>) => m.lines.find((l) => l.id === 'rescan');
+  const LINE = 'Scan again the 30 tracks read before v16.8.1, so they match on every device';
+  eq(row(at({ deviceRate: 48000, mobile: true })), { id: 'rescan', title: 'Deep Scan, older readings', line: LINE, sub: 'About 1 h 15 min · this phone plays at 48 kHz, so most stay the same', done: false, todo: false, action: { label: 'Scan', kind: 'rescan', blocked: false } }, 'rescan: offered (48 kHz, a phone)');
+  eq(row(at({ deviceRate: 44100, mobile: false }))?.sub, 'About 1 h 15 min · this computer plays at 44.1 kHz, so many may change', 'rescan: 44.1 kHz, a computer');
+  eq(row(at({ deviceRate: 44100, mobile: true }))?.sub, 'About 1 h 15 min · this phone plays at 44.1 kHz, so many may change', 'rescan: 44.1 kHz, a phone');
+  eq(row(at({ deviceRate: null }))?.sub, 'About 1 h 15 min', 'rescan: no note while the rate is unknown');
+  eq(row(at())?.sub, 'About 1 h 15 min', 'rescan: no note without a rate');
+  eq(rateNote(96000, false), ' · this computer plays at 96 kHz, so many may change', 'rateNote: the rate as the device reports it');
+  eq([rateNote(22050, true), rateNote(0, true), rateNote(NaN, true)], [' · this phone plays at 22.05 kHz, so many may change', '', ''], 'rateNote: any other rate; none for 0 or NaN');
+  eq(row(healthModel(base({ health: libraryHealth([older[0]]), analyseCounts: countAnalysable([older[0]] as never, CAPS) })))?.line, 'Scan again the 1 track read before v16.8.1, so it matches on every device', 'rescan: one track (fix round 1: "it matches")');
+  // Optional: the card stays folded, "All set · Deep Scan optional", and the row is no "to do".
+  const mOffered = at({ deviceRate: 48000 });
+  eq([mOffered.status, mOffered.toDo, mOffered.autoOpen, mOffered.folded], ['All set', 0, false, 'All set · Deep Scan optional'], 'rescan: optional, folded "All set · Deep Scan optional"');
+  eq(mOffered.lines.map((l) => l.id), ['crystals', 'analyse', 'scan', 'rescan'], 'rescan: after the Deep Scan row');
+  eq(mOffered.lines.find((l) => l.id === 'scan')?.line, 'All 30 tracks scanned', 'the plain Deep Scan row: all scanned');
+  // None while there are none; hidden while a plain Deep Scan runs; held while Analyse tracks runs.
+  check(!row(healthModel(base({ health: libraryHealth(allDone), analyseCounts: countAnalysable(allDone as never, CAPS) }))), 'rescan: no row without older readings');
+  check(!row(at({ isScanning: true, scanProgress: 10, scanRun: { mode: 'scan', done: 3, total: 30 } })), 'rescan: hidden while a plain Deep Scan runs');
+  check(!row(at({ isScanning: true, scanProgress: 10, scanRun: null })), 'rescan: hidden while a scan of no known pass runs');
+  const busy = at({ pass: { ...PASS_IDLE, phase: 'running', total: 4, done: 1 } as never, deviceRate: 48000 });
+  eq([row(busy)?.sub, row(busy)?.action], ['Unavailable while Analyse tracks runs', { label: 'Scan', kind: 'rescan', blocked: true }], 'rescan: held while Analyse tracks runs, with the other scan lines\' sub');
+  // Running: "Scanning again · P % · i of N", Stop, the progress bar; the plain Deep Scan row its own state.
+  const run = at({ isScanning: true, scanProgress: 42, scanRun: { mode: 'rescan', done: 113, total: 270 }, deviceRate: 48000 });
+  eq(row(run), { id: 'rescan', title: 'Deep Scan, older readings', line: 'Scanning again · 42 % · 113 of 270', done: false, todo: true, action: { label: 'Stop', kind: 'stop-scan', blocked: false }, progress: 113 / 270 }, 'rescan: running');
+  eq(run.lines.find((l) => l.id === 'scan'), { id: 'scan', title: 'Deep Scan', line: 'All 30 tracks scanned', done: true, todo: false }, 'rescan running: the plain Deep Scan row shows its own state');
+  eq([run.status, run.autoOpen], ['Scanning…', true], 'rescan running: "Scanning…", open');
+  const partly = libraryHealth([...older.slice(0, 10), ...mk(4, () => ({})).map((s) => ({ ...s, id: `new-${s.id}` }))]);
+  eq(healthModel(base({ health: partly, isScanning: true, scanProgress: 50, scanRun: { mode: 'rescan', done: 5, total: 10 } })).lines[0].sub, 'Unavailable while Deep Scan runs', 'rescan running: Assign held');
+  const runPartly = healthModel(base({ health: partly, analyseCounts: countAnalysable([] as never, CAPS), isScanning: true, scanProgress: 50, scanRun: { mode: 'rescan', done: 5, total: 10 } }));
+  eq(runPartly.lines.find((l) => l.id === 'scan')?.action, { label: 'Scan', kind: 'scan', blocked: true }, 'rescan running: the plain row\'s Scan is held');
+  eq(runPartly.lines.find((l) => l.id === 'scan')?.sub, 'Unavailable while Deep Scan runs', 'rescan running: and says why');
+  // An export holds it, as the other scan lines.
+  eq(row(at({ exporting: true }))?.action?.blocked, true, 'rescan: held while an export runs');
+  eq(row(at({ exportStopping: true }))?.action?.blocked, true, 'rescan: held while a let-go export stops');
+  eq(row(at({ exporting: true, isScanning: true, scanProgress: 1, scanRun: { mode: 'rescan', done: 0, total: 30 } }))?.action, { label: 'Stop', kind: 'stop-scan', blocked: false }, 'rescan: its Stop is never held');
+}
+
+// v16.8.1 (D8): the Crystals row offers an optional Assign whenever a spread would move tracks (M, distribution.ts
+// crystalMoves of planAssign(lib, 'spread'), which HealthCard passes in as spreadMoves).
+{
+  // Every crystal covered, every track read, but spread by an earlier rule: each one a crystal along from its own (the
+  // 2178 one, a Source track, left on 2178: otherwise the row offers to put it back first).
+  const others = ALL_CRYSTALS.filter((f) => f !== 2178);
+  const spreadOld = allDone.map((s, i) => {
+    if (ALL_CRYSTALS[i % 27] === 2178) return s;
+    const c = others[(others.indexOf(ALL_CRYSTALS[i % 27]) + 1) % others.length];
+    return { ...s, closestSolfeggio: c, harmonicDeviation: 1000 + Math.abs((s.harmonicFreq as number) - c), crystalSource: 'assigned' as const };
+  });
+  const hOld = libraryHealth(spreadOld);
+  const counts = countAnalysable(spreadOld as never, CAPS);
+  const M = crystalMoves(planAssign(spreadOld, 'spread'));
+  check(M > 1 && hOld.emptyCrystals === 0 && hOld.noCrystal === 0 && hOld.sourceBack === 0, `the fixture: a spread would move ${M} (no gap, no crystal missing, nothing to put back on 2178)`);
+  const at = (o: Partial<HealthInput> = {}) => healthModel(base({ health: hOld, analyseCounts: counts, spreadMoves: M, ...o }));
+  const m = at();
+  eq(m.lines[0], { id: 'crystals', title: 'Crystals', line: `All 30 have one · Assign would move ${M} of them`, done: false, todo: false, action: { label: 'Assign', kind: 'assign', blocked: false } }, 'D8: an optional Assign, its count');
+  eq([m.status, m.toDo, m.autoOpen, m.folded], ['All set', 0, false, 'All set'], 'D8: not to do: the card folds, "All set"');
+  const busy = at({ isScanning: true, scanProgress: 5 });
+  eq([busy.lines[0].sub, busy.lines[0].action], ['Unavailable while Deep Scan runs', { label: 'Assign', kind: 'assign', blocked: true }], 'D8: held while Deep Scan runs, as the other Assign lines');
+  const one = [spreadOld[0]];
+  eq(healthModel(base({ health: libraryHealth(one), analyseCounts: countAnalysable(one as never, CAPS), spreadMoves: 1 })).lines[0].line, 'The track has one · Assign would move it', 'D8: one track');
+  // (Fix round 2, revR-tests R8: the singular is the library's, not the count's.)
+  eq(at({ spreadMoves: 1 }).lines[0].line, 'All 30 have one · Assign would move 1 of them', 'D8: 30 tracks, 1 to move');
+  // Fix round 2: HealthCard plans only when this line can show and nothing is busy.
+  const idle = { isScanning: false, passPhase: 'idle', restoring: false, durationsLeft: 0 };
+  eq([spreadLineReachable(hOld), spreadPlanBusy(idle), spreadPlanWanted(hOld, idle)], [true, false, true], 'plan gate: reachable and idle: plan');
+  for (const [what, s] of [
+    ['a Deep Scan or Scan again', { ...idle, isScanning: true }],
+    ['an Analyse pass', { ...idle, passPhase: 'running' }],
+    ['a restore', { ...idle, restoring: true }],
+    ['track lengths still being read', { ...idle, durationsLeft: 3 }],
+  ] as const) eq([spreadPlanBusy(s), spreadPlanWanted(hOld, s)], [true, false], `plan gate: busy with ${what}: no plan`);
+  eq(spreadPlanBusy({ ...idle, durationsLeft: NaN }), false, 'plan gate: a junk length count is none');
+  const noCrystal = libraryHealth([...spreadOld, S('n', 'n', {})]);
+  eq([spreadLineReachable(noCrystal), spreadPlanWanted(noCrystal, idle)], [false, false], 'plan gate: a track with no crystal: its line comes first, no plan');
+  const back = libraryHealth(spreadOld.map((s) => (s.closestSolfeggio === 2178 ? { ...s, closestSolfeggio: 852, harmonicDeviation: 1000 + Math.abs((s.harmonicFreq as number) - 852), crystalSource: 'assigned' as const } : s)));
+  eq([back.sourceBack, spreadLineReachable(back), spreadPlanWanted(back, idle)], [1, false, false], 'plan gate: a Source track to put back: its line, no plan');
+  const gaps = libraryHealth(mk(30, () => ({ ...scannedTrack, scanRate: 48000 })));
+  eq([gaps.emptyCrystals > 0 && gaps.spreadCover > 27 - gaps.emptyCrystals, spreadLineReachable(gaps), spreadPlanWanted(gaps, idle)], [true, false, false], 'plan gate: gaps a spread would fill: that line, no plan');
+  // While busy the card passes the last idle count: the held line (Deep Scan) or the plain one (the other busy cases).
+  const heldAnalyse = at({ pass: { ...PASS_IDLE, phase: 'running', total: 4, done: 1 } as never });
+  eq([heldAnalyse.lines[0].line, heldAnalyse.lines[0].action], [`All 30 have one · Assign would move ${M} of them`, { label: 'Assign', kind: 'assign', blocked: false }], 'D8 while Analyse runs: the last count, Assign not held (as the other Assign lines)');
+  eq(at({ spreadMoves: 0 }).lines[0], { id: 'crystals', title: 'Crystals', line: 'All 30 tracks have one', done: true, todo: false }, 'D8: nothing to move: done, no button');
+  eq(healthModel(base({ health: hOld, analyseCounts: counts })).lines[0].done, true, 'D8: without a count (none planned yet: HealthCard passes the last idle one while busy, 0 before the first): done');
+  // Idempotent: after the press, nothing moves, so the line is done and the button gone.
+  const after = patchById(spreadOld as never[], planAssign(spreadOld, 'spread').patches as never) as unknown as LibSong[];
+  eq(crystalMoves(planAssign(after, 'spread')), 0, 'D8: after one press a spread moves nothing');
+  eq(healthModel(base({ health: libraryHealth(after), analyseCounts: countAnalysable(after as never, CAPS), spreadMoves: crystalMoves(planAssign(after, 'spread')) })).lines[0], { id: 'crystals', title: 'Crystals', line: 'All 30 tracks have one', done: true, todo: false }, 'D8: after the press, done');
+  // The earlier lines come first: a track with no crystal, a Source track to put back, a gap a spread fills.
+  eq(healthModel(base({ health: libraryHealth([...spreadOld, S('n', 'n', {})]), spreadMoves: M })).lines[0].line, '1 of 31 tracks have none', 'D8: no crystal first');
+  eq(mDone.lines.map((l) => [l.line, l.done]), [['All 30 tracks have one', true], ['All analysed', true], ['All 30 tracks scanned', true]], 'D8: the all-done pin holds at M = 0');
+}
+// Fix round 1 (rev-logic 4d): a track Scan again couldn't read this session is left out of its row's count.
+{
+  const older = allDone.map((s) => ({ ...s, scanRate: undefined }));
+  eq([libraryHealth(older).olderReadings, libraryHealth(older, new Set(['id0', 'id1'])).olderReadings, libraryHealth(older, new Set(older.map((s) => s.id))).olderReadings], [30, 28, 0], 'olderReadings: the session skip');
+  const allSkipped = healthModel(base({ health: libraryHealth(older, new Set(older.map((s) => s.id))), analyseCounts: countAnalysable(older as never, CAPS) }));
+  check(!allSkipped.lines.some((l) => l.id === 'rescan') && allSkipped.folded === 'All set', 'only skipped tracks left: no row, "All set"');
+  // (4e) An unreadable scan (0 Hz) is the plain Deep Scan's, never an older reading too.
+  const zero = S('z', 'z', { harmonicFreq: 0, closestSolfeggio: 639, harmonicDeviation: 3, crystalSource: 'scan', fractalAnalysis: {} });
+  eq([libraryHealth([zero]).unscanned, libraryHealth([zero]).olderReadings], [1, 0], 'an unreadable scan: in Deep Scan\'s count only');
 }
 
 if (failures.length) {

@@ -19,9 +19,11 @@
 
 import { useEffect, useLayoutEffect } from 'react';
 
-// The last pointerdown's target (capture phase): where a click or a tap left Chrome's starting point. One listener for
+// The last pointerdown's path (capture phase): where a click or a tap left Chrome's starting point. One listener for
 // the page's life, added by the first useZenTab (App's, at launch: App calls it for classic's Zen in both layouts).
-let lastDown: EventTarget | null = null;
+// v16.8.1 (D6): the whole composed path, not only the target: a target React has removed by the hide (a part of the
+// controls that re-rendered), or one inside a shadow root, still counts by the ancestors that are in the hidden part.
+let lastDown: readonly EventTarget[] = [];
 let recording = false;
 function recordPointerDowns(): void {
   if (recording) return;
@@ -29,7 +31,7 @@ function recordPointerDowns(): void {
   window.addEventListener(
     'pointerdown',
     (e: PointerEvent) => {
-      lastDown = e.target;
+      lastDown = e.composedPath();
     },
     true
   );
@@ -40,7 +42,7 @@ export function lostToHide(hiddenRoot: Element | null): boolean {
   if (!hiddenRoot) return false;
   const a = document.activeElement;
   if (a && a !== document.body && a !== document.documentElement) return hiddenRoot.contains(a);
-  return lastDown instanceof Node && hiddenRoot.contains(lastDown);
+  return lastDown.some((n) => n instanceof Node && n.isConnected && hiddenRoot.contains(n));
 }
 
 /** While `hidden`: a Tab or Shift+Tab with the focus lost to the hide goes to `target` ("Show controls"). */

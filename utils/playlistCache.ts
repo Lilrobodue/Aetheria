@@ -101,6 +101,7 @@ interface CachedMeta {
   chromaVersion?: Song['chromaVersion'];
   analysisFailedV?: Song['analysisFailedV'];
   crystalSource?: Song['crystalSource'];
+  scanRate?: Song['scanRate']; // v16.8.1 (D1)
 }
 
 interface CachedState {
@@ -249,6 +250,7 @@ function toMeta(song: Song): CachedMeta {
     chromaVersion: song.chromaVersion,
     analysisFailedV: song.analysisFailedV,
     crystalSource: song.crystalSource,
+    scanRate: song.scanRate,
   };
 }
 
@@ -709,6 +711,7 @@ async function readSavedPlaylist(): Promise<RestoredPlaylist | null> {
         ...keyFieldsOf(meta),
         analysisFailedV: typeof meta?.analysisFailedV === 'number' ? meta.analysisFailedV : undefined,
         crystalSource: meta?.crystalSource === 'scan' || meta?.crystalSource === 'assigned' ? meta.crystalSource : undefined,
+        scanRate: typeof meta?.scanRate === 'number' ? meta.scanRate : undefined, // v16.8.1 (D1)
       };
     };
     const songsOf = (ids: readonly string[]): Song[] =>

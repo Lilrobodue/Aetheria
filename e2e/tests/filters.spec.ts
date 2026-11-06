@@ -214,9 +214,14 @@ async function instrument(page: Page, o: { filters?: string | null; layout?: 'ne
     HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
       const src = String(this.getAttribute('src') ?? this.src);
       if (!src.startsWith('data:')) w.__el = this;
-      return play.call(this);
+      const p = play.call(this);
+      // The start has landed: playTrack's own continuation (its recordPlay) runs right after this one, unless a later
+      // start overtook it. (__heard() names a track as soon as play() is called.)
+      if (!src.startsWith('data:')) p.then(() => { w.__landed = w.__urlName.get(src) ?? null; }, () => {});
+      return p;
     };
     w.__heard = () => (w.__el ? (w.__urlName.get(w.__el.getAttribute('src')) ?? null) : null);
+    w.__landedName = () => w.__landed ?? null;
   }, { keys: { engine: LAYER_ENGINE_KEY, layout: LAYOUT_KEY, filters: FILTERS_KEY }, filters: o.filters, layout: o.layout ?? 'new' });
 }
 
@@ -249,6 +254,8 @@ const fstate = (page: Page): Promise<FState> => page.evaluate(() => (window as a
 const playHook = (page: Page, o: { ids: string[]; startId?: string | null; shuffle?: boolean; label: string; row?: boolean }) =>
   page.evaluate((o) => (window as any).__tap(() => (window as any).__aetheriaFilters.play(o)), o);
 const heard = (page: Page) => page.evaluate(() => (window as any).__heard() as string | null);
+/** The last track whose play() resolved: from then on its play is in the history the LRU shuffle reads. */
+const landed = (page: Page) => page.evaluate(() => (window as any).__landedName() as string | null);
 const toastText = (page: Page) => page.getByTestId('notices').locator('div[aria-atomic="true"]').first();
 const undoButton = (page: Page) => page.getByTestId('notices').getByRole('button', { name: 'Undo', exact: true });
 const qstate = (page: Page) => page.evaluate(() => (window as any).__aetheriaQueue.state());
@@ -1230,6 +1237,7 @@ test('F9u-F11u. through the UI: Play these plays the shown rows from the first; 
   await expect.poll(async () => (await fstate(page)).ids, { message: 'a row: the six' }).toEqual(set);
   expect((await fstate(page)).cursor).toBe(shown.indexOf(15));
   await expect.poll(() => heard(page)).toBe(toneName(15));
+  await expect.poll(() => landed(page), { message: 'its start landed (the play recorded)' }).toBe(toneName(15));
   await expect(toastText(page)).toContainText('Playing the 6 tracks your filters show, from this one.');
   expect((await fstate(page)).label).toBe('528 Hz · 639 Hz');
   // Play these: from the first.
@@ -1237,6 +1245,7 @@ test('F9u-F11u. through the UI: Play these plays the shown rows from the first; 
   await expect.poll(async () => (await fstate(page)).cursor, { message: 'Play these: from the first' }).toBe(0);
   expect((await fstate(page)).ids).toEqual(set);
   await expect.poll(() => heard(page)).toBe(toneName(shown[0]));
+  await expect.poll(() => landed(page), { message: 'its start landed' }).toBe(toneName(shown[0]));
   await expect(toastText(page)).toContainText('Playing the 6 tracks your filters show.');
   await tab(page, 'now');
   await expect(page.getByTestId('np-source')).toHaveText('Play order · 1 of 6');
@@ -1245,6 +1254,7 @@ test('F9u-F11u. through the UI: Play these plays the shown rows from the first; 
   for (const k of [5, 14, 24]) {
     await libraryRowButton(page, toneName(k)).click();
     await expect.poll(() => heard(page)).toBe(toneName(k));
+    await expect.poll(() => landed(page), { message: `${toneName(k)}: its start landed` }).toBe(toneName(k));
   }
   expect((await fstate(page)).shuffle).toBe(false);
   await page.getByTestId('library-shuffle-these').click();

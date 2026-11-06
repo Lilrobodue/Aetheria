@@ -36,6 +36,10 @@ export interface Song {
   // v15.8: who placed closestSolfeggio: Deep Scan ('scan') or Assign crystals ('assigned', not a scan: Deep Scan's queue
   // keeps it). Absent on tracks from before v15.8: utils/mix/distribution.ts crystalOrigin derives it.
   crystalSource?: 'scan' | 'assigned';
+  // v16.8.1 (D1): the rate Deep Scan decoded this track's reading at (utils/mix/distribution.ts DEEP_SCAN_RATE, 48000),
+  // written by a successful scan. Absent on readings made before v16.8.1 (at the device's own rate: Scan again's queue)
+  // and on a failed scan's placeholder.
+  scanRate?: number;
 }
 
 /** Per-band energy over time, sampled at `fps` frames/sec. Each array holds

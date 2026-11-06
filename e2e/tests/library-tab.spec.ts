@@ -9,6 +9,7 @@ import {
   drawsPerSecond,
   libraryRow,
   libraryRowButton,
+  libraryFiles,
   libraryState,
   layersState,
   libraryUndo,
@@ -204,8 +205,9 @@ const nextOnNowPlaying = (page: Page) => page.getByTestId('view-now').getByRole(
 async function seededPlan(page: Page) {
   const s = await libraryState(page);
   if (s.origins.some((o) => o !== 'assigned' && o !== 'none')) throw new Error('seededPlan: only for seeded (assigned) crystals');
+  const files = await libraryFiles(page); // v16.8.1 (D2): the spread's tie-break key is the file
   const lib = s.libraryIds.map((id, i) => ({
-    id, name: s.libraryNames[i], duration: s.libraryDurations[i] ?? undefined,
+    id, name: s.libraryNames[i], duration: s.libraryDurations[i] ?? undefined, file: files.get(id),
     ...(s.crystals[i] ? { closestSolfeggio: s.crystals[i] as number, ...(s.scanned[i] ? { harmonicFreq: s.crystals[i] as number } : {}), harmonicDeviation: 3 } : {}),
   }));
   const log = console.log;

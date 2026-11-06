@@ -226,6 +226,37 @@ test.describe('on a touch screen', () => {
     expect(dialogs).toEqual([]);
   });
 
+  // v16.8.1 (D6): test 9 reaches the toggle with Shift+Tab, and from there Chrome's own next Tab happens to reach "Show
+  // controls" with zenFocus's Tab catch removed too (the review's mutation Z1 left 9 green). Reached with Tab, forward,
+  // the toggle is the last thing in the order before the hidden part: Chrome 157 leaves the page on the next Tab, and
+  // only the catch brings it to "Show controls" in one press.
+  test('9b. hidden from the keyboard, the Zen toggle reached with Tab (forward): no focus move; one Tab reaches "Show controls" (the Tab catch), and it shows; Enter reveals', async ({ page }) => {
+    test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
+    const dialogs = await setUp(page);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    for (let i = 0; i < 200; i++) {
+      if (await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('title') === 'Zen Mode (Hide UI)')) break;
+      await page.keyboard.press('Tab');
+    }
+    const toggle = page.getByTitle('Zen Mode (Hide UI)', { exact: true });
+    await expect(toggle, 'Tab, forward, reached the Zen toggle').toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTitle('Show UI', { exact: true }), 'Zen Mode is on').toBeFocused();
+    await expect(zenLayer(page), 'Zen Mode hides the UI').toHaveClass(/opacity-0/, { timeout: 8_000 });
+    await expect(zenLayer(page)).toHaveAttribute('inert', /.*/);
+    const show = showControls(page);
+    await page.waitForTimeout(500);
+    await expect(show, 'the hide moved no focus to Show controls').not.toBeFocused();
+    expect(await widthOf(show), 'Show controls stays off screen (visually hidden until focused)').toBeLessThanOrEqual(1);
+    await page.keyboard.press('Tab');
+    await expect(show, 'one Tab reaches it').toBeFocused();
+    expect(await widthOf(show), 'and then it shows').toBeGreaterThan(40);
+    await expect(zenLayer(page), 'focusing it revealed nothing').toHaveAttribute('inert', /.*/);
+    await page.keyboard.press('Enter');
+    await revealed(page);
+    expect(dialogs).toEqual([]);
+  });
+
   test('10. hidden after a mouse click on the Zen toggle: nothing new on screen (the focus is not moved to "Show controls"); one Tab reaches it', async ({ page }) => {
     test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
     const dialogs = await setUp(page);

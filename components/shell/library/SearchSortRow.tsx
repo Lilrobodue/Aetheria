@@ -122,10 +122,13 @@ const SearchSortRow = ({ query, onQuery, sort, onSort, total, describedBy, input
           aria-label="Sort"
           value={sort}
           onChange={(e: { target: HTMLSelectElement }) => onSort(parseLibrarySort(e.target.value))}
-          className="absolute -left-px -top-px w-[calc(100%+2px)] h-[calc(100%+2px)] opacity-0 cursor-pointer"
+          className="absolute -left-px -top-px w-[calc(100%+2px)] h-[calc(100%+2px)] opacity-0 cursor-pointer [color-scheme:dark] bg-surface-raised text-ink"
         >
+          {/* v16.8.1: the select is invisible over the chip (opacity-0, unchanged), but its open list is the browser's: with
+              no colour scheme and no colours of its own it drew light-grey options on white on Windows Chrome. Dark, in
+              the kit's colours, the options included (Chrome's popup reads theirs). */}
           {LIBRARY_SORTS.map((o) => (
-            <option key={o.id} value={o.id}>
+            <option key={o.id} value={o.id} className="bg-surface-raised text-ink">
               {o.label}
             </option>
           ))}

@@ -2,7 +2,8 @@ import { type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from './fixtures';
-import { crash, hideZen, importTones, openApp, openHarmonicControl, openNewLayout, openSafety, peekClassicLibrary, seedLibraryRecords } from './helpers';
+import { crash, hideZen, importTones, openApp, openHarmonicControl, openLayersTab, openLibraryTab, openNewLayout, openSafety, openSeededNewLayout, peekClassicLibrary, seedLibraryRecords } from './helpers';
+import { openMorePage, openVisuals } from './moreKit';
 
 // v15.3 "style foundation": the app's CSS is the bundled main-*.css alone. Until v15.2.1 index.html also ran the
 // Tailwind Play CDN, which regenerated the same rules in the page and hid any class the build had missed; it is gone
@@ -1442,5 +1443,61 @@ test.describe('v16.8', () => {
     expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
     expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
     expect([...small], 'targets under 44 × 44').toEqual([]);
+  });
+});
+
+// v16.8.1 (the user, 2026-11-05: "an open dropdown list is pale and unreadable on Windows Chrome"): nothing set a colour
+// scheme, so Chrome drew the native popups of the new layout's selects in the light one, white, and the Library's sort
+// select (invisible over its chip) gave its options the page's light text: light grey on white. Playwright can't show a
+// native popup, so this reads what Chrome paints it from: every new-layout select is in the dark scheme, and each of its
+// options has its own background and text colours, at 4.5:1 or more (a transparent background reads as the light
+// popup's white). The closed looks are unchanged (the class census above, and the new layout's parity).
+test.describe('v16.8.1', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('o. the new layout\'s native selects open dark and readable: color-scheme dark, every option at 4.5:1 or more on its own background', async ({ page }) => {
+    test.setTimeout(120_000);
+    await openSeededNewLayout(page, 3);
+    const read = (sel: string) =>
+      page.evaluate((s) => {
+        // (Fix round 1, rev-tests 7: a colour that isn't rgb()/rgba() fails the test: the ratio is then -1, not a guess.)
+        const rgb = (c: string) => { const m = c.match(/^rgba?\(([^)]+)\)$/); if (!m) return null; const p = m[1].split(/[,\s/]+/).filter(Boolean).map((x) => Number(x)); if (p.length < 3 || p.some((x) => !Number.isFinite(x))) return null; return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; };
+        const lum = (c: { r: number; g: number; b: number }) => { const f = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+        const ratio = (fg: string, bg: string) => { const b = rgb(bg), f = rgb(fg); if (!b || !f) return -1; const back = b.a < 1 ? { r: 255, g: 255, b: 255 } : b; const x = lum(f), y = lum(back); return Math.round(((Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)) * 100) / 100; };
+        const el = document.querySelector(s) as HTMLSelectElement | null;
+        if (!el) return null;
+        const cs = getComputedStyle(el);
+        return {
+          scheme: cs.colorScheme,
+          opacity: cs.opacity,
+          options: Array.from(el.options).map((o) => { const oc = getComputedStyle(o); return { label: o.textContent, color: oc.color, background: oc.backgroundColor, ratio: ratio(oc.color, oc.backgroundColor) }; }),
+        };
+      }, sel);
+    const selects: Array<[string, string, () => Promise<void>]> = [
+      ['Library › Sort', 'select[aria-label="Sort"]', () => openLibraryTab(page)],
+      ['Layers › Advanced › Experience level', '[data-testid="layers-experience"] select', () => openLayersTab(page)],
+      ['More › Visuals › Hex visual mode', '[data-testid="visuals-hex-mode"] select', () => openVisuals(page, 'more')],
+      // (Fix round 1, rev-tests 4: More › Journal's start-session modal, classic's ExperienceTracker in the new layout.)
+      ['More › Journal › Environment', '[data-testid="journal-tracker"] select', async () => {
+        await openMorePage(page, 'journal');
+        await page.getByRole('button', { name: /Start Experience Documentation/ }).click();
+      }],
+    ];
+    const seen: string[] = [];
+    for (const [what, sel, open] of selects) {
+      await open();
+      await page.locator(sel).waitFor({ state: 'attached' });
+      const r = await read(sel);
+      expect(r, `${what}: found`).not.toBeNull();
+      expect(r!.scheme, `${what}: its popup in the dark scheme`).toBe('dark');
+      expect(r!.options.length, `${what}: options`).toBeGreaterThan(1);
+      for (const o of r!.options) expect(o.ratio, `${what}: "${o.label}" (${o.color} on ${o.background})`).toBeGreaterThanOrEqual(4.5);
+      if (sel.startsWith('select[aria-label="Sort"]')) expect(r!.opacity, 'the sort select stays invisible over its chip (its closed look unchanged)').toBe('0');
+      seen.push(what);
+      // Every select the new layout shows here (a select added later is held to the same).
+      const all = await page.evaluate(() => Array.from(document.querySelectorAll('[data-testid="new-shell"] select, [role="dialog"] select, [role="region"] select')).map((s) => getComputedStyle(s).colorScheme));
+      expect(all.every((x) => x === 'dark'), `${what}: every select on screen dark (${all})`).toBe(true);
+    }
+    expect(seen.length).toBe(4);
   });
 });

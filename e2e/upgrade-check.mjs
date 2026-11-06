@@ -4,7 +4,9 @@
 //
 //   vite build --config e2e/vite.e2e.config.ts --outDir <old> --emptyOutDir   (the previous build: the release before this one)
 //   vite build --config e2e/vite.e2e.config.ts --outDir <new> --emptyOutDir   (this checkout)
-//   node e2e/upgrade-check.mjs --old <old> --new <new> [--port 3199]
+//   node e2e/upgrade-check.mjs --old <old> --new <new> [--port 3199] [--version v16.8.1]
+//                                       (v16.8.1: the new build's version, its header badge and its cache's name;
+//                                       default the checkout's components/ErrorBoundary.tsx APP_VERSION)
 //
 // Profiles, each its own context:
 //   classic  the previous build: ?layout=classic (a saved "classic", as Back to classic leaves it), the statement accepted
@@ -28,6 +30,11 @@ const arg = (n, f) => {
 const OLD = arg('old');
 const NEW = arg('new');
 const PORT = Number(arg('port', process.env.E2E_PORT || '3199'));
+// v16.8.1: the version the new build carries (it was written in as v16.8).
+const { readFileSync } = await import('node:fs');
+const VERSION = arg('version', readFileSync(path.join(E2E, '..', 'components', 'ErrorBoundary.tsx'), 'utf8').match(/export const APP_VERSION = '([^']+)'/)?.[1]);
+if (!VERSION) throw new Error('upgrade-check: no --version, and no APP_VERSION in components/ErrorBoundary.tsx');
+const CACHE = `aetheria-${VERSION}-offline`;
 if (!OLD || !NEW) {
   console.error('usage: node e2e/upgrade-check.mjs --old <previous release dist> --new <this build dist> [--port 3199]');
   process.exit(2);
@@ -125,7 +132,7 @@ try {
   check('never: the new layout with the card, nothing saved, marked due', v.shell && v.card && v.layout === null && v.notice === 'due', v);
   check('never: the statement is not shown again; no tour by itself', !v.statement && !v.tour, v);
   for (const p of PROFILES) {
-    check(`${p}: the only cache is aetheria-v16.8-offline, controlled`, JSON.stringify(report[`${p}.v168`].caches) === '["aetheria-v16.8-offline"]' && report[`${p}.v168`].controlled, report[`${p}.v168`].caches);
+    check(`${p}: the only cache is ${CACHE}, controlled`, JSON.stringify(report[`${p}.v168`].caches) === JSON.stringify([CACHE]) && report[`${p}.v168`].controlled, report[`${p}.v168`].caches);
   }
 
   // The card stays until tapped (a reload: again), then never again.
@@ -150,7 +157,7 @@ try {
     await appUp(page);
     report['never.classic'] = await state(page);
     check('never: Use the classic layout holds across a reload, no card', report['never.classic'].classic && !report['never.classic'].card && report['never.classic'].layout === 'classic' && report['never.classic'].notice === 'seen', report['never.classic']);
-    check('never: the classic header names v16.8', report['never.classic'].version === 'v16.8', report['never.classic'].version);
+    check(`never: the classic header names ${VERSION}`, report['never.classic'].version === VERSION, report['never.classic'].version);
   }
 
   // ---- A new install on v16.8 ----

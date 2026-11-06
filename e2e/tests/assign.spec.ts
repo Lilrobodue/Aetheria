@@ -7,6 +7,7 @@ import {
   addFiles,
   confirmDelete,
   countConsole,
+  libraryFiles,
   libraryState,
   libraryRowButton,
   metaRecords,
@@ -30,6 +31,8 @@ import { patchById } from '../../utils/library/listOps.ts';
 import { GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS, SOURCE_FREQ } from '../../utils/crystalData.ts';
 // v16.7.3: v16.7.1's spread, frozen (it builds "a library v16.7.1 already spread").
 import { spreadV1671 } from '../../scripts/mix-golden/spread-v1671.ts';
+// v16.8.1: the spread's rule restated independently (D2, D3, D3b).
+import { spreadOracle } from '../../scripts/mix-golden/spread-oracle.ts';
 
 // v15.8, Assign crystals (classic: Auto-Distribute Frequencies), decisions 2026-10-26: Deep Scan's crystals stay (one
 // an older Auto-Distribute replaced is put back), every other track is placed the same way on every press, and placed
@@ -42,8 +45,13 @@ import { spreadV1671 } from '../../scripts/mix-golden/spread-v1671.ts';
 // the fresh tones of tests 5 and A1 have no such track, so their expectations are v16.7.1's (each test says so in Node).
 
 const FLEG: any[] = JSON.parse(readFileSync(new URL('../../scripts/mix-golden/fixtures-fleg.json', import.meta.url), 'utf8')).library;
+/** v16.8.1 (D2): the file each seeded track has on the page: its name + .wav, and the one 6 s tone (8 kHz mono WAV:
+ *  44 + 8000 × 6 × 2 bytes). The spread's tie-break key is the file's name and size, so Node's copies carry the same
+ *  file as the page's (seedFleg stores the meta without it), and Node's plan is the page's. */
+const TONE_BYTES = 44 + 8000 * 6 * 2;
+const withFile = <T extends { name: string }>(s: T): T & { file: { name: string; size: number } } => ({ ...s, file: { name: `${s.name}.wav`, size: TONE_BYTES } });
 /** FLEG as seeded: every length stored (no probe; a missing one as 200 s), so the app's stand-ins see the same. */
-const SEEDED = FLEG.map(({ file, ...m }) => ({ ...m, duration: m.duration || 200 }));
+const SEEDED = FLEG.map(({ file, ...m }) => withFile({ ...m, duration: m.duration || 200 }));
 const quietly = <T,>(f: () => T): T => { const log = console.log; console.log = () => {}; try { return f(); } finally { console.log = log; } };
 const PLAN: AssignPlan = quietly(() => planAssign(SEEDED, 'spread'));
 /** FLEG after the spread, as Node computes it: the origins and the stored crystalSource the page must show. */
@@ -82,7 +90,7 @@ async function seedFleg(page: Page, library: any[] = SEEDED): Promise<void> {
       tx.onerror = () => reject(tx.error);
     });
     await put('blobs', lib.map((s: any) => ({ id: s.id, fileBlob: tone, fileName: `${s.name}.wav`, fileType: 'audio/wav' })));
-    await put('meta', lib);
+    await put('meta', lib.map(({ file, ...m }: any) => m)); // (v16.8.1: the file is the blob's, as the app stores it)
     await put('playlist-state', [{ key: 'current', playlistOrder: lib.map((s: any) => s.id), originalOrder: lib.map((s: any) => s.id), currentSongIndex: -1, loShuWalkMode: null, selectedSolfeggio: 528, savedAt: Date.now() }]);
     db.close();
   }, library);
@@ -418,9 +426,10 @@ test.describe('v16.3, Assign without the per-track console lines', () => {
     await phoneSize(page);
     const before = await libraryState(page);
     const records = await metaRecords(page);
+    const files = await libraryFiles(page); // v16.8.1 (D2): the spread's key is the file
     const songs = before.libraryIds.map((id) => {
       const m = records.find((r) => r.id === id)!;
-      return { id: m.id, name: m.name, duration: m.duration ?? undefined } as any;
+      return { id: m.id, name: m.name, duration: m.duration ?? undefined, file: files.get(id) } as any;
     });
     const plan = quietly(() => planAssign(songs, 'spread'));
     expect(plan.patches.size, 'every tone gets a crystal').toBe(60);
@@ -447,7 +456,7 @@ const BUNCH = [174, 396, 528];
 const BUNCHED: any[] = Array.from({ length: 36 }, (_, i) => {
   const hf = BUNCH[i % 3] + 1.5 + (i % 4) * 0.25; // a reading near its crystal (Deep Scan's crystal is scanCrystalOf it)
   const cc = quietly(() => scanCrystalOf(hf));
-  return { id: `1771700000000-b${String(i).padStart(2, '0')}`, name: `tone-${String(i + 1).padStart(2, '0')}`, duration: 200, harmonicFreq: hf, closestSolfeggio: cc, harmonicDeviation: Math.abs(hf - cc), crystalSource: 'scan', isAetheriaCandidate: false };
+  return withFile({ id: `1771700000000-b${String(i).padStart(2, '0')}`, name: `tone-${String(i + 1).padStart(2, '0')}`, duration: 200, harmonicFreq: hf, closestSolfeggio: cc, harmonicDeviation: Math.abs(hf - cc), crystalSource: 'scan', isAetheriaCandidate: false });
 });
 const BUNCHED_PLAN: AssignPlan = quietly(() => planAssign(BUNCHED, 'spread'));
 const rangesOf = (crystals: readonly (number | null)[]) => (['GUT', 'HEART', 'HEAD'] as const).filter((r, k) => [GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS][k].some((f) => crystals.includes(f)));
@@ -491,7 +500,8 @@ test.describe('v16.7.1, Auto-Distribute after a full Deep Scan', () => {
 // ---------------------------------------------------------------------------------------------------------------
 // v16.7.3 (the user's decision 2026-11-04): "i hoped that source tracks would not get displaced if they were scanned at
 // 2178 hz originally". A track Deep Scan placed on 2178 Hz (the SOURCE crystal: a reading scanCrystalOf maps to 2178)
-// stays on 2178, recorded as the scan's, when Auto-Distribute spreads; it counts toward 2178's share; one v16.7.1's
+// stays on 2178, recorded as the scan's, when Auto-Distribute spreads (v16.8.1, D3: and 2178 gets its full share of the
+// other tracks on top, like every other crystal; it counted toward 2178's share in v16.7.3); one v16.7.1's
 // spread moved off it goes back on the next press. sourced(prefix): BUNCHED's 36 readings and 4 placed on 2178 Hz, every
 // track scanned, with ids of its own per test (fix round 1, F4.3: S2's and S3's libraries never share an id, so a stale
 // tab of one can't stand in for the other). V1671: S3's library as v16.7.1's own spread left it (the frozen copy): every
@@ -501,7 +511,7 @@ const SOURCE_READINGS = [2180.5, 2179.25, 2182, 2177.25];
 const sourced = (prefix: string): any[] => {
   const list: any[] = BUNCHED.map((s, i) => ({ ...s, id: `${prefix}-b${String(i).padStart(2, '0')}` }));
   SOURCE_READINGS.forEach((hf, k) => list.splice(4 + k * 9, 0, { id: `${prefix}-s${k}`, duration: 200, harmonicFreq: hf, closestSolfeggio: SOURCE_FREQ, harmonicDeviation: Math.abs(hf - SOURCE_FREQ), crystalSource: 'scan', isAetheriaCandidate: false }));
-  return list.map((s, i) => ({ ...s, name: `tone-${String(i + 1).padStart(2, '0')}` }));
+  return list.map((s, i) => withFile({ ...s, name: `tone-${String(i + 1).padStart(2, '0')}` }));
 };
 const SOURCED: any[] = sourced('1771800000000');
 const SOURCED_PLAN: AssignPlan = quietly(() => planAssign(SOURCED, 'spread'));
@@ -528,13 +538,23 @@ const wantStored = (lib: any[], plan: AssignPlan) =>
   Object.fromEntries(lib.map((s) => { const p = { ...s, ...(plan.patches.get(s.id) ?? {}) }; return [s.id, [p.closestSolfeggio ?? null, p.crystalSource ?? null, p.harmonicFreq ?? null, p.harmonicDeviation ?? null]]; }));
 
 test.describe('v16.7.3, Source tracks keep 2178 Hz', () => {
-  test('S2. a fully scanned library with 4 tracks Deep Scan placed on 2178 Hz: classic’s Auto-Distribute spreads the rest over every crystal and keeps the 4 on 2178 as Deep Scan’s (2178 holds max(Source, share)); the stored meta has it; a reload keeps the ids and the crystals', async ({ page }) => {
+  test('S2. a fully scanned library with 4 tracks Deep Scan placed on 2178 Hz: classic’s Auto-Distribute spreads the rest over every crystal and keeps the 4 on 2178 as Deep Scan’s (v16.8.1: 2178 holds the 4 and its share of the other 36 on top); the stored meta has it; a reload keeps the ids and the crystals', async ({ page }) => {
     test.setTimeout(180_000);
-    // Node: 4 Source tracks, already on 2178 (nothing to put back); 2178 keeps them and gets no other (share 2).
+    // Node: 4 Source tracks, already on 2178 (nothing to put back); 2178 keeps them and, v16.8.1, its share of the others.
     expect([sourceIdsOf(SOURCED).length, SOURCED.length, SOURCED_PLAN.source, SOURCED_PLAN.restored], 'Node: the fixture').toEqual([4, 40, 4, 0]);
     expect(SOURCED.some((s) => S3_LIB.some((x) => x.id === s.id)), 'Node: S2 and S3 share no id').toBe(false);
-    const share = Math.ceil(SOURCED.length / 27);
-    expect(SOURCED_PLAN.perCrystal[AT], 'Node: 2178 holds max(Source, share)').toBe(Math.max(4, share));
+    // v16.8.1 (D3, was v16.7.3's "2178 holds max(Source, share)"): the 36 others spread evenly over all 27, 2178 included
+    // (1 or 2 each), and 2178 holds the 4 Source tracks on top. Against the independent restatement (spread-oracle.ts).
+    const open = SOURCED.length - 4;
+    const fill = SOURCED_PLAN.perCrystal.map((c, i) => c - (i === AT ? 4 : 0));
+    expect([Math.min(...fill), Math.max(...fill)], 'Node: the others even over all 27').toEqual([Math.floor(open / 27), Math.ceil(open / 27)]);
+    expect(fill[AT], 'Node: 2178 gets its share of them').toBeGreaterThanOrEqual(Math.floor(open / 27));
+    const oracle = quietly(() => spreadOracle(SOURCED));
+    expect([SOURCED_PLAN.perCrystal, SOURCED.map((s) => SOURCED_PLAN.patches.get(s.id)?.closestSolfeggio ?? s.closestSolfeggio)], 'Node: the oracle agrees').toEqual([oracle.perCrystal, SOURCED.map((s) => oracle.after.get(s.id)![0])]);
+    const on2178 = SOURCED_PLAN.perCrystal[AT];
+    // Fix round 1 (rev-tests 3), by hand: 36 open tracks, 27 in the first round (one each, 2178 included), the other 9 to
+    // the spread order's first 9 crystals in the second; 2178 is its 14th, so its fill is 1: 4 + 1 = 5.
+    expect(on2178, 'Node: 2178 holds 5 (the 4 Source tracks and 1 of the others)').toBe(5);
     const dialogs = await openFleg(page, 'classic', SOURCED);
     const s0 = await libraryState(page);
     expect([[...new Set(s0.crystals)].sort((a, b) => (a ?? 0) - (b ?? 0)), tally(s0.origins)], 'before: 3 GUT crystals and 2178, every track scanned').toEqual([[174, 396, 528, SOURCE_FREQ], { scan: 40 }]);
@@ -543,7 +563,7 @@ test.describe('v16.7.3, Source tracks keep 2178 Hz', () => {
     const s1 = await libraryState(page);
     expect(s1.crystals, 'as planAssign(lib, "spread") says').toEqual(s1.libraryIds.map((id) => SOURCED_PLAN.patches.get(id)?.closestSolfeggio ?? SOURCED.find((s) => s.id === id)!.closestSolfeggio));
     expect(sourceState(s1, SOURCED), 'the 4 placed on 2178 Hz: on 2178, Deep Scan’s').toEqual(ON_2178);
-    expect(s1.crystals.filter((c) => c === SOURCE_FREQ).length, '2178 holds max(Source, share): no other track joins them').toBe(Math.max(4, share));
+    expect(s1.crystals.filter((c) => c === SOURCE_FREQ).length, '2178 holds the 4 and its share of the others').toBe(on2178);
     expect(rangesOf(s1.crystals), 'all 3 ranges').toEqual(['GUT', 'HEART', 'HEAD']);
     await expect(page.getByText(assignDoneText(SOURCED_PLAN), { exact: true }), 'the notice').toBeVisible();
     expect(assignDoneText(SOURCED_PLAN)).toMatch(/^Tracks spread over all 27 crystals: \d+ scanned tracks moved off Deep Scan's crystal\. .* Tracks Deep Scan placed on 2178 Hz keep the SOURCE crystal\.$/);

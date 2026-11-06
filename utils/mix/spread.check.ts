@@ -212,7 +212,14 @@ for (const [k, lib] of all) {
   ok(u.body.startsWith("Keeping Deep Scan's crystals leaves them very uneven: one crystal has 9 tracks, another 1."), 'uneven: the body says so');
   const spread = apply(build(shape(9, 1, 81)), planAssign(build(shape(9, 1, 81)), 'spread'));
   const per = ALL_CRYSTALS.map((f) => spread.filter((x) => x.closestSolfeggio === f).length);
-  eq([Math.min(...per), Math.max(...per)], [3, 3], 'uneven: a spread evens it (3 a crystal)');
+  // v16.8.1 (D3, "full share on top"): the 3 tracks read at 2180.5 Hz are Source tracks, no longer 2178's share; the 78
+  // others spread evenly over all 27 (2 or 3 a crystal), 2178 included, and 2178 holds the 3 on top (was: 3 a crystal).
+  const src = ALL_CRYSTALS.indexOf(2178);
+  const fill = per.map((n, i) => n - (i === src ? 3 : 0));
+  eq([spread.filter((x) => x.closestSolfeggio === 2178 && x.crystalSource === 'scan' && x.harmonicFreq === 2180.5).length, Math.min(...fill), Math.max(...fill)], [3, 2, 3], 'uneven: a spread evens it (the fill 2 or 3 a crystal, the 3 Source tracks on 2178 on top)');
+  // Fix round 1 (rev-tests 3): exactly 6 on 2178: 78 open, two full rounds (54), then 24 to the spread order's first 24
+  // crystals in the third; 2178 is the 14th, so it gets a third: 3 of the fill and the 3 Source tracks.
+  eq(per[src], 6, 'uneven: 2178 holds exactly 6 (3 Source, 3 of the fill)');
   ok(!assignChoice(spread).ask, 'and then no question');
 }
 // The spread's mark: recognised by itself, never by the reading differing from the crystal.

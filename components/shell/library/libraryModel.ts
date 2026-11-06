@@ -15,7 +15,7 @@ import { passButtonText, passEta, passEtaMinutes } from '../../../utils/library/
 import type { PassProgress } from '../../../utils/library/analysePass.ts';
 import { CHROMA_VERSION } from '../../../utils/soundV2/keyAnalysis.ts';
 import { BUSY_EXPORT, BUSY_STOPPING, BUSY_STOPPING_LONG } from '../../../utils/export/exportWords.ts';
-import { ALL_CRYSTALS, crystalOrigin, deepScanQueue, readByDeepScan, scanCrystalChanged, spreadFromScan, spreadRole } from '../../../utils/mix/distribution.ts';
+import { ALL_CRYSTALS, DEEP_SCAN_RATE, crystalOrigin, deepScanQueue, needsRescan, readByDeepScan, scanCrystalChanged, spreadFromScan, spreadRole } from '../../../utils/mix/distribution.ts';
 import { SOURCE_FREQ } from '../../../utils/crystalData.ts';
 import type { CrystalSource } from '../../../utils/mix/distribution.ts';
 
@@ -37,6 +37,8 @@ export interface LibSong {
   keyConfidence?: number;
   chromaVersion?: number;
   analysisFailedV?: number;
+  /** v16.8.1 (D1): the rate Deep Scan read it at (absent: an older reading, which Scan again offers). */
+  scanRate?: number;
   file?: { name?: string; size?: number } | null;
 }
 
@@ -459,12 +461,17 @@ export interface LibraryHealth {
   sourceBack: number;
   /** v16.7.3 (F1): the crystals a spread would cover: the crystals its pinned tracks hold (spreadRole: Source tracks on
    *  2178, unreadable scans on their own) and one each for the open tracks while any remain (the fill's first round), at
-   *  most 27. So it is exactly 27 − planAssign(lib, 'spread').emptyAfter (source.check), without running the plan. */
+   *  most 27. So it is exactly 27 − planAssign(lib, 'spread').emptyAfter (source.check), without running the plan.
+   *  (v16.8.1, D3b: the spread keeps that true with 2178's full share: devices.check.) */
   spreadCover: number;
+  /** v16.8.1 (D4): tracks with an older Deep Scan reading (distribution.ts needsRescan: read before v16.8.1, at the
+   *  device's own rate), what Scan again reads anew (rescanQueue: but the ones it couldn't read this session). */
+  olderReadings: number;
 }
 
-/** One O(n) pass, each id once, by each action's own rule (so a number never promises what its button won't do). */
-export function libraryHealth(songs: readonly LibSong[]): LibraryHealth {
+/** One O(n) pass, each id once, by each action's own rule (so a number never promises what its button won't do).
+ *  `rescanSkip` (fix round 1): the tracks Scan again couldn't read this session, left out of its count as of its queue. */
+export function libraryHealth(songs: readonly LibSong[], rescanSkip?: ReadonlySet<string>): LibraryHealth {
   const seen = new Set<string>();
   const used = new Set<number>();
   const unique: LibSong[] = [];
@@ -475,10 +482,12 @@ export function libraryHealth(songs: readonly LibSong[]): LibraryHealth {
   let sourceBack = 0;
   const pinned = new Set<number>();
   let openTracks = 0;
+  let olderReadings = 0;
   for (const s of songs) {
     if (!s || seen.has(s.id)) continue;
     seen.add(s.id);
     unique.push(s);
+    if (needsRescan(s) && !rescanSkip?.has(s.id)) olderReadings++;
     if (!s.closestSolfeggio) noCrystal++;
     else used.add(s.closestSolfeggio);
     const o = crystalOrigin(s);
@@ -499,13 +508,13 @@ export function libraryHealth(songs: readonly LibSong[]): LibraryHealth {
   const assignedToScan = deepScanQueue(unique, { assigned: true }).length - unscanned;
   const emptyCrystals = ALL_CRYSTALS.filter((f) => !used.has(f)).length;
   const spreadCover = Math.min(27, pinned.size + openTracks);
-  return { total: unique.length, noCrystal, unscanned, assignedToScan, scanned, scanReplaced, emptyCrystals, placeable, sourceBack, spreadCover };
+  return { total: unique.length, noCrystal, unscanned, assignedToScan, scanned, scanReplaced, emptyCrystals, placeable, sourceBack, spreadCover, olderReadings };
 }
 
-export type HealthAction = 'assign' | 'analyse' | 'scan' | 'scan-assigned' | 'stop-scan' | 'review';
+export type HealthAction = 'assign' | 'analyse' | 'scan' | 'scan-assigned' | 'rescan' | 'stop-scan' | 'review';
 
 export interface HealthLine {
-  id: 'crystals' | 'analyse' | 'scan' | 'scan-assigned' | 'lengths' | 'orphans';
+  id: 'crystals' | 'analyse' | 'scan' | 'scan-assigned' | 'rescan' | 'lengths' | 'orphans';
   title: string;
   line: string;
   /** A second, quieter line. */
@@ -535,6 +544,14 @@ export interface HealthInput {
   exportStopping?: boolean;
   /** v16.5 export memory: and for a minute or more (the line adds "or reload Aetheria"). */
   exportStoppingLong?: boolean;
+  /** v16.8.1 (D4): which pass the running Deep Scan is (a Scan again: 'rescan'), and its tracks done of its queue. */
+  scanRun?: { mode: 'scan' | 'rescan'; done: number; total: number } | null;
+  /** v16.8.1 (D4): this device's playback rate (the playback AudioContext's), null until it is known. */
+  deviceRate?: number | null;
+  /** v16.8.1 (D8): the tracks whose crystal a spread would change now (distribution.ts crystalMoves of
+   *  planAssign(lib, 'spread')). The card doesn't plan while something is busy (spreadPlanBusy): it passes the last
+   *  count it planned while idle then (at most the track count; 0 before the first). */
+  spreadMoves?: number;
 }
 
 export interface HealthModel {
@@ -546,6 +563,38 @@ export interface HealthModel {
   autoOpen: boolean;
   /** The folded line ("All set · Deep Scan optional"). */
   folded: string;
+}
+
+/** v16.8.1 (D8, fix round 2): whether the Crystals row would show D8's line: no earlier line takes the row (a track
+ *  with no crystal, a Source track to put back, a gap a spread would fill). */
+export function spreadLineReachable(h: LibraryHealth): boolean {
+  return h.noCrystal === 0 && h.sourceBack === 0 && !(h.emptyCrystals > 0 && h.spreadCover > 27 - h.emptyCrystals);
+}
+/** What the card's plan waits for: a Deep Scan or Scan again, an Analyse pass, a restore, or track lengths still being
+ *  read (the stand-ins read the length, so what a spread would move isn't settled until they are in). */
+export interface SpreadPlanStatus {
+  isScanning: boolean;
+  passPhase: string;
+  restoring: boolean;
+  durationsLeft: number;
+}
+export function spreadPlanBusy(s: SpreadPlanStatus): boolean {
+  return s.isScanning || s.passPhase !== 'idle' || s.restoring || count(s.durationsLeft) > 0;
+}
+/** v16.8.1 (D8, fix round 2): HealthCard plans a spread (planAssign(lib, 'spread'), to count what it would move) only
+ *  when its line can show and nothing is busy; while busy it shows the last idle count, held. */
+export function spreadPlanWanted(h: LibraryHealth, s: SpreadPlanStatus): boolean {
+  return spreadLineReachable(h) && !spreadPlanBusy(s);
+}
+
+/** v16.8.1 (D4): Scan again's note on this device's playback rate, after "About …" (none while the rate is unknown).
+ *  At 48 kHz, Deep Scan's own rate, readings made here mostly stay; at another, many may change. The rate as it is
+ *  (44.1 kHz, or any other a device reports), so the note never names a rate the device doesn't play at. */
+export function rateNote(rate: number | null | undefined, mobile: boolean): string {
+  if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) return '';
+  const device = mobile ? 'this phone' : 'this computer';
+  if (rate === DEEP_SCAN_RATE) return ` · ${device} plays at 48 kHz, so most stay the same`;
+  return ` · ${device} plays at ${Math.round(rate / 10) / 100} kHz, so many may change`;
 }
 
 /** Orphan wording, as classic's banner counts them. */
@@ -587,6 +636,11 @@ export function healthModel(i: HealthInput): HealthModel {
     lines.push(assignAction(true, `${all} · ${h.sourceBack} can go back to 2178 Hz, the crystal Deep Scan gave ${plural(h.sourceBack, 'it', 'them')}`));
   } else if (h.emptyCrystals > 0 && h.spreadCover > 27 - h.emptyCrystals) {
     lines.push(assignAction(false, `${all} · ${gaps}`));
+  } else if (count(i.spreadMoves ?? 0) > 0) {
+    // v16.8.1 (D8): a spread would move tracks (a library spread by an earlier release's rule, or read anew): Assign is
+    // offered, optional. The spread is idempotent, so after its press nothing moves and the line is done again.
+    const m = count(i.spreadMoves ?? 0);
+    lines.push(assignAction(false, h.total === 1 ? 'The track has one · Assign would move it' : `${all} · Assign would move ${m} of them`));
   } else {
     lines.push({
       id: 'crystals',
@@ -646,8 +700,11 @@ export function healthModel(i: HealthInput): HealthModel {
 
   // Deep Scan (optional). v15.8 (decision 6): Scan measures the tracks with no measurement and no assigned crystal
   // (v15.7's scope) and stops; a separate, explicit line offers the assigned ones (the same pass, the same Stop).
+  // v16.8.1 (D4): while a Scan again runs (the same pass, its own queue), its own line shows the progress and the Stop;
+  // this one shows its own state, its Scan held.
+  const rescanning = i.isScanning && i.scanRun?.mode === 'rescan';
   const scanTime = `about ${formatTotal(h.unscanned * SCAN_MIN_PER_TRACK * 60)}`;
-  if (i.isScanning) {
+  if (i.isScanning && !rescanning) {
     const pct = Number.isFinite(i.scanProgress) ? Math.min(100, Math.max(0, Math.round(i.scanProgress))) : 0;
     lines.push({ id: 'scan', title: 'Deep Scan', line: `Scanning · ${pct} %`, done: false, todo: false, action: { label: 'Stop', kind: 'stop-scan', blocked: false } });
   } else if (h.unscanned === 0 && h.assignedToScan === 0) {
@@ -670,10 +727,10 @@ export function healthModel(i: HealthInput): HealthModel {
       id: 'scan',
       title: 'Deep Scan',
       line: `Optional · ${h.unscanned} unscanned · ${scanTime}`,
-      sub: i.mobile ? 'Slow on a phone, and keeps it busy.' : undefined,
+      sub: rescanning ? 'Unavailable while Deep Scan runs' : i.mobile ? 'Slow on a phone, and keeps it busy.' : undefined,
       done: false,
       todo: false,
-      action: { label: 'Scan', kind: 'scan', blocked: false },
+      action: { label: 'Scan', kind: 'scan', blocked: rescanning },
     });
   }
   if (h.assignedToScan > 0 && !i.isScanning) {
@@ -686,6 +743,33 @@ export function healthModel(i: HealthInput): HealthModel {
       done: false,
       todo: false,
       action: { label: 'Scan', kind: 'scan-assigned', blocked: analysing },
+    });
+  }
+  // v16.8.1 (D4, the review page's option A): Scan again, for the tracks Deep Scan read before v16.8.1 (at the device's
+  // own rate; now it reads at 48 kHz everywhere). Optional, shown only while there are some, hidden while a plain Deep
+  // Scan runs; while it runs, its progress and Stop. The rate note names this device's playback rate when known.
+  if (rescanning) {
+    const run = i.scanRun!;
+    const pct = Number.isFinite(i.scanProgress) ? Math.min(100, Math.max(0, Math.round(i.scanProgress))) : 0;
+    lines.push({
+      id: 'rescan',
+      title: 'Deep Scan, older readings',
+      line: `Scanning again · ${pct} % · ${count(run.done)} of ${count(run.total)}`,
+      done: false,
+      todo: true,
+      action: { label: 'Stop', kind: 'stop-scan', blocked: false },
+      progress: run.total > 0 ? Math.min(1, Math.max(0, run.done / run.total)) : 0,
+    });
+  } else if (h.olderReadings > 0 && !i.isScanning) {
+    const n = h.olderReadings;
+    lines.push({
+      id: 'rescan',
+      title: 'Deep Scan, older readings',
+      line: `Scan again the ${n} ${plural(n, 'track', 'tracks')} read before v16.8.1, so ${plural(n, 'it matches', 'they match')} on every device`,
+      sub: analysing ? 'Unavailable while Analyse tracks runs' : `About ${formatTotal(n * SCAN_MIN_PER_TRACK * 60)}${rateNote(i.deviceRate, i.mobile)}`,
+      done: false,
+      todo: false,
+      action: { label: 'Scan', kind: 'rescan', blocked: analysing },
     });
   }
 
@@ -708,10 +792,12 @@ export function healthModel(i: HealthInput): HealthModel {
 
   // v16.5 review (B10): while an export runs, Analyse tracks and Deep Scan don't start (their decodes would stack on
   // the export's): their buttons are held, with the reason. A running pass's Stop stays.
+  // (v16.8.1: Scan again is a Deep Scan too.)
+  const held = (k: HealthAction) => k === 'analyse' || k === 'scan' || k === 'scan-assigned' || k === 'rescan';
   if (i.exporting) {
     for (const l of lines) {
       const a = l.action;
-      if (!a || a.label === 'Stop' || (a.kind !== 'analyse' && a.kind !== 'scan' && a.kind !== 'scan-assigned')) continue;
+      if (!a || a.label === 'Stop' || !held(a.kind)) continue;
       l.action = { ...a, blocked: true };
       l.sub = BUSY_EXPORT;
     }
@@ -720,7 +806,7 @@ export function healthModel(i: HealthInput): HealthModel {
   if (i.exportStopping && !i.exporting) {
     for (const l of lines) {
       const a = l.action;
-      if (!a || a.label === 'Stop' || (a.kind !== 'analyse' && a.kind !== 'scan' && a.kind !== 'scan-assigned')) continue;
+      if (!a || a.label === 'Stop' || !held(a.kind)) continue;
       l.action = { ...a, blocked: true };
       l.sub = i.exportStoppingLong ? BUSY_STOPPING_LONG : BUSY_STOPPING;
     }
@@ -729,7 +815,7 @@ export function healthModel(i: HealthInput): HealthModel {
   const toDo = lines.filter((l) => l.todo).length;
   const status = analysing ? 'Analysing…' : i.isScanning ? 'Scanning…' : toDo > 0 ? `${toDo} to do` : 'All set';
   const autoOpen = toDo > 0 || analysing || i.isScanning || left > 0;
-  const folded = h.unscanned > 0 || h.assignedToScan > 0 ? 'All set · Deep Scan optional' : 'All set';
+  const folded = h.unscanned > 0 || h.assignedToScan > 0 || h.olderReadings > 0 ? 'All set · Deep Scan optional' : 'All set';
   return { lines, status, toDo, autoOpen, folded };
 }
 
