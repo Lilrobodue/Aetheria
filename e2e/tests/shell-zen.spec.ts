@@ -22,7 +22,9 @@ import {
   zenToggle,
   PHONE_VIEWPORT,
   peekClassicLibrary,
+  LAYOUT_KEY,
 } from './helpers';
+import { DISCLAIMER_KEY, TUTORIAL_KEY } from './moreKit';
 
 // v15.6, Zen in the new layout (spec §3.11; decisions 1 A and 2 A): an eye button in Now Playing's top bar (the desktop
 // transport's right end), and a first row in the ⋯ menu, turn it on; the controls then hide 3 s after the last
@@ -558,6 +560,244 @@ test.describe('landscape phone, touch', () => {
       )
       .toBe('Zen mode');
     await expect(eye, 'the landscape header’s Zen button').toBeFocused();
+    expect(dialogs).toEqual([]);
+  });
+});
+
+// v16.8 (Chrome 157, components/shell/zenFocus.ts): the hide makes the focused control inert, and Chrome 157 then starts
+// the next Tab from it and leaves the page. Fix round 1 puts back exactly the Chrome 156 behaviour: no focus moves at the
+// hide (nothing new on screen, Space keeps play/pause on the desktop), and while the focus is lost to the hide one Tab
+// goes to Show controls; a focus or a starting point in a notice that stays visible keeps its own Tab order. (Tests 4
+// and 4b turn Zen on with a DOM click, which focuses nothing, so they never met this.)
+async function tabTo(page: Page, label: string, shift = false): Promise<void> {
+  for (let i = 0; i < 60; i++) {
+    if (await page.evaluate((l) => document.activeElement?.getAttribute('aria-label') === l, label)) return;
+    await page.keyboard.press(shift ? 'Shift+Tab' : 'Tab');
+  }
+  throw new Error(`the keyboard never reached "${label}"`);
+}
+
+const showControls = (page: Page) => page.getByTestId('zen-show-controls');
+/** An element's rendered width (Show controls is sr-only, 1 px, until it has the focus). */
+const widthOf = async (target: Locator): Promise<number> => (await target.boundingBox())?.width ?? 0;
+const musicPaused = async (page: Page): Promise<boolean> => (await layerState(page)).music!.paused;
+
+/** After the hide: no focus moved to Show controls, and it is not on screen. */
+async function expectNoFocusMove(page: Page): Promise<void> {
+  const show = showControls(page);
+  await page.waitForTimeout(500);
+  await expect(show, 'the hide moved no focus to Show controls').not.toBeFocused();
+  expect(await widthOf(show), 'Show controls stays off screen (visually hidden until focused)').toBeLessThanOrEqual(1);
+}
+
+/** Space (the desktop's play/pause shortcut) plays or pauses, and the controls stay hidden. */
+async function expectSpacePlaysOrPauses(page: Page, what: string): Promise<void> {
+  const before = await musicPaused(page);
+  await page.keyboard.press(' ');
+  await expect.poll(() => musicPaused(page), { message: `${what}: Space played or paused`, timeout: 5_000 }).toBe(!before);
+  expect(await shellHidden(page), `${what}: the shell stays hidden`).toBe(true);
+  expect(await widthOf(showControls(page)), `${what}: Show controls still off screen`).toBeLessThanOrEqual(1);
+}
+
+/** One Tab reaches Show controls, which shows; focusing it reveals nothing. */
+async function expectOneTabToShow(page: Page): Promise<void> {
+  const show = showControls(page);
+  await page.keyboard.press('Tab');
+  await expect(show, 'one Tab reaches Show controls').toBeFocused();
+  await expect(show).toBeInViewport();
+  expect((await show.boundingBox())!.height, 'and then it shows').toBeGreaterThanOrEqual(40);
+  expect(await shellHidden(page), 'focusing it reveals nothing').toBe(true);
+}
+
+for (const [where, viewport, eyeId] of [
+  ['phone', PHONE_VIEWPORT, 'zen-button'],
+  ['desktop', { width: 1280, height: 800 }, 'zen-button-desktop'],
+] as const) {
+  test.describe(`v16.8, ${where}`, () => {
+    test.use({ viewport });
+
+    test(`14. ${where}: Zen hidden from the keyboard: no focus move (nothing new on screen)${where === 'desktop' ? ', Space still plays and pauses' : ''}; one Tab reaches Show controls, and it shows; Enter reveals`, async ({ page }) => {
+      test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
+      test.setTimeout(150_000);
+      await instrumentAudio(page);
+      const dialogs = await playInNewLayout(page);
+      const eye = page.getByTestId(eyeId);
+      await expect(eye).toBeVisible();
+      await tabTo(page, 'Zen mode', where === 'desktop');
+      await expect(eye, 'the keyboard reached the eye button').toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(eye).toHaveAttribute('aria-pressed', 'true');
+      // No key and no pointer from here: the controls hide 3 s later.
+      await expectShellHidden(page);
+      await expectNoFocusMove(page);
+      if (where === 'desktop') await expectSpacePlaysOrPauses(page, 'before any Tab');
+      await expectOneTabToShow(page);
+      await page.keyboard.press('Enter');
+      await expectShown(page, 'Enter reveals');
+      expect(dialogs).toEqual([]);
+    });
+
+    test(`15. ${where}: Zen hidden after a click on the eye button: nothing new on screen; one Tab reaches Show controls`, async ({ page }) => {
+      test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
+      test.setTimeout(150_000);
+      await instrumentAudio(page);
+      const dialogs = await playInNewLayout(page);
+      const eye = page.getByTestId(eyeId);
+      await eye.click(); // a real click: Chrome focuses the button (4's DOM click focuses nothing)
+      await expect(eye).toHaveAttribute('aria-pressed', 'true');
+      if (where === 'desktop') await page.mouse.move(0, 0); // park the pointer; no move from here (a move reveals)
+      await expectShellHidden(page);
+      await expectNoFocusMove(page);
+      await expectOneTabToShow(page);
+      expect(dialogs).toEqual([]);
+    });
+  });
+}
+
+// Review B1 (fix round 1): Chrome 157 gives a mouse-focused button :focus-visible after ANY key (Space, Shift alone, M,
+// an arrow, the media keys). So nothing keyed on :focus-visible may move the focus at the hide: after a click and a key
+// "Show controls" stays off screen, and Space keeps playing and pausing (on Show controls it would reveal instead).
+test.describe('v16.8, desktop, a mouse and a keyboard', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  for (const [n, key, what] of [
+    ['16', ' ', 'Space (it plays or pauses)'],
+    ['16b', 'Shift', 'Shift alone'],
+  ] as const) {
+    test(`${n}. a mouse click on the eye, then ${what}: after the hide no focus move, Show controls off screen; the next Space plays or pauses and the shell stays hidden; one Tab reaches Show controls`, async ({ page }) => {
+      test.skip(ON_DEVICE, 'a mouse and a keyboard');
+      test.setTimeout(150_000);
+      await instrumentAudio(page);
+      const dialogs = await playInNewLayout(page);
+      const eye = page.getByTestId('zen-button-desktop');
+      await eye.click();
+      await expect(eye).toHaveAttribute('aria-pressed', 'true');
+      await page.mouse.move(0, 0); // park the pointer; no move from here (a move reveals)
+      const before = await musicPaused(page);
+      await page.keyboard.press(key);
+      if (key === ' ') await expect.poll(() => musicPaused(page), { message: 'the first Space played or paused', timeout: 5_000 }).toBe(!before);
+      expect(await eye.evaluate((el) => el.matches(':focus-visible')), 'Chrome: :focus-visible after a key').toBe(true);
+      await expectShellHidden(page);
+      await expectNoFocusMove(page);
+      await expectSpacePlaysOrPauses(page, 'after the hide');
+      await expectOneTabToShow(page);
+      expect(dialogs).toEqual([]);
+    });
+  }
+
+  test('17. a mouse click on Play, then F (full screen and Zen): after the hide no focus move, Show controls off screen; Space plays or pauses, the shell stays hidden; one Tab reaches Show controls', async ({ page }) => {
+    test.skip(ON_DEVICE, 'a mouse and a keyboard');
+    test.setTimeout(150_000);
+    await instrumentAudio(page);
+    const dialogs = await playInNewLayout(page);
+    const play = page.getByTestId('desktop-play');
+    const before = await musicPaused(page);
+    await play.click();
+    await expect.poll(() => musicPaused(page), { message: 'the click played or paused', timeout: 5_000 }).toBe(!before);
+    await page.mouse.move(0, 0);
+    await page.keyboard.press('f');
+    await expect(page.getByTestId('zen-button-desktop'), 'F turned Zen on').toHaveAttribute('aria-pressed', 'true');
+    await expectShellHidden(page);
+    await expectNoFocusMove(page);
+    await expectSpacePlaysOrPauses(page, 'after the hide');
+    await expectOneTabToShow(page);
+    expect(dialogs).toEqual([]);
+  });
+
+  test('20. a click on the transport\'s title (no control: the focus on <body>), then the hide: one Tab reaches Show controls', async ({ page }) => {
+    test.skip(ON_DEVICE, 'a mouse and a keyboard');
+    test.setTimeout(150_000);
+    await instrumentAudio(page);
+    const dialogs = await playInNewLayout(page);
+    const eye = page.getByTestId('zen-button-desktop');
+    await eye.evaluate((b) => (b as HTMLButtonElement).click());
+    await expect(eye).toHaveAttribute('aria-pressed', 'true');
+    // Chrome's starting point goes where the click landed, inside the shell that the hide makes inert.
+    await page.getByTestId('desktop-title').click();
+    expect(await page.evaluate(() => document.activeElement === document.body), 'words take no focus').toBe(true);
+    await expectShellHidden(page);
+    await expectNoFocusMove(page);
+    await expectOneTabToShow(page);
+    expect(dialogs).toEqual([]);
+  });
+});
+
+// Review S2 (fix round 1): the notices stay visible (and live) in Zen, outside the hidden shell. A Tab whose starting
+// point is in one of them is the browser's: the notice's next control, never Show controls.
+test.describe('v16.8, desktop, the moved-over card', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, layoutSeed: null });
+
+  test('18. a moved profile: a click on the card\'s words (no control), then the hide: one Tab goes to the card\'s Dismiss, not to Show controls', async ({ page }) => {
+    test.skip(ON_DEVICE, 'a mouse and a keyboard');
+    test.setTimeout(120_000);
+    // A saved "classic" from before v16.8 and prior use (decision 1 B): moved once, with the card.
+    await page.addInitScript((k) => {
+      try {
+        if (sessionStorage.getItem('__e2eMoved') === null) {
+          sessionStorage.setItem('__e2eMoved', '1');
+          localStorage.setItem(k.disclaimer, '2026-10-21');
+          localStorage.setItem(k.tutorial, 'true');
+          localStorage.setItem(k.layout, 'classic');
+          localStorage.setItem('aetheria.layerEngine.v1', 'v2');
+          localStorage.setItem('aetheria.layerOutput.v1', 'headphones');
+        }
+      } catch {}
+    }, { disclaimer: DISCLAIMER_KEY, tutorial: TUTORIAL_KEY, layout: LAYOUT_KEY });
+    await page.goto('/');
+    await newShell(page).waitFor();
+    const card = page.getByTestId('layout-card');
+    await expect(card, 'the moved-over card').toBeVisible({ timeout: 15_000 });
+    const eye = page.getByTestId('zen-button-desktop');
+    await eye.click();
+    await expect(eye).toHaveAttribute('aria-pressed', 'true');
+    await card.getByText(/now opens in the new layout/).click();
+    expect(await page.evaluate(() => document.activeElement === document.body), 'words take no focus').toBe(true);
+    await expectShellHidden(page);
+    await expect(card, 'the card stays visible in Zen').toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(card.getByRole('button', { name: 'Dismiss the layout notice', exact: true }), "the card's next control").toBeFocused();
+    await expect(showControls(page)).not.toBeFocused();
+  });
+});
+
+test.describe('v16.8, phone, touch', () => {
+  test.use({ viewport: PHONE_VIEWPORT, hasTouch: true });
+
+  test('19. a real touch tap on the eye: after the hide no focus move, Show controls off screen; one Tab still reaches it', async ({ page }) => {
+    test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
+    test.setTimeout(150_000);
+    await instrumentAudio(page);
+    const dialogs = await playInNewLayout(page);
+    const eye = page.getByTestId('zen-button');
+    const c = await centre(eye);
+    await page.touchscreen.tap(c.x, c.y); // a real touch (hasTouch), not a mouse click
+    await expect(eye).toHaveAttribute('aria-pressed', 'true');
+    await expectShellHidden(page);
+    await expectNoFocusMove(page);
+    await expectOneTabToShow(page);
+    expect(dialogs).toEqual([]);
+  });
+
+  test('19b. hidden, a tap on a notice\'s words (the update banner, outside the hidden shell): the next Tab is the notice\'s (Reload), not Show controls', async ({ page }) => {
+    test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
+    test.setTimeout(150_000);
+    await instrumentAudio(page);
+    const dialogs = await playInNewLayout(page);
+    await page.evaluate(() => window.dispatchEvent(new Event('aetheria:update-ready')));
+    const words = page.getByText(/A new version of Aetheria is ready/);
+    await expect(words).toBeVisible();
+    const eye = page.getByTestId('zen-button');
+    const c = await centre(eye);
+    await page.touchscreen.tap(c.x, c.y); // the eye has the focus at the hide: lost to it
+    await expect(eye).toHaveAttribute('aria-pressed', 'true');
+    await expectShellHidden(page);
+    const w = await centre(words);
+    await page.touchscreen.tap(w.x, w.y); // a finger on the notice: the starting point is there now
+    await page.waitForTimeout(500);
+    expect(await shellHidden(page), 'a tap on a notice reveals nothing').toBe(true);
+    await page.keyboard.press('Tab');
+    await expect(page.getByTestId('update-reload'), "the notice's next control").toBeFocused();
+    await expect(showControls(page)).not.toBeFocused();
     expect(dialogs).toEqual([]);
   });
 });

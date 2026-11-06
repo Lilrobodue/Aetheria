@@ -1380,3 +1380,67 @@ test.describe('style foundation (v15.3)', () => {
     expect(expected.size, 'tokens checked').toBeGreaterThan(40);
   });
 });
+
+// v16.8: the moved-over card (the notices, phone 411 and desktop 1280) and the desktop's empty-library card. The card
+// reuses the notices' classes and DesktopEmpty the kit's: every class has a rule, no blur, no endless animation, and
+// each of their targets is at least 44 × 44. The real default (no fixture seed): a moved profile, then an empty desktop.
+test.describe('v16.8', () => {
+  test.use({ layoutSeed: null });
+
+  test('n. the new default (v16.8): the moved-over card at 411 and 1280 and the empty desktop card: every class has a rule, no blur, no endless animation, every target 44 × 44', async ({ page }) => {
+    test.setTimeout(120_000);
+    const seen = new Map<string, string>();
+    const effects = new Set<string>();
+    const small = new Set<string>();
+    const census = async (state: string, root: string) => {
+      await page.locator(root).first().waitFor();
+      await page.waitForTimeout(250);
+      await collectClasses(page, state, seen);
+      const r = await page.evaluate((sel) => {
+        const out: string[] = [];
+        const tiny: string[] = [];
+        for (const rootEl of Array.from(document.querySelectorAll(sel))) {
+          for (const el of [rootEl, ...Array.from(rootEl.querySelectorAll('*'))]) {
+            const cs = getComputedStyle(el);
+            const tag = `${el.tagName.toLowerCase()}.${(el.getAttribute('class') || '').split(/\s+/).slice(0, 3).join('.')}`;
+            if (cs.backdropFilter && cs.backdropFilter !== 'none') out.push(`backdrop-filter on ${tag}`);
+            if (cs.animationName && cs.animationName !== 'none' && /infinite/.test(cs.animationIterationCount)) out.push(`infinite animation on ${tag}`);
+          }
+          for (const b of Array.from(rootEl.querySelectorAll('button'))) {
+            const box = b.getBoundingClientRect();
+            if (box.width > 0 && (box.width < 43.5 || box.height < 43.5)) tiny.push(b.getAttribute('aria-label') || (b.textContent || '').trim());
+          }
+        }
+        return { out, tiny };
+      }, root);
+      for (const e of r.out) effects.add(`${e} (${state})`);
+      for (const t of r.tiny) small.add(`${t} (${state})`);
+    };
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem('__styleN') !== null) return;
+      sessionStorage.setItem('__styleN', '1');
+      localStorage.setItem('aetheria.disclaimer.v1', '2026-10-21');
+      localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
+    });
+    for (const [label, viewport] of [['phone 411', { width: 411, height: 752 }], ['desktop 1280', { width: 1280, height: 800 }]] as const) {
+      await page.setViewportSize(viewport);
+      await page.goto('/');
+      await census(`${label}, the moved-over card`, '[data-testid="layout-card"]');
+    }
+    // The empty desktop: the card closed (its X), so the empty-library card is alone over the visuals.
+    await page.getByRole('button', { name: 'Dismiss the layout notice', exact: true }).click();
+    await census('desktop 1280, the empty library', '[data-testid="desktop-empty"]');
+    await page.setViewportSize({ width: 1024, height: 600 });
+    await census('desktop 1024 × 600, the empty library', '[data-testid="desktop-empty"]');
+
+    const styled = await stylesheetClasses(page);
+    const unstyled = [...seen]
+      .filter(([t]) => !styled.has(t) && !LUCIDE.test(t) && !INERT.has(t))
+      .map(([t, state]) => `${t} (${state})`)
+      .sort();
+    expect(seen.size, 'the walk saw the new layout').toBeGreaterThan(100);
+    expect(unstyled, 'classes in the DOM with no rule').toEqual([]);
+    expect([...effects], 'backdrop-filter or an endless animation').toEqual([]);
+    expect([...small], 'targets under 44 × 44').toEqual([]);
+  });
+});

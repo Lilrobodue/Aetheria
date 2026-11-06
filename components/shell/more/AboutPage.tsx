@@ -167,7 +167,8 @@ const AboutPage = ({ go }: { go: (v: MoreView) => void }) => {
         <span>
           <span className="block text-lg font-serif tracking-[0.2em] text-gold-400">AETHERIA</span>
           <span className="block text-sm text-ink-muted tabular-nums" data-testid="about-version">
-            Version {APP_VERSION} · new layout (beta)
+            {/* v16.8: no "(beta)": the new layout is the default. */}
+            Version {APP_VERSION} · new layout
           </span>
         </span>
       </div>

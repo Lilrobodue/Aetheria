@@ -1,5 +1,5 @@
 import { type Locator, type Page } from '@playwright/test';
-import { test, expect, ON_DEVICE } from './fixtures';
+import { test, expect, ON_DEVICE, watchNativeDialogs } from './fixtures';
 import {
   acceptDisclaimer,
   crash,
@@ -131,52 +131,60 @@ const DRAWING = 8;
 // 1. The opt-in and persistence
 // ---------------------------------------------------------------------------------------------------------------
 
-test('1. classic is the default; the opt-in, a reload, Back to classic and ?layout= save the choice; junk is classic', async ({ page }) => {
-  test.setTimeout(150_000);
-  await instrumentAudio(page);
-  const dialogs = await playingInNewLayout(page, { optIn: false });
-  // A whole classic session: never written without a tap.
-  await openHarmonicControl(page);
-  await page.getByRole('heading', { name: 'Harmonic Control', exact: true }).locator('xpath=..').getByRole('button', { name: 'Close', exact: true }).click();
-  await page.reload();
-  await acceptDisclaimer(page);
-  await expect(newShell(page)).toHaveCount(0);
-  expect(await layoutPref(page), 'a classic session writes no layout choice').toBeNull();
+// The default itself: no fixture seed (v16.8 fixtures.ts layoutSeed). default-layout.spec has the rest of the
+// default's cases (the move, the card, the statement).
+test.describe('the default', () => {
+  test.use({ layoutSeed: null });
 
-  // Harmonic Control › Try the new layout: the shell, saved; Harmonic Control closed.
-  await optInNewLayout(page);
-  expect(await layoutPref(page)).toBe('new');
-  await expect(page.getByRole('heading', { name: 'Harmonic Control', exact: true })).toHaveCount(0);
-  await expect(classicHeader(page)).toHaveCount(0);
+  test('1. the new layout is the default (v16.8): a session writes no layout choice; Back to classic, the pill and ?layout= save the choice; junk is the default', async ({ page }) => {
+    test.setTimeout(150_000);
+    const dialogs = watchNativeDialogs(page);
+    await page.goto('/');
+    await newShell(page).waitFor();
+    await expect(classicHeader(page)).toHaveCount(0);
+    await page.getByRole('button', { name: /I understand, let me begin/ }).click();
+    await page.getByTestId('tour').getByRole('button', { name: 'Close', exact: true }).click();
+    // A whole new-layout session: never written without a tap.
+    await tab(page, 'library');
+    await tab(page, 'now');
+    await page.reload();
+    await newShell(page).waitFor();
+    await expect(classicHeader(page)).toHaveCount(0);
+    expect(await layoutPref(page), 'a new-layout session writes no layout choice').toBeNull();
 
-  // A reload stays new.
-  await page.reload();
-  await newShell(page).waitFor();
-  await expect(classicHeader(page)).toHaveCount(0);
+    // ⋯ › Back to classic: classic, saved; a reload stays classic (a tap after v16.8's first launch holds).
+    await moreOptions(page).click();
+    await page.getByTestId('menu-back-to-classic').click();
+    await expect(classicHeader(page)).toBeVisible();
+    await expect(newShell(page)).toHaveCount(0);
+    expect(await layoutPref(page)).toBe('classic');
+    await page.reload();
+    await acceptDisclaimer(page);
+    await expect(newShell(page)).toHaveCount(0);
 
-  // ⋯ › Back to classic.
-  await moreOptions(page).click();
-  await page.getByTestId('menu-back-to-classic').click();
-  await expect(classicHeader(page)).toBeVisible();
-  await expect(newShell(page)).toHaveCount(0);
-  expect(await layoutPref(page)).toBe('classic');
+    // Harmonic Control › Try the new layout: the shell, saved; Harmonic Control closed.
+    await optInNewLayout(page);
+    expect(await layoutPref(page)).toBe('new');
+    await expect(page.getByRole('heading', { name: 'Harmonic Control', exact: true })).toHaveCount(0);
+    await expect(classicHeader(page)).toHaveCount(0);
 
-  // ?layout=new and ?layout=classic set it and save it.
-  await page.goto('/?layout=new');
-  await newShell(page).waitFor();
-  expect(await layoutPref(page)).toBe('new');
-  await page.goto('/?layout=classic');
-  await acceptDisclaimer(page);
-  await expect(newShell(page)).toHaveCount(0);
-  expect(await layoutPref(page)).toBe('classic');
+    // ?layout=classic and ?layout=new set it and save it.
+    await page.goto('/?layout=classic');
+    await acceptDisclaimer(page);
+    await expect(newShell(page)).toHaveCount(0);
+    expect(await layoutPref(page)).toBe('classic');
+    await page.goto('/?layout=new');
+    await newShell(page).waitFor();
+    expect(await layoutPref(page)).toBe('new');
 
-  // A stored value that isn't one: classic, and left as it is.
-  await page.evaluate((k) => localStorage.setItem(k, 'garbage'), LAYOUT_KEY);
-  await page.goto('/');
-  await acceptDisclaimer(page);
-  await expect(newShell(page)).toHaveCount(0);
-  expect(await layoutPref(page)).toBe('garbage');
-  expect(dialogs).toEqual([]);
+    // A stored value that isn't one: the default (new), and left as it is.
+    await page.evaluate((k) => localStorage.setItem(k, 'garbage'), LAYOUT_KEY);
+    await page.goto('/');
+    await newShell(page).waitFor();
+    await expect(classicHeader(page)).toHaveCount(0);
+    expect(await layoutPref(page)).toBe('garbage');
+    expect(dialogs).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -505,7 +513,8 @@ test.describe('desktop, renders', () => {
     await page.waitForTimeout(3000);
     const now = await renders(page);
     test.info().annotations.push({ type: 'renders on the desktop, 3 s', description: JSON.stringify(now) });
-    for (const view of ['DesktopShell', 'SideNav', 'DesktopTransport', 'DesktopKeys', 'KeyFeedback', 'FullscreenButton', 'AppShell']) {
+    // v16.8: DesktopEmpty (the empty library's card) never follows the clock either.
+    for (const view of ['DesktopShell', 'SideNav', 'DesktopTransport', 'DesktopKeys', 'KeyFeedback', 'FullscreenButton', 'AppShell', 'DesktopEmpty']) {
       expect.soft(now[view] ?? 0, `${view} renders`).toBe(0);
     }
     expect.soft(now.SeekBar ?? 0, 'SeekBar renders').toBeGreaterThanOrEqual(8);

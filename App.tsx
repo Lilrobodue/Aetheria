@@ -183,6 +183,7 @@ import OutputSheet from './components/layers/OutputSheet';
 import OutputQuickSwitch from './components/layers/OutputQuickSwitch';
 // v15.4 UI kit and isolation.
 import Dialog, { ReadoutActions } from './components/ui/Dialog';
+import { useOverlay } from './components/ui/overlayStack'; // v16.8: the safety statement is a kit modal
 import Button from './components/ui/Button';
 import { ViewBoundary, PanelFallback, SafeTransport, VisualsStoppedPill, modalFallback, panelFallback, APP_VERSION } from './components/ErrorBoundary';
 import LayersBadge from './components/layers/LayersBadge';
@@ -226,7 +227,7 @@ import { VISUALS_PAUSED_KEY, parseVisualsPaused, userPauseHolds } from './compon
 import { KEEP_AWAKE_KEY, parseKeepAwake, RELOAD_RECORDING_NOTE, RELOAD_EXPORT_NOTE, RELOAD_ANYWAY_LABEL } from './components/shell/more/moreModel';
 import type { MoreView } from './components/shell/more/moreModel';
 // v16.5, the More area part 2: the Guide's view, Track info's toast, Record's toast, and Advanced's scan scores.
-import { NO_TRACK_FOR_INFO } from './components/shell/more/moreModel';
+import { NO_TRACK_FOR_INFO, USE_CLASSIC } from './components/shell/more/moreModel';
 import type { GuideView } from './components/shell/more/moreModel';
 import { RECORD_SAVED_TOAST } from './components/shell/more/recordModel';
 import type { RecordKind } from './components/shell/more/recordModel';
@@ -241,10 +242,11 @@ import type { ExportJobValue, ExportTargetValue } from './components/shell/conte
 import VisualsPause from './components/shell/VisualsPause';
 import PeekPill from './components/shell/PeekPill';
 import { useMediaQuery } from './components/shell/useMediaQuery';
-import { LAYOUT_KEY, parseLayoutPref, sourceLine, walkSegment, newLayoutNotice, queueSourceLine, queueThen, queueSourceShort, PLAYLISTS_HOME } from './components/shell/shellModel';
-import type { LayoutPref, ShellTab, ShellSheet, PeekPanel } from './components/shell/shellModel';
+import { LAYOUT_KEY, LAYOUT_NOTICE_KEY, LAYOUT_LAUNCH_BLOCKED, LAYOUT_CARD_TEXT, LAYOUT_CARD_TOUR, LAYOUT_CARD_DISMISS, layoutAtLaunch, sourceLine, walkSegment, newLayoutNotice, queueSourceLine, queueThen, queueSourceShort, PLAYLISTS_HOME } from './components/shell/shellModel';
+import type { LayoutLaunch, LayoutPref, ShellTab, ShellSheet, PeekPanel } from './components/shell/shellModel';
 import { zenActive } from './components/shell/zenModel';
 import { useShellZen } from './components/shell/useShellZen';
+import { useZenTab } from './components/shell/zenFocus'; // v16.8: Zen's Tab under Chrome 157
 import { CRYSTAL_FILTER_KEY, parseCrystalFilter, toneLoweredText } from './components/shell/layers/layersModel';
 import type { LayersSection } from './components/shell/layers/layersModel';
 // v15.7: the Library tab (new layout). The row tap's pure rules; App's renders are counted in dev builds only.
@@ -1088,6 +1090,41 @@ const DISCLAIMER_VERSION = '2026-10-21';
 // an older text and is ignored.
 const DISCLAIMER_STORAGE_KEY = 'aetheria.disclaimer.v1';
 
+// v16.8: the layout at launch (the new layout is the default) and the one-time move with its card (decisions 1 B and
+// 2 A; components/shell/shellModel.ts layoutAtLaunch, Node-checked). Read once, synchronously, before the first frame
+// (App's layout state), every read in one try: storage that throws opens the new layout, with no card and nothing to
+// write. "Prior use" is read here, before this launch can accept the statement or close the tutorial.
+function readLayoutLaunch(): LayoutLaunch {
+  try {
+    return layoutAtLaunch({
+      stored: localStorage.getItem(LAYOUT_KEY),
+      query: new URLSearchParams(window.location.search).get('layout'),
+      mark: localStorage.getItem(LAYOUT_NOTICE_KEY),
+      priorUse: localStorage.getItem(DISCLAIMER_STORAGE_KEY) !== null || localStorage.getItem('aetheria_v3_tutorial_seen') !== null,
+    });
+  } catch {
+    return LAYOUT_LAUNCH_BLOCKED;
+  }
+}
+
+/** v16.8 (review B4): where the focus lands when what had it goes away (the moved-over card's buttons, the statement):
+ *  the open view's heading, else the desktop's Play, else classic's first header control; or `preferred`. */
+const FOCUS_LANDING = '[data-testid="new-shell"] [data-view-heading], [data-testid="new-shell"] [data-testid="desktop-play"], header button[aria-label="Library"]';
+function focusLanding(preferred?: string): void {
+  const el = document.querySelector(preferred ?? FOCUS_LANDING);
+  if (el instanceof HTMLElement) el.focus();
+}
+/** The same once the next frames have rendered (a switch of layout, a closed modal), unless something took the focus. */
+function focusLandingSoon(preferred?: string): void {
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      const a = document.activeElement;
+      if (a && a !== document.body && a.isConnected) return;
+      focusLanding(preferred);
+    })
+  );
+}
+
 /** v15.9: how long the Mixes tab waits for the saved library to be read back before it shows what it has. */
 const LIBRARY_LOADING_MAX_MS = 15_000;
 
@@ -1234,19 +1271,30 @@ const App: React.FC = () => {
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
   
   const [currTime, setCurrTime] = useState(0);
-  // v15.5: the new layout (beta), opt-in (Harmonic Control's "Try the new layout"); classic is the default. Read once,
-  // synchronously, in this initialiser, so the first frame is already the right layout (no flash of classic). A missing
-  // or invalid value means classic. Written only by a tap (setLayout, below) or by ?layout= (the effect below).
-  const [layout, setLayoutState] = useState<LayoutPref>(() => {
+  // v15.5: the new layout (beta), opt-in; v16.8: the default (decision 1 B: a saved "classic" from before v16.8 is moved
+  // once, and a later tap holds). Read once, synchronously, in these initialisers (readLayoutLaunch, above App), so the
+  // first frame is already the right layout (no flash of the other). The choice is written by a tap (setLayout, below),
+  // by ?layout= (the effect below), and once by v16.8's move (the effect here removes a saved "classic" from before it).
+  const [layoutLaunch] = useState<LayoutLaunch>(readLayoutLaunch);
+  const [layout, setLayoutState] = useState<LayoutPref>(layoutLaunch.layout);
+  // v16.8: the moved-over card is due, until one of its buttons is tapped (closeLayoutCard); the notices show it only
+  // while nothing is over the new layout.
+  const [layoutCardDue, setLayoutCardDue] = useState<boolean>(layoutLaunch.card);
+  const [layoutCardTick, setLayoutCardTick] = useState<boolean>(false);
+  const layoutCardAnnouncedRef: { current: boolean } = useRef(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setLayoutCardTick(true), 100);
+    return () => window.clearTimeout(t);
+  }, []);
+  // v16.8: the launch's one write, the move's record (LAYOUT_NOTICE_KEY), and with it the move itself. Idempotent
+  // (StrictMode runs it twice in dev); nothing to write after the first v16.8 launch.
+  useEffect(() => {
+    if (!layoutLaunch.mark) return;
     try {
-      return parseLayoutPref(
-        typeof localStorage !== 'undefined' ? localStorage.getItem(LAYOUT_KEY) : null,
-        new URLSearchParams(window.location.search).get('layout')
-      );
-    } catch {
-      return 'classic';
-    }
-  });
+      localStorage.setItem(LAYOUT_NOTICE_KEY, layoutLaunch.mark);
+      if (layoutLaunch.clearStored) localStorage.removeItem(LAYOUT_KEY);
+    } catch {}
+  }, []);
   // The new layout's tab and open sheet (memory only: a reload opens Now Playing), and a stub's "peek" into classic
   // (decision 4: classic shows with `layout` still 'new', and a pill comes back).
   const [shellTab, setShellTab] = useState<ShellTab>('now');
@@ -1374,7 +1422,11 @@ const App: React.FC = () => {
       const url = new URL(window.location.href);
       const q = url.searchParams.get('layout');
       if (q === null) return;
-      if (q === 'new' || q === 'classic') localStorage.setItem(LAYOUT_KEY, q);
+      if (q === 'new' || q === 'classic') {
+        localStorage.setItem(LAYOUT_KEY, q);
+        // v16.8 (review A1): an explicit switch answers the moved-over card (never shown again).
+        if (localStorage.getItem(LAYOUT_NOTICE_KEY) === 'due') localStorage.setItem(LAYOUT_NOTICE_KEY, 'seen');
+      }
       url.searchParams.delete('layout');
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
     } catch {}
@@ -1433,8 +1485,12 @@ const App: React.FC = () => {
       // disclaimer was reopened to read it (Safety Protocols).
       if (rereadingDisclaimerRef.current) {
         rereadingDisclaimerRef.current = false;
+        // v16.8 (review B4): the button that reopened it went with the Safety panel: back to Safety Protocols.
+        focusLandingSoon('header [title="Safety Protocols"]');
         return;
       }
+      // v16.8: the statement's button is gone; the tour (below) takes the focus when it opens, else the page's start.
+      focusLandingSoon();
       let tutorialSeen: string | null = 'true'; // storage unreadable: don't nag
       try {
         tutorialSeen = localStorage.getItem('aetheria_v3_tutorial_seen');
@@ -1450,6 +1506,40 @@ const App: React.FC = () => {
         localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
       } catch {}
   };
+
+  // v16.8: the statement is a real modal in both layouts (the v16.7 follow-up): in a portal on <body>, on the kit's
+  // overlay stack, so #root (the shell, classic, the notices) is inert behind it and Tab stays inside it. Escape does
+  // nothing: it is a gate (the stack still stops the key, so nothing behind it acts on it). Its first focus is its
+  // panel, so a screen reader starts at the top (focusing the button would scroll the statement to its end). Its
+  // words, its classes and DISCLAIMER_VERSION are unchanged, so nobody who accepted it sees it again.
+  const statementPanelRef: { current: HTMLDivElement | null } = useRef(null);
+  useOverlay(!disclaimerAccepted, statementPanelRef, () => {});
+  useEffect(() => {
+    if (!disclaimerAccepted) statementPanelRef.current?.focus({ preventScroll: true });
+  }, [disclaimerAccepted]);
+  // v16.8 (review A5): the other portals on <body> (a tooltip, the visuals-stopped pill) are outside #root, so the stack's
+  // inert doesn't reach them: while the statement shows they are inert too, as they come and go, and given back after.
+  useEffect(() => {
+    if (disclaimerAccepted) return;
+    const made: Array<HTMLElement & { inert: boolean }> = [];
+    const apply = () => {
+      const statement = document.querySelector('[data-testid="disclaimer"]');
+      for (const node of Array.from(document.body.children)) {
+        const el = node as HTMLElement & { inert: boolean };
+        if (!(node instanceof HTMLElement) || el.id === 'root' || el === statement || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+        if (el.inert) continue;
+        el.inert = true;
+        made.push(el);
+      }
+    };
+    apply();
+    const watch = new MutationObserver(apply);
+    watch.observe(document.body, { childList: true });
+    return () => {
+      watch.disconnect();
+      for (const el of made) el.inert = false;
+    };
+  }, [disclaimerAccepted]);
 
   // Visual settings — persisted to localStorage so the user's tuning survives
   // reloads and new sessions. If VizSettings changes incompatibly, bump the
@@ -3062,6 +3152,10 @@ const App: React.FC = () => {
   useEffect(() => {
     zenShownRef.current = !uiHidden;
   }, [uiHidden]);
+  // v16.8 (Chrome 157, components/shell/zenFocus.ts): while the UI is hidden, a Tab with the focus lost to the hide goes
+  // to "Show controls", as before Chrome 157. No focus moves at the hide.
+  const zenShowControlsRef: { current: HTMLButtonElement | null } = useRef(null);
+  useZenTab(uiHidden, zenShowControlsRef, zenLayerRef);
   useEffect(() => {
     const apply = (top: number, bottom: number) =>
       setUiInsets((prev: { top: number; bottom: number }) => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }));
@@ -7115,6 +7209,14 @@ registerProcessor('wav-capture', WavCapture);
   }, [nowPlayingId, settleToneLowering]);
   // The phone shell's Car screen (Output = Car); the desktop has none (its layers chip says Car).
   const carLayout = layout === 'new' && !desktopShell && layerOutput === 'car';
+  // v16.8: the moved-over card shows while it is due and nothing is over the new layout (the statement, the tour, the
+  // Car screen, a classic peek). Review B3: never in the first frame with the notices' live region (a screen reader skips
+  // content inserted with its region), so it waits one tick after mount; and it is announced once: after its first
+  // showing it carries aria-live="off", so coming back to it (a peek, Car, the tour) doesn't read it again.
+  const layoutCardShows = layoutCardDue && layoutCardTick && shellOn && disclaimerAccepted && !showTutorial && !carLayout;
+  useEffect(() => {
+    if (layoutCardShows) layoutCardAnnouncedRef.current = true;
+  }, [layoutCardShows]);
   // v15.6: the Car screen is never Zen: choosing Car ends the new layout's Zen (as v15.5's effect above ends classic's).
   useEffect(() => {
     if (carLayout && shellZen) setShellZen(false);
@@ -8388,7 +8490,12 @@ registerProcessor('wav-capture', WavCapture);
   const setLayout = (next: LayoutPref) => {
     try {
       localStorage.setItem(LAYOUT_KEY, next);
+      // v16.8 (review A1): any explicit switch (Back to classic, Use the classic layout in Advanced or on the crash card,
+      // the pill) answers the moved-over card: it never shows again. A device that started on v16.8 stays 'fresh'.
+      const mark = localStorage.getItem(LAYOUT_NOTICE_KEY);
+      if (mark !== 'fresh' && mark !== 'seen') localStorage.setItem(LAYOUT_NOTICE_KEY, 'seen');
     } catch {}
+    setLayoutCardDue(false);
     setLayoutState(next);
     setClassicPeek(null);
     setShellTab('now');
@@ -8403,6 +8510,27 @@ registerProcessor('wav-capture', WavCapture);
       setLayerSwitchOpen(false);
       setShowLoShuWalkMenu(false);
       setShowSettings(false);
+    }
+  };
+  /**
+   * v16.8: the moved-over card's three buttons (App-local, not shell actions): the card never again, then the tour or
+   * classic (the music keeps playing, as with every switch). The focus goes where it would land on the page
+   * (focusLanding: the view's heading, the desktop's Play, classic's first header control), never to <body>; Show the
+   * tour moves it there first, so the tour gives it back there, not to the card it replaced.
+   */
+  const closeLayoutCard = (then: 'tour' | 'classic' | null) => {
+    try {
+      localStorage.setItem(LAYOUT_NOTICE_KEY, 'seen');
+    } catch {}
+    setLayoutCardDue(false);
+    if (then === 'tour') {
+      focusLanding();
+      setShowTutorial(true);
+    } else if (then === 'classic') {
+      setLayout('classic');
+      focusLandingSoon();
+    } else {
+      focusLanding();
     }
   };
   /** A stub's "Open the classic …": classic at the right place, with "Back to the new layout"; the choice stays new. */
@@ -9819,6 +9947,7 @@ registerProcessor('wav-capture', WavCapture);
       {/* Zen Mode, UI hidden (v15.4): the hidden UI is inert, so this is what a keyboard or a screen reader finds. */}
       {uiHidden && (
         <button
+          ref={zenShowControlsRef}
           type="button"
           onClick={() => zenRevealRef.current?.()}
           className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-toast focus:px-4 focus:min-h-touch focus:rounded-control focus:bg-surface-panel focus:text-ink"
@@ -9828,13 +9957,14 @@ registerProcessor('wav-capture', WavCapture);
       )}
       
       {/* Disclaimer Modal. Its wording is versioned: change DISCLAIMER_VERSION
-          (above App) with any wording change, or it won't show again. */}
-      {!disclaimerAccepted && (
+          (above App) with any wording change, or it won't show again.
+          v16.8: a real modal (a portal on <body>, the overlay stack: see statementPanelRef); its panel is the dialog. */}
+      {!disclaimerAccepted && createPortal(
         <div data-testid="disclaimer" className="fixed inset-0 z-[150] bg-black/95 flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-500">
-          <div className="max-w-lg w-full max-h-[90vh] bg-slate-900 border border-gold-500/30 p-8 rounded-2xl shadow-2xl text-center relative overflow-hidden overflow-y-auto my-auto">
+          <div ref={statementPanelRef} role="dialog" aria-modal="true" aria-labelledby="disclaimer-title" tabIndex={-1} className="max-w-lg w-full max-h-[90vh] bg-slate-900 border border-gold-500/30 p-8 rounded-2xl shadow-2xl text-center relative overflow-hidden overflow-y-auto my-auto outline-none">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent"></div>
             <AlertTriangle className="w-12 h-12 text-gold-500 mx-auto mb-4 animate-pulse" />
-            <h1 className="text-2xl font-serif text-white mb-2 tracking-wide">Welcome to Aetheria</h1>
+            <h1 id="disclaimer-title" className="text-2xl font-serif text-white mb-2 tracking-wide">Welcome to Aetheria</h1>
             <p className="text-xs text-slate-500 mb-2 uppercase tracking-widest italic">Resonance & Geometry Player</p>
             <p className="text-sm text-slate-400 mb-6">Before you begin, please take a moment to read how we think about this tool and what it is and is not.</p>
 
@@ -9853,7 +9983,8 @@ registerProcessor('wav-capture', WavCapture);
               I understand, let me begin
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
           {/* Tutorial Modal */}
@@ -9928,6 +10059,43 @@ registerProcessor('wav-capture', WavCapture);
                 >
                   <CheckCircle2 size={16} aria-hidden="true" className="shrink-0 text-emerald-400" />
                   <span className="flex-1 leading-snug">Restored {restoredCount} {restoredCount === 1 ? 'track' : 'tracks'} from cache.</span>
+                </div>
+              )}
+              {/* v16.8: the moved-over card (decision 2 A: an existing user moved to the new layout, once), after the
+                  restore card and before Ready Offline, so an Undo toast keeps its place at the stack's foot. It stays
+                  until one of its three buttons is tapped (App-local: closeLayoutCard), and never shows over the
+                  statement, the tour, the phone's Car screen or a classic peek (shellOn). Atomic: read once. */}
+              {layoutCardShows && (
+                <div data-testid="layout-card" aria-atomic="true" aria-live={layoutCardAnnouncedRef.current ? 'off' : undefined} className="flex flex-col gap-2 bg-slate-900/95 border border-gold-500/40 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-lg">
+                  <div className="flex items-start gap-3">
+                    <span className="flex-1 leading-snug">{LAYOUT_CARD_TEXT}</span>
+                    <button
+                      type="button"
+                      aria-label={LAYOUT_CARD_DISMISS}
+                      onClick={() => closeLayoutCard(null)}
+                      className="shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-white"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      data-testid="layout-card-tour"
+                      onClick={() => closeLayoutCard('tour')}
+                      className="min-h-[44px] px-3 rounded-lg bg-gold-500 hover:bg-gold-400 text-black text-xs font-bold transition-colors"
+                    >
+                      {LAYOUT_CARD_TOUR}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="layout-card-classic"
+                      onClick={() => closeLayoutCard('classic')}
+                      className="min-h-[44px] px-3 rounded-lg border border-slate-600 text-slate-300 hover:border-slate-400 text-xs font-bold transition-colors"
+                    >
+                      {USE_CLASSIC}
+                    </button>
+                  </div>
                 </div>
               )}
               {/* v16.4: in the new layout the Ready Offline notice is a card here, first in the stack (so an Undo toast
@@ -10199,7 +10367,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.7.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.8</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

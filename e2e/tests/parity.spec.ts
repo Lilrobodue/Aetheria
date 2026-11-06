@@ -384,6 +384,8 @@ async function walk(page: Page, context: BrowserContext, vp: Viewport): Promise<
 // grid, the HEAD line is gone); on the desktop the same with the transport masked (the Zen button narrows its left
 // column: reviewed). Shot for review only, unasserted: the ⋯ menu, the Sound sheet, More, Layers, the desktop
 // transport. The shell's crash fallback needs the dev hook: not in a production build.
+// v16.8: the phone's top bar loses its Beta label (placeBetaMask, the one allowed difference); the statement over the new
+// layout and the desktop's empty-library card are reviewed shots.
 // ---------------------------------------------------------------------------------------------------------------
 
 const HIDE_NEW_CSS = fs.readFileSync(fileURLToPath(new URL('./parity-new.css', import.meta.url)), 'utf8');
@@ -402,6 +404,30 @@ async function placeZenMask(page: Page, menu: Locator): Promise<void> {
       'margin:0;padding:0;border:0;background:transparent;pointer-events:none;z-index:2147483647';
     document.body.appendChild(m);
   }, b);
+}
+
+/**
+ * v16.8: the one allowed difference of the phone's compared shots: the top bar's Beta label is gone (nothing else moves:
+ * REC, its right-hand neighbour, shows only while recording). A transparent fixed overlay over the label's box, from
+ * the AETHERIA wordmark's right edge, 64 px wide and as tall as the top bar, in both builds. None while the top bar is
+ * hidden (a landscape phone) or absent (the desktop, the Car screen).
+ */
+async function placeBetaMask(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    document.querySelectorAll('[data-parity-beta-mask]').forEach((n) => n.remove());
+    const bar = document.querySelector('[data-testid="new-top-bar"]');
+    const mark = bar?.querySelector('span');
+    if (!bar || !mark) return;
+    const b = bar.getBoundingClientRect();
+    const r = mark.getBoundingClientRect();
+    if (!b.width || !b.height || !r.width) return;
+    const m = document.createElement('div');
+    m.setAttribute('data-parity-beta-mask', '');
+    m.style.cssText =
+      `position:fixed;left:${r.right}px;top:${b.top}px;width:64px;height:${b.height}px;` +
+      'margin:0;padding:0;border:0;background:transparent;pointer-events:none;z-index:2147483647';
+    document.body.appendChild(m);
+  });
 }
 
 async function walkNew(page: Page, vp: Viewport): Promise<void> {
@@ -430,12 +456,13 @@ async function walkNew(page: Page, vp: Viewport): Promise<void> {
     await page.waitForTimeout(700);
     const name = `new-${vp}-${state}`;
     if (o.zenMask) await placeZenMask(page, o.zenMask);
-    const masks = [...(o.masks ?? []), page.locator('[data-parity-zen-mask]')];
+    await placeBetaMask(page);
+    const masks = [...(o.masks ?? []), page.locator('[data-parity-zen-mask]'), page.locator('[data-parity-beta-mask]')];
     if (o.compare) {
       compared.push(state);
       await expect.soft(page, `${name} matches the baseline`).toHaveScreenshot(`${name}.png`, { mask: masks, stylePath: NEW_STYLES, clip: o.clip });
     }
-    await page.evaluate(() => document.querySelectorAll('[data-parity-zen-mask]').forEach((n) => n.remove()));
+    await page.evaluate(() => document.querySelectorAll('[data-parity-zen-mask],[data-parity-beta-mask]').forEach((n) => n.remove()));
     const out = path.join(SHOTS_DIR, label, `${name}.png`);
     fs.mkdirSync(path.dirname(out), { recursive: true });
     await page.screenshot({ path: out, animations: 'disabled', caret: 'hide', scale: 'css', style: HIDE_CSS + HIDE_NEW_CSS });
@@ -445,8 +472,22 @@ async function walkNew(page: Page, vp: Viewport): Promise<void> {
   await page.goto('/');
   await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
   const accept = page.getByRole('button', { name: /I understand, let me begin/ });
-  if (await accept.isVisible().catch(() => false)) await accept.click();
   label = label || ((await page.locator('header h1 > span').first().textContent().catch(() => '')) || 'build').trim();
+  // v16.8 (reviewed, never compared): the statement over the new layout (a real modal from v16.8), and on the desktop
+  // the empty library's Import music card (absent before v16.8: skipped there). Then classic again, as before.
+  await page.goto('/?layout=new');
+  await page.getByTestId('new-shell').waitFor();
+  if (await accept.isVisible().catch(() => false)) {
+    await shot('statement', { compare: false });
+    await accept.click();
+  }
+  if (vp === 'desktop') {
+    await page.waitForTimeout(500);
+    if (await page.getByTestId('desktop-empty').count()) await shot('empty-library', { compare: false });
+  }
+  await page.goto('/?layout=classic');
+  await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
+  if (await accept.isVisible().catch(() => false)) await accept.click();
   await importTones(page, 3, 60);
   await page.getByText('tone-01', { exact: true }).first().click();
   await page.getByRole('button', { name: 'Pause', exact: true }).first().waitFor({ timeout: 20_000 });

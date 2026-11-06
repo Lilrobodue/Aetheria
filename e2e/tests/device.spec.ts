@@ -162,6 +162,71 @@ test('the new layout keeps the lock-screen card across three gapless advances wi
   expect(dialogs).toEqual([]);
 });
 
+// v16.8 (review B6): the same with NO saved layout (the default, as every new install and most existing users have
+// it): the android-lock-screen-default project (layoutSeed null), after the android-default first-launch checks. The
+// profile is a moved one (the statement accepted, the tutorial seen), so the moved-over card waits in the notices.
+test.describe('v16.8, no saved layout', () => {
+  test.use({ layoutSeed: null });
+
+  test('v16.8: with no saved layout (the default) the new layout keeps the lock-screen card across three gapless advances with the screen off; the moved-over card stays in the notices @default-lock', async ({ page }) => {
+    await page.addInitScript(({ keys }) => {
+      try {
+        if (sessionStorage.getItem('__e2eDefaultLock') === null) {
+          sessionStorage.setItem('__e2eDefaultLock', '1');
+          localStorage.setItem('aetheria.disclaimer.v1', '2026-10-21');
+          localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
+          localStorage.setItem(keys.engine, 'classic');
+        }
+      } catch {
+        // No storage here.
+      }
+      const w = window as any;
+      w.__pauseCount = 0;
+      const original = HTMLMediaElement.prototype.pause;
+      HTMLMediaElement.prototype.pause = function (this: HTMLMediaElement) {
+        w.__pauseCount++;
+        return original.call(this);
+      };
+    }, { keys: { engine: LAYER_ENGINE_KEY } });
+    await seedToneLibrary(page, { n: 12, cursor: -1 });
+    await page.setViewportSize(PHONE_VIEWPORT);
+    await page.goto('/');
+    await expect(page.getByTestId('view-now')).toBeVisible({ timeout: 30_000 });
+    expect(await layoutPref(page), 'no saved layout').toBeNull();
+    await expect(page.getByTestId('layout-card'), 'the moved-over card').toBeVisible();
+    const play = await page.getByTestId('np-play').boundingBox();
+    expect(play, "Now Playing's Play button").toBeTruthy();
+    await tapAt(page, play!.x + play!.width / 2, play!.y + play!.height / 2);
+    await expect.poll(() => mediaSession()?.state, { timeout: 15_000 }).toBe('playing');
+    const first = mediaSession()!.title;
+    const pausesBefore = await pauseCount(page);
+    adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+    const titles: string[] = [];
+    try {
+      await expect
+        .poll(
+          () => {
+            const s = mediaSession();
+            if (s && s.state === 'playing' && s.title !== first && !titles.includes(s.title)) titles.push(s.title);
+            return titles.length;
+          },
+          { timeout: 45_000, intervals: [500], message: 'three gapless advances on the PLAYING card, its title following' }
+        )
+        .toBeGreaterThanOrEqual(3);
+      expect(mediaSession()?.state, 'the card still says playing').toBe('playing');
+      expect(chromeSessions().filter((s) => s.state === 'playing').length, 'one PLAYING Chrome card: none stranded').toBe(1);
+    } finally {
+      adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+    }
+    test.info().annotations.push({ type: 'card titles with the screen off', description: [first, ...titles].join(' → ') });
+    // DOM reads only after the wake (the keyguard: no frames, no taps).
+    expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
+    await expect(page.getByTestId('new-shell'), 'still the new layout').toBeAttached();
+    await expect(page.getByTestId('layout-card'), 'the card still waits (it was not tapped)').toBeAttached();
+    expect(await layoutPref(page), 'still no saved layout').toBeNull();
+  });
+});
+
 test('in Zen, the new layout keeps the lock-screen card across three gapless advances with the screen off @device', async ({ page }) => {
   // v15.6 (spec §5.9 step 3): the test above with the new layout's Zen on and hidden before the screen goes off (the
   // shell inert and transparent: nothing of it may touch the card or the advance). Turns the screen off; a phone with a

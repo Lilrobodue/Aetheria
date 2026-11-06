@@ -43,6 +43,10 @@ export function toneWav(seconds: number, freq: number): Buffer {
  * load, as a tap on Classic would, unless the profile already holds a choice;
  * later taps and seedLayers change it as usual. 'default' leaves the profile
  * unset, as a new user's.
+ *
+ * The layout (v16.8): the new layout is the app's default, so openApp opens classic only because the suite's fixture
+ * seeds it (fixtures.ts layoutSeed, default 'classic', with the moved-over card's mark): the suites written for classic
+ * keep testing it unchanged. A test of the default itself declares test.use({ layoutSeed: null }).
  */
 export async function openApp(
   page: Page,
@@ -82,7 +86,10 @@ export async function openApp(
 /**
  * The launch disclaimer: accept it if it shows. From v14.6 it shows only until
  * the current wording is accepted, so "not there" is a normal answer — wait
- * for the app itself (rendered under the disclaimer) before deciding.
+ * for the app itself (rendered under the disclaimer) before deciding. It waits
+ * for classic's header (the fixture's classic seed, v16.8); acceptDisclaimerNew
+ * waits for the new layout. v16.8: the statement is a modal on <body> with #root
+ * inert behind it; what is under it still renders, so the wait holds.
  */
 export async function acceptDisclaimer(page: Page): Promise<void> {
   await page.getByTitle('Safety Protocols', { exact: true }).waitFor();
@@ -1073,7 +1080,9 @@ export type CrashView =
   // v16.5, the More area part 2: the Guide, the Journal, Advanced and the Record sheet's body.
   | 'more-guide' | 'more-journal' | 'more-advanced' | 'sheet-record'
   // v16.5, Export with layers: the Export sheet's body.
-  | 'sheet-export';
+  | 'sheet-export'
+  // v16.8: the desktop's empty-library card.
+  | 'desktop-empty';
 
 /**
  * Make a region throw on its next render, through the app's dev hook window.__aetheriaCrash (ErrorBoundary.tsx; dev
@@ -1136,10 +1145,11 @@ export async function hideZen(page: Page): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// The new layout (v15.5, opt-in beta)
+// The new layout (v15.5, opt-in beta; v16.8, the default)
 // ---------------------------------------------------------------------------------------------------------------
 
-/** The saved layout choice ('new' / 'classic'; unset = classic). The app writes it only from a tap or ?layout=. */
+/** The saved layout choice ('new' / 'classic'; v16.8: unset = new, the default). The app writes it from a tap or ?layout=,
+ *  and once (v16.8's move) removes a 'classic' saved before v16.8. The fixture seeds 'classic' (fixtures.ts layoutSeed). */
 export const LAYOUT_KEY = 'aetheria.layout.v1';
 /** A phone, as the probes and the mockups measured it. */
 export const PHONE_VIEWPORT = { width: 411, height: 752 };

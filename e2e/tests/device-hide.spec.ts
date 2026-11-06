@@ -1,5 +1,5 @@
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
-import { test, expect, ON_DEVICE, assertNoDeviceArtifacts, watchNativeDialogs } from './fixtures';
+import { test, expect, ON_DEVICE, assertNoDeviceArtifacts, seedLayout, watchNativeDialogs } from './fixtures';
 import {
   acceptDisclaimerNew,
   appUrl,
@@ -105,6 +105,9 @@ async function openTab(context: BrowserContext, clear: boolean): Promise<Page> {
       return play.call(this);
     };
   });
+  // v16.8 (review B5): these tabs are not the fixture's, so they get its classic seed here (openApp's tests are classic's;
+  // the new-layout ones write 'new' themselves).
+  await seedLayout(page, 'classic', TEST_ORIGIN);
   watchNativeDialogs(page);
   return page;
 }

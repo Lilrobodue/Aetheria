@@ -21,6 +21,10 @@
 // v16.5: online, a synthetic track is stored and the new layout stays open for 35 s: the Export engine (a lazy chunk the
 // app fetches once on idle) must then be in the cache. After the offline boot, the new layout opens offline and exports
 // that track (the download caught in the page, nothing saved): it must complete.
+// v16.8: the new layout is the default (and a returning user who never chose is moved to it, with a one-time card): the
+// waits accept either layout, under the statement too. With --from, the returning user (the statement accepted on the
+// previous release, no layout chosen) must land in the new layout with the card, the statement not shown again. The
+// classic checks (the header badge, the offline relaunch's styles) then save "classic", as a tap would.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -75,10 +79,13 @@ try {
   page.on('dialog', (d) => d.dismiss().catch(() => {}));
   await page.addInitScript(() => localStorage.setItem('aetheria_v3_tutorial_seen', 'true'));
 
+  /** Either layout is up (v16.8), the statement accepted if it showed; returns whether it showed. */
   const appUp = async (timeout = 20_000) => {
-    await page.getByTitle('Safety Protocols', { exact: true }).waitFor({ timeout });
+    await page.locator('[data-testid="new-shell"], header [title="Safety Protocols"]').first().waitFor({ timeout });
     const accept = page.getByRole('button', { name: /I understand, let me begin/ });
-    if (await accept.isVisible().catch(() => false)) await accept.click();
+    const shown = await accept.isVisible().catch(() => false);
+    if (shown) await accept.click();
+    return shown;
   };
   const cacheContents = () =>
     page.evaluate(async () => {
@@ -123,7 +130,18 @@ try {
     await appUp();
     await page.waitForTimeout(4000);
     await page.reload(); // the new SW (skipWaiting + clients.claim) controls
-    await appUp();
+    const statementAgain = await appUp();
+    // v16.8: the returning user (accepted on the previous release, no layout chosen) is moved to the new layout once.
+    report.upgrade = {
+      statementAgain,
+      shell: (await page.getByTestId('new-shell').count()) > 0,
+      // (The card shows a tick after the first frame, so a screen reader announces it: wait for it.)
+      card: await page.getByTestId('layout-card').waitFor({ timeout: 5_000 }).then(() => true, () => false),
+      layout: await page.evaluate(() => localStorage.getItem('aetheria.layout.v1')),
+      notice: await page.evaluate(() => localStorage.getItem('aetheria.layoutNotice.v1')),
+    };
+    check('upgrade: the statement accepted on the previous release is not shown again', !statementAgain);
+    check('upgrade: the returning user opens in the new layout, with the moved-over card', report.upgrade.shell && report.upgrade.card, report.upgrade);
   } else {
     server = await serve(DIST, { port: PORT });
     await page.goto(ORIGIN + '/');
@@ -135,6 +153,10 @@ try {
   }
 
   // ---- Online ----
+  // v16.8: the header badge is classic's: "classic" saved, as a tap would (after v16.8's first launch: it holds).
+  await page.evaluate(() => localStorage.setItem('aetheria.layout.v1', 'classic'));
+  await page.reload();
+  await appUp();
   const cachedAll = await waitForCached(['/', MAIN_CSS, MAIN_JS], 20_000);
   await page.waitForTimeout(1000);
   const caches = await cacheContents();
@@ -167,6 +189,9 @@ try {
   await page.getByTestId('new-shell').waitFor({ timeout: 20_000 });
   const acceptNew = page.getByRole('button', { name: /I understand, let me begin/ });
   if (await acceptNew.isVisible().catch(() => false)) await acceptNew.click();
+  // v16.8: the moved-over card (a returning user's) is closed first, as its X would, so it covers no row.
+  const cardX = page.getByRole('button', { name: 'Dismiss the layout notice', exact: true });
+  if (await cardX.isVisible().catch(() => false)) await cardX.click();
   await page.getByTestId('tab-more-button').click();
   await page.getByTestId('more-about-row').click();
   await page.getByTestId('about-offline').waitFor({ timeout: 10_000 });

@@ -1,13 +1,13 @@
 // components/shell/TopBar.tsx (v15.5, the new layout beta)
 //
-// Now Playing's top bar on the phone: AETHERIA, Beta, REC while a recording runs (v16.5: a tap opens Record), and ⋯ (the menu). A gradient scrim
+// Now Playing's top bar on the phone: AETHERIA, REC while a recording runs (v16.5: a tap opens Record), and ⋯ (the menu). A gradient scrim
 // over the visualizer, never a blur (I13: no backdrop-filter over the canvas). The Spectrum lens's top inset is
 // measured from it (headerRef). Hidden on a landscape phone, where Now Playing carries its own ⋯.
 // v15.6: the Zen button (the eye) sits left of ⋯ (decision 1, option A).
+// v16.8: no Beta label (the new layout is the default).
 
 import React from 'react';
 import { Ellipsis } from 'lucide-react';
-import Badge from '../ui/Badge';
 import { useActions, useShell } from './contexts';
 import { countRender } from './devRenders';
 import RecButton from './RecButton';
@@ -25,7 +25,6 @@ const TopBar = () => {
     >
       <div className="flex items-center gap-2">
         <span className="text-sm font-serif tracking-[0.25em] text-gold-400">AETHERIA</span>
-        <Badge>Beta</Badge>
         <RecButton />
       </div>
       <div className="flex items-center">

@@ -1,7 +1,7 @@
 // components/shell/layers/LayersTab.tsx (v15.6, the Layers tab; decision 4, option A)
 //
 // Every sound control classic keeps in Harmonic Control, on one page (mockups layers-phone-A-*, layers-desktop): the
-// header (Layers, Beta; Close in the desktop panel), the sticky jump row, and five cards in the plan's order, Sound,
+// header (Layers; Close in the desktop panel; v16.8: no Beta), the sticky jump row, and five cards in the plan's order, Sound,
 // Crystal, Levels (with Key fit), Beat and Advanced, each its own region (a crash in one card leaves the others and
 // the music). Solid, so on a phone the heat guard pauses the visuals behind it, as for the stub it replaces.
 // It reopens where it was left: the content's scrollTop goes into App's layersScrollRef as it scrolls and comes back on
@@ -13,7 +13,6 @@
 
 import React, { useLayoutEffect, useRef } from 'react';
 import { X } from 'lucide-react';
-import Badge from '../../ui/Badge';
 import IconButton from '../../ui/IconButton';
 import { ViewBoundary } from '../../ErrorBoundary';
 import { useActions, useShell } from '../contexts';
@@ -70,7 +69,6 @@ const LayersTab = ({ inPanel = false }: LayersTabProps) => {
           Layers
         </h1>
         <span className="flex items-center gap-1">
-          <Badge>Beta</Badge>
           {inPanel ? <IconButton label="Close panel" icon={<X size={20} />} onClick={() => actions.setTab('now')} /> : null}
         </span>
       </header>

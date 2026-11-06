@@ -7,15 +7,20 @@
 //   - a full-screen surface over the shell and under the notices (z-scrim), aria-hidden, that reveals on `click` only:
 //     a reveal on pointerdown would let the click that follows hit-test again, after the surface is gone, and press
 //     the control under the finger (spec §2.5, probe C). So the first tap only reveals; a second within 3 s presses.
+// v16.8 (Chrome 157, zenFocus.ts): mounted in the commit that hides the shell, so while it shows a Tab with the focus
+// lost to the hide lands on Show controls, as before Chrome 157. No focus moves at the hide.
 
-import React from 'react';
+import React, { useRef } from 'react';
 import { useActions, useShell } from './contexts';
+import { useZenTab } from './zenFocus';
 
 const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const ZenReveal = () => {
   const actions = useActions();
   const { rootRef } = useShell();
+  const showRef: { current: HTMLButtonElement | null } = useRef(null);
+  useZenTab(true, showRef, rootRef);
   const showControls = () => {
     actions.revealZen();
     // Once the shell is live again (the next frame), the keyboard continues from its first VISIBLE control (on a
@@ -30,6 +35,7 @@ const ZenReveal = () => {
   return (
     <>
       <button
+        ref={showRef}
         type="button"
         onClick={showControls}
         data-testid="zen-show-controls"

@@ -61,15 +61,52 @@ export function assertDeviceRun(testOrigin: string, workers: number): void {
   if (workers !== 1) throw new Error(`Refusing to run with ${workers} workers on a device: one worker only (another worker's test tab would look like a leftover).`);
 }
 
-const localTest = base.extend({
-  page: async ({ page }, use) => {
+/**
+ * v16.8: the new layout is the app's default, and a saved "classic" from before v16.8 is moved to it once (decision
+ * 1 B). The suites written for classic keep testing classic: `layoutSeed` (default 'classic') is saved before the
+ * tab's first load, as a tap on "Use the classic layout" after the move would, unless the profile already holds a
+ * choice; with it the moved-over card's memory (aetheria.layoutNotice.v1 = 'seen'), so no seeded test ever meets the
+ * one-time move or the card. Once per tab (a sessionStorage flag), so a test that clears storage and reloads sees
+ * the real default. The new-layout helpers write 'new' themselves (their init scripts run after this one) or load
+ * ?layout=new. `test.use({ layoutSeed: null })` seeds nothing: the tests of the default itself (default-layout.spec).
+ * Fix round 1 (review N2): only on `origin`, the tests' own (TEST_ORIGIN): a tab that followed a link elsewhere (on
+ * the phone, the live app) is never seeded, so it never cancels that origin's one-time move. fixtures-seed.spec.ts
+ * checks the rules on the desktop. v16.9 removes the option with the classic tests.
+ */
+export type LayoutSeed = 'classic' | 'new' | null;
+export const SEED_KEYS = { layout: 'aetheria.layout.v1', notice: 'aetheria.layoutNotice.v1' } as const;
+
+export async function seedLayout(page: Page, layoutSeed: LayoutSeed, origin: string): Promise<void> {
+  if (!layoutSeed) return;
+  await page.addInitScript(
+    ({ v, keys, origin }) => {
+      if (location.origin !== origin) return; // another origin (or about:blank): never seeded
+      try {
+        if (sessionStorage.getItem('__e2eLayoutSeeded') === null) {
+          sessionStorage.setItem('__e2eLayoutSeeded', '1');
+          if (localStorage.getItem(keys.layout) === null) localStorage.setItem(keys.layout, v);
+          if (localStorage.getItem(keys.notice) === null) localStorage.setItem(keys.notice, 'seen');
+        }
+      } catch {
+        // No storage here (e.g. about:blank): nothing to seed.
+      }
+    },
+    { v: layoutSeed, keys: SEED_KEYS, origin }
+  );
+}
+
+const localTest = base.extend<{ layoutSeed: LayoutSeed }>({
+  layoutSeed: ['classic', { option: true }],
+  page: async ({ page, layoutSeed }, use) => {
     const opened = watchNativeDialogs(page);
+    await seedLayout(page, layoutSeed, TEST_ORIGIN);
     await use(page);
     expectNoNativeDialogs(opened);
   },
 });
 
-const deviceTest = base.extend<{}, { phoneChrome: Browser }>({
+const deviceTest = base.extend<{ layoutSeed: LayoutSeed }, { phoneChrome: Browser }>({
+  layoutSeed: ['classic', { option: true }],
   phoneChrome: [
     async ({ screenshot, trace, video }, use, workerInfo) => {
       // Before connecting: once the phone's context exists, a trace or a screenshot would already record its tabs.
@@ -86,7 +123,7 @@ const deviceTest = base.extend<{}, { phoneChrome: Browser }>({
   context: async ({ phoneChrome }, use) => {
     await use(phoneChrome.contexts()[0]);
   },
-  page: async ({ context, phoneChrome, baseURL, screenshot, trace, video }, use) => {
+  page: async ({ context, phoneChrome, baseURL, screenshot, trace, video, layoutSeed }, use) => {
     assertNoDeviceArtifacts({ screenshot, trace, video });
     const page = await context.newPage();
     // v16.7.3 (fix round 1, F5): any throw while setting the tab up (the origin
@@ -122,6 +159,9 @@ const deviceTest = base.extend<{}, { phoneChrome: Browser }>({
           return play.call(this);
         };
       });
+      // v16.8: the layout seed, inside the try (a throw here still closes the tab) and after the clear, so its
+      // once-per-tab sessionStorage flag starts unset at this tab's first load.
+      await seedLayout(page, layoutSeed, TEST_ORIGIN);
     } catch (e) {
       await page.close().catch(() => {});
       throw e;
@@ -152,5 +192,5 @@ const deviceTest = base.extend<{}, { phoneChrome: Browser }>({
   },
 });
 
-export const test = (ON_DEVICE ? deviceTest : localTest) as typeof base;
+export const test = (ON_DEVICE ? deviceTest : localTest) as typeof localTest;
 export { expect };

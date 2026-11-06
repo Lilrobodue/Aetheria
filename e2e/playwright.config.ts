@@ -88,14 +88,19 @@ export default defineConfig({
     ? [{ name: DEVICE ? 'android-hide' : 'desktop-hide', testMatch: /[\\/]device-hide\.spec\.ts$/ }]
     : DEVICE
     ? [
-        { name: 'android', grepInvert: /@device|@real/ },
+        { name: 'android', grepInvert: /@device|@real|@default/ },
+        // v16.8 (the new layout is the default): the first-launch checks with NO saved layout (the fixture's classic seed
+        // off): the statement over the new layout, the moved-over card. Then the lock-screen check of a profile with no
+        // saved layout, with the other screen-off tests' rule (after everything else: it may leave the phone locked).
+        { name: 'android-default', grep: /@default(?!-lock)/, grepInvert: /@device|@real/, use: { layoutSeed: null } },
         // Turns the screen off (and leaves a phone with a secure lock locked),
         // so it runs after everything else.
         { name: 'android-lock-screen', grep: /@device/, dependencies: ['android'] },
+        { name: 'android-lock-screen-default', grep: /@default-lock/, use: { layoutSeed: null }, dependencies: ['android-default'] },
         ...(process.env.E2E_REAL_LIBRARY ? [{ name: 'android-real', grep: /@real/ }] : []),
       ]
     : [
-        { name: 'desktop', grepInvert: /@device|@real/ },
+        { name: 'desktop', grepInvert: /@device|@real|@default-lock/ },
         { name: 'mobile-ua', grep: /@mobile/, grepInvert: /@device|@real/, use: { userAgent: ANDROID_UA } },
       ],
   webServer: {

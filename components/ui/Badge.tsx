@@ -1,6 +1,7 @@
 // components/ui/Badge.tsx (v15.5 UI kit)
 //
-// A small uppercase label: display only. `outline` is the new layout's Beta, `rec` a recording in progress (a red dot,
+// A small uppercase label: display only. `outline` the plain label (v15.5-v16.7 the new layout's Beta; v16.8 shows none),
+// `rec` a recording in progress (a red dot,
 // the text stays ink), `playing` the gold tag of the playing crystal, `track` the neutral tag of the track's own crystal
 // and `active` the active walk. v16.5: `experimental`, dashed and neutral (the Journal; nothing experimental is gold or
 // coloured).

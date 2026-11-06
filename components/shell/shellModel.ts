@@ -1,10 +1,11 @@
 // components/shell/shellModel.ts (v15.5, the new layout beta)
 //
-// The new layout's pure rules: which layout opens, the words the views show (the play order's source line, the
+// The new layout's pure rules: which layout opens (v16.8: the default, the one-time move and its card), the words the views show (the play order's source line, the
 // time, the φ phase, the Car screen's line, the library summary), and the crystal grid. Free of app imports, so Node
 // checks it directly (shellModel.check.ts: `npm run check:shell`, type stripping, no build step).
 
-/** The saved layout choice. Written only by a tap (the opt-in, Back to classic, the crash fallback) or ?layout=. */
+/** The saved layout choice. Written only by a tap (the opt-in, Back to classic, the crash fallback, v16.8's card) or
+ *  ?layout=, and once by v16.8's move (a saved 'classic' from before v16.8 is removed: layoutAtLaunch). */
 export const LAYOUT_KEY = 'aetheria.layout.v1';
 
 export type LayoutPref = 'classic' | 'new';
@@ -28,15 +29,77 @@ export function isLayoutPref(v: unknown): v is LayoutPref {
   return v === 'new' || v === 'classic';
 }
 
+/** v16.8: the layout that opens when nothing valid is saved: the new layout (the plan's step 8; v15.5-v16.7: classic). */
+export const LAYOUT_DEFAULT: LayoutPref = 'new';
+
 /**
- * The layout to open with. A valid `?layout=` beats the saved choice; a missing or invalid value of either means
- * classic (the default), so nothing but 'new' ever opens the beta.
+ * The layout to open with. A valid `?layout=` beats the saved choice; a missing or invalid value of either means the
+ * default (v16.8: the new layout). layoutAtLaunch decides whether a saved choice still counts (v16.8's one-time move).
  */
 export function parseLayoutPref(stored: string | null | undefined, query: string | null | undefined): LayoutPref {
   if (isLayoutPref(query)) return query;
   if (isLayoutPref(stored)) return stored;
-  return 'classic';
+  return LAYOUT_DEFAULT;
 }
+
+/**
+ * v16.8: the one-time move's record and the moved-over card's memory (decisions 1 B and 2 A). Absent: this device has
+ * not opened v16.8 yet. 'fresh': it started on v16.8 or later (never a card); 'due': it was moved at v16.8 (an existing
+ * user who never chose, or a saved "classic" from before v16.8), and the card shows until one of its buttons is tapped;
+ * 'seen': the card was closed, or there was nothing to tell (a saved "new", a ?layout= launch). Once it is set, a saved
+ * choice is a v16.8 tap's (or the address's) and holds: the move never repeats.
+ */
+export const LAYOUT_NOTICE_KEY = 'aetheria.layoutNotice.v1';
+export type LayoutNotice = 'fresh' | 'due' | 'seen';
+
+export function isLayoutNotice(v: unknown): v is LayoutNotice {
+  return v === 'fresh' || v === 'due' || v === 'seen';
+}
+
+/** What the first frame needs: the layout, whether the card is due, and the launch's one write (if any). */
+export interface LayoutLaunch {
+  layout: LayoutPref;
+  /** The moved-over card is due at this launch (App still holds it back over the statement, the tour, Car, a peek). */
+  card: boolean;
+  /** Write LAYOUT_NOTICE_KEY = this now (the first v16.8 launch only); null: nothing to write. */
+  mark: LayoutNotice | null;
+  /** Remove a saved "classic" from before v16.8 (decision 1 B: moved once); the layout choice is then unset. */
+  clearStored: boolean;
+}
+
+/** Storage that throws: the new layout, no card, nothing to write (nothing could be remembered). */
+export const LAYOUT_LAUNCH_BLOCKED: LayoutLaunch = { layout: LAYOUT_DEFAULT, card: false, mark: null, clearStored: false };
+
+/**
+ * v16.8: the layout at launch, and the one-time move (decisions 1 B, 2 A). `stored` is the saved choice, `query` the
+ * address's ?layout=, `mark` LAYOUT_NOTICE_KEY's value, `priorUse` whether this device used Aetheria before this
+ * launch (a statement acceptance or the first-run tutorial's key, read before this launch's own; a saved choice counts
+ * too).
+ *   - Marked (any value, review A2: one this version doesn't know, a later version's, counts too, so a v16.8 choice is
+ *     never moved again): the move is done. The choice as parseLayoutPref reads it; the card while 'due', never on a
+ *     ?layout= launch.
+ *   - Not marked (the first v16.8 launch):
+ *       ?layout=: as asked, no card, marked 'seen' (prior use) or 'fresh';
+ *       a saved "new": new, no card, 'seen';
+ *       prior use (a saved "classic" among it): the new layout and the card, 'due'; a saved "classic" is removed;
+ *       otherwise (a new install; junk or nothing saved): new, no card, 'fresh'.
+ */
+export function layoutAtLaunch(i: { stored: string | null; query: string | null; mark: string | null; priorUse: boolean }): LayoutLaunch {
+  if (i.mark !== null) {
+    return { layout: parseLayoutPref(i.stored, i.query), card: i.mark === 'due' && !isLayoutPref(i.query), mark: null, clearStored: false };
+  }
+  const used = i.priorUse || isLayoutPref(i.stored);
+  if (isLayoutPref(i.query)) return { layout: i.query, card: false, mark: used ? 'seen' : 'fresh', clearStored: false };
+  if (i.stored === 'new') return { layout: 'new', card: false, mark: 'seen', clearStored: false };
+  if (used) return { layout: LAYOUT_DEFAULT, card: true, mark: 'due', clearStored: i.stored === 'classic' };
+  return { layout: LAYOUT_DEFAULT, card: false, mark: 'fresh', clearStored: false };
+}
+
+/** v16.8: the moved-over card (decision 2 A), first in the new layout's notices. Its second button is moreModel's
+ *  USE_CLASSIC ("Use the classic layout"); its X is labelled LAYOUT_CARD_DISMISS. */
+export const LAYOUT_CARD_TEXT = 'Aetheria now opens in the new layout. For this version, the classic layout is still in More › Advanced.';
+export const LAYOUT_CARD_TOUR = 'Show the tour';
+export const LAYOUT_CARD_DISMISS = 'Dismiss the layout notice';
 
 export const TABS: ReadonlyArray<{ id: ShellTab; label: string; short: string }> = [
   { id: 'now', label: 'Now Playing', short: 'Playing' },

@@ -1,7 +1,7 @@
 // components/shell/SideNav.tsx (v15.5, the new layout beta)
 //
 // The desktop shell's 72 px side nav (mockup desktop-shell): the same five sections as the phone's tabs, as 64 × 56
-// tiles with short labels, the active one gold, and Beta at the foot.
+// tiles with short labels, the active one gold (v16.8: no Beta at the foot).
 // v16.4: a click on the active More section takes More back to its root, also when the
 // desktop panel shows the Visuals sheet in More's place (v16.4 review: requestMoreRoot is given where More was left).
 // v16.7 (desktop polish; decisions 1 A and 2 A): below 1280 px, today's 72 px rail plus a Shortcuts button above Beta;
@@ -13,7 +13,6 @@
 
 import React from 'react';
 import { Activity as PulseIcon, Disc3, Keyboard, Layers, Library, ListMusic, Menu } from 'lucide-react';
-import Badge from '../ui/Badge';
 import Kbd from '../ui/Kbd';
 import Tooltip from '../ui/Tooltip';
 import { useActions, useShell } from './contexts';
@@ -87,7 +86,7 @@ const SideNav = () => {
           </Tooltip>
         );
       })}
-      <Tooltip label="Keyboard shortcuts" keys={keys ? tipKeys('help') : null} side="right" hideFrom="xl" wrapClassName="relative inline-flex shrink-0 mt-auto mb-1">
+      <Tooltip label="Keyboard shortcuts" keys={keys ? tipKeys('help') : null} side="right" hideFrom="xl" wrapClassName="relative inline-flex shrink-0 mt-auto mb-3">
         <button
           type="button"
           aria-label="Keyboard shortcuts"
@@ -105,7 +104,6 @@ const SideNav = () => {
           ) : null}
         </button>
       </Tooltip>
-      <Badge className="mb-3 xl:self-start xl:ml-1">Beta</Badge>
     </nav>
   );
 };

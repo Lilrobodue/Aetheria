@@ -7,8 +7,8 @@
 //   Safety · Safety & comfort;
 //   About · About (the version, and "an update is ready" with a dot), Links;
 //   In the classic layout for now · "Guide, Record, Journal, scan scores" (Use the classic layout: v16.5 brings them).
-// A page's header has Back ("Back to More"; the statement's "Back to Safety & comfort") first, its h1, Beta (and Close
-// on the desktop panel). Its h1 takes the focus on entry; Back returns to the row that opened it. Where the tab was
+// A page's header has Back ("Back to More"; the statement's "Back to Safety & comfort") first, its h1 (and Close
+// on the desktop panel; v16.8: no Beta). Its h1 takes the focus on entry; Back returns to the row that opened it. Where the tab was
 // left (the page and its scrollTop) is App's moreViewRef (session only), so Library and back reopens the same page at
 // the same place; a tap on the active More tab goes back to the root (moreModel's request). Links opened from About's
 // row remembers it (v16.4 review): its Back returns to About, to that row.
@@ -67,6 +67,7 @@ import {
   openerOf,
 } from './moreModel';
 import type { MoreView } from './moreModel';
+import { useNoticeSpacer } from '../playlists/useNoticeSpacer';
 
 /** The row (by test id) a page's Back returns the focus to. */
 const OPENED_FROM: Readonly<Record<MoreView, string | null>> = {
@@ -241,6 +242,11 @@ const MoreTab = ({ inPanel = false }: MoreTabProps) => {
   const view = nav.view;
   const scrollRef: { current: HTMLDivElement | null } = useRef(null);
   const headingRef: { current: HTMLHeadingElement | null } = useRef(null);
+  // v16.8: on the phone the notices (the moved-over card, Ready Offline, a toast) sit over the bottom of the page, above
+  // the tab bar: a spacer as tall as they are ends the scroller, so the last rows (About, Links, Advanced) can scroll
+  // clear of them (Layers', Library's and Mixes' rule). 0 px with none.
+  const spacerRef: { current: HTMLDivElement | null } = useRef(null);
+  useNoticeSpacer(spacerRef, inPanel, null);
   // The root's scroll, kept while a page shows; the row a Back returns to; the first layout (restore, no focus move).
   const rootTopRef: { current: number } = useRef(moreViewRef.current.view === 'root' ? moreViewRef.current.top : 0);
   const returnToRef: { current: string | null } = useRef(null);
@@ -321,7 +327,6 @@ const MoreTab = ({ inPanel = false }: MoreTabProps) => {
           ) : null}
         </span>
         <span className="flex items-center gap-1">
-          <Badge>Beta</Badge>
           {inPanel ? <IconButton label="Close panel" icon={<X size={20} />} onClick={() => actions.setTab('now')} /> : null}
         </span>
       </header>
@@ -347,6 +352,7 @@ const MoreTab = ({ inPanel = false }: MoreTabProps) => {
         <ViewBoundary name="more-guide" fallback={(api) => (view === 'guide' ? <PageCrash api={api} /> : null)} render={() => view === 'guide' && <GuidePage />} />
         <ViewBoundary name="more-journal" fallback={(api) => (view === 'journal' ? <PageCrash api={api} /> : null)} render={() => view === 'journal' && <JournalPage />} />
         <ViewBoundary name="more-advanced" fallback={(api) => (view === 'advanced' ? <PageCrash api={api} /> : null)} render={() => view === 'advanced' && <AdvancedPage />} />
+        <div ref={spacerRef} aria-hidden="true" data-testid="more-notice-spacer" />
       </div>
     </div>
   );

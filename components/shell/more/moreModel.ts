@@ -274,7 +274,8 @@ export const SCAN_SCORES_NOTE = {
   tag: 'design',
 } as const;
 export const SCAN_SCORES_LINE = SCAN_SCORES_NOTE.line;
-export const LAYOUT_STATUS = 'new (beta)';
+/** v16.8: the new layout is the default (it was 'new (beta)'). */
+export const LAYOUT_STATUS = 'new';
 export const LAYOUT_LINE = 'The classic layout has every control on one screen. The music keeps playing when you switch.';
 export const USE_CLASSIC = 'Use the classic layout';
 export const PERF_TITLE = 'Performance readout';

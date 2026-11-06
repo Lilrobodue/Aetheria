@@ -1,7 +1,7 @@
 // components/shell/library/LibraryTab.tsx (v15.7, the Library tab; mockups library-phone-A-top, -A-mid, -search,
 // -empty, library-desktop; v16.1 playlists-phone-A, playlist-detail-phone, playlists-desktop)
 //
-// The header (Library, Beta, Import; Close in the desktop panel), then the body. Solid, so on a phone the heat guard
+// The header (Library, Import; Close in the desktop panel; v16.8: no Beta), then the body. Solid, so on a phone the heat guard
 // pauses the visuals behind it, as for the stub it replaces. v15.7's body (search, sort, summary, health card, list, row
 // menu, Track info) is LibraryTracks since v16.1, moved there verbatim.
 // v16.1 (decision 1 A, PROVISIONAL: shellModel.PLAYLISTS_HOME): a "Tracks · Playlists" switch under the header (a
@@ -13,7 +13,6 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, X } from 'lucide-react';
-import Badge from '../../ui/Badge';
 import IconButton from '../../ui/IconButton';
 import { useActions, useLibraryList, usePlaylists, useShell } from '../contexts';
 import { countRender } from '../devRenders';
@@ -77,7 +76,6 @@ const LibraryTab = ({ inPanel = false }: LibraryTabProps) => {
           Library
         </h1>
         <span className="flex items-center gap-1">
-          <Badge>Beta</Badge>
           <button
             type="button"
             data-testid="library-import"

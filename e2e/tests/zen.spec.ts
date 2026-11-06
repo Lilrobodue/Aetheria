@@ -10,6 +10,10 @@ import { hideZen, importTones, openApp, tapAt, zenLayer } from './helpers';
 
 const harmonicHeading = (page: Page) => page.getByRole('heading', { name: 'Harmonic Control', exact: true });
 const masterVolume = (page: Page) => page.locator('input[type="range"][title^="Master Volume"]');
+/** Zen's "Show controls" (visually hidden until it has the focus). */
+const showControls = (page: Page) => page.getByRole('button', { name: 'Show controls', exact: true });
+/** An element's rendered width (an sr-only one is 1 px: not on screen). */
+const widthOf = async (target: Locator): Promise<number> => (await target.boundingBox())?.width ?? 0;
 
 /** The centre of an element's box (inert elements still have one). */
 async function centre(target: Locator): Promise<{ x: number; y: number }> {
@@ -185,6 +189,167 @@ test.describe('on a touch screen', () => {
     // Leaving the field lets Zen hide the UI again.
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await expect(zenLayer(page)).toHaveClass(/opacity-0/, { timeout: 8_000 });
+    expect(dialogs).toEqual([]);
+  });
+
+  // v16.8 (Chrome 157, components/shell/zenFocus.ts): when the hide makes the focused control inert, Chrome 157 starts
+  // the next Tab from that control, finds nothing after it and leaves the page (only a second Tab reached "Show
+  // controls"). Fix round 1 puts back exactly the Chrome 156 behaviour: no focus moves at the hide (nothing new on
+  // screen), and while the focus is lost to the hide one Tab goes to "Show controls". A focus somewhere that stays
+  // visible (a notice) keeps its own Tab order.
+  test('9. hidden from the keyboard: the focus is not moved (nothing new on screen); one Tab reaches "Show controls", and it shows; Enter reveals', async ({ page }) => {
+    test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
+    const dialogs = await setUp(page);
+    // To the Zen toggle (the player bar's last button) by the keyboard, as a keyboard user gets there.
+    for (let i = 0; i < 80; i++) {
+      if (await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('title') === 'Zen Mode (Hide UI)')) break;
+      await page.keyboard.press('Shift+Tab');
+    }
+    const toggle = page.getByTitle('Zen Mode (Hide UI)', { exact: true });
+    await expect(toggle, 'the keyboard reached the Zen toggle').toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTitle('Show UI', { exact: true }), 'Zen Mode is on').toBeFocused();
+    // No key and no pointer from here: the controls hide 3 s later.
+    await expect(zenLayer(page), 'Zen Mode hides the UI').toHaveClass(/opacity-0/, { timeout: 8_000 });
+    await expect(zenLayer(page)).toHaveAttribute('inert', /.*/);
+    const show = showControls(page);
+    await page.waitForTimeout(500);
+    await expect(show, 'the hide moved no focus to Show controls').not.toBeFocused();
+    expect(await widthOf(show), 'Show controls stays off screen (visually hidden until focused)').toBeLessThanOrEqual(1);
+    await page.keyboard.press('Tab');
+    await expect(show, 'one Tab reaches it').toBeFocused();
+    await expect(show).toBeInViewport();
+    expect(await widthOf(show), 'and then it shows').toBeGreaterThan(40);
+    await expect(zenLayer(page), 'focusing it revealed nothing').toHaveAttribute('inert', /.*/);
+    await page.keyboard.press('Enter');
+    await revealed(page);
+    expect(dialogs).toEqual([]);
+  });
+
+  test('10. hidden after a mouse click on the Zen toggle: nothing new on screen (the focus is not moved to "Show controls"); one Tab reaches it', async ({ page }) => {
+    test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
+    const dialogs = await setUp(page);
+    await hidden(page); // hideZen: a mouse click (Playwright's click), which focuses the toggle
+    const show = showControls(page);
+    await page.waitForTimeout(500);
+    await expect(show, 'a click hid it: the focus is not moved there').not.toBeFocused();
+    expect(await widthOf(show), '"Show controls" stays off screen (visually hidden until focused)').toBeLessThanOrEqual(1);
+    await page.keyboard.press('Tab');
+    await expect(show, 'one Tab reaches it').toBeFocused();
+    expect(await widthOf(show), 'and then it shows').toBeGreaterThan(40);
+    expect(dialogs).toEqual([]);
+  });
+
+  test('10b. hidden after a real touch tap on the Zen toggle: no focus move, nothing new on screen; one Tab still reaches "Show controls"', async ({ page }) => {
+    test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
+    const dialogs = await setUp(page);
+    const at = await centre(page.getByTitle('Zen Mode (Hide UI)', { exact: true }));
+    await page.touchscreen.tap(at.x, at.y); // a real touch (hasTouch), not a mouse click
+    await expect(page.getByTitle('Show UI', { exact: true }), 'Zen Mode is on').toHaveCount(1);
+    await expect(zenLayer(page), 'Zen Mode hides the UI').toHaveClass(/opacity-0/, { timeout: 8_000 });
+    await expect(zenLayer(page)).toHaveAttribute('inert', /.*/);
+    const show = showControls(page);
+    await page.waitForTimeout(500);
+    await expect(show, 'a tap hid it: the focus is not moved there').not.toBeFocused();
+    expect(await widthOf(show), '"Show controls" stays off screen').toBeLessThanOrEqual(1);
+    await page.keyboard.press('Tab');
+    await expect(show, 'one Tab reaches it').toBeFocused();
+    expect(await widthOf(show), 'and then it shows').toBeGreaterThan(40);
+    expect(dialogs).toEqual([]);
+  });
+
+  test('11. a notice stays visible in Zen and keeps its own Tab order: Reload focused while hidden, Tab goes to "Dismiss update notice", not to "Show controls"', async ({ page }) => {
+    test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
+    const dialogs = await setUp(page);
+    await page.evaluate(() => window.dispatchEvent(new Event('aetheria:update-ready')));
+    const reload = page.getByTestId('update-reload');
+    await expect(reload).toBeVisible();
+    await hidden(page);
+    await expect(zenLayer(page)).toHaveAttribute('inert', /.*/);
+    await reload.focus(); // the keyboard's way to it (no pointer), as a screen reader's or a skip link's would be
+    await expect(reload).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Dismiss update notice', exact: true }), "the notice's next control").toBeFocused();
+    await expect(showControls(page)).not.toBeFocused();
+    expect(dialogs).toEqual([]);
+  });
+
+  test('11b. a keyboard focus on a notice that stays visible is never moved by the hide: Reload keeps it, and Tab goes on in the notice', async ({ page }) => {
+    test.skip(ON_DEVICE, 'keyboard focus order at the phone test viewport');
+    const dialogs = await setUp(page);
+    await page.evaluate(() => window.dispatchEvent(new Event('aetheria:update-ready')));
+    const reload = page.getByTestId('update-reload');
+    await expect(reload).toBeVisible();
+    await page.getByTitle('Zen Mode (Hide UI)', { exact: true }).click();
+    await expect(page.getByTitle('Show UI', { exact: true }), 'Zen Mode is on').toHaveCount(1);
+    await reload.focus();
+    await page.keyboard.press('Shift'); // a key: the keyboard's focus now (it matches :focus-visible)
+    expect(await reload.evaluate((el) => el.matches(':focus-visible')), "Reload has the keyboard's focus").toBe(true);
+    // No pointer from here: the controls hide 3 s after the key.
+    await expect(zenLayer(page), 'Zen Mode hides the UI').toHaveClass(/opacity-0/, { timeout: 8_000 });
+    await expect(zenLayer(page)).toHaveAttribute('inert', /.*/);
+    await page.waitForTimeout(500);
+    await expect(reload, 'the hide left the focus on Reload').toBeFocused();
+    expect(await widthOf(showControls(page)), '"Show controls" stays off screen').toBeLessThanOrEqual(1);
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Dismiss update notice', exact: true })).toBeFocused();
+    expect(dialogs).toEqual([]);
+  });
+});
+
+// Review B1 (fix round 1): Chrome 157 gives a mouse-focused button :focus-visible after ANY key (Shift alone, a letter,
+// the media keys). So nothing keyed on :focus-visible may move the focus at the hide: after a click on the Zen toggle and
+// a key, "Show controls" stays off screen (it would otherwise sit at the top left all session). Classic has no Space
+// shortcut: Space there presses the focused toggle and leaves Zen, so Shift alone is the case.
+test.describe('with a mouse and a keyboard', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('12. a mouse click on the Zen toggle, then Shift alone: after the hide no focus move, "Show controls" off screen; one Tab reaches it', async ({ page }) => {
+    test.skip(ON_DEVICE, 'a mouse and a keyboard');
+    const dialogs = await openApp(page);
+    await importTones(page, 2, 60);
+    await page.getByText('tone-01', { exact: true }).first().click();
+    await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible({ timeout: 15_000 });
+    await closeSafety(page);
+    const toggle = page.getByTitle('Zen Mode (Hide UI)', { exact: true });
+    await toggle.click();
+    const on = page.getByTitle('Show UI', { exact: true });
+    await expect(on, 'the click focused the toggle').toBeFocused();
+    await page.keyboard.press('Shift');
+    expect(await on.evaluate((el) => el.matches(':focus-visible')), 'Chrome: :focus-visible after a key').toBe(true);
+    await expect(zenLayer(page), 'Zen Mode hides the UI').toHaveClass(/opacity-0/, { timeout: 8_000 });
+    await expect(zenLayer(page)).toHaveAttribute('inert', /.*/);
+    const show = showControls(page);
+    await page.waitForTimeout(500);
+    await expect(show, 'the hide moved no focus to Show controls').not.toBeFocused();
+    expect(await widthOf(show), 'the pill is not on screen').toBeLessThanOrEqual(1);
+    await page.waitForTimeout(1000);
+    expect(await widthOf(show), 'nor a second later').toBeLessThanOrEqual(1);
+    await page.keyboard.press('Tab');
+    await expect(show, 'one Tab reaches it').toBeFocused();
+    expect(await widthOf(show), 'and then it shows').toBeGreaterThan(40);
+    expect(dialogs).toEqual([]);
+  });
+
+  test('13. a click on words in the player bar (no control: the focus on <body>), then the hide: one Tab reaches "Show controls"', async ({ page }) => {
+    test.skip(ON_DEVICE, 'a mouse and a keyboard');
+    const dialogs = await openApp(page);
+    await importTones(page, 2, 60);
+    await page.getByText('tone-01', { exact: true }).first().click();
+    await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible({ timeout: 15_000 });
+    await closeSafety(page);
+    await page.getByTitle('Zen Mode (Hide UI)', { exact: true }).evaluate((b) => (b as HTMLButtonElement).click());
+    await expect(page.getByTitle('Show UI', { exact: true }), 'Zen Mode is on').toHaveCount(1);
+    // Chrome's starting point goes where the click landed, inside the UI that the hide makes inert.
+    await page.getByTestId('now-playing-title').click();
+    expect(await page.evaluate(() => document.activeElement === document.body), 'words take no focus').toBe(true);
+    await expect(zenLayer(page), 'Zen Mode hides the UI').toHaveClass(/opacity-0/, { timeout: 8_000 });
+    await expect(zenLayer(page)).toHaveAttribute('inert', /.*/);
+    const show = showControls(page);
+    await page.waitForTimeout(500);
+    expect(await widthOf(show), '"Show controls" off screen').toBeLessThanOrEqual(1);
+    await page.keyboard.press('Tab');
+    await expect(show, 'one Tab reaches it').toBeFocused();
     expect(dialogs).toEqual([]);
   });
 });

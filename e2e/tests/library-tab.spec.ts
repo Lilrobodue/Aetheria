@@ -236,7 +236,7 @@ test.describe('phone', () => {
     await openLibraryTab(page);
     const t = page.getByTestId('tab-library');
     await expect(t.getByRole('heading', { name: 'Library', level: 1 })).toBeVisible();
-    await expect(t.getByText('Beta', { exact: true })).toBeVisible();
+    await expect(t.getByText('Beta', { exact: true }), 'v16.8: no Beta label').toHaveCount(0);
     await expect(page.getByTestId('library-import')).toHaveText('Import');
     await expect(search(page)).toHaveAttribute('placeholder', 'Search 30 tracks');
     await expect(sortSelect(page)).toHaveValue('library');

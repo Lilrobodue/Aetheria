@@ -1,9 +1,18 @@
-// Checks for components/shell/shellModel.ts (v15.5, the new layout beta).
+// Checks for components/shell/shellModel.ts (v15.5, the new layout beta; v16.8, the new layout as the default).
 // Run with: node components/shell/shellModel.check.ts   (npm run check:shell; Node 22.18+ strips the types)
 // Exits non-zero on any failure.
 
 import {
   LAYOUT_KEY,
+  LAYOUT_DEFAULT,
+  LAYOUT_NOTICE_KEY,
+  LAYOUT_LAUNCH_BLOCKED,
+  LAYOUT_CARD_TEXT,
+  LAYOUT_CARD_TOUR,
+  LAYOUT_CARD_DISMISS,
+  isLayoutPref,
+  isLayoutNotice,
+  layoutAtLaunch,
   parseLayoutPref,
   sourceLine,
   walkSegment,
@@ -32,19 +41,111 @@ function check(ok: boolean, what: string): void {
 }
 const eq = (a: unknown, b: unknown, what: string) => check(JSON.stringify(a) === JSON.stringify(b), `${what}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`);
 
-// parseLayoutPref: every input class; nothing but 'new' opens the beta, and the query beats storage.
+// parseLayoutPref: every input class; v16.8: a missing or invalid value means the new layout (the default), and the
+// query beats storage.
 eq(LAYOUT_KEY, 'aetheria.layout.v1', 'the storage key');
-eq(parseLayoutPref(null, null), 'classic', 'missing → classic');
-eq(parseLayoutPref(undefined, undefined), 'classic', 'undefined → classic');
+eq(LAYOUT_DEFAULT, 'new', 'v16.8: the default is the new layout');
+eq(parseLayoutPref(null, null), 'new', 'missing → new');
+eq(parseLayoutPref(undefined, undefined), 'new', 'undefined → new');
 eq(parseLayoutPref('new', null), 'new', "stored 'new'");
 eq(parseLayoutPref('classic', null), 'classic', "stored 'classic'");
-for (const junk of ['garbage', 'NEW', ' new', 'new ', '', 'true', '1', '{"v":"new"}', 'null', 'undefined']) {
-  eq(parseLayoutPref(junk, null), 'classic', `stored junk ${JSON.stringify(junk)} → classic`);
-  eq(parseLayoutPref('new', junk), 'new', `query junk ${JSON.stringify(junk)} is ignored`);
+for (const junk of ['garbage', 'NEW', ' new', 'new ', '', 'true', '1', '{"v":"new"}', 'null', 'undefined', 'CLASSIC', 'classic ']) {
+  eq(parseLayoutPref(junk, null), 'new', `stored junk ${JSON.stringify(junk)} → new`);
+  eq(parseLayoutPref('classic', junk), 'classic', `query junk ${JSON.stringify(junk)} is ignored (classic stored)`);
+  eq(parseLayoutPref('new', junk), 'new', `query junk ${JSON.stringify(junk)} is ignored (new stored)`);
 }
 eq(parseLayoutPref('classic', 'new'), 'new', 'the query beats storage (new)');
 eq(parseLayoutPref('new', 'classic'), 'classic', 'the query beats storage (classic)');
-eq(parseLayoutPref(null, 'new'), 'new', 'the query alone');
+eq(parseLayoutPref(null, 'new'), 'new', 'the query alone (new)');
+eq(parseLayoutPref(null, 'classic'), 'classic', 'the query alone (classic)');
+
+// v16.8: layoutAtLaunch, decision 1 B (a saved "classic" from before v16.8 is moved once) and 2 A (the card).
+eq(LAYOUT_NOTICE_KEY, 'aetheria.layoutNotice.v1', 'the notice key');
+eq(LAYOUT_LAUNCH_BLOCKED, { layout: 'new', card: false, mark: null, clearStored: false }, 'storage that throws: new, no card, nothing written');
+const L = (stored: string | null, query: string | null, mark: string | null, priorUse: boolean) => layoutAtLaunch({ stored, query, mark, priorUse });
+const R = (layout: string, card: boolean, mark: string | null, clearStored = false) => ({ layout, card, mark, clearStored });
+// §3.2's table, the first v16.8 launch (no mark).
+eq(L(null, null, null, false), R('new', false, 'fresh'), 'a new install: new, no card, marked fresh');
+eq(L(null, null, null, true), R('new', true, 'due'), 'an existing user who never chose: new, the card');
+eq(L('classic', null, null, true), R('new', true, 'due', true), "1 B: a saved 'classic' (prior use): moved, the card, the saved value removed");
+eq(L('classic', null, null, false), R('new', true, 'due', true), "1 B: a saved 'classic' is itself prior use: moved, the card");
+eq(L('new', null, null, true), R('new', false, 'seen'), "a saved 'new': new, no card, marked seen");
+eq(L('new', null, null, false), R('new', false, 'seen'), "a saved 'new' without other prior use: the same");
+eq(L('garbage', null, null, true), R('new', true, 'due'), 'junk with prior use: as never chose (the junk left as it is)');
+eq(L('garbage', null, null, false), R('new', false, 'fresh'), 'junk without prior use: as a new install');
+eq(L(null, 'classic', null, false), R('classic', false, 'fresh'), '?layout=classic on a new install: classic, no card, fresh');
+eq(L(null, 'new', null, false), R('new', false, 'fresh'), '?layout=new on a new install: new, no card, fresh');
+eq(L(null, 'classic', null, true), R('classic', false, 'seen'), '?layout=classic with prior use: as asked, no card, seen');
+eq(L('classic', 'new', null, true), R('new', false, 'seen'), "?layout=new over a saved 'classic': new, nothing removed (the effect saves 'new')");
+eq(L('classic', 'classic', null, true), R('classic', false, 'seen'), "?layout=classic over a saved 'classic': the address's choice holds");
+eq(L('new', 'classic', null, false), R('classic', false, 'seen'), "?layout=classic over a saved 'new' (a choice: prior use)");
+eq(L('garbage', 'garbage', null, false), R('new', false, 'fresh'), 'junk in both, no prior use: a new install');
+eq(L(null, 'garbage', null, true), R('new', true, 'due'), 'a junk query is no query');
+// Marked: the move is done; a saved choice is a v16.8 tap's (or the address's) and holds; the card only while due.
+for (const mark of ['fresh', 'due', 'seen']) {
+  for (const prior of [false, true]) {
+    const card = mark === 'due';
+    eq(L(null, null, mark, prior), R('new', card, null), `marked ${mark}, nothing saved (prior use ${prior})`);
+    eq(L('classic', null, mark, prior), R('classic', card, null), `marked ${mark}: a saved 'classic' holds (prior use ${prior})`);
+    eq(L('new', null, mark, prior), R('new', card, null), `marked ${mark}: a saved 'new' (prior use ${prior})`);
+    eq(L('garbage', null, mark, prior), R('new', card, null), `marked ${mark}: junk saved → new (prior use ${prior})`);
+    eq(L('classic', 'new', mark, prior), R('new', false, null), `marked ${mark}: ?layout=new, no card on that launch`);
+    eq(L('new', 'classic', mark, prior), R('classic', false, null), `marked ${mark}: ?layout=classic, no card on that launch`);
+  }
+}
+// Review A2: any mark counts, one this version doesn't know (a later version's) too: a saved choice holds, never moved
+// again; no card unless it is 'due'.
+for (const other of ['', 'SEEN', 'Fresh', 'true', 'moved', 'null', ' seen', 'v17']) {
+  eq(L('classic', null, other, true), R('classic', false, null), `mark ${JSON.stringify(other)}: a saved classic holds`);
+  eq(L(null, null, other, false), R('new', false, null), `mark ${JSON.stringify(other)}, nothing saved: new, no write`);
+  eq(L('new', 'classic', other, true), R('classic', false, null), `mark ${JSON.stringify(other)}: the query as asked`);
+}
+eq(isLayoutNotice('due') && isLayoutNotice('fresh') && isLayoutNotice('seen') && !isLayoutNotice('moved'), true, 'the three marks this version writes');
+// Launch sequences: apply each launch's writes as App does (the mark, the removal), with the profile's taps between.
+{
+  type Store = { layout: string | null; mark: string | null; prior: boolean };
+  const launch = (s: Store, query: string | null = null) => {
+    const r = layoutAtLaunch({ stored: s.layout, query, mark: s.mark, priorUse: s.prior });
+    if (r.mark) s.mark = r.mark;
+    if (r.clearStored) s.layout = null;
+    if (isLayoutPref(query)) s.layout = query; // the ?layout= effect
+    return r;
+  };
+  // A new install: the statement accepted and the tour closed at launch 1 (prior use from then on): never a card.
+  const fresh: Store = { layout: null, mark: null, prior: false };
+  eq(launch(fresh), R('new', false, 'fresh'), 'new install, launch 1');
+  fresh.prior = true;
+  eq(launch(fresh), R('new', false, null), 'new install, launch 2: no card (marked fresh)');
+  eq(launch(fresh), R('new', false, null), 'new install, launch 3');
+  // A saved 'classic' from v16.7: moved once; the card until tapped; its "Use the classic layout" then holds.
+  const moved: Store = { layout: 'classic', mark: null, prior: true };
+  eq(launch(moved), R('new', true, 'due', true), 'v16.7 classic, launch 1: moved');
+  eq(moved, { layout: null, mark: 'due', prior: true }, 'v16.7 classic: the saved value removed, marked due');
+  eq(launch(moved), R('new', true, null), 'v16.7 classic, launch 2: the card again (not tapped)');
+  moved.layout = 'classic'; // ⋯ › Back to classic (not the card)
+  eq(launch(moved), R('classic', true, null), 'a v16.8 Back to classic holds; the card stays due (App shows it in the new layout only)');
+  moved.layout = 'new'; // the pill
+  moved.mark = 'seen'; // then the card's X
+  eq(launch(moved), R('new', false, null), 'closed: never again');
+  moved.layout = 'classic'; // Use the classic layout later
+  eq(launch(moved), R('classic', false, null), 'a later classic tap holds for v16.8');
+  eq(launch(moved), R('classic', false, null), '... and keeps holding (the move never repeats)');
+  // ?layout=classic on a new install, then plain launches: classic holds.
+  const queried: Store = { layout: null, mark: null, prior: false };
+  eq(launch(queried, 'classic'), R('classic', false, 'fresh'), '?layout=classic, launch 1');
+  eq(launch(queried), R('classic', false, null), 'then a plain launch: still classic, no move');
+  eq(launch(queried, 'new'), R('new', false, null), '?layout=new');
+  eq(launch(queried), R('new', false, null), 'then a plain launch: new, no card');
+  // A beta user: never a card, and a later Back to classic holds.
+  const beta: Store = { layout: 'new', mark: null, prior: true };
+  eq(launch(beta), R('new', false, 'seen'), 'beta, launch 1');
+  beta.layout = 'classic';
+  eq(launch(beta), R('classic', false, null), 'beta, then Back to classic: holds');
+}
+// The card's words (decision 2 A; its second button is moreModel's USE_CLASSIC).
+eq(LAYOUT_CARD_TEXT, 'Aetheria now opens in the new layout. For this version, the classic layout is still in More › Advanced.', 'the card');
+eq(LAYOUT_CARD_TOUR, 'Show the tour', 'the card: the tour');
+eq(LAYOUT_CARD_DISMISS, 'Dismiss the layout notice', 'the card: its X');
 
 // sourceLine: a walk, the library, another play order.
 eq(sourceLine('Vortex', false, 2, 27), 'Lo Shu walk · Vortex · step 3 of 27', 'a walk');

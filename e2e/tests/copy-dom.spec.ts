@@ -265,7 +265,8 @@ test('D3. the statement: its words hash to the unchanged pin, and an acceptance 
       if (localStorage.getItem(key) === null) localStorage.setItem(key, version);
     }, { key: DISCLAIMER_KEY, version: DISCLAIMER_VERSION });
     await p2.goto(new URL('/', page.url()).toString());
-    await p2.getByTitle('Safety Protocols', { exact: true }).waitFor();
+    // v16.8: a returning user who never chose opens the new layout (the move): either layout, then the check.
+    await p2.locator('[data-testid="new-shell"], header [title="Safety Protocols"]').first().waitFor();
     await p2.waitForTimeout(1500);
     await expect(p2.getByRole('button', { name: /I understand, let me begin/ }), 'no re-show for an accepted 2026-10-21').toHaveCount(0);
   } finally {

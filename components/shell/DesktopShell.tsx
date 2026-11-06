@@ -14,6 +14,8 @@
 // keyboard shortcuts' leaf (DesktopKeys) lives here, in its own region. A tab change still focuses the view's heading,
 // unless the focus is already inside the panel ("/" puts it in the Library's search field). As Zen hides the shell, any
 // tooltip hides with it. Leaving this shell (classic, a peek, a phone-sized window) leaves the full screen entered here.
+// v16.8 (decision 4 A): an empty library gets the phone's "Import music" card over the visuals (DesktopEmpty, its own
+// region), on Now Playing with no panel open and the shell showing; it goes with the first import.
 
 import React, { useEffect, useRef } from 'react';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
@@ -33,6 +35,7 @@ import LibraryTab from './library/LibraryTab';
 import { TabCrash, TransportCrash } from './fallbacks';
 import { focusViewHeading } from './PhoneShell';
 import DesktopKeys from './shortcuts/DesktopKeys';
+import DesktopEmpty from './DesktopEmpty';
 import { leaveIfEnteredHere } from './shortcuts/immersive';
 
 const SKIP =
@@ -145,6 +148,11 @@ const DesktopShell = () => {
           )}
         </div>
       ) : null}
+      <ViewBoundary
+        name="desktop-empty"
+        fallback={() => null}
+        render={() => <DesktopEmpty show={tab === 'now' && !panelSheet && !stubOpen && !zen.hidden} />}
+      />
       <ViewBoundary
         name="desktop-transport"
         fallback={(api) => <TransportCrash api={api} what="The player bar" slot={false} />}

@@ -83,6 +83,10 @@ if (!up) { console.error(`no server on ${ORIGIN}`); stopServer(); process.exit(2
 
 const INIT = ({ exp, cube }) => {
   localStorage.setItem('aetheria_v3_tutorial_seen', 'true');
+  // v16.8: the new layout is the default; the goldens are classic's controls. Classic, saved as a tap after v16.8's
+  // one-time move would save it (the layout notice marked, so the move never applies).
+  localStorage.setItem('aetheria.layout.v1', 'classic');
+  localStorage.setItem('aetheria.layoutNotice.v1', 'seen');
   localStorage.setItem('aetheria.layerEngine.v1', 'v2');
   localStorage.setItem('aetheria.layerOutput.v1', 'headphones');
   if (sessionStorage.getItem('__seeded') === null) {
@@ -137,7 +141,8 @@ async function openApp(context, opts) {
   page.on('dialog', (d) => d.dismiss());
   await page.addInitScript(INIT, opts);
   await page.goto(ORIGIN + '/');
-  await page.getByTitle('Safety Protocols', { exact: true }).waitFor({ timeout: 60000 });
+  // Either layout (v16.8), under the statement too.
+  await page.locator('[data-testid="new-shell"], header [title="Safety Protocols"]').first().waitFor({ timeout: 60000 });
   const accept = page.getByRole('button', { name: /I understand, let me begin/ });
   if (await accept.isVisible().catch(() => false)) await accept.click();
   await page.waitForFunction((n) => window.__aetheriaLibrary && window.__aetheriaLibrary.state().libraryIds.length === n, F160.length, { timeout: 60000 });

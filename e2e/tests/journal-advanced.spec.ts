@@ -368,7 +368,9 @@ test.describe('phone', () => {
     test.setTimeout(120_000);
     const dialogs = await playingSeeded(page, 3);
     await openPage(page, 'advanced');
-    await expect(page.getByTestId('advanced-layout')).toContainText('new (beta)');
+    // v16.8: the new layout is the default (the status said 'new (beta)').
+    await expect(page.getByTestId('advanced-layout').getByText('new', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('advanced-layout')).not.toContainText('beta');
     await expect(page.getByTestId('advanced-layout')).toContainText('The classic layout has every control on one screen. The music keeps playing when you switch.');
     const p0 = await pauseCount(page);
     const t0 = (await libraryState(page)).t ?? 0;

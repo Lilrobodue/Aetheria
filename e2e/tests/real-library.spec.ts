@@ -1,12 +1,13 @@
 import { test as base, expect, chromium, type Browser, type Page } from '@playwright/test';
 import { adb, mediaSession } from './adb';
-import { acceptDisclaimer } from './helpers';
 
 // Real-load checks against the library YOU loaded on the phone, in your open
 // tab of your own dev server (http://localhost:3100). Opt in on a device run:
 //
 //   E2E_REAL_LIBRARY=1 npm run test:device -- --project=android-real
 //
+// v16.8 (review 3): it refuses to run while your tab has tracks waiting in the queue (playing marks them played and
+// empties your queue); play or clear them first.
 // Strictly non-destructive: it attaches to your tab (never opens, closes,
 // clears or navigates away from anything) and only reloads, plays, seeks,
 // skips and pauses — no import, delete, Clear, Discard, Auto-Distribute, Deep
@@ -28,6 +29,19 @@ const test = base.extend<{}, { phone: Browser; userTab: Page }>({
       const tab = phone.contexts()[0].pages().find((p) => p.url().replace(/[?#].*$/, '') === USER_ORIGIN + '/');
       if (!tab) throw new Error(`Open your library at ${USER_ORIGIN} on the phone first.`);
       await tab.bringToFront(); // a background tab doesn't render, so taps would wait for ever
+      const waiting = await tab.evaluate(async () => {
+    // The live queue (the dev hook) or, in a production build, the saved one.
+    const live = (window as any).__aetheriaQueue?.state?.();
+    if (live && Array.isArray(live.waiting)) return live.waiting.length;
+    const req = (r: IDBRequest) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    const db: IDBDatabase = await new Promise((res, rej) => { const r = indexedDB.open('aetheria-db'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    const state: any = await req(db.transaction('playlist-state', 'readonly').objectStore('playlist-state').get('current'));
+    db.close();
+    return state?.queue?.waiting?.length ?? 0;
+  });
+      if (waiting > 0) {
+        throw new Error(`Your tab has ${waiting} track(s) waiting in the queue: these tests' plays would mark them played and empty your queue. Play or clear them first.`);
+      }
       // Counts pause() calls (the gapless swap never pauses; the fallback
       // does) and remembers the media elements, so a test can jump near a
       // track's end. In-memory only.
@@ -75,7 +89,8 @@ async function storedLibrary(tab: Page): Promise<{ count: number; names: string[
 }
 
 const pauseCount = (tab: Page) => tab.evaluate(() => (window as any).__pauseCount as number);
-const title = (tab: Page) => tab.getByTestId('now-playing-title').textContent();
+/** What plays, layout-neutral (v16.8): the lock-screen card's title as the page sets it. */
+const title = (tab: Page) => tab.evaluate(() => navigator.mediaSession.metadata?.title ?? null);
 
 /** Jump the playing track to `secondsLeft` before its end (waits for its metadata). */
 async function jumpNearEnd(tab: Page, secondsLeft = 6): Promise<void> {
@@ -94,8 +109,41 @@ async function jumpNearEnd(tab: Page, secondsLeft = 6): Promise<void> {
   }, secondsLeft);
 }
 
-/** Click without layout or hit-testing — works with the screen off. */
-const press = (tab: Page, name: string) => tab.getByRole('button', { name, exact: true }).dispatchEvent('click');
+/**
+ * v16.8: every step works in either layout (your tab opens the new layout once that server runs v16.8 or later, unless
+ * you chose classic), and none changes your play order: no Library row is ever tapped (a row's tap replaces the play
+ * order and is saved); the new layout plays with Now Playing's Play, from your own cursor; the moved-over card, if it
+ * shows, is left alone. The statement, accepted if it shows, once either layout is up.
+ */
+async function acceptDisclaimer(tab: Page): Promise<void> {
+  await tab.locator('[data-testid="new-shell"], header [title="Safety Protocols"]').first().waitFor();
+  const accept = tab.getByRole('button', { name: /I understand, let me begin/ });
+  if (await accept.isVisible().catch(() => false)) await accept.click();
+}
+
+/** Click without layout or hit-testing — works with the screen off. The first match (the new layout's phone shows one
+ *  transport on Now Playing; the desktop one). */
+const press = (tab: Page, name: string) => tab.getByRole('button', { name, exact: true }).first().dispatchEvent('click');
+
+const inNewLayout = async (tab: Page) => (await tab.getByTestId('new-shell').count()) > 0;
+
+/** The library's size as the app holds it (the dev server's read-only hook; both layouts). */
+const shownCount = (tab: Page) => tab.evaluate(() => (window as any).__aetheriaLibrary?.state().libraryIds.length ?? null);
+
+/**
+ * Start playing without touching the order: classic's sidebar row of `name` (it plays in place, in the current order);
+ * the new layout's Play (np-play / desktop-play), from the cursor. Returns the title that plays.
+ */
+async function startPlaying(tab: Page, name: string): Promise<string> {
+  if (await inNewLayout(tab)) {
+    await tab.locator('[data-testid="np-play"], [data-testid="desktop-play"]').first().dispatchEvent('click');
+  } else {
+    await tab.getByText(name, { exact: true }).first().click();
+  }
+  await expect.poll(() => mediaSession()?.state, { timeout: 15_000 }).toBe('playing');
+  await expect.poll(() => title(tab), { timeout: 15_000 }).not.toBeNull();
+  return (await title(tab))!;
+}
 
 test('your library restores in full @real', async ({ userTab }) => {
   const stored = await storedLibrary(userTab);
@@ -108,20 +156,19 @@ test('your library restores in full @real', async ({ userTab }) => {
   await expect.poll(() => lines.find((l) => l.text.includes('[PlaylistCache] Restored')), { timeout: 60_000 }).toBeTruthy();
   const restoredAfter = lines.find((l) => l.text.includes('[PlaylistCache] Restored'))!.at - t0;
   await acceptDisclaimer(userTab);
-  await expect(userTab.getByText(/^\d+ Tracks$/)).toHaveText(`${stored.count} Tracks`);
+  await expect.poll(() => shownCount(userTab), { timeout: 60_000 }).toBe(stored.count);
   console.log(`[real] ${stored.count} tracks restored ${restoredAfter} ms after the reload started`);
   expect(lines.filter((l) => l.type === 'error' && !/favicon/i.test(l.text)).map((l) => l.text)).toEqual([]);
 });
 
 test('plays your tracks, skips forward and back @real', async ({ userTab }) => {
   const { names } = await storedLibrary(userTab);
-  await userTab.getByText(names[0], { exact: true }).first().click();
-  await expect.poll(() => title(userTab)).toBe(names[0]);
-  await expect.poll(() => mediaSession()?.state, { timeout: 15_000 }).toBe('playing');
+  const first = await startPlaying(userTab, names[0]);
+  if (!(await inNewLayout(userTab))) expect(first).toBe(names[0]);
   await press(userTab, 'Next track');
-  await expect.poll(() => title(userTab)).not.toBe(names[0]);
+  await expect.poll(() => title(userTab)).not.toBe(first);
   await press(userTab, 'Previous track');
-  await expect.poll(() => title(userTab)).toBe(names[0]);
+  await expect.poll(() => title(userTab)).toBe(first);
   await press(userTab, 'Pause');
   await expect.poll(() => mediaSession()?.state, { timeout: 15_000 }).toBe('paused');
 });
@@ -133,14 +180,13 @@ test('Reload for an update saves and brings back the whole library @real', async
   await Promise.all([userTab.waitForEvent('load', { timeout: 90_000 }), press(userTab, 'Reload')]);
   console.log(`[real] update flush + reload: ${Date.now() - t0} ms`);
   await acceptDisclaimer(userTab);
-  await expect(userTab.getByText(/^\d+ Tracks$/)).toHaveText(`${count} Tracks`, { timeout: 60_000 });
+  await expect.poll(() => shownCount(userTab), { timeout: 60_000 }).toBe(count);
   expect((await storedLibrary(userTab)).count).toBe(count);
 });
 
 test('with the screen off, your tracks advance gaplessly and the lock-screen card follows @real', async ({ userTab }) => {
   const { names } = await storedLibrary(userTab);
-  await userTab.getByText(names[0], { exact: true }).first().click();
-  await expect.poll(() => mediaSession(), { timeout: 15_000 }).toMatchObject({ state: 'playing' });
+  await startPlaying(userTab, names[0]);
   const pausesBefore = await pauseCount(userTab);
   const seen = [mediaSession()!.title];
   let pausesDuringAdvances = -1;

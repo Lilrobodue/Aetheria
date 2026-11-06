@@ -32,7 +32,6 @@ import EvidenceTag from '../../ui/EvidenceTag';
 import { EvidenceOrigin } from '../../guide/evidenceLink';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ChevronRight, ListMusic, SlidersHorizontal, X } from 'lucide-react';
-import Badge from '../../ui/Badge';
 import Button from '../../ui/Button';
 import EmptyState from '../../ui/EmptyState';
 import IconButton from '../../ui/IconButton';
@@ -336,7 +335,6 @@ const MixesTab = ({ inPanel = false }: MixesTabProps) => {
           Mixes
         </h1>
         <span className="flex items-center gap-1">
-          <Badge>Beta</Badge>
           {inPanel ? <IconButton label="Close panel" icon={<X size={20} />} onClick={() => actions.setTab('now')} /> : null}
         </span>
       </header>

@@ -91,7 +91,7 @@ test.describe('phone', () => {
     await openMixes(page);
     const t = page.getByTestId('tab-mixes');
     await expect(t.getByRole('heading', { name: 'Mixes', level: 1 })).toBeVisible();
-    await expect(t.getByText('Beta', { exact: true })).toBeVisible();
+    await expect(t.getByText('Beta', { exact: true }), 'v16.8: no Beta label').toHaveCount(0);
     await expect(page.getByTestId('mixes-summary')).toHaveText('30 tracks · 29 with a crystal');
     await expect(t.getByText('A tap builds a play order from your library and starts it. ⋯ queues it, saves it or changes it.')).toBeVisible();
     await expect(page.getByText('The new Mixes are coming in a later beta')).toHaveCount(0);

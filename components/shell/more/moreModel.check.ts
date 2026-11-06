@@ -46,6 +46,8 @@ import {
   JOURNAL_EXPERIMENTAL_LINE,
   SCAN_SCORES_LINE,
   LAYOUT_LINE,
+  LAYOUT_STATUS,
+  USE_CLASSIC,
   PERF_LINE,
   NO_TRACK_FOR_INFO,
   RELOAD_ANYWAY_LABEL,
@@ -187,6 +189,7 @@ eq(JOURNAL_EXPERIMENTAL_LINE, 'Experimental: self-reports, not measurements.', '
 eq(/not measurements/.test(SCAN_SCORES_LINE) && /unreliable/.test(SCAN_SCORES_LINE), true, 'the scan-score line says they are not measurements');
 eq([LAYOUT_LINE, PERF_LINE], ['The classic layout has every control on one screen. The music keeps playing when you switch.', 'Frames, renders and long tasks in a corner of the screen. Shows from the next launch.'], "Advanced's lines");
 eq(NO_TRACK_FOR_INFO, 'No track currently selected for analysis.', "classic's toast, verbatim");
+eq([LAYOUT_STATUS, USE_CLASSIC], ['new', 'Use the classic layout'], "v16.8: Advanced's layout status (no beta) and the classic button (the moved-over card's too)");
 
 // v16.5: Record (recordModel.ts).
 eq(RECORD_CLASSIC_LINE, 'Choose a recording mode.', "classic's line (v16.6, N1: its advice was backwards, so it is gone)");
