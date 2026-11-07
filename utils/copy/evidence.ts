@@ -89,7 +89,7 @@ export const TIERS: Readonly<Record<Tier, TierCopy>> = {
     plain: 'Aetheria’s own choice, how it is built: not a claim about the world.',
     technical: 'A decision of the app’s design (values, names, structure). It can be judged by ear or by taste, not by evidence.',
     examples: [
-      'The 27 crystals, the three ranges, and the crystal each track gets (an assignment, not a measured pitch).',
+      'The 27 crystals, the three ranges, and the crystal each track gets (an assignment, not a measured pitch); a song with a clear key goes first to a crystal whose tone fits its key.',
       'The layers’ levels under the music, Gamma as a manual choice, Key fit, the drone’s rests, φ timing.',
       'The crystal sets and their names; the experimental scan scores.',
     ],

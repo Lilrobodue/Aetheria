@@ -39,6 +39,8 @@ import type { PassProgress } from '../../utils/library/analysePass';
 import type { Filters } from '../../utils/library/filterModel';
 import type { BuilderSettings, SourceRef } from '../../utils/mix/builder';
 import type { MixId } from '../../utils/mix/catalog';
+import type { AssignPlan } from '../../utils/mix/distribution';
+import type { AssignOptions } from '../../utils/mix/distribution';
 import type { VizSettings } from '../../types';
 import type { FrequencyColorMode } from '../../utils/spectrumColor';
 import type { MoreViewState, GuideView } from './more/moreModel';
@@ -412,6 +414,13 @@ export interface LibraryStatusValue {
   deviceRate: number | null;
   /** v16.8.1 fix round 1: the tracks Scan again couldn't read in this session (left out of its row until a reload). */
   rescanSkip: ReadonlySet<string>;
+  /** v16.8.2 (K6): the library's clear-key tracks whose key bands aren't made yet (the card's plan waits for them). */
+  bandsLeft: number;
+  /** v16.8.2: App's one key-band cache (utils/mix/keyBands.ts BandCache): what the card plans a spread with, and the
+   *  tracks of a library it has no bands for yet. The same object for the session. */
+  keyBands: { planOptions: AssignOptions; missing: (songs: readonly Song[]) => number; get: (s: Song) => ArrayLike<number> | null };
+  /** v16.8.2 fix round 1 (A-SF2): a press whose bands are ready, waiting for the card (0: none); takeAssignPending takes it. */
+  assignPending: number;
 }
 
 /** v16.1: one row of the saved playlists' list (resolved against the library as it is now). */
@@ -598,6 +607,19 @@ export interface ShellActions {
   requestDelete: (id: string) => void;
   /** Auto-Distribute. */
   assignCrystals: () => void;
+  /** v16.8.2 fix round 2 (R2a): the plan a confirmation showed, applied exactly while the library is still `lib` (the
+   *  array it was planned from): true; false, nothing written (the library changed: the card presses again). */
+  assignPlan: (plan: AssignPlan, lib: readonly Song[]) => boolean;
+  /** v16.8.2 (K6): the Assign press's warm for these tracks (the toast "Getting the keys ready… N left", its Stop):
+   *  true once none of their key bands is missing, false after a Stop or a Clear (then nothing is planned). */
+  keysReady: (songs: Song[]) => Promise<boolean>;
+  /** v16.8.2 fix round 1: the card's press with bands still to make (the warm in App, again while more go missing; the
+   *  press then waits in assignPending), the card's taking of it (true once), and the cards mounted (for the toast). */
+  assignWhenKeysReady: (songs: Song[], o?: { again?: boolean; confirmed?: AssignPlan | null }) => Promise<void>;
+  /** Fix round 4 (G2): the take returns the plan the user confirmed for that press (or null with none), null when there
+   *  is nothing to take. */
+  takeAssignPending: () => { confirmed: AssignPlan | null } | null;
+  noteHealthCard: (on: boolean) => void;
   /** Analyse tracks' button (Start, or Stop while it runs). */
   analyse: () => void;
   /** Deep Scan (the tracks with no crystal; decision 6), and its cancel. */

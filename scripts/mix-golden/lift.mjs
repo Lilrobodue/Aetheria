@@ -47,6 +47,8 @@ export const ENV_NAMES = [
 export const ENV_NAMES_V159 = ['startPlayOrder', 'shellOnRef', 'stateRef', 'setShuffledIndices', 'setShufflePos', 'sameIdOrder',
   // the review's fixes: a mix's classic notice (applyMix), and a start still in flight (Restore Library)
   'mixNoticeRef', 'mainAudioRef', 'startedRequestRef', 'playRequestSeqRef', 'playStartBusyRef', 'blobUrlsRef'];
+/** v16.8.2: what Assign reads since it places by key: App's key-band cache, and the press's way when bands are missing. */
+export const ENV_NAMES_V1682 = ['keyBandsRef', 'keysThenAssign'];
 
 /** A button's label: its first line of text (a direct text child, or a <span>'s), e.g. "Qi Strength", "Grounding". */
 export function buttonLabel(ts, sf, el) {

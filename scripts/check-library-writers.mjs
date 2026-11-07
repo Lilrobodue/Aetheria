@@ -45,6 +45,14 @@
 //      drainPlaylists name neither BLOBS_STORE nor META_STORE (nor a 'blobs' or 'meta' literal), and every
 //      .transaction( call in them has STATE_STORE, alone, as its first argument.
 //
+//   8. v16.8.2, the key bands' cache record ('keyBands:v1' in the playlist-state store: utils/mix/keyBands.ts BandCache's
+//      export) has ONE writer and ONE reader: playlistCache's writeKeyBandsRecord is used only in App › saveKeyBandsNow,
+//      its readKeyBandsRecord only in App's mount effect, App › useEffect([]) (followed through imports as rule 6). In
+//      utils/playlistCache.ts their bodies name neither BLOBS_STORE nor META_STORE (nor a 'blobs' or 'meta' literal), every
+//      .transaction( call in them has STATE_STORE alone as its first argument, they name no other record (STATE_KEY,
+//      PL_PREFIX, PL_END, 'current') and never delete or clear anything: the record is a cache, and losing it costs only
+//      a re-warm.
+//
 //   node scripts/check-library-writers.mjs            compare against scripts/library-writers.json
 //   node scripts/check-library-writers.mjs --update   rewrite the table (only for an intended change; list it)
 //   node scripts/check-library-writers.mjs --root=DIR check another checkout (e.g. a scratch copy with an injection)
@@ -481,6 +489,86 @@ if (existsSync(join(root, CACHE_FILE))) {
   }
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Rule 8 (v16.8.2): the key bands' cache record: one writer, one reader, its own key in the playlist-state store
+// ---------------------------------------------------------------------------------------------------------------
+const KEY_BANDS_IO = {
+  writeKeyBandsRecord: { app: 'App › saveKeyBandsNow' },
+  readKeyBandsRecord: { app: 'App › useEffect([])' },
+};
+const KEY_BANDS_STORE_FUNCTIONS = ['readKeyBandsRecord', 'writeKeyBandsRecord'];
+const keyBandsUses = [];
+for (const file of files) {
+  if (file === CACHE_FILE) continue;
+  const sf = parse(file);
+  const names = new Map();
+  const namespaces = new Set();
+  const collect = (n) => {
+    if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier) && resolveImport(file, n.moduleSpecifier.text) === CACHE_FILE) {
+      const b = n.importClause?.namedBindings;
+      if (b && ts.isNamespaceImport(b)) namespaces.add(b.name.text);
+      if (b && ts.isNamedImports(b)) for (const el of b.elements) {
+        const imported = (el.propertyName ?? el.name).text;
+        if (KEY_BANDS_IO[imported]) names.set(el.name.text, imported);
+      }
+    }
+    ts.forEachChild(n, collect);
+  };
+  collect(sf);
+  if (!names.size && !namespaces.size) continue;
+  const visit = (n) => {
+    if (ts.isIdentifier(n) && !isDeclarationName(n)) {
+      let which = names.get(n.text) ?? null;
+      let at = n;
+      if (!which && namespaces.has(n.text)) {
+        const pa = n.parent;
+        const member =
+          ts.isPropertyAccessExpression(pa) && pa.expression === n ? pa.name.text
+          : ts.isElementAccessExpression(pa) && pa.expression === n && ts.isStringLiteralLike(pa.argumentExpression) ? pa.argumentExpression.text
+          : null;
+        if (member && KEY_BANDS_IO[member]) { which = member; at = pa; }
+      }
+      if (which) keyBandsUses.push({ file, which, line: lineOf(sf, at), path: where(at, sf).path });
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+}
+for (const [which, allowed] of Object.entries(KEY_BANDS_IO)) {
+  const uses = keyBandsUses.filter((u) => u.which === which);
+  for (const u of uses) {
+    const ok = u.file === 'App.tsx' && (u.path === allowed.app || u.path.startsWith(`${allowed.app} › `));
+    if (!ok) problem(`${u.file}:${u.line}: ${which} used in ${u.path} (the key bands' record: its one ${which === 'writeKeyBandsRecord' ? 'writer is App › saveKeyBandsNow' : 'read is App’s mount effect'})`);
+  }
+  if (existsSync(join(root, 'App.tsx')) && !uses.some((u) => u.file === 'App.tsx')) problem(`App.tsx: ${which} is not used in ${allowed.app}`);
+}
+if (existsSync(join(root, CACHE_FILE))) {
+  const sf = parse(CACHE_FILE);
+  for (const name of KEY_BANDS_STORE_FUNCTIONS) {
+    const decls = [];
+    const find = (n) => {
+      if (ts.isFunctionDeclaration(n) && n.name?.text === name && n.body) decls.push(n);
+      ts.forEachChild(n, find);
+    };
+    find(sf);
+    if (decls.length !== 1) {
+      problem(`${CACHE_FILE}: expected exactly one \`function ${name}\`, found ${decls.length}`);
+      continue;
+    }
+    const visit = (n) => {
+      if (ts.isIdentifier(n) && ['BLOBS_STORE', 'META_STORE', 'STATE_KEY', 'PL_PREFIX', 'PL_END'].includes(n.text)) problem(`${CACHE_FILE}:${lineOf(sf, n)}: ${name} names ${n.text} (the key bands' record touches only its own key in the playlist-state store)`);
+      if (ts.isStringLiteralLike(n) && ['blobs', 'meta', 'current'].includes(n.text)) problem(`${CACHE_FILE}:${lineOf(sf, n)}: ${name} names '${n.text}'`);
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && ['delete', 'clear'].includes(n.expression.name.text)) problem(`${CACHE_FILE}:${lineOf(sf, n)}: ${name} calls .${n.expression.name.text}( (the key bands' record never deletes)`);
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'transaction') {
+        const first = n.arguments[0];
+        if (!first || !ts.isIdentifier(first) || first.text !== 'STATE_STORE') problem(`${CACHE_FILE}:${lineOf(sf, n)}: ${name} opens a transaction on ${first ? first.getText(sf) : 'nothing'} (only STATE_STORE, alone)`);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(decls[0].body);
+  }
+}
+
 const places = Object.keys(current).length;
 const total = Object.values(current).reduce((a, b) => a + b.count, 0);
 if (problems.size) {
@@ -494,5 +582,6 @@ console.log(
     `${files.length} files, as pinned (counts and code); components/shell, utils/mix, utils/queue, utils/playlists, utils/library and utils/crystalData never import playlistCache, ` +
     `nor components/shell utils/playlists; ` +
     `${PLAY_ORDER_FUNCTIONS.join(', ')} use no writer; the saved playlists are written only by App › commitPlaylists and read only by ` +
-    `App › useEffect([libraryLoading]) (${playlistIoUses.length} uses), and ${PLAYLIST_STORE_FUNCTIONS.join(', ')} touch only the playlist-state store.`
+    `App › useEffect([libraryLoading]) (${playlistIoUses.length} uses), and ${PLAYLIST_STORE_FUNCTIONS.join(', ')} touch only the playlist-state store; ` +
+    `the key bands' record is written only by App › saveKeyBandsNow and read only by App › useEffect([]) (${keyBandsUses.length} uses), and ${KEY_BANDS_STORE_FUNCTIONS.join(', ')} touch only its own key.`
 );

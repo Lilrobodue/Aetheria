@@ -56,9 +56,9 @@ export function tourCards(desktop: boolean): TourCard[] {
         { label: 'Scan:', text: 'Reads each song and gives it a crystal (slow, and optional).' },
         {
           label: 'Assign crystals:',
-          text: "Spreads every song, scanned ones too, over the 27 crystals across the GUT, HEART, and HEAD ranges in turn. Deep Scan's own reading stays with each scanned song. Songs Deep Scan placed on 2178 Hz keep the SOURCE crystal.",
+          text: "Spreads every song, scanned ones too, over the 27 crystals across the GUT, HEART, and HEAD ranges in turn. Deep Scan's own reading stays with each scanned song. Songs Deep Scan placed on 2178 Hz keep the SOURCE crystal. Songs with a clear key go first to crystals whose tone fits their key.",
         },
-        { label: 'One-time:', text: 'Once assigned, your library is ready for any listening mode.' },
+        { label: 'Then:', text: 'Once assigned, your library is ready for any listening mode.' },
       ],
     },
     {

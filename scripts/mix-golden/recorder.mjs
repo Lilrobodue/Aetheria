@@ -97,6 +97,16 @@ export function runScenarios(makeApp, deps, fixtures, scenarios, gens, mulberry3
         playRequestSeqRef: { current: 0 },
         playStartBusyRef: { current: false },
         blobUrlsRef: { current: {} },
+        // v16.8.2: App's key-band cache (Assign plans with it: keyBandsRef.current.planOptions), warm for this fixture's
+        // library as the press needs it (a cold one sends the press to App's keysThenAssign: recorded, never run here).
+        // deps.BandCache (utils/mix/keyBands.ts) where the harness gives it; else a cache that has no bands.
+        keyBandsRef: { current: (() => {
+          if (!deps.BandCache) return { missing: () => 0, get: () => null, planOptions: undefined };
+          const c = new deps.BandCache();
+          c.ensureSync(lib.filter((s) => s && typeof s === 'object'));
+          return c;
+        })() },
+        keysThenAssign: () => calls.push(['keysThenAssign']),
         ...deps,
       };
       const realRandom = Math.random;

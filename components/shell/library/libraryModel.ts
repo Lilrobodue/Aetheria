@@ -10,13 +10,14 @@
 // from the LIBRARY's own Song objects, by id, so an order made here never holds a track the library doesn't, and an
 // Undo never brings back a stale copy of a track's metadata.
 
-import { formatTime, formatTotal, regimeName, regimeOf } from '../shellModel.ts';
+import { PERFECT_GUT_MAP, formatTime, formatTotal, regimeName, regimeOf } from '../shellModel.ts';
 import { passButtonText, passEta, passEtaMinutes } from '../../../utils/library/analysePass.ts';
 import type { PassProgress } from '../../../utils/library/analysePass.ts';
 import { CHROMA_VERSION } from '../../../utils/soundV2/keyAnalysis.ts';
 import { BUSY_EXPORT, BUSY_STOPPING, BUSY_STOPPING_LONG } from '../../../utils/export/exportWords.ts';
-import { ALL_CRYSTALS, DEEP_SCAN_RATE, crystalOrigin, deepScanQueue, needsRescan, readByDeepScan, scanCrystalChanged, spreadFromScan, spreadRole } from '../../../utils/mix/distribution.ts';
+import { ALL_CRYSTALS, DEEP_SCAN_RATE, awaitingKeyCount, crystalOrigin, deepScanQueue, needsRescan, readByDeepScan, scanCrystalChanged, spreadFromScan, spreadRole } from '../../../utils/mix/distribution.ts';
 import { SOURCE_FREQ } from '../../../utils/crystalData.ts';
+import { awaitingKey, clearKey } from '../../../utils/mix/keyBands.ts';
 import type { CrystalSource } from '../../../utils/mix/distribution.ts';
 
 /** What the tab reads of a track (types.ts Song; `file` only for Track info). */
@@ -37,6 +38,9 @@ export interface LibSong {
   keyConfidence?: number;
   chromaVersion?: number;
   analysisFailedV?: number;
+  /** v16.8.2: the key data the key bands read (keyBands.ts clearKey). */
+  chroma?: unknown;
+  chromaA4Hz?: number;
   /** v16.8.1 (D1): the rate Deep Scan read it at (absent: an older reading, which Scan again offers). */
   scanRate?: number;
   file?: { name?: string; size?: number } | null;
@@ -363,6 +367,9 @@ export function formatBytes(size: unknown): string | null {
 }
 
 export const ASSIGNED_NOTE = 'An assigned crystal, not a measured pitch.';
+/** v16.8.2 (K7): Track info's Crystal note, after ASSIGNED_NOTE, when the track has a clear key and its band on its
+ *  crystal is 0 (the tone fits its key), whoever placed it. Never without bands cached for it. */
+export const KEY_FITS_NOTE = "Its key fits this crystal's tone.";
 
 // v15.8: where a crystal comes from is utils/mix/distribution.ts crystalOrigin's answer (the field Deep Scan and Assign
 // record, or, on tracks from before v15.8, what they stored), the same rule Deep Scan's queue and Assign use.
@@ -392,14 +399,19 @@ export function crystalSource(s: LibSong): string {
 
 const hasBass = (e: LibSong['bandEnvelope']) => (e?.bass?.length ?? 0) > 0;
 
-/** Track info's rows (mockup library-track-info-phone): Length, Crystal, Key, Visual sync, File, Added. */
-export function trackInfoRows(s: LibSong, now: number): InfoRow[] {
+/** Track info's rows (mockup library-track-info-phone): Length, Crystal, Key, Visual sync, File, Added. v16.8.2 (K7):
+ *  `bands`, the track's key bands (App's cache: BandCache.get, null without a clear key or before they are made).
+ *  Fix round 1 (L-N3): `perfectGut`, Lo Shu Perfect GUT on: the six crystals it swaps play another tone, so their
+ *  key note is left out there (PERFECT_GUT_MAP, the shell's copy of App's swap table). */
+export function trackInfoRows(s: LibSong, now: number, bands?: ArrayLike<number> | null, perfectGut = false): InfoRow[] {
   const rows: InfoRow[] = [];
   const d = s.duration;
   rows.push({ label: 'Length', value: Number.isFinite(d) && (d as number) > 0 ? formatTime(d as number) : d === 0 ? 'Reading…' : 'Unknown' });
   const hz = s.closestSolfeggio;
   if (Number.isFinite(hz) && (hz as number) > 0) {
-    rows.push({ label: 'Crystal', value: `${Math.round(hz as number)} Hz · ${regimeName(regimeOf(hz as number))}`, note: `${crystalSource(s)}. ${ASSIGNED_NOTE}`, tag: 'design' });
+    const at = ALL_CRYSTALS.indexOf(hz as number);
+    const fits = !!bands && bands.length === ALL_CRYSTALS.length && at >= 0 && bands[at] === 0 && clearKey(s) && !(perfectGut && PERFECT_GUT_MAP[hz as number] !== undefined);
+    rows.push({ label: 'Crystal', value: `${Math.round(hz as number)} Hz · ${regimeName(regimeOf(hz as number))}`, note: `${crystalSource(s)}. ${ASSIGNED_NOTE}${fits ? ` ${KEY_FITS_NOTE}` : ''}`, tag: 'design' });
   } else {
     rows.push({ label: 'Crystal', value: 'None yet' });
   }
@@ -425,9 +437,9 @@ export function trackInfoRows(s: LibSong, now: number): InfoRow[] {
 }
 
 /** Track info as plain text, for Copy: the name, then "Label: value (note)" per row. */
-export function trackInfoText(s: LibSong, now: number): string {
+export function trackInfoText(s: LibSong, now: number, bands?: ArrayLike<number> | null, perfectGut = false): string {
   const lines = [String(s.name ?? '')];
-  for (const r of trackInfoRows(s, now)) lines.push(`${r.label}: ${r.value}${r.note ? ` (${r.note})` : ''}`);
+  for (const r of trackInfoRows(s, now, bands, perfectGut)) lines.push(`${r.label}: ${r.value}${r.note ? ` (${r.note})` : ''}`);
   return lines.join('\n');
 }
 
@@ -467,6 +479,11 @@ export interface LibraryHealth {
   /** v16.8.1 (D4): tracks with an older Deep Scan reading (distribution.ts needsRescan: read before v16.8.1, at the
    *  device's own rate), what Scan again reads anew (rescanQueue: but the ones it couldn't read this session). */
   olderReadings: number;
+  /** v16.8.2 (K4): tracks Assign places that could get a clear key from Analyse tracks but haven't yet (fix round 1:
+   *  distribution.ts awaitingKeyCount, the plan's own count, with keyBands.ts awaitingKey), and
+   *  the tracks with a clear key (keyBands.ts clearKey: what Assign places by key). */
+  awaitingKey: number;
+  clearKeys: number;
 }
 
 /** One O(n) pass, each id once, by each action's own rule (so a number never promises what its button won't do).
@@ -483,10 +500,12 @@ export function libraryHealth(songs: readonly LibSong[], rescanSkip?: ReadonlySe
   const pinned = new Set<number>();
   let openTracks = 0;
   let olderReadings = 0;
+  let clearKeys = 0;
   for (const s of songs) {
     if (!s || seen.has(s.id)) continue;
     seen.add(s.id);
     unique.push(s);
+    if (clearKey(s)) clearKeys++;
     if (needsRescan(s) && !rescanSkip?.has(s.id)) olderReadings++;
     if (!s.closestSolfeggio) noCrystal++;
     else used.add(s.closestSolfeggio);
@@ -508,7 +527,7 @@ export function libraryHealth(songs: readonly LibSong[], rescanSkip?: ReadonlySe
   const assignedToScan = deepScanQueue(unique, { assigned: true }).length - unscanned;
   const emptyCrystals = ALL_CRYSTALS.filter((f) => !used.has(f)).length;
   const spreadCover = Math.min(27, pinned.size + openTracks);
-  return { total: unique.length, noCrystal, unscanned, assignedToScan, scanned, scanReplaced, emptyCrystals, placeable, sourceBack, spreadCover, olderReadings };
+  return { total: unique.length, noCrystal, unscanned, assignedToScan, scanned, scanReplaced, emptyCrystals, placeable, sourceBack, spreadCover, olderReadings, awaitingKey: awaitingKeyCount(unique as never, awaitingKey as never), clearKeys };
 }
 
 export type HealthAction = 'assign' | 'analyse' | 'scan' | 'scan-assigned' | 'rescan' | 'stop-scan' | 'review';
@@ -552,6 +571,8 @@ export interface HealthInput {
    *  planAssign(lib, 'spread')). The card doesn't plan while something is busy (spreadPlanBusy): it passes the last
    *  count it planned while idle then (at most the track count; 0 before the first). */
   spreadMoves?: number;
+  /** v16.8.2 (K9): those moves come from the key data alone (a plan without the bands moves none): the line says so. */
+  spreadKeyReason?: boolean;
 }
 
 export interface HealthModel {
@@ -571,15 +592,17 @@ export function spreadLineReachable(h: LibraryHealth): boolean {
   return h.noCrystal === 0 && h.sourceBack === 0 && !(h.emptyCrystals > 0 && h.spreadCover > 27 - h.emptyCrystals);
 }
 /** What the card's plan waits for: a Deep Scan or Scan again, an Analyse pass, a restore, or track lengths still being
- *  read (the stand-ins read the length, so what a spread would move isn't settled until they are in). */
+ *  read (the stand-ins read the length, so what a spread would move isn't settled until they are in). v16.8.2 (K6):
+ *  and key bands still being made (bandsLeft: a plan never reads partial bands). */
 export interface SpreadPlanStatus {
   isScanning: boolean;
   passPhase: string;
   restoring: boolean;
   durationsLeft: number;
+  bandsLeft?: number;
 }
 export function spreadPlanBusy(s: SpreadPlanStatus): boolean {
-  return s.isScanning || s.passPhase !== 'idle' || s.restoring || count(s.durationsLeft) > 0;
+  return s.isScanning || s.passPhase !== 'idle' || s.restoring || count(s.durationsLeft) > 0 || count(s.bandsLeft ?? 0) > 0;
 }
 /** v16.8.1 (D8, fix round 2): HealthCard plans a spread (planAssign(lib, 'spread'), to count what it would move) only
  *  when its line can show and nothing is busy; while busy it shows the last idle count, held. */
@@ -620,11 +643,17 @@ export function healthModel(i: HealthInput): HealthModel {
   // the next press: Assign is to do then (sourceBack, the plan's own count; a library already spread would otherwise read
   // "All N tracks have one" and offer nothing).
   const all = h.total === 1 ? 'The track has one' : `All ${h.total} have one`;
+  // v16.8.2 (K4): tracks Analyse tracks could still give a key, while it doesn't run: say so (Assign stays available).
+  // Only once some track has a clear key (key placement is in use): a library with no key data reads as v16.8.1's.
+  const waiting = count(h.awaitingKey ?? 0);
+  const keySub = waiting > 0 && !analysing && count(h.clearKeys ?? 0) > 0
+    ? `${waiting} ${plural(waiting, 'track has', 'tracks have')} no key yet · Analyse tracks first so Assign can place ${plural(waiting, 'it', 'them')} by key`
+    : undefined;
   const assignAction = (todo: boolean, line: string): HealthLine => ({
     id: 'crystals',
     title: 'Crystals',
     line,
-    sub: i.isScanning ? 'Unavailable while Deep Scan runs' : undefined,
+    sub: i.isScanning ? 'Unavailable while Deep Scan runs' : keySub,
     done: false,
     todo,
     action: { label: 'Assign', kind: 'assign', blocked: i.isScanning },
@@ -640,13 +669,16 @@ export function healthModel(i: HealthInput): HealthModel {
     // v16.8.1 (D8): a spread would move tracks (a library spread by an earlier release's rule, or read anew): Assign is
     // offered, optional. The spread is idempotent, so after its press nothing moves and the line is done again.
     const m = count(i.spreadMoves ?? 0);
-    lines.push(assignAction(false, h.total === 1 ? 'The track has one · Assign would move it' : `${all} · Assign would move ${m} of them`));
+    // v16.8.2 (K9): the reason, when the key data alone cause the moves (the first press after the update).
+    // (Fix round 2, R4: the plural counts the keyless tracks moved to make room too, so it says what Assign does.)
+    const why = i.spreadKeyReason ? (h.total === 1 ? ' · to fit its key' : ' · to place tracks by key') : '';
+    lines.push(assignAction(false, h.total === 1 ? `The track has one · Assign would move it${why}` : `${all} · Assign would move ${m} of them${why}`));
   } else {
     lines.push({
       id: 'crystals',
       title: 'Crystals',
       line: h.total === 1 ? 'The track has one' : `All ${h.total} tracks have one`,
-      sub: h.emptyCrystals > 0 && h.total > 0 ? `${gaps}.` : undefined,
+      sub: h.emptyCrystals > 0 && h.total > 0 ? `${gaps}.` : keySub,
       done: true,
       todo: false,
     });
@@ -823,6 +855,9 @@ export function healthModel(i: HealthInput): HealthModel {
 export const HEALTH_FOOTER = 'The classic library view is one tap away.';
 
 /** Assign's confirmation (v15.8: from the plan, asked only when crystals tracks already have would change). */
+/** v16.8.2 fix round 3 (F1): the line a confirmation asked again carries above its counts (its library changed while it
+ *  was open, and so did the plan). */
+export const ASSIGN_CHANGED_LINE = 'Your library changed while this was open, so these counts are new.';
 export { assignConfirmText, assignNeedsConfirm } from '../../../utils/mix/distribution.ts';
 
 // ---------------------------------------------------------------------------------------------------------------

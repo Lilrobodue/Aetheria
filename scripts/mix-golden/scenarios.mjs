@@ -20,5 +20,8 @@ export function buildScenarios(H1) {
   for (const fixture of ['F160', 'F160d'])
     for (const [cursor, shuffle] of [[7, false], [7, true], [-1, false]])
       scenarios.push({ fixture, exp: 'beginner', historyName: 'none', history: null, seed: 1, width: 411, playOrder: { from: 0, count: 40, reverse: true }, cursor, shuffle, only: ['restore'] });
+  // v16.8.2: Assign on the key fixtures (fixed synthetic chroma arrays): the only new runs (step 11).
+  for (const fixture of ['FKEY', 'FKEYU'])
+    for (const exp of ['beginner', 'expert']) scenarios.push({ fixture, exp, historyName: 'none', history: null, seed: 1, width: 411, only: ['autoDistribute'] });
   return scenarios;
 }

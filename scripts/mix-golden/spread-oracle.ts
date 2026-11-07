@@ -1,4 +1,5 @@
-// scripts/mix-golden/spread-oracle.ts (v16.8.1): the spread's rule, restated from the decisions, never shipped.
+// scripts/mix-golden/spread-oracle.ts (v16.8.1; v16.8.2: the key band): the spread's rule, restated from the decisions,
+// never shipped.
 //
 // The independent side of the v16.8.1 pins (utils/mix/source.check.ts, scorecap.check.ts, devices.check.ts, step 10 of
 // scripts/check-mix-golden.mjs and e2e/tests/assign.spec.ts S2). It is written fresh from the rule, not from
@@ -12,14 +13,24 @@
 //   - the open tracks fill the crystals in turn (GUT, HEART, HEAD, ...), three rounds: in round L a crystal whose fill
 //     (its 'stays' and open tracks, never a Source track) is under L takes the best open track left; then each track
 //     left, in key order, goes to the best of the crystals with the smallest fill;
-//   - "best": the lowest score, then the file's hash, then the file key, then the id (D2);
+//   - "best": the lowest key band (v16.8.2, below), then the lowest score, then the file's hash, then the file key, then
+//     the id (D2), compared in that order; in the balance, the lowest (band, score) of the crystals with the smallest fill;
 //   - D3b: when the open tracks are fewer than the crystals with no 'stays' track, a 2178 holding Source tracks counts as
 //     filled in round 1.
+// v16.8.2 (decisions K1, K3, K5), the key band: a track with a clear key (key data of CHROMA_VERSION 1 that Key fit can
+// read, a key name, a confidence of at least 0.45, a stored length of at most 720 s and a file of at most 100 MiB) has,
+// on each crystal, Key fit's rel of the crystal's tone (the canonical one, folded for headphones: v2's toneOf) against
+// its chroma heard at chromaA4Hz × 432/440 (v2's musicFit), cut at 0.35 / 0.55 / 0.75 into 0..3; any other track has
+// 0.5 on every crystal (fix round 1: after a fitting track, before a partly fitting one). Fix round 2 (R1, the user's
+// decision 2026-11-06): a clear-key track that is band 0 on no crystal at all compares as 0.25 on each crystal where its
+// band is its lowest (after a fitting track, before a track with no key), and as its band elsewhere; only a real band 0
+// counts as fitting. It takes musicFit and toneOf from the vendored v2 (as Key fit does) and restates the rest here.
 // What it gives: each track's record after (closestSolfeggio, harmonicFreq, harmonicDeviation, crystalSource), each
 // crystal's tracks (Source tracks included) and its fill (without them), the empty crystals, and each track's role.
 
 import { GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS, getHarmonicSolfeggio } from '../../utils/crystalData.ts';
 import { standInFreq } from '../../utils/mix/distribution.ts';
+import { musicFit, toneOf } from '../../utils/soundV2/aetheria_sound_v2.ts';
 
 export interface OracleSong {
   id: string;
@@ -32,6 +43,12 @@ export interface OracleSong {
   crystalSource?: 'scan' | 'assigned';
   isAetheriaCandidate?: boolean;
   fractalAnalysis?: unknown;
+  // v16.8.2: the key data, as Analyse tracks stores it.
+  chroma?: unknown;
+  chromaA4Hz?: number;
+  musicKey?: string;
+  keyConfidence?: number;
+  chromaVersion?: number;
 }
 export type OracleRecord = [closestSolfeggio: number | null, harmonicFreq: number | null, harmonicDeviation: number | null, crystalSource: string | null];
 export type OracleRole = 'source' | 'stays' | 'left' | 'open';
@@ -46,6 +63,9 @@ export interface OracleResult {
   /** The crystals pinned tracks hold (Source on 2178, 'stays' on their own) and the open tracks' count. */
   pinnedCrystals: number;
   open: number;
+  /** v16.8.2: the open tracks with a clear key, and of them the ones that end on a crystal whose band is 0. */
+  keyed: number;
+  keyFits: number;
 }
 
 const SOURCE = 2178;
@@ -118,6 +138,42 @@ function hash(text: string): number {
 /** The file's name and size, as the saved playlists fingerprint a track; the id without them. */
 export const oracleFileKey = (s: OracleSong): string => (s.file && typeof s.file.name === 'string' && typeof s.file.size === 'number' ? `${s.file.name}|${s.file.size}` : s.id);
 
+// ---- v16.8.2: the key band, restated ----
+const EDGES = [0.35, 0.55, 0.75];
+const NO_KEY = 0.5; // between "fits" (0) and "partly fits" (1): any value in (0, 1) gives the same plans
+const BEST_OF_NONE = 0.25; // fix round 2 (R1): a track that fits nowhere, on its best crystals: between 0 and NO_KEY
+const KEY_VERSION = 1; // CHROMA_VERSION
+const MIN_CONFIDENCE = 0.45;
+const MAX_SECONDS = 720; // the 8 GB phone's Analyse tracks caps, on every device
+const MAX_BYTES = 100 * 1024 * 1024;
+const HEARD = 0.981818; // the app's PITCH_SHIFT_FACTOR (constants.ts), its own literal: 432/440 differs by 1.9e-7 (fix round 1, L-N1)
+/** A clear key: every condition of the rule. */
+export function oracleClearKey(s: OracleSong): boolean {
+  const c = s.chroma;
+  if (s.chromaVersion !== KEY_VERSION || !Array.isArray(c) || c.length !== 12) return false;
+  if (!c.every((w) => fin(w) && w >= 0) || !((c as number[]).reduce((a, b) => a + b, 0) > 1e-9)) return false;
+  if (!fin(s.chromaA4Hz) || !(s.chromaA4Hz > 0)) return false;
+  if (typeof s.musicKey !== 'string' || !s.musicKey.length) return false;
+  if (!fin(s.keyConfidence) || s.keyConfidence < MIN_CONFIDENCE) return false;
+  if (!fin(s.duration) || !(s.duration > 0) || s.duration > MAX_SECONDS) return false;
+  const size = s.file?.size;
+  return fin(size) && size >= 0 && size <= MAX_BYTES;
+}
+const bandMemo = new Map<string, number[]>();
+/** The 27 bands (the crystals ascending) of a clear-key track, or null. Remembered by the A4 and the chroma. */
+export function oracleBands(s: OracleSong): number[] | null {
+  if (!oracleClearKey(s)) return null;
+  const chroma = s.chroma as number[];
+  const k = `${s.chromaA4Hz}|${chroma.join(',')}`;
+  let b = bandMemo.get(k);
+  if (!b) {
+    const heard = (s.chromaA4Hz as number) * HEARD;
+    b = CRYSTALS.map((c) => { const rel = musicFit(toneOf(c, 'headphones'), chroma, heard).rel; return rel <= EDGES[0] ? 0 : rel <= EDGES[1] ? 1 : rel <= EDGES[2] ? 2 : 3; });
+    bandMemo.set(k, b);
+  }
+  return b;
+}
+
 export function spreadOracle(library: readonly OracleSong[]): OracleResult {
   const seen = new Set<string>();
   const lib = library.filter((s) => s && typeof s === 'object' && !seen.has(s.id) && !!seen.add(s.id));
@@ -125,7 +181,7 @@ export function spreadOracle(library: readonly OracleSong[]): OracleResult {
   const role = new Map<string, OracleRole>();
   const fill = new Map<number, number>(CRYSTALS.map((c) => [c, 0]));
   let sources = 0;
-  type Cand = { s: OracleSong; measured: boolean; own: number; key: number; fk: string; score: Map<number, number> };
+  type Cand = { s: OracleSong; measured: boolean; own: number; key: number; fk: string; score: Map<number, number>; band: Map<number, number>; keyed: boolean };
   const cands: Cand[] = [];
   const pinned = new Set<number>();
   for (const s of lib) {
@@ -148,13 +204,21 @@ export function spreadOracle(library: readonly OracleSong[]): OracleResult {
       const fk = oracleFileKey(s);
       // D5r: an unmeasured track's stand-in, seeded by its file (the id without one).
       const match = m ? own : getHarmonicSolfeggio(standInFreq({ ...s, id: fk } as never), true);
-      cands.push({ s, measured: m, own, fk, key: hash('order:' + fk), score: new Map(CRYSTALS.map((c) => [c, compatibility(match, c)])) });
+      const bands = oracleBands(s);
+      // (R1: no crystal fits it: its lowest band's crystals compare as BEST_OF_NONE. keyFits below reads this rank, not
+      // the band; it is the same count, since only a band of 0 has a rank of 0: BEST_OF_NONE and NO_KEY are above 0.)
+      const fitsSomewhere = !!bands && bands.some((v) => v === 0);
+      const lowest = bands ? Math.min(...bands) : 0;
+      const rankOf = (i: number) => (!bands ? NO_KEY : !fitsSomewhere && bands[i] === lowest ? BEST_OF_NONE : bands[i]);
+      cands.push({ s, measured: m, own, fk, key: hash('order:' + fk), score: new Map(CRYSTALS.map((c) => [c, compatibility(match, c)])), band: new Map(CRYSTALS.map((c, i) => [c, rankOf(i)])), keyed: !!bands });
     }
   }
-  // (score, hash, file key, id): a < b.
+  // (hash, file key, id): a < b. (The band and the score come first, below.)
   const before = (a: Cand, b: Cand) => (a.key !== b.key ? a.key < b.key : a.fk !== b.fk ? a.fk < b.fk : a.s.id < b.s.id);
+  let keyFits = 0;
   const put = (x: Cand, c: number) => {
     fill.set(c, fill.get(c)! + 1);
+    if (x.keyed && x.band.get(c) === 0) keyFits++;
     const s = x.s, sc = x.score.get(c)!;
     if (!x.measured) after.set(s.id, [c, c, Math.min(sc, CAP), 'assigned']);
     else if (c === x.own) after.set(s.id, [c, s.harmonicFreq as number, Math.abs((s.harmonicFreq as number) - c), 'scan']);
@@ -170,6 +234,8 @@ export function spreadOracle(library: readonly OracleSong[]): OracleResult {
       if (have >= round) continue;
       let best = pool[0];
       for (const x of pool) {
+        const db = x.band.get(c)! - best.band.get(c)!;
+        if (db !== 0) { if (db < 0) best = x; continue; }
         const d = x.score.get(c)! - best.score.get(c)!;
         if (d < 0 || (d === 0 && before(x, best))) best = x;
       }
@@ -181,10 +247,11 @@ export function spreadOracle(library: readonly OracleSong[]): OracleResult {
   for (const x of pool) {
     const least = Math.min(...ORDER.map((c) => fill.get(c)!));
     let at = -1;
-    for (const c of ORDER) if (fill.get(c) === least && (at < 0 || x.score.get(c)! < x.score.get(at)!)) at = c;
+    const lower = (c: number, a: number) => x.band.get(c)! < x.band.get(a)! || (x.band.get(c) === x.band.get(a) && x.score.get(c)! < x.score.get(a)!);
+    for (const c of ORDER) if (fill.get(c) === least && (at < 0 || lower(c, at))) at = c;
     put(x, at);
   }
   const fills = CRYSTALS.map((c) => fill.get(c)!);
   const perCrystal = CRYSTALS.map((c, i) => fills[i] + (c === SOURCE ? sources : 0));
-  return { after, role, perCrystal, fill: fills, emptyAfter: perCrystal.filter((n) => n === 0).length, pinnedCrystals: pinned.size, open: cands.length };
+  return { after, role, perCrystal, fill: fills, emptyAfter: perCrystal.filter((n) => n === 0).length, pinnedCrystals: pinned.size, open: cands.length, keyed: cands.filter((x) => x.keyed).length, keyFits };
 }

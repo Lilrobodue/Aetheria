@@ -1086,6 +1086,54 @@ function drainPlaylists(reopened = false): Promise<boolean> {
   return plDrain;
 }
 
+// ----------------------------------------------------------------------------
+// v16.8.2: the key bands' cache (utils/mix/keyBands.ts BandCache.export(): how each track's key fits each crystal's
+// tone, by content), one record 'keyBands:v1' in the playlist-state store beside 'current' and the playlists
+// (DB_VERSION stays 2; never in the track records, never meta or blobs). It is a cache: App validates it whole
+// (BandCache.import) and makes the bands again when it can't; losing it costs only that. A Clear deletes it with
+// 'current' (every key below 'pl:'). Its one writer, writeKeyBandsRecord, puts only this key, through the kept flush
+// connection when one is open (so a pagehide write starts in the same task), and writes nothing once a Clear has come
+// since the caller read cacheGeneration().
+// ----------------------------------------------------------------------------
+
+const KEY_BANDS_KEY = 'keyBands:v1';
+
+/** The stored key bands, raw, for App to validate; null when there is none or the read failed. */
+async function readKeyBandsRecord(): Promise<unknown | null> {
+  let own: IDBDatabase | null = null;
+  try {
+    if (typeof indexedDB === 'undefined') return null;
+    const db = flushDb ?? (own = await openDB());
+    const rec = await reqDone(db.transaction(STATE_STORE, 'readonly').objectStore(STATE_STORE).get(KEY_BANDS_KEY));
+    return rec ?? null;
+  } catch (err) {
+    console.warn('[PlaylistCache] Could not read the saved key bands (they are made again):', err);
+    return null;
+  } finally {
+    own?.close();
+  }
+}
+
+/** Put the key bands' record (BandCache.export()); resolves whether it was written. Nothing after a Clear since `epoch`
+ *  (cacheGeneration() when the caller made the record). */
+function writeKeyBandsRecord(data: { v: number; fp: string[]; entries: unknown[] }, epoch: number): Promise<boolean> {
+  if (epoch !== cacheEpoch) return Promise.resolve(false);
+  const rec = { key: KEY_BANDS_KEY, v: data.v, fp: data.fp, entries: data.entries };
+  const put = (db: IDBDatabase): Promise<boolean> => {
+    try {
+      const tx = db.transaction(STATE_STORE, 'readwrite');
+      tx.objectStore(STATE_STORE).put(rec);
+      if (typeof tx.commit === 'function') tx.commit();
+      return txDone(tx).then(() => true, (err) => { console.warn('[PlaylistCache] Saving the key bands failed:', err); return false; });
+    } catch (err) {
+      console.warn('[PlaylistCache] Saving the key bands failed:', err);
+      return Promise.resolve(false);
+    }
+  };
+  if (flushDb) return put(flushDb);
+  return openFlushConnection().then((db) => (db && epoch === cacheEpoch ? put(db) : false));
+}
+
 /** Whether this site's storage is persistent (navigator.storage.persisted), or null when the browser can't say. */
 async function storagePersisted(): Promise<boolean | null> {
   try {
@@ -1185,5 +1233,8 @@ export {
   playlistWriteFailure,
   storagePersisted,
   requestPersistentStorageOnce,
+  // v16.8.2: the key bands' cache record ('keyBands:v1', the playlist-state store).
+  readKeyBandsRecord,
+  writeKeyBandsRecord,
   __setCacheDbNameForTests,
 };

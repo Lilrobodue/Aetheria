@@ -180,6 +180,40 @@ export function holdFor(pb: PlaybackSnapshot | null, step: 'slice' | 'native' | 
   return null;
 }
 
+/** The gate's bounds on two holds (§8.3), shared with App's key-band warm (v16.8.2 fix round 2, R3): a 'starting' flag
+ *  stuck true (playTrack's early return, a decode that never settles) latches off after STARTING_HOLD_MAX_MS until the
+ *  flag clears, and 'loading' lasts at most LOADING_HOLD_MAX_MS of one wait. One per run (the latch spans the run's
+ *  waits); wait() starts a wait (the loading cap counts from its first 'loading'). `now` is read only where a bound
+ *  needs it, as the gate always did. */
+export class HoldBounds {
+  private startingSince: number | null = null;
+  private startingLatched = false;
+  private loadingSince: number | null = null;
+  wait(): void {
+    this.loadingSince = null;
+  }
+  hold(pb: PlaybackSnapshot | null, step: 'slice' | 'native' | 'flush', mobile: boolean, now: () => number, nativeLeftS?: number | null): Hold | null {
+    let h = holdFor(pb, step, mobile, nativeLeftS);
+    if (!pb || !pb.starting) {
+      this.startingSince = null;
+      this.startingLatched = false;
+    } else if (h === 'starting') {
+      const t = now();
+      if (this.startingSince === null) this.startingSince = t;
+      if (this.startingLatched || t - this.startingSince >= PASS.STARTING_HOLD_MAX_MS) {
+        this.startingLatched = true;
+        h = holdFor({ ...pb, starting: false }, step, mobile, nativeLeftS);
+      }
+    }
+    if (h === 'loading') {
+      const t = now();
+      if (this.loadingSince === null) this.loadingSince = t;
+      else if (t - this.loadingSince > PASS.LOADING_HOLD_MAX_MS) h = null;
+    }
+    return h;
+  }
+}
+
 /** What reading and decoding a track adds to the JS heap: the file, its 22050 Hz stereo PCM (counted once
  *  getChannelData runs) and one 8 kHz envelope render. */
 export function projectedBytes(seconds: number, fileBytes: number): number {
@@ -285,9 +319,9 @@ export function startPass<D extends { duration: number }>(env: PassEnv<D>): Pass
   let lastFlushAt = t0;
   let lastLibrary: readonly PassSong[] | null = null;
   let lastSeenPlayingId: string | null = null;
-  // The 'starting' latch (§8.3): a flag stuck true (playTrack's early return) can't stall the pass.
-  let startingSince: number | null = null;
-  let startingLatched = false;
+  // The 'starting' latch (§8.3): a flag stuck true (playTrack's early return) can't stall the pass; and the 'loading' cap
+  // (fix round 2, R3: HoldBounds, shared with the key-band warm).
+  const bounds = new HoldBounds();
   // The heap gate trusts performance.memory only once it has been seen to move across a decode. Android
   // Chrome's reading is bucketized and refreshed at most every 20 minutes unless the renderer is locked to a
   // site, so a stale value must never latch the gate: unproven or stale, the gate stays open (the caps and the
@@ -434,29 +468,13 @@ export function startPass<D extends { duration: number }>(env: PassEnv<D>): Pass
   /** Wait until a step of this kind may start (§8.3). Throws STOP or PARK, or TOO_LONG_DEVICE from the heap gate. */
   async function gate(kind: 'native' | 'slice' | 'flush', heapFor?: { seconds: number; bytes: number }): Promise<void> {
     let heldSince: number | null = null;
-    let loadingSince: number | null = null;
     let memoryWaits = 0;
+    bounds.wait();
     for (;;) {
       if (!aliveNow()) throw STOP;
       if (parkNow()) throw PARK;
       const pb = env.playback();
-      let h = holdFor(pb, kind, env.mobile, tuning.nativeLeftS);
-      if (!pb || !pb.starting) {
-        startingSince = null;
-        startingLatched = false;
-      } else if (h === 'starting') {
-        const t = env.now();
-        if (startingSince === null) startingSince = t;
-        if (startingLatched || t - startingSince >= PASS.STARTING_HOLD_MAX_MS) {
-          startingLatched = true;
-          h = holdFor({ ...pb, starting: false }, kind, env.mobile, tuning.nativeLeftS);
-        }
-      }
-      if (h === 'loading') {
-        const t = env.now();
-        if (loadingSince === null) loadingSince = t;
-        else if (t - loadingSince > PASS.LOADING_HOLD_MAX_MS) h = null;
-      }
+      let h = bounds.hold(pb, kind, env.mobile, () => env.now(), tuning.nativeLeftS);
       if (h === null && heapFor) {
         if (heapTooFull(heapReading(), projectedBytes(heapFor.seconds, heapFor.bytes))) {
           if (memoryWaits >= PASS.HEAP_TRIES) throw TOO_LONG_DEVICE;

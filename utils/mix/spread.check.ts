@@ -251,7 +251,7 @@ for (const [k, lib] of all) {
   {
     const p = planAssign(fixture('FGUT'));
     eq([fgut.keepPutBack, fgut.keepPlaces], [p.restored, p.given + p.moved + p.movedFailed + p.unchanged], "FGUT: Keep's side effects are Assign's own counts");
-    eq(t.body, `Keeping Deep Scan's crystals leaves 9 of the 27 crystals with no track. Nothing would play in the HEAD range. Keeping them also gives ${fgut.keepPutBack} tracks Deep Scan's crystal back and places ${fgut.keepPlaces} tracks with no crystal or a placeholder. Spreading places every track, scanned ones too, so every crystal and every range has tracks. Deep Scan's own reading stays with each track, and Assign keeps them where they are from then on.`, 'bunched: the body (review 3: what Keep also does)');
+    eq(t.body, `Keeping Deep Scan's crystals leaves 9 of the 27 crystals with no track. Nothing would play in the HEAD range. Keeping them also gives ${fgut.keepPutBack} tracks Deep Scan's crystal back and places ${fgut.keepPlaces} tracks with no crystal or a placeholder. Spreading places every track, scanned ones too, so every crystal and every range has tracks. Tracks with a clear key go first to crystals whose tone fits their key. Deep Scan's own reading stays with each track, and Assign keeps them where they are from then on.`, 'bunched: the body (review 3: what Keep also does; v16.8.2: and by key)');
   }
   const lib = fixture('FGUT');
   const spread = apply(lib, planAssign(lib, 'spread'));

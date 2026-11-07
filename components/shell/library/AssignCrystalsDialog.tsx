@@ -8,16 +8,18 @@
 import React, { useRef } from 'react';
 import Dialog from '../../ui/Dialog';
 import Button from '../../ui/Button';
-import { assignConfirmText } from './libraryModel';
+import { ASSIGN_CHANGED_LINE, assignConfirmText } from './libraryModel';
 import type { AssignPlan } from '../../../utils/mix/distribution';
 
 interface AssignCrystalsDialogProps {
   plan: AssignPlan;
+  /** v16.8.2 fix round 3 (F1): asked again because the library changed while it was open (the plan with it). */
+  changed?: boolean;
   onCancel: () => void;
   onAssign: () => void;
 }
 
-const AssignCrystalsDialog = ({ plan, onCancel, onAssign }: AssignCrystalsDialogProps) => {
+const AssignCrystalsDialog = ({ plan, changed = false, onCancel, onAssign }: AssignCrystalsDialogProps) => {
   const cancelRef: { current: HTMLButtonElement | null } = useRef(null);
   const words = assignConfirmText(plan);
   return (
@@ -39,7 +41,12 @@ const AssignCrystalsDialog = ({ plan, onCancel, onAssign }: AssignCrystalsDialog
         </>
       }
     >
-      {words.body}
+      {changed ? (
+        <span data-testid="assign-changed" className="block mb-2 font-medium text-ink-strong">
+          {ASSIGN_CHANGED_LINE}
+        </span>
+      ) : null}
+      <span data-testid="assign-counts">{words.body}</span>
     </Dialog>
   );
 };

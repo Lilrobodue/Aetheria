@@ -293,9 +293,9 @@ const set1 = mk(40, (i) => ({
   visualEnvelope: i % 3 === 0 ? { bass: { length: 5 } } : undefined,
 }));
 const h1 = libraryHealth([...set1, set1[0], set1[1]]);
-eq(h1, { total: 40, noCrystal: 10, unscanned: 16, assignedToScan: 24, scanned: 0, scanReplaced: 0, emptyCrystals: 26, placeable: 30, sourceBack: 0, spreadCover: 27, olderReadings: 0 }, 'libraryHealth: counts by each action’s own rule, each id once');
+eq(h1, { total: 40, noCrystal: 10, unscanned: 16, assignedToScan: 24, scanned: 0, scanReplaced: 0, emptyCrystals: 26, placeable: 30, sourceBack: 0, spreadCover: 27, olderReadings: 0, awaitingKey: 20, clearKeys: 0 }, 'libraryHealth: counts by each action’s own rule, each id once (v16.8.2: the 20 never analysed wait for a key)');
 eq(libraryHealth([S('a', 'a', scannedTrack), S('b', 'b', { harmonicDeviation: 999, harmonicFreq: 440 }), S('c', 'c', { harmonicFreq: 400 }), S('d', 'd', {}), S('e', 'e', { ...scannedTrack, closestSolfeggio: 639, harmonicDeviation: 0 }), S('f', 'f', { ...scannedTrack, closestSolfeggio: 528, harmonicDeviation: 0 })]),
-  { total: 6, noCrystal: 3, unscanned: 2, assignedToScan: 0, scanned: 4, scanReplaced: 1, emptyCrystals: 25, placeable: 0, sourceBack: 0, spreadCover: 6, olderReadings: 3 }, 'libraryHealth: scanned (a scan, the 999 fallback, two the old Auto-Distribute re-stored), the queue, ONE real put-back');
+  { total: 6, noCrystal: 3, unscanned: 2, assignedToScan: 0, scanned: 4, scanReplaced: 1, emptyCrystals: 25, placeable: 0, sourceBack: 0, spreadCover: 6, olderReadings: 3, awaitingKey: 0, clearKeys: 0 }, 'libraryHealth: scanned (a scan, the 999 fallback, two the old Auto-Distribute re-stored), the queue, ONE real put-back');
 eq([h1.unscanned, h1.assignedToScan], [deepScanQueue(set1).length, deepScanQueue(set1, { assigned: true }).length - deepScanQueue(set1).length], 'Scan counts = Deep Scan’s two queues');
 eq(h1.unscanned + h1.assignedToScan, set1.filter((s) => needsDeepScan(s)).length, 'together, every unscanned track');
 check(h1.noCrystal !== h1.unscanned, 'the crystal count is not the scan count (a mutant that swaps them fails)');
@@ -690,8 +690,10 @@ eq(recoverWords(0, 1).recover, 'Remove copies', 'copies only');
     ['an Analyse pass', { ...idle, passPhase: 'running' }],
     ['a restore', { ...idle, restoring: true }],
     ['track lengths still being read', { ...idle, durationsLeft: 3 }],
+    ['key bands still being made (v16.8.2, K6)', { ...idle, bandsLeft: 2 }],
   ] as const) eq([spreadPlanBusy(s), spreadPlanWanted(hOld, s)], [true, false], `plan gate: busy with ${what}: no plan`);
   eq(spreadPlanBusy({ ...idle, durationsLeft: NaN }), false, 'plan gate: a junk length count is none');
+  eq([spreadPlanBusy({ ...idle, bandsLeft: 0 }), spreadPlanBusy({ ...idle, bandsLeft: NaN })], [false, false], 'plan gate: no bands left (or a junk count): not held');
   const noCrystal = libraryHealth([...spreadOld, S('n', 'n', {})]);
   eq([spreadLineReachable(noCrystal), spreadPlanWanted(noCrystal, idle)], [false, false], 'plan gate: a track with no crystal: its line comes first, no plan');
   const back = libraryHealth(spreadOld.map((s) => (s.closestSolfeggio === 2178 ? { ...s, closestSolfeggio: 852, harmonicDeviation: 1000 + Math.abs((s.harmonicFreq as number) - 852), crystalSource: 'assigned' as const } : s)));
@@ -720,6 +722,62 @@ eq(recoverWords(0, 1).recover, 'Remove copies', 'copies only');
   // (4e) An unreadable scan (0 Hz) is the plain Deep Scan's, never an older reading too.
   const zero = S('z', 'z', { harmonicFreq: 0, closestSolfeggio: 639, harmonicDeviation: 3, crystalSource: 'scan', fractalAnalysis: {} });
   eq([libraryHealth([zero]).unscanned, libraryHealth([zero]).olderReadings], [1, 0], 'an unreadable scan: in Deep Scan\'s count only');
+}
+
+// v16.8.2 ("Key placement"): the Crystals row's sub-line (K4), the D8 line's reason (K9), Track info's note (K7).
+{
+  const CH = [0.1211, 0.0123, 0.0954, 0.0187, 0.1032, 0.0811, 0.0245, 0.1702, 0.0161, 0.0988, 0.0204, 0.2382];
+  const keyed = (i: number): Partial<LibSong> => ({ chroma: [...CH], chromaA4Hz: 440, musicKey: 'G', keyConfidence: 0.8, chromaVersion: 1 });
+  const lib = (clear: number, waiting: number, other: number) => mk(clear + waiting + other, (i) => ({
+    closestSolfeggio: 528, harmonicFreq: 528, harmonicDeviation: 3, crystalSource: 'assigned' as const,
+    ...(i < clear ? keyed(i) : i < clear + waiting ? {} : { chromaVersion: 1 }),
+  }));
+  const crystals = (l: LibSong[], o: Partial<HealthInput> = {}) => healthModel(base({ health: libraryHealth(l), analyseCounts: countAnalysable(l as never, CAPS), ...o })).lines[0];
+  const h = libraryHealth(lib(3, 5, 2));
+  eq([h.clearKeys, h.awaitingKey], [3, 5], 'K4: 3 clear keys, 5 waiting (2 analysed, nothing found)');
+  eq(crystals(lib(3, 5, 2)).sub, '5 tracks have no key yet · Analyse tracks first so Assign can place them by key', 'K4: the sub-line, its count');
+  eq(crystals(lib(3, 1, 2)).sub, '1 track has no key yet · Analyse tracks first so Assign can place it by key', 'K4: the singular');
+  eq(crystals(lib(0, 5, 2)).sub, undefined, 'K4: no clear key anywhere: no sub-line (v16.8.1\'s row)');
+  eq(crystals(lib(3, 0, 2)).sub, undefined, 'K4: none waiting: no sub-line');
+  eq(crystals(lib(3, 5, 2), { pass: { ...PASS_IDLE, phase: 'running', done: 1, total: 5 } as never }).sub, undefined, 'K4: not while Analyse tracks runs');
+  // (fix round 1, T-3: the done line too, after an Assign: every crystal covered, nothing to move, keys waiting.)
+  const doneLib = lib(3, 2, 25).map((x, i) => ({ ...x, closestSolfeggio: ALL_CRYSTALS[i % 27], harmonicFreq: ALL_CRYSTALS[i % 27] }));
+  const doneLine = crystals(doneLib, { spreadMoves: 0 });
+  eq([doneLine.done, doneLine.line, doneLine.sub], [true, 'All 30 tracks have one', '2 tracks have no key yet · Analyse tracks first so Assign can place them by key'], 'K4: the done line keeps the sub-line');
+  // (fix round 1, B1: only tracks Assign places count: Source tracks waiting for a key don't.)
+  const srcWaiting = [...lib(3, 0, 27), ...[0, 1, 2].map((i) => S(`src${i}`, `tone-src-${i}`, { duration: 200, file, harmonicFreq: 2180.5, closestSolfeggio: 2178, harmonicDeviation: 2.5, crystalSource: 'scan' as const }))];
+  eq([libraryHealth(srcWaiting).awaitingKey, crystals(srcWaiting).sub], [0, undefined], 'K4: only Source tracks waiting: none counted, no sub-line');
+  // K9: the D8 line's reason, only when the key data alone cause the moves.
+  const two = lib(3, 0, 27).map((x, i) => ({ ...x, closestSolfeggio: ALL_CRYSTALS[i % 27], harmonicFreq: ALL_CRYSTALS[i % 27] })); // every crystal covered
+  const withM = (m: number, reason: boolean) => crystals(two, { spreadMoves: m, spreadKeyReason: reason }).line;
+  eq(withM(4, true), 'All 30 have one · Assign would move 4 of them · to place tracks by key', 'K9: the reason');
+  eq(withM(4, false), 'All 30 have one · Assign would move 4 of them', 'K9: moves without the keys: no reason');
+  eq(healthModel(base({ health: libraryHealth(two.slice(0, 1)), analyseCounts: countAnalysable(two.slice(0, 1) as never, CAPS), spreadMoves: 1, spreadKeyReason: true })).lines[0].line, 'The track has one · Assign would move it · to fit its key', 'K9: one track');
+  // K7: Track info's note, from the bands on its crystal (528 is the 5th crystal).
+  const t = { ...S('k', 'tone-k', { duration: 200, file: { name: 'tone-k.wav', size: 1000 }, closestSolfeggio: 528, harmonicFreq: 528, harmonicDeviation: 3, crystalSource: 'assigned' as const }), ...keyed(0) };
+  const bands = (b: number) => ALL_CRYSTALS.map((f) => (f === 528 ? b : 3));
+  const note = (s: LibSong, b: ArrayLike<number> | null | undefined) => trackInfoRows(s, NOW, b).find((r) => r.label === 'Crystal')?.note;
+  eq(note(t, bands(0)), "Assigned, not scanned yet. An assigned crystal, not a measured pitch. Its key fits this crystal's tone.", 'K7: band 0 on its crystal: the note');
+  eq(note(t, bands(1)), 'Assigned, not scanned yet. An assigned crystal, not a measured pitch.', 'K7: band 1: nothing extra');
+  eq(note(t, null), 'Assigned, not scanned yet. An assigned crystal, not a measured pitch.', 'K7: no bands cached: nothing extra');
+  eq(note({ ...t, keyConfidence: 0.3 }, bands(0)), 'Assigned, not scanned yet. An assigned crystal, not a measured pitch.', 'K7: no clear key: nothing extra, whatever the bands');
+  eq(note({ ...t, duration: 900 }, bands(0)), 'Assigned, not scanned yet. An assigned crystal, not a measured pitch.', 'K7: too long for the phone: nothing extra');
+  check(trackInfoText(t, NOW, bands(0)).includes("(Assigned, not scanned yet. An assigned crystal, not a measured pitch. Its key fits this crystal's tone.)"), 'K7: Copy has it too');
+  // (fix round 1, L-N3: with Lo Shu Perfect GUT on, not on a crystal it swaps (528 plays 519); on one it doesn't (741), yes.)
+  eq(trackInfoRows(t, NOW, bands(0), true).find((r) => r.label === 'Crystal')?.note, 'Assigned, not scanned yet. An assigned crystal, not a measured pitch.', 'K7: Lo Shu on, a swapped crystal: nothing extra');
+  const t741 = { ...t, closestSolfeggio: 741, harmonicFreq: 741 };
+  const b741 = ALL_CRYSTALS.map((f) => (f === 741 ? 0 : 3));
+  eq(trackInfoRows(t741, NOW, b741, true).find((r) => r.label === 'Crystal')?.note, "Assigned, not scanned yet. An assigned crystal, not a measured pitch. Its key fits this crystal's tone.", 'K7: Lo Shu on, a crystal it keeps (741): the note');
+  check(!trackInfoText(t, NOW, bands(0), true).includes('Its key fits'), 'K7: Lo Shu on: Copy without it too');
+  // (Fix round 2, R23: every crystal, band 0 on it, Lo Shu on: hidden on exactly the six it swaps (App's table:
+  // 174, 285, 396, 417, 528 and 639), shown on the 21 others; with Lo Shu off, shown on all 27.)
+  const hiddenOn = ALL_CRYSTALS.filter((f) => {
+    const tf = { ...t, closestSolfeggio: f, harmonicFreq: f };
+    const bf = ALL_CRYSTALS.map((g) => (g === f ? 0 : 3));
+    return !(trackInfoRows(tf, NOW, bf, true).find((r) => r.label === 'Crystal')?.note ?? '').includes('Its key fits');
+  });
+  eq(hiddenOn, [174, 285, 396, 417, 528, 639], 'K7: Lo Shu on: the note hidden on exactly the six swapped crystals, shown on the 21 others');
+  eq(ALL_CRYSTALS.filter((f) => !(trackInfoRows({ ...t, closestSolfeggio: f, harmonicFreq: f }, NOW, ALL_CRYSTALS.map((g) => (g === f ? 0 : 3)), false).find((r) => r.label === 'Crystal')?.note ?? '').includes('Its key fits')), [], 'K7: Lo Shu off: the note on all 27');
 }
 
 if (failures.length) {

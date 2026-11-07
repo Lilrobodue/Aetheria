@@ -20,6 +20,7 @@ import {
   upcomingIds,
   queueOrder,
   holdFor,
+  HoldBounds,
   projectedBytes,
   heapTooFull,
   idleAfter,
@@ -388,6 +389,47 @@ const libSong = (w: World, id: string) => w.library.find((s) => s.id === id);
   expect(holdFor(pb(90.1, 100, { playbackRate: 0 }), 'native', false), 'end', 'rate 0 counts as 1');
   expect(holdFor(pb(90.1), 'native', false), null, 'wall seconds use the 432 rate');
   check(ok, `holdFor table (${bad.slice(0, 5).join('; ')})`);
+}
+
+{
+  // v16.8.2 fix round 2 (R3): HoldBounds, the gate's bounds shared with the key-band warm: a 'starting' flag stuck true
+  // latches off after STARTING_HOLD_MAX_MS (until it clears), and 'loading' lasts at most LOADING_HOLD_MAX_MS of one wait.
+  const pb = (currentTime: number, duration = 100, extra: Partial<PlaybackSnapshot> = {}): PlaybackSnapshot => ({ paused: false, duration, currentTime, playbackRate: RATE, starting: false, ...extra });
+  let t = 0;
+  const now = () => t;
+  const b = new HoldBounds();
+  const stuck = pb(50, 100, { starting: true, paused: true });
+  b.wait();
+  const seen: Array<string | null> = [];
+  for (const at of [0, 30_000, PASS.STARTING_HOLD_MAX_MS - 1, PASS.STARTING_HOLD_MAX_MS, PASS.STARTING_HOLD_MAX_MS + 5_000]) { t = at; seen.push(b.hold(stuck, 'slice', true, now)); }
+  check(JSON.stringify(seen) === JSON.stringify(['starting', 'starting', 'starting', null, null]), `HoldBounds: a stuck 'starting' holds until STARTING_HOLD_MAX_MS, then latches off (${JSON.stringify(seen)})`);
+  t += 1_000;
+  check(b.hold(pb(96, 100, { starting: true }), 'slice', true, now) === 'end', 'HoldBounds: latched, the hold under it still counts (the last 5 s)');
+  check(b.hold(pb(50), 'slice', true, now) === null && (t += 1, b.hold(stuck, 'slice', true, now)) === 'starting', 'HoldBounds: the flag cleared, the latch resets (a new start holds again)');
+  const c = new HoldBounds();
+  const loading = pb(0, NaN);
+  c.wait();
+  const ld: Array<string | null> = [];
+  for (const at of [0, 5_000, PASS.LOADING_HOLD_MAX_MS, PASS.LOADING_HOLD_MAX_MS + 1]) { t = 100_000 + at; ld.push(c.hold(loading, 'slice', true, now)); }
+  check(JSON.stringify(ld) === JSON.stringify(['loading', 'loading', 'loading', null]), `HoldBounds: 'loading' at most LOADING_HOLD_MAX_MS (${JSON.stringify(ld)})`);
+  c.wait();
+  check(c.hold(loading, 'slice', true, now) === 'loading', 'HoldBounds: a new wait counts its loading cap again');
+  let reads = 0;
+  const counted = () => { reads++; return t; };
+  const d = new HoldBounds();
+  d.hold(pb(50), 'slice', true, counted); d.hold(pb(96), 'slice', true, counted); d.hold(null, 'slice', true, counted);
+  check(reads === 0, 'HoldBounds: the clock is read only for a starting or loading hold (as the gate always did)');
+  // (Fix round 3, F6 / the tests review's pin-latch: the latch spans a run's waits, as the gate's startingSince and
+  // startingLatched did, kept per run outside gate(): a flag still stuck at the next step's wait holds no longer.)
+  const e = new HoldBounds();
+  e.wait();
+  t = 500_000;
+  e.hold(stuck, 'slice', true, now);
+  t = 500_000 + PASS.STARTING_HOLD_MAX_MS;
+  const latchedNow = e.hold(stuck, 'slice', true, now);
+  e.wait();
+  t += 1;
+  check(latchedNow === null && e.hold(stuck, 'slice', true, now) === null, "HoldBounds: the 'starting' latch spans the run's waits (the next wait doesn't hold again)");
 }
 
 {

@@ -39,8 +39,9 @@ const CAP = ASSIGN_SCORE_CAP;
 const apply = (l: readonly T[], p: AssignPlan) => patchById(l as never[], p.patches as never) as unknown as T[];
 const ser = (p: AssignPlan) => JSON.stringify([...p.patches.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)));
 const counts = (p: AssignPlan) => {
-  const { patches, source, off, again, back, readings, open, sourceGiven, ...rest } = p;
-  void patches; void source; void off; void again; void back; void readings; void open; void sourceGiven;
+  // (v16.8.2: and its key counts, which v16.7.1 has none of; these libraries have no key data.)
+  const { patches, source, off, again, back, readings, open, sourceGiven, keyed, keyFits, noKey, awaitingKey, hadCrystal, hadCrystalMoves, ...rest } = p;
+  void patches; void source; void off; void again; void back; void readings; void open; void sourceGiven; void keyed; void keyFits; void noKey; void awaitingKey; void hadCrystal; void hadCrystalMoves;
   return rest;
 };
 const fields = (s: T) => [s.closestSolfeggio ?? null, s.harmonicFreq ?? null, s.harmonicDeviation ?? null, s.crystalSource ?? null];

@@ -22,6 +22,8 @@ import {
   deleteTracksFromCache,
   saveBlobsNow,
   debouncedSaveMeta,
+  // v16.8.2 fix round 1 (A-N4): the key bands' pagehide write goes after the play state's waiting save.
+  flushPendingSave,
   saveBlobs,
   saveMetaAndState,
   cancelPendingSaves,
@@ -35,6 +37,9 @@ import {
   writePlaylistRecords,
   playlistWriteFailure,
   storagePersisted,
+  // v16.8.2: the key bands' cache record ('keyBands:v1'): read once at the start, written by saveKeyBandsNow alone.
+  readKeyBandsRecord,
+  writeKeyBandsRecord,
 } from './utils/playlistCache';
 // v16.1: saved playlists. The pure model (records, validation, edits, fingerprints, resolution against the library) and
 // their words (the shell's view model, shared with classic's two texts).
@@ -79,6 +84,8 @@ import { countCommit, reportPassWork } from './utils/perfHud';
 import { gutAlignment, heartAlignment, headAlignment, fullAlignment, crystalSetMix, goldenRatioMix, sequence111, sourceField, ultimateAlignment, loShuWalk } from './utils/mix/recipes';
 import type { MixInput, MixResult } from './utils/mix/recipes';
 import { planAssign, assignDoneText, assignNothingText, deepScanQueue, crystalOrigin, readByDeepScan, spreadFromScan, DEEP_SCAN_RATE, rescanQueue, rescanReadPatch, scanCrystalOf, crystalMoves } from './utils/mix/distribution';
+import type { AssignPlan } from './utils/mix/distribution';
+import { BandCache, bandsOf } from './utils/mix/keyBands';
 import { getHarmonicSolfeggio, PRESETS } from './utils/crystalData';
 // v15.9: the mix catalogue (names, sub-lines, counts) and the Undo toast's words.
 import { mixStartText } from './utils/mix/catalog';
@@ -170,8 +177,8 @@ import { createSoundLog } from './utils/soundV2/soundLog';
 import type { SoundLog, SoundLogFields, StorageLike } from './utils/soundV2/soundLog';
 // Analyse tracks (v15.1): key analysis and visual sync. Static imports, so they are in the offline precache.
 import { createDecodeContext, analyseKeyOf, needsKey } from './utils/soundV2/keyAnalysis';
-import { startPass, capsFor, countAnalysable, upcomingIds, passStartText, passEndText, passButtonText, passEtaMinutes, PASS_IDLE, DEFAULT_TUNING, ANALYSE_INFLIGHT_KEY } from './utils/library/analysePass';
-import type { PassHandle, PassProgress, PassTuning, PassSummary, PassPlan, StepRecord } from './utils/library/analysePass';
+import { startPass, capsFor, countAnalysable, upcomingIds, passStartText, passEndText, passButtonText, passEtaMinutes, PASS_IDLE, DEFAULT_TUNING, ANALYSE_INFLIGHT_KEY, PASS, HoldBounds, idleAfter } from './utils/library/analysePass';
+import type { PassHandle, PassProgress, PassTuning, PassSummary, PassPlan, StepRecord, PlaybackSnapshot } from './utils/library/analysePass';
 // Key fit (v15.2): the duck on the v2 layers, from the playing track's key data. Static imports, so they are in the
 // offline precache.
 import { KeyFitDuck, keyFitFor, keyFitView as keyFitViewOf, keyFitLogFields, riseHold, trackHold, hostGlideHold, laterHold, userFallEnd, gatesSilent, parseKeyFit, KEY_FIT_STORAGE_KEY, DEFAULT_KEY_FIT, DUCK_TAU_S, DUCK_FLIP_TAU_S } from './utils/soundV2/keyFit';
@@ -1436,6 +1443,9 @@ const App: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [pendingDurationAnalysis, setPendingDurationAnalysis] = useState<string[]>([]);
+  // v16.8.2 fix round 3 (F1): the lengths still to read, for the Assign press that waits for them (assignWhenKeysReady).
+  const durationsLeftRef: { current: number } = useRef(0);
+  durationsLeftRef.current = pendingDurationAnalysis.length;
   // How many times the duration analyzer has attempted each track this
   // session. This was a one-shot Set, but getAudioDuration returns 0 for ANY
   // failure — including transient ones, most notably a decode that lost the
@@ -2423,6 +2433,352 @@ const App: React.FC = () => {
   useEffect(() => {
     libraryRef.current = originalPlaylist;
   }, [originalPlaylist]);
+
+  // v16.8.2 (K6, "Key placement"): App's one key-band cache (utils/mix/keyBands.ts BandCache: how each track's key fits
+  // each crystal's tone, by content). Every spread in the app is planned with its planOptions (the Assign press, the
+  // health card's D8 plan, Scan again's closing hint), so they all read the same bands. Made once, on the first render.
+  //  - Persisted in its own record ('keyBands:v1', the playlist-state store; never the track records), read once at the
+  //    start and validated whole (import): a record that doesn't hold together is ignored, and the bands are made again.
+  //  - Warmed in slices (the analyser's: 5 ms on a phone, 8 on a desktop; parked while a phone's page is hidden) once
+  //    the record is read, and whenever key fields arrive (Analyse tracks' flushes, the desktop Deep Scan key step).
+  //  - bandsLeft (the library's clear-key tracks without bands, counted in the render, so it always matches the
+  //    library the shell reads) holds the health card's plan, as track lengths do.
+  //  - Written debounced (10 s after a warm adds bands), pruned to the library's content keys, and on pagehide.
+  //  - A Clear (cacheGeneration) stops a warm and the press waiting on it; nothing else is deleted because of it.
+  const keyBandsRef: { current: BandCache } = useRef(null);
+  if (keyBandsRef.current === null) keyBandsRef.current = new BandCache();
+  const [keyBandsTick, setKeyBandsTick] = useState(0);
+  const [keyBandsLoaded, setKeyBandsLoaded] = useState(false);
+  const keyBandsLoadedRef: { current: boolean } = useRef(false);
+  keyBandsLoadedRef.current = keyBandsLoaded;
+  const bandsLeft: number = useMemo(() => keyBandsRef.current.missing(originalPlaylist), [originalPlaylist, keyBandsTick]);
+  // (Fix round 1: pressQuiet / pressStop, the press waiting now and how to cancel it, so a user's press can take over
+  // Scan again's quiet one; workMs / wallMs, the latest background warm's (its duty, for the dev hook); cards, the health
+  // cards mounted, so a press that finishes with none shows its toast. Fix round 2: toastSeq, the keys toast's last
+  // statusToastSeqRef (R2f); playback, a dev build's stand-in for the playing element (keys.spec R3: undefined = none).)
+  const keyWarmRef: { current: { bg: number; running: boolean; press: Promise<boolean> | null; pressQuiet: boolean; pressStop: (() => void) | null; hold: boolean; dirty: boolean; saveTimer: number; savedGen: number; made: number; tickAt: number; workMs: number; wallMs: number; cards: number; toastSeq: number; playback?: PlaybackSnapshot | null } } =
+    // (Dev builds: keys.spec holds the warm from the start with window.__aetheriaKeyBandsHold, set by an init script.)
+    useRef({ bg: 0, running: false, press: null, pressQuiet: false, pressStop: null, hold: IS_DEV_BUILD && typeof window !== 'undefined' && (window as unknown as { __aetheriaKeyBandsHold?: boolean }).__aetheriaKeyBandsHold === true, dirty: false, saveTimer: 0, savedGen: 0, made: 0, tickAt: 0, workMs: 0, wallMs: 0, cards: 0, toastSeq: -1 });
+  /** The cache changed: bandsLeft is counted again (at most every 500 ms while a warm runs; always at its end). */
+  const keyBandsChanged = (force: boolean) => {
+    const w = keyWarmRef.current;
+    const now = Date.now();
+    if (!force && now - w.tickAt < 500) return;
+    w.tickAt = now;
+    setKeyBandsTick((t: number) => t + 1);
+  };
+  /** Fix round 1 (A-N1): the playing element as Analyse tracks reads it, for the holds around a track change. */
+  const keyWarmPlayback = (): PlaybackSnapshot | null => {
+    if (IS_DEV_BUILD && keyWarmRef.current.playback !== undefined) return keyWarmRef.current.playback;
+    const el = mainAudioRef.current, starting = playStartBusyRef.current;
+    if (!el) return starting ? { paused: true, duration: NaN, currentTime: 0, playbackRate: 1, starting } : null;
+    return { paused: el.paused, duration: el.duration, currentTime: el.currentTime, playbackRate: el.playbackRate, starting };
+  };
+  /** Fix round 1 (A-N2): a phone's hidden page parks the warm until it shows again (an event, never a poll). */
+  const keyWarmVisible = (): Promise<void> => new Promise<void>((resolve) => {
+    const on = () => { if (!document.hidden) { document.removeEventListener('visibilitychange', on); resolve(); } };
+    document.addEventListener('visibilitychange', on);
+    on();
+  });
+  /** Between slices: a message round trip; then (fix round 1, A-N1) on a phone the idle the duty leaves after the slice's
+   *  work (analysePass's idleAfter: the background at the analyser's own mobile duty, PASS.DUTY_MOBILE, the press at 0.5)
+   *  and its holds around a track change (holdFor, polled at PASS.POLL_MS while one lasts; fix round 2, R3: with the
+   *  gate's own bounds, analysePass HoldBounds, so a 'starting' flag stuck true or a track that never loads can't stall
+   *  it past STARTING_HOLD_MAX_MS or LOADING_HOLD_MAX_MS); a phone's hidden page parks until it shows (A-N2); the dev
+   *  hook can hold it (keys.spec). A desktop is as it was: no idle, no hold. Ends at once when `alive` turns false. */
+  const keyWarmYield = async (alive: () => boolean, workMs: number, duty: number, bounds: HoldBounds): Promise<void> => {
+    await yieldToTask();
+    const idle = ANALYSE_MOBILE ? idleAfter(workMs, duty) : 0;
+    if (idle > 0 && alive()) await new Promise<void>((r) => setTimeout(r, idle));
+    bounds.wait();
+    for (;;) {
+      if (!alive()) return;
+      if (ANALYSE_MOBILE && document.hidden) { await keyWarmVisible(); continue; }
+      if (ANALYSE_MOBILE && bounds.hold(keyWarmPlayback(), 'slice', true, () => performance.now()) !== null) { await new Promise<void>((r) => setTimeout(r, PASS.POLL_MS)); continue; }
+      if (keyWarmRef.current.hold) { await new Promise<void>((r) => setTimeout(r, 250)); continue; }
+      return;
+    }
+  };
+  /** Make the missing bands of `lib` at `duty` (a phone's; see keyWarmYield); resolves whether none of its is missing
+   *  after. `stop`, a Clear (cacheGeneration) or the unmount ends it. */
+  const warmKeyBands = async (lib: Song[], stop: () => boolean, duty: number, onLeft?: (left: number) => void): Promise<boolean> => {
+    const cache = keyBandsRef.current;
+    const gen = cacheGeneration();
+    const alive = () => !stop() && cacheGeneration() === gen && appMountedRef.current;
+    const t0 = performance.now();
+    const bounds = new HoldBounds(); // (R3: one per warm, as the gate's is one per run)
+    // (Fix round 1, T-nit 3: the dev hold, and a hidden phone page, before the first slice too; fix round 2: and a
+    // phone's hold around a track change, as the gate holds before a pass's first step.)
+    if (keyWarmRef.current.hold || (ANALYSE_MOBILE && (document.hidden || bounds.hold(keyWarmPlayback(), 'slice', true, () => performance.now()) !== null))) await keyWarmYield(alive, 0, 1, bounds);
+    const r = await cache.warm(lib, {
+      sliceMs: ANALYSE_MOBILE ? PASS.SLICE_MS_MOBILE : PASS.SLICE_MS_DESKTOP,
+      yieldFn: (workMs: number) => keyWarmYield(alive, workMs, duty, bounds),
+      shouldCancel: () => !alive(),
+      onProgress: (left: number) => { keyBandsChanged(false); onLeft?.(left); },
+    });
+    if (r.added > 0) {
+      keyWarmRef.current.made += r.added;
+      keyWarmRef.current.workMs = r.ms;
+      keyWarmRef.current.wallMs = performance.now() - t0;
+      // (Fix round 1, A-N3: the warm's own starting generation: a Clear during it writes no record afterwards.)
+      saveKeyBandsSoon(gen);
+    }
+    keyBandsChanged(true);
+    return !r.cancelled && cache.missing(lib) === 0;
+  };
+  /** The background warm: the library's missing bands, one run at a time; the press stops it and warms its own. */
+  const warmKeyBandsInBackground = (lib: Song[]) => {
+    const w = keyWarmRef.current;
+    if (w.running || w.press) return;
+    const run = ++w.bg;
+    w.running = true;
+    // (Fix round 1, A-N1: on a phone, the analyser's own mobile duty: the user isn't waiting for it.)
+    void warmKeyBands(lib, () => w.bg !== run, PASS.DUTY_MOBILE).finally(() => {
+      if (w.bg === run) w.running = false;
+      keyBandsChanged(true);
+    });
+  };
+  /** Write the record now, pruned to the library's content keys: only once the saved library has been read back (a
+   *  prune before it would drop the bands of tracks still being restored), and never after a Clear since the warm. */
+  const saveKeyBandsNow = (now = false) => {
+    const w = keyWarmRef.current;
+    if (w.saveTimer) window.clearTimeout(w.saveTimer);
+    w.saveTimer = 0;
+    if (!w.dirty) return;
+    // (A warm still running: later, with the rest; the page going away: now, what is made so far.)
+    if (!isLoadGateOpen() || (!now && w.running)) { scheduleKeyBandsSave(); return; }
+    w.dirty = false;
+    // (Fix round 1: a write waiting at a Clear is refused by the writer's own epoch check, savedGen being the warm's.)
+    const cache = keyBandsRef.current;
+    cache.prune(cache.keysOf(libraryRef.current));
+    void writeKeyBandsRecord(cache.export(), w.savedGen);
+  };
+  const saveKeyBandsNowRef: { current: (now?: boolean) => void } = useRef(saveKeyBandsNow);
+  saveKeyBandsNowRef.current = saveKeyBandsNow;
+  const scheduleKeyBandsSave = () => {
+    const w = keyWarmRef.current;
+    if (w.saveTimer) window.clearTimeout(w.saveTimer);
+    w.saveTimer = window.setTimeout(() => saveKeyBandsNow(), 10_000);
+  };
+  /** A warm that began at generation `gen` added bands: write them 10 s after the last one. Nothing when a Clear came
+   *  since the warm began (fix round 1, A-N3), and a Clear before the write drops it (the writer's epoch check). */
+  const saveKeyBandsSoon = (gen: number) => {
+    const w = keyWarmRef.current;
+    if (gen !== cacheGeneration()) return;
+    if (!w.dirty || w.savedGen !== gen) w.savedGen = gen;
+    w.dirty = true;
+    scheduleKeyBandsSave();
+  };
+  // The record, read once at the start (beside the restore), then the warm may run.
+  useEffect(() => {
+    let cancelled = false;
+    void readKeyBandsRecord().then((rec: unknown) => {
+      if (cancelled) return;
+      if (rec && !keyBandsRef.current.import(rec)) console.warn('[Aetheria] The saved key bands could not be read; they are made again.');
+      setKeyBandsLoaded(true);
+      keyBandsChanged(true);
+    });
+    // And a waiting write goes when the page is hidden or goes away (its connection is the cache's kept one).
+    // (Fix round 1, A-N4: the play state's waiting save first: its small record's put is issued before the bands' one,
+    // both through the kept connection in this same task, so a page going away keeps the play state's order.)
+    const flush = () => { if (keyWarmRef.current.dirty) { flushPendingSave(); saveKeyBandsNow(true); } };
+    const onHide = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onHide);
+    };
+  }, []);
+  // The warm-up: once the record is read, whenever the library has clear-key tracks without bands.
+  useEffect(() => {
+    if (!keyBandsLoaded || bandsLeft === 0) return;
+    warmKeyBandsInBackground(originalPlaylist);
+  }, [keyBandsLoaded, bandsLeft, keyBandsTick, originalPlaylist]);
+  /**
+   * The press's warm (the Assign press, the health card's Assign, Scan again's hint with `quiet`): every missing band
+   * of `lib`, the background warm stopped meanwhile, with the toast "Getting the keys ready… N left" (at most once a
+   * second, and only while it is the toast showing: another one that replaced it stands, fix round 1 A-N5; its Cancel
+   * ends the press, A-N6, the background warm goes on). On a phone at duty 0.5 (the user is waiting), with the holds.
+   * Resolves true once none is missing, false after a Cancel or a Clear (the caller writes nothing). A second press while
+   * one waits is dropped (false): the first one goes on; but a user's press takes over Scan again's quiet one (A-N7: its
+   * hint is dropped).
+   * Fix round 2: `why.end` says how it ended (R2d: 'short', the warm done but a band of `lib` missing after it, a prune
+   * took it, is the one a caller may retry); `again` (R2f), a later pass of the same press or the card's re-warm: its
+   * toast is never forced over another, only refreshed while the press's last one is still the toast showing;
+   * `keepToast`, the caller dismisses it (assignWhenKeysReady, at its very end); `stop`, a Cancel shared by its passes.
+   * Fix round 3 (F3): `resume`, the press going on (a card mounted later re-warms it, or its lengths were read first): its
+   * toast shows when no toast is up or the one up is the press's own, never over another (C8; a dismissed one, which
+   * bumps the sequence, doesn't stop it).
+   */
+  type KeysEnd = 'ready' | 'cancel' | 'clear' | 'short' | 'dropped';
+  /** Fix round 3 (F3): no toast is up (none shown since the last dismissal or expiry), or the one up is the press's. */
+  const pressToastFree = () => (statusToastTimerRef.current === null && stickyToastRef.current === null) || statusToastSeqRef.current === keyWarmRef.current.toastSeq;
+  const keysReady = (lib: Song[], opts?: { quiet?: boolean; again?: boolean; resume?: boolean; keepToast?: boolean; stop?: { cancelled: boolean }; why?: { end?: KeysEnd }; reshow?: (f: ((user: boolean) => void) | null) => void }): Promise<boolean> => {
+    const w = keyWarmRef.current;
+    const end = (e: KeysEnd) => { if (opts?.why) opts.why.end = e; };
+    if (keyBandsRef.current.missing(lib) === 0) { end('ready'); return Promise.resolve(true); }
+    if (w.press) {
+      if (w.pressQuiet && !opts?.quiet) {
+        w.pressStop?.();
+        return w.press.then(() => keysReady(lib, opts));
+      }
+      return w.press.then(() => { end('dropped'); return false; });
+    }
+    w.bg++; // the background warm stops (what it made is kept)
+    w.running = false;
+    let stopped = false;
+    const cancelled = () => stopped || !!opts?.stop?.cancelled;
+    let shownAt = 0;
+    // (R2f: a later pass starts from the press's last toast, so it refreshes only that one, while it still shows.)
+    let seq = opts?.again ? w.toastSeq : -1;
+    const say = (left: number, force: boolean) => {
+      if (opts?.quiet || cancelled()) return;
+      const now = Date.now();
+      // (Fix round 4, G3: a press that hasn't shown its toast yet shows it once nothing else is up, never over another.)
+      if (!force && (now - shownAt < 1000 || (seq < 0 ? !pressToastFree() : statusToastSeqRef.current !== seq))) return;
+      shownAt = now;
+      showStatusToast(`Getting the keys ready… ${left.toLocaleString()} left`, { durationMs: 60_000, actionLabel: 'Cancel', onAction: () => { stopped = true; if (opts?.stop) opts.stop.cancelled = true; } });
+      seq = statusToastSeqRef.current;
+      w.toastSeq = seq;
+    };
+    // (R2f: only a user's own press shows it over another toast; F3: a press going on shows it where nothing else is up.)
+    say(keyBandsRef.current.missing(lib), opts?.resume ? pressToastFree() : !opts?.again);
+    // (G3: and while it waits without having shown it, it looks again twice a second: a parked warm makes no progress to
+    // show it on. G1: the press's toast, again, for a second tap that joins it.)
+    const look = !opts?.quiet && seq < 0 ? window.setInterval(() => { if (seq >= 0) window.clearInterval(look); else say(keyBandsRef.current.missing(lib), false); }, 500) : 0;
+    opts?.reshow?.((user: boolean) => say(keyBandsRef.current.missing(lib), user || pressToastFree()));
+    w.pressQuiet = !!opts?.quiet;
+    w.pressStop = () => { stopped = true; };
+    const gen = cacheGeneration();
+    w.press = warmKeyBands(lib, cancelled, 0.5, (left: number) => say(left, false)).then(
+      (ready: boolean) => {
+        end(ready && !cancelled() ? 'ready' : cancelled() ? 'cancel' : gen !== cacheGeneration() || !appMountedRef.current ? 'clear' : 'short');
+        return ready && !cancelled();
+      },
+      () => { end('clear'); return false; },
+    ).then((ready: boolean) => {
+      if (look) window.clearInterval(look);
+      opts?.reshow?.(null);
+      w.press = null;
+      w.pressQuiet = false;
+      w.pressStop = null;
+      if (!opts?.keepToast && seq >= 0 && statusToastSeqRef.current === seq) dismissStatusToast();
+      keyBandsChanged(true);
+      return ready;
+    });
+    return w.press;
+  };
+  /**
+   * Fix round 1 (A-SF1, A-SF2): the health card's Assign with bands still to make. The press's warm, again while more
+   * go missing meanwhile (new key fields from an Analyse pass), so nothing is ever planned on partial bands; then the
+   * press waits in App (assignPending), not in the card: the card that is mounted takes it and plans (its confirmation
+   * when one is needed; a card mounted after the press always asks); with none mounted, a toast says how to finish.
+   * A Cancel or a Clear ends it: nothing is planned or written.
+   */
+  // (Fix round 2, R2b: the press's token is monotonic, never reset: a take marks it taken, so a re-warm that ends within
+  // the same task as the take still gives the card a new token, and React's batching can't fold it away.)
+  const [assignPending, setAssignPending] = useState(0);
+  const assignSeqRef: { current: number } = useRef(0);
+  const assignPendingRef: { current: { token: number; gen: number; taken: boolean; confirmed: AssignPlan | null } } = useRef({ token: 0, gen: 0, taken: true, confirmed: null });
+  /** Fix round 4 (G1, G2): the press in flight, from its tap to its end (the length wait, its band passes, the retries):
+   *  one Cancel for it (stop), the plan the user confirmed for it in a dialog (confirmed: it lives and dies with this
+   *  press), and how to show its toast again (reshow, set by the stage it is in). */
+  const assignRunRef: { current: { stop: { cancelled: boolean }; confirmed: AssignPlan | null; reshow: ((user: boolean) => void) | null } | null } = useRef(null);
+  /** Fix round 3 (F1): the press waits for the track lengths still being read (a plan reads them: a clear key needs a
+   *  known length, and the D8 row holds while they are read), as it waits for its bands: its toast with Cancel, a Clear
+   *  ends it. Resolves true once none is left; false after a Cancel, a Clear or the unmount. The queue always drains:
+   *  getAudioDuration resolves (0 for a file it can't read, a 15 s timeout), and a 0 is retried at most
+   *  MAX_DURATION_ATTEMPTS times. */
+  const lengthsRead = (gen: number, run: { stop: { cancelled: boolean }; reshow: ((user: boolean) => void) | null }, resume: boolean): Promise<boolean> => new Promise<boolean>((resolve) => {
+    const w = keyWarmRef.current;
+    const stop = run.stop;
+    let seq = -1;
+    let shownAt = 0;
+    const say = (force: boolean) => {
+      // (Fix round 4, G3: not shown yet, it shows once nothing else is up; shown, it is kept up only while it is up.)
+      if (!force && (seq < 0 ? !pressToastFree() : statusToastSeqRef.current !== seq)) return;
+      shownAt = Date.now();
+      showStatusToast('Reading track lengths · then Assign', { durationMs: 60_000, actionLabel: 'Cancel', onAction: () => { stop.cancelled = true; } });
+      seq = statusToastSeqRef.current;
+      w.toastSeq = seq;
+    };
+    say(resume ? pressToastFree() : true);
+    run.reshow = (user: boolean) => say(user || pressToastFree());
+    const done = (ok: boolean) => { run.reshow = null; resolve(ok); };
+    const tick = () => {
+      if (stop.cancelled || gen !== cacheGeneration() || !appMountedRef.current) { done(false); return; }
+      if (durationsLeftRef.current === 0) { done(true); return; }
+      if (seq < 0 || Date.now() - shownAt > 30_000) say(false); // kept up while it is still the toast showing
+      setTimeout(tick, 250);
+    };
+    setTimeout(tick, 250);
+  });
+  /** `again`: the card's re-warm of a press it took (fix round 3, F3: its toast shows where nothing else is up).
+   *  `confirmed` (fix round 4, G2): the plan the user confirmed in a dialog for this press; it goes with the press to the
+   *  card that takes it, and ends with it (a Cancel, a Clear, or a row tap that joins it, below). */
+  const assignWhenKeysReady = async (lib: Song[], o?: { again?: boolean; confirmed?: AssignPlan | null }): Promise<void> => {
+    // (Fix round 4, G1: one press at a time. A second, at any stage, joins the one in flight: one Cancel for both, the
+    // press's toast shown again (a tap's over anything; the card's re-warm only where nothing else is up), and the
+    // second returns. G2: a row tap that joins drops a confirmation: the press ends as a row press.)
+    const live = assignRunRef.current;
+    if (live && !live.stop.cancelled) {
+      live.confirmed = o?.confirmed ?? null;
+      live.reshow?.(!o?.again);
+      return;
+    }
+    const run: { stop: { cancelled: boolean }; confirmed: AssignPlan | null; reshow: ((user: boolean) => void) | null } = { stop: { cancelled: false }, confirmed: o?.confirmed ?? null, reshow: null };
+    assignRunRef.current = run;
+    const gen = cacheGeneration();
+    const stop = run.stop;
+    const pass = async (l: Song[], mode: 'user' | 'resume' | 'again') => {
+      const why: { end?: KeysEnd } = {};
+      const ok = await keysReady(l, { again: mode === 'again', resume: mode === 'resume', keepToast: true, stop, why, reshow: (f) => { run.reshow = f; } });
+      return { ok, end: why.end };
+    };
+    try {
+    // (F1: lengths still being read: they first, then the bands of the library as it is then.)
+    let r: { ok: boolean; end?: KeysEnd } = durationsLeftRef.current > 0 ? { ok: true, end: 'ready' } : await pass(lib, o?.again ? 'resume' : 'user');
+    let waited = false;
+    let retried = false;
+    for (;;) {
+      if (gen !== cacheGeneration() || stop.cancelled) break;
+      if (r.ok && durationsLeftRef.current > 0) {
+        if (!(await lengthsRead(gen, run, waited || !!o?.again))) { r = { ok: false, end: 'cancel' }; break; }
+        waited = true;
+        r = await pass(libraryRef.current, 'resume');
+        continue;
+      }
+      // (R2d: a pass that ended short of its bands, a prune took one while it ran, neither a Cancel, a Clear nor a
+      // dropped second press: once more, on the latest library, so the press still ends in a dialog or the toast.)
+      if (!r.ok && r.end === 'short' && !retried) { retried = true; r = await pass(libraryRef.current, 'again'); continue; }
+      if (r.ok && keyBandsRef.current.missing(libraryRef.current) > 0) { r = await pass(libraryRef.current, 'again'); continue; }
+      break;
+    }
+    const w = keyWarmRef.current;
+    if (w.toastSeq >= 0 && statusToastSeqRef.current === w.toastSeq) dismissStatusToast();
+    if (assignRunRef.current === run) assignRunRef.current = null;
+    if (!r.ok || gen !== cacheGeneration() || stop.cancelled) return;
+    const token = ++assignSeqRef.current;
+    assignPendingRef.current = { token, gen, taken: false, confirmed: run.confirmed };
+    setAssignPending(token);
+    if (w.cards === 0) {
+      showStatusToast('Keys ready · open Library to Assign', { durationMs: 12_000, actionLabel: 'Open', onAction: () => { setShellTab('library'); dismissStatusToast(); } });
+      w.toastSeq = statusToastSeqRef.current; // (the press's own: the card that takes it may show its re-warm's over it)
+    }
+    } finally {
+      if (assignRunRef.current === run) assignRunRef.current = null;
+    }
+  };
+  /** The card takes the waiting press once, if a Clear hasn't come since: with the plan the user confirmed for it (G2),
+   *  or null when there is none to take. */
+  const takeAssignPending = (): { confirmed: AssignPlan | null } | null => {
+    const a = assignPendingRef.current;
+    if (a.taken) return null;
+    a.taken = true;
+    return a.gen === cacheGeneration() ? { confirmed: a.confirmed } : null;
+  };
   // v15.7: the play order's entries are the library's own objects, by id (listOps.refreshById). An order built from a
   // library one commit old (a Library tap racing a patch) or a patch that reached only the library would otherwise
   // leave an older copy of a track in the play order, which the metadata save prefers. Same ids, order and length, the
@@ -5041,14 +5397,21 @@ const App: React.FC = () => {
           // spreads, not only the tracks read differently (on a 48 kHz device often none). One plan per run, of the
           // library with this run's results in it. (Rev-logic 5: after a Stop with nothing read, no words at all.)
           const n = (x: number) => x.toLocaleString();
-          const moves = rescanned > 0 ? crystalMoves(planAssign(patchById(libraryRef.current, results), 'spread')) : 0;
+          // v16.8.2: planned with App's key bands, made first when some are missing (quietly, once per run); a Clear or a
+          // press waiting meanwhile: no plan, so no hint.
+          const planned = rescanned > 0 ? patchById(libraryRef.current, results) : null;
+          const keysOk = planned ? await keysReady(planned, { quiet: true }) : false;
+          const hintPlan = planned && keysOk ? planAssign(planned, 'spread', keyBandsRef.current.planOptions) : null;
+          const moves = hintPlan ? crystalMoves(hintPlan) : 0;
+          // (Fix round 1, A-N8: when the plan places tracks by key, the hint says so: "by the new readings" alone isn't true.)
+          const byKey = (hintPlan?.keyed ?? 0) > 0;
           const words = rescanned === 0 && rescanFailed > 0
             ? `Scan again couldn't read ${n(rescanFailed)} ${rescanFailed === 1 ? 'track. It keeps its older reading.' : 'tracks. They keep their older readings.'}`
             : rescanned === 0
               ? (shouldCancel ? null : 'Nothing left to scan again.')
               : `Scanned again: ${n(rescanned)} ${rescanned === 1 ? 'track' : 'tracks'} · ${n(readDifferently)} read differently` +
                 (rescanFailed > 0 ? ` · ${n(rescanFailed)} couldn't be read` : '') +
-                (moves > 0 ? ' · Tap Assign to spread your library by the new readings' : '');
+                (moves > 0 ? (byKey ? (readDifferently > 0 ? ' · Tap Assign to place your library by key and the new readings' : ' · Tap Assign to place your library by key') : ' · Tap Assign to spread your library by the new readings') : '');
           if (words) {
             setAnalysisNotification(words);
             setTimeout(() => setAnalysisNotification(null), 8000);
@@ -7346,17 +7709,39 @@ registerProcessor('wav-capture', WavCapture);
 
   // v15.7: AUTO-DISTRIBUTE (lifted verbatim from the classic button's onClick, which now calls it; the Library tab's
   // health card calls it too).
-  const autoDistribute = () => {
+  // v16.8.2 (K6): the Assign press with bands still to make: they are made first (keysReady, with its progress toast),
+  // then the press runs again on App's latest state (shellActionsRef). A Stop or a Clear meanwhile ends it, writing
+  // nothing. Never a plan on partial bands.
+  const keysThenAssign = (lib: Song[]) => {
+    void keysReady(lib).then((ready: boolean) => { if (ready) shellActionsRef.current?.autoDistribute(); });
+  };
+  const keysReadyRef: { current: (lib: Song[], opts?: { quiet?: boolean }) => Promise<boolean> } = useRef(keysReady as (lib: Song[], opts?: { quiet?: boolean }) => Promise<boolean>);
+  keysReadyRef.current = keysReady;
+  const assignWhenKeysReadyRef: { current: (lib: Song[], o?: { again?: boolean; confirmed?: AssignPlan | null }) => Promise<void> } = useRef(assignWhenKeysReady);
+  assignWhenKeysReadyRef.current = assignWhenKeysReady;
+  const takeAssignPendingRef: { current: () => { confirmed: AssignPlan | null } | null } = useRef(takeAssignPending);
+  takeAssignPendingRef.current = takeAssignPending;
+  // v16.8.2 fix round 2 (R2a): `planned`, the plan the health card's confirmation showed, applied exactly (the shell's
+  // assignPlan passes it only while the library is still the array it was made from; otherwise the card presses again).
+  const autoDistribute = (planned?: { plan: AssignPlan }) => {
     // Not during a Deep Scan: the scan is writing real analysis into these tracks.
     if (isScanning) {
       showStatusToast('Auto-Distribute is unavailable while Deep Scan runs.');
+      return;
+    }
+    // v16.8.2 (K6): never planned on partial bands. With any still to make, they are made first (keysThenAssign), and
+    // the press comes back here. Then the spread places each track with a clear key by how its key fits each crystal's
+    // tone (App's key-band cache), Deep Scan's reading breaking ties.
+    const keyBands = keyBandsRef.current;
+    if (!planned && keyBands.missing(originalPlaylist) > 0) {
+      keysThenAssign(originalPlaylist);
       return;
     }
     // v16.7.1: every press spreads (v16.8's planAssign(lib, 'spread')): every track, scanned ones too, over all 27
     // crystals, the GUT, HEART and HEAD ranges in turn, the same result on every press. A scanned track moved off Deep
     // Scan's crystal keeps its reading (harmonicFreq) and is marked (crystalSource 'assigned', harmonicDeviation
     // SPREAD_MARK + its distance). Only the crystal fields change, by id, in the library and the play order.
-    const plan = planAssign(originalPlaylist, 'spread');
+    const plan = planned ? planned.plan : planAssign(originalPlaylist, 'spread', keyBands.planOptions);
     if (plan.patches.size === 0) {
       showStatusToast(assignNothingText(plan));
       return;
@@ -8896,8 +9281,11 @@ registerProcessor('wav-capture', WavCapture);
       scanRun, // v16.8.1 (D4): Scan again's progress line
       deviceRate, // v16.8.1 (D4): its rate note
       rescanSkip, // v16.8.1 fix round 1: the tracks it couldn't read this session
+      bandsLeft, // v16.8.2 (K6): the library's clear-key tracks without bands (the card's plan waits)
+      keyBands: keyBandsRef.current, // v16.8.2: App's one key-band cache (the card plans with its planOptions)
+      assignPending, // v16.8.2 fix round 1 (A-SF2): a press whose bands are ready, waiting for the card
     }),
-    [isScanning, scanProgress, pass, analyseCounts, isRestoring, pendingDurationAnalysis.length, shellOrphans, orphanBusy, discardArmed, lastImport, storedTrackCount, savedPlaylists, scanRun, deviceRate, rescanSkip]
+    [isScanning, scanProgress, pass, analyseCounts, isRestoring, pendingDurationAnalysis.length, shellOrphans, orphanBusy, discardArmed, lastImport, storedTrackCount, savedPlaylists, scanRun, deviceRate, rescanSkip, bandsLeft, assignPending]
   );
   // v16.1: the saved playlists' slice (PlaylistsContext): the list's rows (summaries, O(total entries)), the open
   // playlist's resolved rows, the name Dialog and the Add sheet. Only while the new layout shows; never the clock (the
@@ -9024,12 +9412,49 @@ registerProcessor('wav-capture', WavCapture);
           spreadPlans: (window as unknown as { __aetheriaSpreadPlans?: number }).__aetheriaSpreadPlans ?? 0,
           durations: s.playlist.map((x: Song) => (typeof x.duration === 'number' ? x.duration : null)),
           libraryDurations: libraryRef.current.map((x: Song) => (typeof x.duration === 'number' ? x.duration : null)),
+          // v16.8.2 (K6): the key bands: the library's clear-key tracks without them, the cache's entries, the last warm's
+          // ms per track (null before one made any), and the bands made this session (0 when the record had them all).
+          bandsLeft: keyBandsRef.current.missing(libraryRef.current),
+          bandsCached: keyBandsRef.current.size,
+          bandsMsPerTrack: keyBandsRef.current.lastWarm ? keyBandsRef.current.lastWarm.msPerTrack : null,
+          bandsMade: keyWarmRef.current.made,
+          bandsLoaded: keyBandsLoadedRef.current,
+          bandsWarming: keyWarmRef.current.running || !!keyWarmRef.current.press,
+          // (fix round 1: the latest background warm's work and wall ms: its duty, work / wall)
+          bandsWorkMs: keyWarmRef.current.workMs,
+          bandsWallMs: keyWarmRef.current.wallMs,
         };
       },
       /** The latest tap's Undo, as its toast's button does (for the negative halves once the toast is gone). */
       undo: () => shellActionsRef.current?.undoPlayOrder(),
     };
     return () => { delete w.__aetheriaLibrary; };
+  }, []);
+  // v16.8.2: the key placement tests (keys.spec) drive the warm through this hook, __aetheriaKeyBands (dev builds only;
+  // production strips it; __aetheriaKeys is the desktop shortcuts' counter, useDesktopKeys):
+  // hold(true) parks it between slices, bandsOf is keyBands.ts's own on the page's JS engine (K-8), flush writes the
+  // record now; press(quiet) is a press's keysReady on the library (fix round 1, K-1e: a second press, Scan again's
+  // quiet one taken over).
+  useEffect(() => {
+    if (!IS_DEV_BUILD) return;
+    const w = window as unknown as { __aetheriaKeyBands?: unknown };
+    w.__aetheriaKeyBands = {
+      hold: (on: boolean) => { keyWarmRef.current.hold = !!on; },
+      bandsOf: (chroma: number[], a4: number) => Array.from(bandsOf(chroma, a4)),
+      flush: () => saveKeyBandsNowRef.current(true),
+      press: (quiet?: boolean) => keysReadyRef.current(libraryRef.current, quiet ? { quiet: true } : undefined),
+      // (Fix round 2: assign, the card's press on the library as App runs it, resolving when it ends (R30, R2d, R2e);
+      // left, the bands the library misses now; cached, the bands made; dropBand(i), a prune of track i's band (R2d);
+      // playback(pb), a stand-in for the playing element as the warm reads it, undefined for the real one (R3, R10).)
+      assign: () => assignWhenKeysReadyRef.current(libraryRef.current),
+      left: () => keyBandsRef.current.missing(libraryRef.current),
+      cached: () => keyBandsRef.current.map.size,
+      dropBand: (i: number) => { const t = libraryRef.current[i]; return !!t && keyBandsRef.current.map.delete(keyBandsRef.current.keyOf(t)); },
+      playback: (pb?: PlaybackSnapshot | null) => { keyWarmRef.current.playback = pb; },
+      // (and pending: a record write waits on its 10 s debounce, K-4e.)
+      pending: () => keyWarmRef.current.dirty && keyWarmRef.current.saveTimer !== 0,
+    };
+    return () => { delete w.__aetheriaKeyBands; };
   }, []);
   // v16.0: the queue's tests drive it and read it through this hook (dev builds only; production strips it).
   useEffect(() => {
@@ -9825,6 +10250,19 @@ registerProcessor('wav-capture', WavCapture);
       undoPlayOrder: () => A().undoPlayOrder(),
       requestDelete: (id: string) => A().requestDelete(id),
       assignCrystals: () => A().autoDistribute(),
+      // v16.8.2 fix round 2 (R2a): the plan the card's confirmation showed, applied exactly while the library is still
+      // the array it was made from (false otherwise: the card presses again on the latest library and asks).
+      assignPlan: (plan: AssignPlan, lib: readonly Song[]) => {
+        if (lib !== libraryRef.current) return false;
+        A().autoDistribute({ plan });
+        return true;
+      },
+      // v16.8.2 (K6): the health card's Assign with bands still to make: the press's warm, then it plans (keysReady).
+      keysReady: (songs: Song[]) => keysReadyRef.current(songs),
+      // v16.8.2 fix round 1 (A-SF1, A-SF2): the card's press with bands still to make, and its taking of the press.
+      assignWhenKeysReady: (songs: Song[], o?: { again?: boolean; confirmed?: AssignPlan | null }) => assignWhenKeysReadyRef.current(songs, o),
+      takeAssignPending: () => takeAssignPendingRef.current(),
+      noteHealthCard: (on: boolean) => { keyWarmRef.current.cards = Math.max(0, keyWarmRef.current.cards + (on ? 1 : -1)); },
       // v16.5 review (B10): while an export runs, Analyse tracks and Deep Scan don't start (their decodes would stack on
       // the export's); a running pass's Stop still works.
       analyse: () => {
@@ -10488,7 +10926,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.8.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.8.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -10840,7 +11278,7 @@ registerProcessor('wav-capture', WavCapture);
                <button
                 aria-disabled={isScanning}
                 title={isScanning ? 'Unavailable while Deep Scan runs' : undefined}
-                onClick={autoDistribute}
+                onClick={() => autoDistribute()}
                 className={`mb-3 w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg font-medium tracking-wide transition-all border border-gold-500/30 ${isScanning ? 'opacity-40 cursor-not-allowed' : 'active:scale-95 hover:border-gold-500/50'}`}
                >
                  <Target size={14} className="text-gold-400" />

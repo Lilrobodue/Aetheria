@@ -16,10 +16,11 @@ export const PLACES: Readonly<Record<PlaceKey, { classic: string; new: string }>
     classic: 'Click "Deep Scan" — wait for your music to be processed',
     new: 'In Library, open Library health and tap Scan (Deep Scan: slow, and optional)',
   },
-  // P2: step 4 (v16.7.3: songs Deep Scan placed on 2178 Hz keep the SOURCE crystal)
+  // P2: step 4 (v16.7.3: songs Deep Scan placed on 2178 Hz keep the SOURCE crystal; v16.8.2: songs with a clear key go
+  // first to crystals whose tone fits their key)
   assign: {
-    classic: 'Click "Auto-Distribute Frequencies" — every song, scanned ones too, is spread over the 27 Aetheria frequencies across the GUT, HEART and HEAD ranges; songs Deep Scan placed on 2178 Hz keep the SOURCE crystal',
-    new: 'In Library’s health card, tap Assign — every song, scanned ones too, is spread over the 27 crystals across the GUT, HEART and HEAD ranges; songs Deep Scan placed on 2178 Hz keep the SOURCE crystal',
+    classic: 'Click "Auto-Distribute Frequencies" — every song, scanned ones too, is spread over the 27 Aetheria frequencies across the GUT, HEART and HEAD ranges; songs Deep Scan placed on 2178 Hz keep the SOURCE crystal; songs with a clear key go first to crystals whose tone fits their key',
+    new: 'In Library’s health card, tap Assign — every song, scanned ones too, is spread over the 27 crystals across the GUT, HEART and HEAD ranges; songs Deep Scan placed on 2178 Hz keep the SOURCE crystal; songs with a clear key go first to crystals whose tone fits their key',
   },
   // P3: step 5
   modes: {

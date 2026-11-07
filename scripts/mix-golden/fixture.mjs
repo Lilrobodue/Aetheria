@@ -18,6 +18,10 @@
 // crystals only), F3 (three unscanned), F0 (empty), F160u (160 unscanned), F111gap (F160 with the 111 Sequence's
 // First order unscanned), FLEG (a v15.7 library replayed with v15.7's own code: Deep Scan, the old Auto-Distribute,
 // later imports and scans; stored as data in fixtures-fleg.json, synthetic names, with each track's true history).
+// v16.8.2 ("Key placement"): FKEY (81 tracks, Assign only: scanned, assigned earlier and never scanned, with key data:
+// clear keys, unclear ones, another analyser's, too long or too large for the phone, none) and FKEYU (30 never-scanned
+// tracks, every one with a clear key: stand-ins placed by their key). Their key data are fixed synthetic chroma arrays
+// (a key's idealised weights with seeded noise, as Analyse tracks stores them), never a recording's; no Source track.
 
 import { readFileSync } from 'node:fs';
 
@@ -141,7 +145,57 @@ export function buildFixtures() {
   const F111gap = clone(F160).map((s) => (s.closestSolfeggio === 174 ? (({ fractalAnalysis, ...rest }) => rest)(s) : s));
   // A legacy library (v15.7 history replayed: Deep Scan, the old Auto-Distribute, later imports and scans), for Assign.
   const FLEG = JSON.parse(readFileSync(new URL('./fixtures-fleg.json', import.meta.url), 'utf8')).library;
-  return { F160, F160g, F160d, F26, FGUT, F3, F0, F160u, F111gap, FLEG };
+  return { F160, F160g, F160d, F26, FGUT, F3, F0, F160u, F111gap, FLEG, ...buildKeyFixtures() };
+}
+
+// ---- v16.8.2: the key fixtures ----------------------------------------------------------------------------------
+const KEY_NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+/** Key data as Analyse tracks stores it: 12 weights at 4 dp (a key's idealised profile, tonic 3, fifth 2.5, third 2,
+ *  the other scale notes 1, the rest 0.15, with noise), an A4 at 2 dp, a key name, a confidence at 3 dp. */
+function keyData(r) {
+  const tonic = Math.floor(r() * 12), minor = r() < 0.35;
+  const scale = minor ? [0, 2, 3, 5, 7, 8, 10] : [0, 2, 4, 5, 7, 9, 11];
+  const w = new Array(12).fill(0.15);
+  scale.forEach((d, j) => { w[(tonic + d) % 12] = j === 0 ? 3 : j === 4 ? 2.5 : j === 2 ? 2 : 1; });
+  const noisy = w.map((v) => v * (0.6 + 0.8 * r()));
+  const sum = noisy.reduce((a, b) => a + b, 0);
+  const chromaA4Hz = r() < 0.75 ? Math.round((438.5 + r() * 3) * 100) / 100 : [432, 436.5, 445][Math.floor(r() * 3)];
+  return { chroma: noisy.map((v) => Math.round((v / sum) * 1e4) / 1e4), chromaA4Hz, musicKey: KEY_NOTES[tonic] + (minor ? 'm' : ''), keyConfidence: Math.round((0.5 + r() * 0.45) * 1e3) / 1e3, chromaVersion: 1 };
+}
+export function buildKeyFixtures() {
+  const r = mulberry32(1682);
+  const others = CRYSTALS.filter((c) => c !== 2178); // no Source track (a reading that maps to 2178)
+  const FKEY = [];
+  for (let i = 0; i < 81; i++) {
+    const name = `key-${String(i + 1).padStart(3, '0')}`;
+    const s = song(`17650000${String(i).padStart(5, '0')}-k${i}`, name, { duration: 100 + Math.round(r() * 500) });
+    const c = others[Math.floor(r() * others.length)];
+    const kind = i % 9;
+    if (kind < 6) {
+      // Scanned: its reading near a crystal, Deep Scan's record (some an earlier spread moved: the mark).
+      const hf = Math.round((c + (r() - 0.5) * 3) * 100) / 100;
+      Object.assign(s, { harmonicFreq: hf, closestSolfeggio: c, harmonicDeviation: Math.round(Math.abs(hf - c) * 1e6) / 1e6, crystalSource: 'scan', isAetheriaCandidate: false, fractalAnalysis: { dominantFrequency: hf } });
+    } else if (kind < 8) {
+      // Placed by an earlier Assign (its harmonicFreq is its crystal).
+      Object.assign(s, { harmonicFreq: c, closestSolfeggio: c, harmonicDeviation: 3 + (i % 7), crystalSource: 'assigned' });
+    } // else never scanned: a stand-in
+    const u = r();
+    const k = keyData(r);
+    if (u >= 0.08) { // (under it: never analysed)
+      if (u < 0.16) k.keyConfidence = Math.round((0.2 + r() * 0.24) * 1e3) / 1e3; // unclear
+      else if (u < 0.21) k.chromaVersion = 0; // another analyser's
+      else if (u < 0.26) s.duration = 721 + Math.round(r() * 900); // too long for the phone
+      else if (u < 0.3) s.file = { ...s.file, size: 104857601 + i }; // too large for the phone
+      Object.assign(s, k);
+    }
+    FKEY.push(s);
+  }
+  const r2 = mulberry32(16821);
+  const FKEYU = Array.from({ length: 30 }, (_, i) => {
+    const name = `keyu-${String(i + 1).padStart(2, '0')}`;
+    return song(`17660000${String(i).padStart(5, '0')}-u${i}`, name, { duration: 100 + Math.round(r2() * 500), ...keyData(r2) });
+  });
+  return { FKEY, FKEYU };
 }
 
 /** A play history H1 over 50 scanned F160 tracks: ties (same timestamp) and distinct times. */

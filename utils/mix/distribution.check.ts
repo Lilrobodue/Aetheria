@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   ALL_CRYSTALS, crystalOrigin, needsDeepScan, deepScanQueue, planAssign, standInFreq, assignConfirmText, assignDoneText,
-  assignNothingText, assignNeedsConfirm, scanCrystalOf, scanCrystalChanged,
+  assignNothingText, assignNeedsConfirm, scanCrystalOf, scanCrystalChanged, samePlanPatches,
 } from './distribution.ts';
 import type { AssignPlan } from './distribution.ts';
 import { getHarmonicSolfeggio, SOLFEGGIO_INFO } from '../crystalData.ts';
@@ -260,6 +260,24 @@ try {
   const ms = performance.now() - t0;
   ok(pb.total === 5000 && pb.emptyAfter === 0 && planAssign(apply(big, pb)).patches.size === 0, '5,000 tracks: placed, idempotent');
   ok(ms < 2000, `5,000 tracks in ${ms.toFixed(0)} ms`);
+
+  // 7. (v16.8.2 fix round 3, F1) samePlanPatches: two plans write the same, or not.
+  {
+    const a = planAssign(fleg), b = planAssign(fleg.map((s) => ({ ...s })));
+    ok(a.patches !== b.patches && a.patches.size > 2 && samePlanPatches(a.patches, b.patches), 'samePlanPatches: two plans of the same library (other maps, other objects) are equal');
+    ok(samePlanPatches(a.patches, a.patches) && samePlanPatches(new Map(), new Map()), 'samePlanPatches: itself; two empty plans');
+    const [id0, p0] = [...a.patches.entries()][0];
+    const otherId = new Map(a.patches); otherId.delete(id0); otherId.set(id0 + '-other', p0);
+    ok(!samePlanPatches(a.patches, otherId) && !samePlanPatches(otherId, a.patches), 'samePlanPatches: a different id (the same size)');
+    const otherField = new Map(a.patches); otherField.set(id0, { ...p0, closestSolfeggio: (p0.closestSolfeggio ?? 0) === 528 ? 639 : 528 });
+    ok(!samePlanPatches(a.patches, otherField), 'samePlanPatches: a different value of a field');
+    const moreField = new Map(a.patches); moreField.set(id0, { ...p0, crystalSource: p0.crystalSource ? undefined : 'assigned' });
+    ok(!samePlanPatches(a.patches, moreField) || Object.keys(p0).includes('crystalSource'), 'samePlanPatches: a field more or less (an own key, even undefined)');
+    const fewer = new Map(a.patches); fewer.delete(id0);
+    ok(!samePlanPatches(a.patches, fewer) && !samePlanPatches(fewer, a.patches), 'samePlanPatches: a different size');
+    const keyed = new Map(a.patches); keyed.set(id0, Object.fromEntries(Object.entries(p0).filter(([k]) => k !== 'harmonicDeviation')) as never);
+    ok(Object.keys(p0).includes('harmonicDeviation') ? !samePlanPatches(a.patches, keyed) : samePlanPatches(a.patches, keyed), 'samePlanPatches: a field missing (the patch writes fewer)');
+  }
 } finally {
   Math.random = realRandom;
   console.log = realLog; console.warn = realWarn;

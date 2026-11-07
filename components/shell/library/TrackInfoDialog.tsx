@@ -15,7 +15,7 @@ import Dialog, { ReadoutActions } from '../../ui/Dialog';
 import { PanelFallback, ViewBoundary } from '../../ErrorBoundary';
 import type { Song } from '../../../types';
 import { countRender } from '../devRenders';
-import { useMore, useShell } from '../contexts';
+import { useLibraryStatus, useMore, useShell, useSound } from '../contexts';
 import { EvidenceOrigin } from '../../guide/evidenceLink';
 import { trackInfoRows, trackInfoText } from './libraryModel';
 import { SCAN_SECTION_LEAD, SCAN_SECTION_TITLE, scanScoreRows, scanScoreText } from './scanScoresModel';
@@ -26,9 +26,9 @@ interface TrackInfoDialogProps {
   onClose: () => void;
 }
 
-const TrackInfoBody = ({ song, scores }: { song: Song; scores: boolean }) => {
+const TrackInfoBody = ({ song, scores, bands, perfectGut }: { song: Song; scores: boolean; bands: ArrayLike<number> | null; perfectGut: boolean }) => {
   countRender('TrackInfo');
-  const rows = trackInfoRows(song, Date.now());
+  const rows = trackInfoRows(song, Date.now(), bands, perfectGut);
   const scoreRows = scores ? scanScoreRows(song) : [];
   return (
     <div data-testid="track-info-body">
@@ -87,14 +87,18 @@ const TrackInfoDialog = ({ song, onClose }: TrackInfoDialogProps) => {
   const { tab } = useShell();
   const origin = React.useMemo(() => ({ tab, sheet: null, label: 'Track info', trackInfo: song.id }), [tab, song.id]);
   const extra = scanScores ? scanScoreText(song) : '';
+  // v16.8.2 (K7): the track's key bands from App's cache (null without a clear key or before they are made).
+  const bands = useLibraryStatus().keyBands.get(song);
+  // (Fix round 1, L-N3: with Lo Shu Perfect GUT on, no key note on the six crystals it swaps.)
+  const { perfectGut } = useSound();
   return (
     <Dialog
       open
       title="Track info"
       onClose={onClose}
-      actions={<ReadoutActions body={extra ? `${trackInfoText(song, Date.now())}
+      actions={<ReadoutActions body={extra ? `${trackInfoText(song, Date.now(), bands, perfectGut)}
 
-${extra}` : trackInfoText(song, Date.now())} onClose={onClose} />}
+${extra}` : trackInfoText(song, Date.now(), bands, perfectGut)} onClose={onClose} />}
       data-testid="track-info-dialog"
     >
       <ViewBoundary
@@ -104,7 +108,7 @@ ${extra}` : trackInfoText(song, Date.now())} onClose={onClose} />}
         )}
         render={() => (
           <EvidenceOrigin.Provider value={origin}>
-            <TrackInfoBody song={song} scores={scanScores} />
+            <TrackInfoBody song={song} scores={scanScores} bands={bands} perfectGut={perfectGut} />
           </EvidenceOrigin.Provider>
         )}
       />

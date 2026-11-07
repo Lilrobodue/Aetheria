@@ -52,8 +52,9 @@ const apply = (l: readonly T[], p: AssignPlan) => patchById(l as never[], p.patc
 const ser = (p: AssignPlan) => JSON.stringify([...p.patches.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)));
 /** Every count of a plan, v16.7.3's own (source, off, again, back) aside. */
 const counts = (p: AssignPlan) => {
-  const { patches, source, off, again, back, readings, open, sourceGiven, ...rest } = p;
-  void patches; void source; void off; void again; void back; void readings; void open; void sourceGiven;
+  // (v16.8.2: and its key counts, which v16.7.1 has none of; these libraries have no key data.)
+  const { patches, source, off, again, back, readings, open, sourceGiven, keyed, keyFits, noKey, awaitingKey, hadCrystal, hadCrystalMoves, ...rest } = p;
+  void patches; void source; void off; void again; void back; void readings; void open; void sourceGiven; void keyed; void keyFits; void noKey; void awaitingKey; void hadCrystal; void hadCrystalMoves;
   return rest;
 };
 const unique = (l: readonly T[]) => { const seen = new Set<string>(); return l.filter((s) => s && !seen.has(s.id) && !!seen.add(s.id)); };
@@ -87,7 +88,7 @@ const measuredOpen = (s: T) => spreadRole(s).role === 'open' && readByDeepScan(s
   const oracle = readFileSync(fileURLToPath(new URL('../../scripts/mix-golden/spread-oracle.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
   const copied = oracle.match(/\/\/ ---- 666132c:utils\/mix\/distribution\.ts lines 158-176 \(the old score, as the frozen copy holds it\) ----\n([\s\S]*?)\n\/\/ ---- end of the copied lines ----/);
   eq(copied?.[1], sections.find((m) => m[1] === '158')?.[3].replace(/\n+$/, ''), "the oracle's score: the frozen copy's lines 158-176");
-  eq([...oracle.matchAll(/^import .* from '([^']+)';$/gm)].map((m) => m[0]), ["import { GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS, getHarmonicSolfeggio } from '../../utils/crystalData.ts';", "import { standInFreq } from '../../utils/mix/distribution.ts';"], "the oracle's imports: crystalData, and distribution.ts's stand-in alone");
+  eq([...oracle.matchAll(/^import .* from '([^']+)';$/gm)].map((m) => m[0]), ["import { GUT_CRYSTALS, HEART_CRYSTALS, HEAD_CRYSTALS, getHarmonicSolfeggio } from '../../utils/crystalData.ts';", "import { standInFreq } from '../../utils/mix/distribution.ts';", "import { musicFit, toneOf } from '../../utils/soundV2/aetheria_sound_v2.ts';"], "the oracle's imports: crystalData, distribution.ts's stand-in alone, and (v16.8.2) the vendored v2's musicFit and toneOf");
 }
 
 // ---- the tracks ---------------------------------------------------------------------------------------------------
@@ -203,9 +204,12 @@ function stacked(seed: number, size: number): T[] {
   });
 }
 const fx = buildFixtures();
+// (v16.8.2: the keyless fixtures only. FKEY and FKEYU carry key data, which this file's v16.7.1 comparisons and its
+// oracle calls without the bands can't place; devices.check and golden step 11 check them.)
 const fixtures: Array<[string, T[]]> = Object.entries(fx)
   .filter(([, v]) => Array.isArray(v))
-  .map(([k, v]) => [k, (v as unknown[]).filter((s) => s && typeof s === 'object').map(({ collection, ...s }: any) => s as T)]);
+  .map(([k, v]): [string, T[]] => [k, (v as unknown[]).filter((s) => s && typeof s === 'object').map(({ collection, ...s }: any) => s as T)])
+  .filter(([, l]) => !l.some((s) => Array.isArray((s as { chroma?: unknown }).chroma)));
 const sized = [0, 1, 2, 3, 5, 9, 12, 26, 27, 28, 40, 54, 81, 120];
 const randoms: Array<[string, T[]]> = Array.from({ length: 84 }, (_, k) => [`random ${k} (${sized[k % sized.length]})`, randomSource(k, sized[k % sized.length])]);
 const piles: Array<[string, T[]]> = Array.from({ length: 30 }, (_, k) => [`stacked ${k}`, stacked(k, [5, 12, 27, 30, 54][k % 5])]);

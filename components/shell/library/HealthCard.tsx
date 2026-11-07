@@ -13,15 +13,15 @@
 // Assign asks first only when crystals tracks already have would change (v15.8: the plan, computed on the tap).
 // React.memo with no props; it reads the library and the passes' state, never the time.
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Check, ChevronDown, Trash2 } from 'lucide-react';
 import { useActions, useExport, useLibraryList, useLibraryStatus, useShell } from '../contexts';
 import { countRender } from '../devRenders';
 import AssignCrystalsDialog from './AssignCrystalsDialog';
 import ClearLibraryDialog from './ClearLibraryDialog';
 import { HEALTH_FOOTER, assignNeedsConfirm, healthModel, libraryHealth, spreadLineReachable, spreadPlanBusy, spreadPlanWanted } from './libraryModel';
-import { crystalMoves, planAssign } from '../../../utils/mix/distribution';
-import type { AssignPlan } from '../../../utils/mix/distribution';
+import { crystalMoves, planAssign, samePlanPatches } from '../../../utils/mix/distribution';
+import type { AssignOptions, AssignPlan } from '../../../utils/mix/distribution';
 import type { HealthLine, LibSong } from './libraryModel';
 
 const BUTTON = 'shrink-0 min-h-touch px-3 rounded-control bg-surface-raised border border-line-strong text-sm text-ink hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400';
@@ -30,13 +30,18 @@ const BUTTON_BLOCKED = 'shrink-0 min-h-touch px-3 rounded-control bg-surface-rai
 // v16.8.1 (D8, fix round 2): the spread plans the card made, by library array (a new array on every change), so a
 // remount (a search clears, a tab comes back) doesn't plan again; and the last count planned while nothing was busy,
 // shown held while something is. Dev builds count the plans in window.__aetheriaSpreadPlans (the dev hook reports it).
+// v16.8.2: planned with App's key-band cache (st.keyBands.planOptions, the same provider as the Assign press), only once
+// none of the library's bands is missing (spreadPlanBusy holds while bandsLeft > 0).
 const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
-const spreadPlans: WeakMap<readonly LibSong[], { plan: AssignPlan; moves: number }> = new WeakMap();
-let lastIdleMoves: number | null = null;
-function spreadPlanOf(songs: readonly LibSong[]): { plan: AssignPlan; moves: number } {
+// v16.8.2 (K9): with the moves, whether the key data alone cause them: one plan more, without the bands, made only for
+// the card's D8 line, when it moves tracks and some are placed by key, and kept with the plan in the same entry (fix
+// round 1, A-N10 / L-N8: a tap reuses the cached plan and never asks for the reason, so it never plans twice).
+const spreadPlans: WeakMap<readonly LibSong[], { plan: AssignPlan; moves: number; keyReason?: boolean }> = new WeakMap();
+let lastIdle: { moves: number; keyReason: boolean } | null = null;
+function spreadPlanOf(songs: readonly LibSong[], keys: AssignOptions, reason = false): { plan: AssignPlan; moves: number; keyReason: boolean } {
   let p = spreadPlans.get(songs);
   if (!p) {
-    const plan = planAssign(songs as never, 'spread');
+    const plan = planAssign(songs as never, 'spread', keys);
     p = { plan, moves: crystalMoves(plan) };
     spreadPlans.set(songs, p);
     if (IS_DEV_BUILD) {
@@ -44,7 +49,8 @@ function spreadPlanOf(songs: readonly LibSong[]): { plan: AssignPlan; moves: num
       w.__aetheriaSpreadPlans = (w.__aetheriaSpreadPlans ?? 0) + 1;
     }
   }
-  return p;
+  if (reason && p.keyReason === undefined) p.keyReason = p.moves > 0 && (p.plan.keyed ?? 0) > 0 && crystalMoves(planAssign(songs as never, 'spread')) === 0;
+  return { plan: p.plan, moves: p.moves, keyReason: p.keyReason ?? false };
 }
 
 const HealthCard = () => {
@@ -61,11 +67,14 @@ const HealthCard = () => {
   // while a pass runs or the library restores). While busy the last idle count shows, held; with none yet, the row is
   // done. (Fix round 3, revR2-logic S1: never more than the tracks there are: tracks deleted while busy keep the count
   // planned before them.)
-  const planStatus = { isScanning: st.isScanning, passPhase: st.pass.phase, restoring: st.restoring, durationsLeft: st.durationsLeft };
+  const planStatus = { isScanning: st.isScanning, passPhase: st.pass.phase, restoring: st.restoring, durationsLeft: st.durationsLeft, bandsLeft: st.bandsLeft };
   const wanted = spreadPlanWanted(health, planStatus);
-  const spread = useMemo(() => (wanted ? { songs, ...spreadPlanOf(songs) } : null), [songs, wanted]);
-  if (spread) lastIdleMoves = spread.moves;
-  const spreadMoves = spread ? spread.moves : spreadPlanBusy(planStatus) && spreadLineReachable(health) ? Math.min(lastIdleMoves ?? 0, health.total) : 0;
+  const spread = useMemo(() => (wanted ? { songs, ...spreadPlanOf(songs, st.keyBands.planOptions, true) } : null), [songs, wanted]);
+  if (spread) lastIdle = { moves: spread.moves, keyReason: spread.keyReason };
+  const held = !spread && spreadPlanBusy(planStatus) && spreadLineReachable(health);
+  // (Fix round 3: the held count is clamped to the tracks there are; v16.8.2: its reason is held with it.)
+  const spreadMoves = spread ? spread.moves : held ? Math.min(lastIdle?.moves ?? 0, health.total) : 0;
+  const spreadKeyReason = spread ? spread.keyReason : held ? (lastIdle?.keyReason ?? false) : false;
   const model = healthModel({
     health,
     pass: st.pass,
@@ -82,12 +91,106 @@ const HealthCard = () => {
     scanRun: st.scanRun, // v16.8.1 (D4): Scan again's progress
     deviceRate: st.deviceRate, // v16.8.1 (D4): the rate note
     spreadMoves, // v16.8.1 (D8)
+    spreadKeyReason, // v16.8.2 (K9)
   });
   const [openPref, setOpenPref] = useState<boolean | null>(libraryViewRef.current.healthOpen);
-  const open = openPref ?? model.autoOpen;
-  const [confirming, setConfirming] = useState<AssignPlan | null>(null);
+  // (Fix round 2, R2a: the plan the dialog shows, with the library array it was made from; fix round 3, F1: and whether
+  // it asks again because that library changed.)
+  const [confirming, setConfirming] = useState<{ plan: AssignPlan; lib: readonly LibSong[]; seq: number; changed: boolean } | null>(null);
+  // (Fix round 3, F2: open while a confirmation is set, so it never vanishes when the card would fold itself.)
+  const open = !!confirming || (openPref ?? model.autoOpen);
+  const confirmSeq: { current: number } = useRef(0); // (a fresh dialog for every plan shown: Cancel takes the focus again)
   const [clearing, setClearing] = useState(false);
+  // (Fix round 4, G4: when the dialog closes and the card folds, focus goes to the folded card's toggle, not <body>; while
+  // the card stays open, the dialog returns it to the Assign button as before. closedAt: when the dialog closed.)
+  const toggleRef: { current: HTMLButtonElement | null } = useRef(null);
+  const closedAt: { current: number } = useRef(0);
+  useEffect(() => {
+    if (confirming || !closedAt.current || open) return;
+    if (Date.now() - closedAt.current < 3000) toggleRef.current?.focus();
+    closedAt.current = 0;
+  }, [confirming, open]);
+  // (Fix round 5, H2: the card stays open, but what the dialog gave focus back to is gone (after Assign the Crystals line
+  // is done, and its button with it), so focus fell to <body>: the card's heading takes it. Once per close, within the
+  // same 3 s, on whichever render the button goes; a fold after it is still G4's.)
+  const headingRef: { current: HTMLHeadingElement | null } = useRef(null);
+  const headingFor: { current: number } = useRef(0);
+  useEffect(() => {
+    const at = closedAt.current;
+    if (confirming || !open || !at || headingFor.current === at || Date.now() - at >= 3000) return;
+    const a = document.activeElement;
+    if (a && a !== document.body) return;
+    headingFor.current = at;
+    headingRef.current?.focus();
+  });
 
+  // v16.8.2 (K6): the library as the latest render has it (the Assign after the press's warm plans that one).
+  const songsRef: { current: readonly LibSong[] } = useRef(songs);
+  songsRef.current = songs;
+  /** The Assign of these tracks, their bands all made and their lengths read: ask first when crystals tracks have would
+   *  change (`ask`: always, for a press that finishes on a card mounted after it). Fix round 2: a plan with nothing to do
+   *  is a direct press with nothing to do (R2e: App's toast, never a dialog); otherwise exactly this plan is applied
+   *  (R2a: App refuses it if the library changed since, and then the press goes again on the latest one).
+   *  Fix round 3 (F1): `confirmed`, the plan a dialog showed and the user confirmed: the plan of the library as it is
+   *  now is applied when it writes the same (samePlanPatches: the same patches, in this tap); when it doesn't, the dialog
+   *  asks again, once, saying the library changed. Fix round 5 (H1): only on the card that confirmed it (`ask` false):
+   *  a card mounted after the press always asks, with the line only when the plan differs from the confirmation. */
+  const assignWith = (list: readonly LibSong[], ask = false, confirmed: AssignPlan | null = null) => {
+    const plan = spreadPlanOf(list, st.keyBands.planOptions).plan;
+    const same = !!confirmed && samePlanPatches(plan.patches, confirmed.patches);
+    if (same && !ask && actions.assignPlan(plan, list as never)) return;
+    if (plan.patches.size === 0) {
+      actions.assignCrystals();
+      return;
+    }
+    // (The line: the plan differs from the confirmation, or, on the card that confirmed it, App refused it as the library
+    // changed since.)
+    if (confirmed || ask || assignNeedsConfirm(plan)) setConfirming({ plan, lib: list, seq: ++confirmSeq.current, changed: !!confirmed && (!same || !ask) });
+    else if (!actions.assignPlan(plan, list as never)) pressAgain(null);
+  };
+  /** Fix round 2 (R2a): plan the latest library and apply or ask (its bands first when some are missing: the press waits
+   *  in App, and the card takes it then; fix round 3, F1: and its track lengths first while they are read, as the D8 row
+   *  holds for them). `confirmed`, the plan a dialog showed (F1): fix round 4, G2: it goes with the press in App and
+   *  comes back with the take, so it counts only for this press (a Cancel, a Clear or a row tap ends it). */
+  const pressAgain = (confirmed: AssignPlan | null) => {
+    const now = songsRef.current;
+    pressedHere.current = false;
+    if (st.durationsLeft > 0 || st.keyBands.missing(now as never) > 0) {
+      // (Fix round 5, H1: a press this card confirmed is its own: when it ends here, an equal plan is applied with no
+      // second dialog; a card mounted after it asks. pressAgain(null), a plan App refused, asks again.)
+      pressedHere.current = !!confirmed;
+      void actions.assignWhenKeysReady(now as never, { confirmed });
+      return;
+    }
+    assignWith(now, !confirmed, confirmed);
+  };
+  // v16.8.2 fix round 1 (A-SF1, A-SF2): a press whose bands App made waits there (st.assignPending), so leaving the
+  // card never drops it. The card mounted now takes it: with more bands missing by then, App warms again; then the
+  // plan, and its confirmation when one is needed (always, when this card wasn't the one pressed: it mounted later).
+  const pressedHere: { current: boolean } = useRef(false);
+  useEffect(() => {
+    actions.noteHealthCard(true);
+    return () => actions.noteHealthCard(false);
+  }, []);
+  useEffect(() => {
+    if (!st.assignPending) return;
+    const taken = actions.takeAssignPending();
+    if (!taken) return;
+    const now = songsRef.current;
+    if (st.durationsLeft > 0 || st.keyBands.missing(now as never) > 0) {
+      // (Fix round 2, R2c: the re-warm doesn't make the press this card's own: a card that didn't press still asks.)
+      void actions.assignWhenKeysReady(now as never, { again: true, confirmed: taken.confirmed });
+      return;
+    }
+    const ask = !pressedHere.current;
+    pressedHere.current = false;
+    const confirmed = taken.confirmed;
+    if (ask) {
+      libraryViewRef.current.healthOpen = true;
+      setOpenPref(true);
+    }
+    assignWith(now, ask, confirmed);
+  }, [st.assignPending]);
   const run = (line: HealthLine) => {
     const a = line.action;
     if (!a) return;
@@ -95,9 +198,19 @@ const HealthCard = () => {
       // Blocked (Deep Scan runs): Auto-Distribute's own toast says why. When crystals tracks have would change: ask
       // first, with the plan's counts. Otherwise it runs at once (its notice, or its toast when there is nothing to do).
       // v16.7.1: Assign spreads (autoDistribute's plan). v16.8.1 (D8): the card's own plan when it is of this library.
-      const plan = a.blocked ? null : spread && spread.songs === songs ? spread.plan : spreadPlanOf(songs).plan;
-      if (plan && assignNeedsConfirm(plan)) setConfirming(plan);
-      else actions.assignCrystals();
+      if (a.blocked) {
+        actions.assignCrystals();
+        return;
+      }
+      // v16.8.2 (K6): never planned on partial bands: with any missing, the press's warm first (its toast, its Cancel),
+      // in App (fix round 1: again while more go missing; the press waits there, the effect above takes it), then the
+      // plan and its confirmation. Never applied without it. (Fix round 3, F1: nor while track lengths are read.)
+      if (st.durationsLeft > 0 || st.keyBands.missing(songs as never) > 0) {
+        pressedHere.current = true;
+        void actions.assignWhenKeysReady(songs as never);
+        return;
+      }
+      assignWith(songs);
     } else if (a.kind === 'analyse') actions.analyse();
     else if (a.kind === 'scan') actions.scan();
     else if (a.kind === 'scan-assigned') actions.scanAssigned();
@@ -116,6 +229,7 @@ const HealthCard = () => {
           type="button"
           aria-expanded="false"
           data-testid="library-health-toggle"
+          ref={toggleRef}
           onClick={() => {
             libraryViewRef.current.healthOpen = true;
             setOpenPref(true);
@@ -135,7 +249,7 @@ const HealthCard = () => {
   return (
     <section aria-labelledby="library-health-h" data-testid="library-health" data-open="true" className="mx-4 mb-3 rounded-card bg-surface-panel border border-line px-4 pt-3 pb-1">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 id="library-health-h" className="text-xs font-semibold uppercase tracking-widest text-ink-soft">
+        <h2 id="library-health-h" ref={headingRef} tabIndex={-1} className="text-xs font-semibold uppercase tracking-widest text-ink-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400">
           Library health
         </h2>
         <span data-testid="library-health-status" className="text-xs text-ink-muted">
@@ -227,14 +341,24 @@ const HealthCard = () => {
         />
       ) : null}
       {confirming ? (
+        <React.Fragment key={confirming.seq}>
         <AssignCrystalsDialog
-          plan={confirming}
-          onCancel={() => setConfirming(null)}
-          onAssign={() => {
+          plan={confirming.plan}
+          changed={confirming.changed}
+          onCancel={() => {
+            closedAt.current = Date.now();
             setConfirming(null);
-            actions.assignCrystals();
+          }}
+          onAssign={() => {
+            closedAt.current = Date.now();
+            // (Fix round 2, R2a: what is written is the plan this dialog showed. Fix round 3, F1: the plan of the library
+            // as it is now, applied in this tap when it writes the same; asked again, once, when it doesn't.)
+            const c = confirming;
+            setConfirming(null);
+            pressAgain(c.plan);
           }}
         />
+        </React.Fragment>
       ) : null}
     </section>
   );

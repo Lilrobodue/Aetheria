@@ -24,7 +24,12 @@ const asClassicPlaces = (nodes: string[]): string[] => {
 // v16.6 review round 1 re-pin (the review's rewording of the technical view: B5, B6, B8, B14, B17): was
 // '64122645130c392c' (1157 text nodes).
 // Round 2 re-pin (2178's centre-cell sentences): was 'fb28630853f1004b'.
-const TECHNICAL_TEXT_SHA = '00bb58554f82ecf0'; // 1158 text nodes, v16.6 review round 2
+// v16.8.2: the Design choice example (utils/copy/evidence.ts) gains how a track's crystal follows its key; with v16.8.1's
+// copy files (evidence.ts, places.ts) this build gives v16.6's 00bb58554f82ecf0 again, so that sentence is the only change.
+// v16.8.2 fix round 1 (B3): that sentence now reads "a song with a clear key goes first to a crystal whose tone fits its
+// key" (evidence.ts), with places.ts's "go first to crystals whose tone fits their key"; with 96d4639's two copy files
+// this build gives 3cee2bb820544f0a again, so those words are the only change. Was '3cee2bb820544f0a'.
+const TECHNICAL_TEXT_SHA = 'fc0c8cd57a91a81a'; // 1158 text nodes, v16.8.2 fix round 1 (v16.6 review round 2: 00bb58554f82ecf0)
 
 const sha = (parts: string[]) => createHash('sha256').update(parts.join('\n'), 'utf8').digest('hex').slice(0, 16);
 

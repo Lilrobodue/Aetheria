@@ -35,7 +35,7 @@ const REPORT = arg('report');
 const ONLY = arg('only')?.split(',');
 const ORIGIN = `http://localhost:${PORT}`;
 
-const { loadTs, liftText, APP_FUNCS_V158, ENV_NAMES, ENV_NAMES_V159 } = await import(pathToFileURL(path.join(ROOT, 'scripts/mix-golden/lift.mjs')).href);
+const { loadTs, liftText, APP_FUNCS_V158, ENV_NAMES, ENV_NAMES_V159, ENV_NAMES_V1682 } = await import(pathToFileURL(path.join(ROOT, 'scripts/mix-golden/lift.mjs')).href);
 const { buildFixtures, mulberry32 } = await import(pathToFileURL(path.join(ROOT, 'scripts/mix-golden/fixture.mjs')).href);
 const { runScenarios } = await import(pathToFileURL(path.join(ROOT, 'scripts/mix-golden/recorder.mjs')).href);
 const ts = loadTs(ROOT);
@@ -57,7 +57,8 @@ const moduleNames = Object.keys({ ...C, ...D, ...R, ...K }).filter((k) => typeof
 const lifted = liftText(ts, readFileSync(path.join(ROOT, 'App.tsx'), 'utf8'), {
   moduleFuncs: ['getLruShuffledIndices'],
   appFuncs: APP_FUNCS_V158,
-  envNames: [...new Set([...ENV_NAMES, 'setLoShuWalkSteps', ...ENV_NAMES_V159, ...moduleNames])],
+  // (v16.8.2: App's key-band cache too; F160 has no key data, so the recorder's cache with no bands is the app's.)
+  envNames: [...new Set([...ENV_NAMES, 'setLoShuWalkSteps', ...ENV_NAMES_V159, ...(ENV_NAMES_V1682 ?? []), ...moduleNames])],
   moduleImports: Object.fromEntries(moduleNames.map((k) => [k, true])),
 });
 const F160 = buildFixtures().F160.map(({ collection, ...s }) => s);

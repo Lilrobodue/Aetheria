@@ -1035,6 +1035,8 @@ function idbChanges(a: StorageDump, b: StorageDump): string[] {
     for (const k of mb.keys()) if (!ma.has(k)) out.push(`${store}: ${norm(String(k))} added`);
   }
   if (JSON.stringify(a.stores) !== JSON.stringify(b.stores) || a.version !== b.version) out.push(`schema ${a.version}:${a.stores} -> ${b.version}:${b.stores}`);
+  // (v16.8.2: never the key bands' cache record: see keyBandsCache.)
+  for (let i = out.length - 1; i >= 0; i--) if (keyBandsCache(out[i])) out.splice(i, 1);
   if (JSON.stringify(a.dbs) !== JSON.stringify(b.dbs)) out.push(`databases ${a.dbs} -> ${b.dbs}`);
   return [...new Set(out)].sort();
 }
@@ -1048,6 +1050,10 @@ function lsChanges(a: StorageDump, b: StorageDump): string[] {
 const DATA_TRACKS = 12;
 /** What every launch, moved or not, does to the play state: the launch snapshot of the walk. */
 const LAUNCH_SNAPSHOT = 'playlist-state: current.walk changed';
+// v16.8.2: a library with key data gains the key bands' cache record ('keyBands:v1', its own record in the play-state
+// store: utils/playlistCache.ts writeKeyBandsRecord), written 10 s after the warm or on pagehide, whatever the layout. It
+// is a cache (never the tracks, the play state or the playlists), so the move's comparisons leave it out.
+const keyBandsCache = (x: string) => x.startsWith('playlist-state: keyBands:v1');
 const layoutLines = (l: string[]) => l.filter((x) => x.startsWith(`${LAYOUT_KEY}:`) || x.startsWith(`${NOTICE_KEY}:`));
 const otherLines = (l: string[]) => l.filter((x) => !x.startsWith(`${LAYOUT_KEY}:`) && !x.startsWith(`${NOTICE_KEY}:`));
 

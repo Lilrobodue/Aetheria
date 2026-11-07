@@ -25,6 +25,12 @@
 //                          longer count toward its share), and a library too small to give every crystal one fills the
 //                          empty crystals first (devices.check, source.check). needsRescan / rescanQueue (D4): the tracks
 //                          Deep Scan read before it read at DEEP_SCAN_RATE.
+//   v16.8.2 (key placement): planAssign(lib, 'spread', { bands }) compares a track's key band on each crystal (how its
+//                          measured key fits the crystal's tone: utils/mix/keyBands.ts) before Deep Scan's compatibility,
+//                          so a track with a clear key goes first to the crystals whose tone fits it, and the reading only
+//                          breaks ties (decisions U1, K1, K2). A track without bands has NEUTRAL_BAND on every crystal, so a
+//                          library with no clear-key track gets v16.8.1's plan, patch for patch (devices.check, against a
+//                          frozen copy in scripts/mix-golden/spread-v1681.ts). Keep and 'restore' never read the bands.
 //
 // What Assign does (decisions 2026-10-26, 5 and 6 after the review): Deep Scan's crystals stay, and one an older
 // Auto-Distribute replaced is put back from the track's own stored measurement. A crystal Assign placed before (recorded
@@ -58,6 +64,57 @@ export interface CrystalPatch { closestSolfeggio?: number; harmonicFreq?: number
 export type CrystalOrigin = 'scan' | 'scan-replaced' | 'scan-failed' | 'assigned' | 'none';
 
 export const ALL_CRYSTALS: readonly number[] = [...GUT_CRYSTALS, ...HEART_CRYSTALS, ...HEAD_CRYSTALS];
+const CRYSTAL_INDEX = new Map<number, number>(ALL_CRYSTALS.map((f, i) => [f, i]));
+
+/** v16.8.2: the key rank the spread compares on each crystal before the score (the one place the rule is stated).
+ *  A crystal takes, in this order:
+ *   - a track whose key fits it (band 0);
+ *   - (fix round 2, R1) a track whose key fits no crystal at all, on the crystals where its band is its own best one
+ *     (FIT_NOWHERE_BAND, 0.25): so such a track still gets the crystals it suits best before the tracks with no key,
+ *     and never ahead of a track that fits there;
+ *   - a track with no key, no clear key or no bands (NEUTRAL_BAND, 0.5, on every crystal; fix round 1, L-S1: while
+ *     keys are still arriving, a keyed track is never placed on a crystal it only partly fits ahead of a no-key track
+ *     while a fitting crystal still has room);
+ *   - a keyed track that only partly fits there (its band, 1, 2 or 3), on every other crystal.
+ *  Each rank depends on the track alone (its own bands), so the same files rank the same on every device. The bands
+ *  are integers 0-3, so any NEUTRAL_BAND in (0, 1) and any FIT_NOWHERE_BAND in (0, NEUTRAL_BAND) give the same plans.
+ *  With NEUTRAL_BAND on every track the spread is v16.8.1's exactly (every track ties). (keyBands.ts re-exports it.) */
+export const NEUTRAL_BAND = 0.5;
+/** v16.8.2 fix round 2 (R1): see NEUTRAL_BAND. */
+export const FIT_NOWHERE_BAND = 0.25;
+/** A clear-key track's 27 ranks from its 27 bands (NEUTRAL_BAND's rule): its bands as they are when some crystal fits
+ *  it (band 0); otherwise FIT_NOWHERE_BAND on the crystals with its lowest band, its band on the rest. What
+ *  AssignOptions.bands gives (keyBands.ts BandCache.planOptions); the spread compares the values it is given, so a rank
+ *  of 0 is exactly a band of 0 (keyFits) and a provider can still give other values (the checks' emulations). */
+export function keyRanks(bands: ArrayLike<number>): ArrayLike<number> {
+  let low = Infinity;
+  for (let i = 0; i < bands.length; i++) if (bands[i] < low) low = bands[i];
+  if (low === 0) return bands;
+  return Array.from(bands, (b) => (b === low ? FIT_NOWHERE_BAND : b));
+}
+/** v16.8.2 (fix round 1, B1): the tracks of `library` (each id once) that a spread places (spreadRole 'open': never a
+ *  Source track, nor an unreadable scan that stays) and that `awaiting` says could still get a clear key. The plan's
+ *  awaitingKey and the health card's Crystals sub-line both count with it, so the two numbers always agree. */
+export function awaitingKeyCount(library: readonly AssignSong[], awaiting: (s: AssignSong) => boolean): number {
+  const seen = new Set<string>();
+  let n = 0;
+  for (const s of library) {
+    if (!s || seen.has(s.id)) continue;
+    seen.add(s.id);
+    if (spreadRole(s).role === 'open' && awaiting(s)) n++;
+  }
+  return n;
+}
+/** v16.8.2: what a spread may also read. Every caller in the app passes the same one, App's BandCache's
+ *  (keyBands.ts BandCache.planOptions): bands for a clear-key track whose bands are cached (callers never plan while
+ *  some are missing). Keep and 'restore' ignore it. */
+export interface AssignOptions {
+  /** A track's 27 key bands in ALL_CRYSTALS order (0 fits .. 3 clashes), or null: NEUTRAL_BAND on every crystal. */
+  bands?: (s: AssignSong) => ArrayLike<number> | null;
+  /** A track that could get a clear key from Analyse tracks but hasn't yet (keyBands.ts awaitingKey): the plan's
+   *  awaitingKey counts them over the whole library. */
+  awaiting?: (s: AssignSong) => boolean;
+}
 const SCAN_FAILED_DEVIATION = 999; // Deep Scan's "couldn't read" fallback: 440 Hz / 528 / 999
 
 /**
@@ -324,6 +381,18 @@ export interface AssignPlan {
   /** v16.7.3 (fix round 3, W3), a spread: Source tracks with no crystal at all (a shape Deep Scan never writes), in
    *  `given`: they get the SOURCE crystal as Deep Scan's, not an assigned one. */
   sourceGiven?: number;
+  /** v16.8.2, a spread: open tracks placed by their key bands (`keyed`), of them the ones that land on a crystal whose
+   *  tone fits their key (band 0: `keyFits`), and open tracks placed without bands (`noKey`: by v16.8.1's rule). */
+  keyed?: number;
+  keyFits?: number;
+  noKey?: number;
+  /** v16.8.2, a spread: the tracks it places that are still waiting for a key (awaitingKeyCount with
+   *  AssignOptions.awaiting; 0 without it). Fix round 1: the open tracks only, as the health card counts them. */
+  awaitingKey?: number;
+  /** v16.8.2 fix round 1 (B2), a spread: the tracks that had a crystal, and of them the ones whose crystal it changes
+   *  ("This time most tracks move (M of N)": a track that had none is given one, it doesn't move). */
+  hadCrystal?: number;
+  hadCrystalMoves?: number;
 }
 
 /**
@@ -331,9 +400,11 @@ export interface AssignPlan {
  * crystals Assign placed before (anchors). Placed: the tracks with no crystal, failed scans and an older
  * Auto-Distribute's placeholders, empty crystals first, then balanced.
  */
-export function planAssign(library: readonly AssignSong[], mode: AssignMode = 'keep'): AssignPlan {
+export function planAssign(library: readonly AssignSong[], mode: AssignMode = 'keep', opts?: AssignOptions): AssignPlan {
   // v16.8 (decision 6): the spread and its way back are their own plans; Assign's own rule below is unchanged.
-  if (mode === 'spread' || mode === 'restore') return spreadOrRestore(library, mode);
+  // v16.8.2: only the spread reads the key bands (opts); the way back and Keep never do.
+  if (mode === 'spread') return spreadOrRestore(library, mode, opts);
+  if (mode === 'restore') return spreadOrRestore(library, mode);
   // v16.8.1 (D5): Keep is left as it was, its ties still broken by the id: the app never runs it (Auto-Distribute and
   // Assign crystals run planAssign(lib, 'spread') on every press, App.tsx autoDistribute), so it can't make two devices
   // differ. Only the spread's key comes from the file.
@@ -613,7 +684,7 @@ export function assignChoice(library: readonly AssignSong[]): AssignChoice {
 }
 
 /** v16.8: the plan of a spread or a way back (planAssign's modes); the same shape, with the mode and its own counts. */
-function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'restore'): AssignPlan {
+function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'restore', opts?: AssignOptions): AssignPlan {
   const seen = new Set<string>();
   const lib: AssignSong[] = [];
   for (const s of library) if (!seen.has(s.id)) { seen.add(s.id); lib.push(s); }
@@ -627,6 +698,7 @@ function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'resto
   let readings = 0; // fix round 2 (R3): a spread's tracks with a Deep Scan reading (the notice says they keep it)
   let sourceGiven = 0; // fix round 3 (W3): Source tracks with no crystal, given 2178 as Deep Scan's
   const opened: AssignSong[] = []; // a spread's open tracks (fix round 3, W1, W2: the plan says how many)
+  const keys = { keyed: 0, keyFits: 0, noKey: 0 }; // v16.8.2: a spread's open tracks by whether their key places them
   /** Only the fields that differ: a second press (or a spread already spread) writes nothing. */
   const want = (s: AssignSong, w: CrystalPatch) => {
     const p: CrystalPatch = {};
@@ -689,19 +761,31 @@ function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'resto
     // reads the id it is given): seeded by the per-device id, one never-scanned or failed track moved measured tracks
     // between devices in most libraries. A track with no file gets its id, so it is as before. (Only the spread reads a
     // stand-in here; the way back, 'restore', never does. Keep, above, still seeds by the id: D5.)
+    // v16.8.2 (K1, K2): and its key band on each crystal (opts.bands, in ALL_CRYSTALS order), compared before the score:
+    // a track with a clear key goes first to the crystals whose tone fits its key, its reading's (or its stand-in's)
+    // compatibility only breaking ties; a stand-in with a clear key (never scanned, but analysed) is placed by its key
+    // too. Without bands, NEUTRAL_BAND on every crystal: v16.8.1's order exactly.
+    const bandsFor = opts?.bands;
     const open = opened.map((s) => {
       const isMeasured = measured(s);
       if (isMeasured) readings++;
       const scanCrystal = isMeasured ? scanCrystalOf(s.harmonicFreq as number) : 0;
       const fk = fileKey(s);
       const bestMatch = isMeasured ? scanCrystal : getHarmonicSolfeggio(standInFreq({ ...s, id: fk }), true);
-      return { s, isMeasured, scanCrystal, fk, key: fnv1a('order:' + fk), scores: new Map(ALL_CRYSTALS.map((f) => [f, compatibility(bestMatch, f)])) };
+      const b = bandsFor ? bandsFor(s) : null;
+      const band = b && b.length === ALL_CRYSTALS.length ? b : null;
+      if (band) keys.keyed++;
+      else keys.noKey++;
+      return { s, isMeasured, scanCrystal, fk, key: fnv1a('order:' + fk), scores: new Map(ALL_CRYSTALS.map((f) => [f, compatibility(bestMatch, f)])), band };
     });
     type Open = (typeof open)[number];
-    // Order-free: (score, the file's hash, the file key, the id). The file key itself after its hash, so two files whose
-    // hashes collide are still told apart by what every device has.
+    const bandAt = (x: Open, f: number): number => (x.band ? x.band[CRYSTAL_INDEX.get(f)!] : NEUTRAL_BAND);
+    // Order-free: (band, score, the file's hash, the file key, the id), compared in that order, never summed. The file
+    // key itself after its hash, so two files whose hashes collide are still told apart by what every device has.
     const tie = (a: Open, b: Open) => (a.key !== b.key ? a.key < b.key : a.fk !== b.fk ? a.fk < b.fk : a.s.id < b.s.id);
     const better = (a: Open, b: Open, f: number) => {
+      const ba = bandAt(a, f), bb = bandAt(b, f);
+      if (ba !== bb) return ba < bb;
       const d = a.scores.get(f)! - b.scores.get(f)!;
       return d !== 0 ? d < 0 : tie(a, b);
     };
@@ -712,6 +796,7 @@ function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'resto
     const place = (x: Open, f: number) => {
       left.delete(x);
       counts.set(f, counts.get(f)! + 1);
+      if (x.band && bandAt(x, f) === 0) keys.keyFits++;
       const s = x.s;
       const had = s.closestSolfeggio;
       if (x.isMeasured) {
@@ -756,11 +841,12 @@ function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'resto
     for (const x of rest) {
       let min = Infinity;
       for (const f of SPREAD_ORDER) min = Math.min(min, counts.get(f)!);
-      let bestF = SPREAD_ORDER[0], bestScore = Infinity;
+      // v16.8.2: the best (band, score) of them, compared in that order (the first in SPREAD_ORDER on a tie).
+      let bestF = SPREAD_ORDER[0], bestBand = Infinity, bestScore = Infinity;
       for (const f of SPREAD_ORDER) {
         if (counts.get(f) !== min) continue;
-        const sc = x.scores.get(f)!;
-        if (sc < bestScore) { bestScore = sc; bestF = f; }
+        const bd = bandAt(x, f), sc = x.scores.get(f)!;
+        if (bd < bestBand || (bd === bestBand && sc < bestScore)) { bestBand = bd; bestScore = sc; bestF = f; }
       }
       place(x, bestF);
     }
@@ -771,7 +857,12 @@ function spreadOrRestore(library: readonly AssignSong[], mode: 'spread' | 'resto
     patches, total: lib.length, ...plan, perCrystal, mode,
     emptyBefore: ALL_CRYSTALS.filter((f) => before.get(f) === 0).length,
     emptyAfter: perCrystal.filter((c) => c === 0).length,
-    ...(mode === 'spread' ? { source, ...moves, readings, open: opened.length, sourceGiven } : {}),
+    ...(mode === 'spread' ? {
+      source, ...moves, readings, open: opened.length, sourceGiven, ...keys,
+      awaitingKey: opts?.awaiting ? awaitingKeyCount(lib, opts.awaiting) : 0,
+      hadCrystal: lib.filter((s) => !!s.closestSolfeggio).length,
+      hadCrystalMoves: lib.filter((s) => !!s.closestSolfeggio && patches.get(s.id)?.closestSolfeggio !== undefined).length,
+    } : {}),
   };
 }
 
@@ -780,6 +871,22 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 /** Tracks this Assign places (they become assigned, not scanned). */
 const placed = (p: AssignPlan) => p.given + p.moved + p.movedFailed + p.unchanged;
 
+/** v16.8.2 fix round 3 (F1): whether two plans write the same: the same ids, and for each id the same fields (the patch's
+ *  own keys, all that patchById spreads) with the same values (Object.is). The health card's confirmation applies a fresh
+ *  plan of a library that changed while it was open in the same tap when this holds (what it showed is what is written),
+ *  and asks again, once, when it doesn't. */
+export function samePlanPatches(a: ReadonlyMap<string, CrystalPatch>, b: ReadonlyMap<string, CrystalPatch>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const [id, pa] of a) {
+    const pb = b.get(id);
+    if (!pb) return false;
+    const ka = Object.keys(pa);
+    if (ka.length !== Object.keys(pb).length) return false;
+    for (const k of ka) if (!Object.prototype.hasOwnProperty.call(pb, k) || !Object.is((pa as Record<string, unknown>)[k], (pb as Record<string, unknown>)[k])) return false;
+  }
+  return true;
+}
 /** v16.8.1 (D8): the tracks whose crystal (closestSolfeggio) a plan changes: a patch carries only the fields that
  *  differ, so one with a crystal moves it (a record-only change, crystalSource or the stored score alone, is not one).
  *  A spread is idempotent: after its press, a plan of the result moves none. */
@@ -866,7 +973,9 @@ export function assignChoiceText(c: AssignChoice, o: { restore?: boolean } = {})
     c.emptyRegimes.length > 0 ? `Nothing would play in ${rangeList(c.emptyRegimes)}.` : '',
     c.emptyCrystals === 0 && c.uneven ? `Keeping Deep Scan's crystals leaves them very uneven: one crystal has ${plural(c.heaviest, 'track', 'tracks')}, another ${c.lightest}.` : '',
     also.length ? `Keeping them also ${also.join(' and ')}.` : '',
-    `Spreading places every track, scanned ones too, so ${c.total >= 27 ? 'every crystal and every range' : 'every range'} has tracks. Deep Scan's own reading stays with each track, and Assign keeps them where they are from then on.`,
+    // v16.8.2: and by key (classic's question, which the app no longer shows: classic does show the done text's key part,
+    // the keys toast and the copy, as the new layout does; classic goes in v16.9).
+    `Spreading places every track, scanned ones too, so ${c.total >= 27 ? 'every crystal and every range' : 'every range'} has tracks. Tracks with a clear key go first to crystals whose tone fits their key. Deep Scan's own reading stays with each track, and Assign keeps them where they are from then on.`,
     restore ? `${plural(c.spreadAway, 'track is', 'tracks are')} already spread away from Deep Scan's crystal.` : '',
   ];
   return { title: 'How should Assign place your tracks?', body: sentences.filter(Boolean).join(' '), keep: "Keep Deep Scan's crystals", spread: 'Spread every track over all 27 crystals', restore };
@@ -880,6 +989,7 @@ function spreadConfirmText(p: AssignPlan): { title: string; body: string } {
   // v16.7.3: the Source tracks first (F3); they are never among the scanned tracks that move (those are open ones only).
   const source = p.source ?? 0;
   const off = p.off ?? 0, again = p.again ?? 0, back = p.back ?? 0;
+  const keyed = p.keyed ?? 0, awaiting = p.awaitingKey ?? 0, had = p.hadCrystal ?? 0, hadMoves = p.hadCrystalMoves ?? 0; // v16.8.2
   const them = (n: number) => (n === 1 ? 'it' : 'them');
   // v16.7.3 (F2): the scanned tracks whose crystal changes, by how: off the crystal Deep Scan gave them, moved again
   // (already off it: an older Auto-Distribute or spread had moved them), or back on it. The reading stays with the ones
@@ -901,6 +1011,13 @@ function spreadConfirmText(p: AssignPlan): { title: string; body: string } {
     // (Fix round 2, R2, and round 3, W1: no "Every other track" when no other track is spread: every track a SOURCE one,
     // or the rest unreadable scans the spread leaves where they are.)
     source === 0 || (p.open ?? 0) > 0 ? `${source > 0 ? 'Every other track' : 'Every track'} is spread over ${p.emptyAfter === 0 ? 'all 27 crystals' : 'the crystals'}, the GUT, HEART and HEAD ranges in turn.` : '',
+    // v16.8.2 (K9): only when a track's key places it (none: v16.8.1's words, sentence for sentence). The first press
+    // after the update moves most tracks, and says so.
+    // (Fix round 1: "first", since an even spread can't give every keyed track a fitting crystal; the tracks that move
+    // are counted among the ones that had a crystal, at least 2 of them, more than half; the waiting ones are open tracks.)
+    keyed > 0 ? "Tracks with a clear key go first to crystals whose tone fits their key." : '',
+    keyed > 0 && had >= 2 && hadMoves > had / 2 ? `This time most tracks move (${hadMoves} of ${had}).` : '',
+    keyed > 0 && awaiting > 0 ? `${plural(awaiting, 'track has', 'tracks have')} no key yet: Analyse tracks to place ${awaiting === 1 ? 'it' : 'them'} by key too.` : '',
     moving ? `${moving}; Deep Scan's reading is kept.` : '',
     back ? `${plural(back, 'scanned track goes', 'scanned tracks go')} back to the crystal Deep Scan gave ${them(back)}.` : '',
     p.given > 0 ? `${plural(p.given, 'track without one gets', 'tracks without one get')} a crystal.` : '',
@@ -928,6 +1045,8 @@ function assignModeDoneText(p: AssignPlan): string {
     p.restored ? `${plural(p.restored, 'track', 'tracks')} back on 2178 Hz` : '',
     p.given ? `${plural(p.given, 'track', 'tracks')} got a crystal` : '',
     p.moved + p.movedFailed ? `${plural(p.moved + p.movedFailed, 'assigned crystal', 'assigned crystals')} moved` : '',
+    // v16.8.2: the tracks their key placed, and of them the ones on a crystal whose tone fits it (none: v16.8.1's words).
+    p.keyed ? `${p.keyed} placed by key (${p.keyFits ?? 0} where the tone fits)` : '',
   ].filter(Boolean);
   // v16.7.1: no way back in this release, so none is promised.
   // (Fix round 3, W2: with Source tracks and nothing else to place, nothing spreads: the heading of Assign's own notice.)

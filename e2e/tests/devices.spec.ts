@@ -16,6 +16,8 @@ import {
 } from './helpers';
 import { crystalMoves, planAssign, scanCrystalOf } from '../../utils/mix/distribution.ts';
 import type { AssignPlan } from '../../utils/mix/distribution.ts';
+// v16.8.2: a library with key data is planned with the key bands, as App plans it (P5's tones are analysed in the page).
+import { BandCache, clearKey } from '../../utils/mix/keyBands.ts';
 import { patchById } from '../../utils/library/listOps.ts';
 // The frozen v16.7.1 spread (666132c's own code): 9541b9d's plan of a library with no Source track.
 import { spreadV1671 } from '../../scripts/mix-golden/spread-v1671.ts';
@@ -192,9 +194,11 @@ const OLD_EVERY: Array<{ name: string; seconds?: number; freq?: number; junk?: b
   { name: 'rate-07s', seconds: 8, freq: 300, rec: { harmonicFreq: 240.487, closestSolfeggio: 852, harmonicDeviation: MARK + Math.abs(240.487 - 852), crystalSource: 'assigned', isAetheriaCandidate: false, fractalAnalysis: fa(240.487) } },
   // (Fix round 3, revR-tests nit 3: W1b's second file that no longer decodes, for the plural sentence.)
   { name: 'rate-06b', junk: true, rec: { harmonicFreq: 640.5, closestSolfeggio: 639, harmonicDeviation: 1.5, crystalSource: 'scan', isAetheriaCandidate: false, fractalAnalysis: fa(640.5) } },
+  // (v16.8.2 fix round 2, W9: rate-07s with a clear key, so the hint's plan places it by key.)
+  { name: 'rate-07k', seconds: 8, freq: 300, rec: { harmonicFreq: 240.487, closestSolfeggio: 852, harmonicDeviation: MARK + Math.abs(240.487 - 852), crystalSource: 'assigned', isAetheriaCandidate: false, fractalAnalysis: fa(240.487), chroma: [0.1211, 0.0123, 0.0954, 0.0187, 0.1032, 0.0811, 0.0245, 0.1702, 0.0161, 0.0988, 0.0204, 0.2382], chromaA4Hz: 440, musicKey: 'G', keyConfidence: 0.8 } },
 ];
 /** The older library D2 and D3 seed (W7's spread copy of rate-07 and W1b's second unreadable file aside). */
-const OLD_ALL = OLD_EVERY.filter((x) => x.name !== 'rate-07s' && x.name !== 'rate-06b');
+const OLD_ALL = OLD_EVERY.filter((x) => x.name !== 'rate-07s' && x.name !== 'rate-06b' && x.name !== 'rate-07k');
 /** After Scan again: closestSolfeggio, harmonicFreq (3 dp), what harmonicDeviation is (the spread's 'mark', Deep Scan's
  *  'distance' to the crystal, or its value), crystalSource, scanRate. */
 const AFTER: Record<string, unknown[]> = {
@@ -645,6 +649,27 @@ test.describe('v16.8.1, Scan again: the closing words', () => {
     expect(dialogs).toEqual([]);
   });
 
+  test('W9. (v16.8.2 fix round 2) a track with a clear key: the hint waits for its key bands, then says "Tap Assign to place your library by key" @mobile', async ({ page }) => {
+    test.setTimeout(150_000);
+    // The key bands held from the start (keys.spec's dev hold): the hint's plan must wait for them (X32), and then it
+    // places the track by key (R28).
+    await page.addInitScript(() => { (window as any).__aetheriaKeyBandsHold = true; });
+    const dialogs = await openOld(page, ['rate-07k']);
+    await run(page);
+    const saved = () => page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((resolve, reject) => { const r = indexedDB.open('aetheria-db'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+      const all: any[] = await new Promise((resolve) => { const g = db.transaction('meta', 'readonly').objectStore('meta').getAll(); g.onsuccess = () => resolve(g.result); });
+      db.close();
+      return all[0]?.scanRate ?? null;
+    });
+    await expect.poll(saved, { message: 'read anew and saved', timeout: 90_000, intervals: [500] }).toBe(48000);
+    await page.waitForTimeout(1500);
+    await expect(page.getByTestId('notices').getByText(/^Scanned again/), 'the closing words wait for the key bands').toHaveCount(0);
+    await page.evaluate(() => (window as any).__aetheriaKeyBands.hold(false));
+    await expect(toast(page, 'Scanned again: 1 track · 0 read differently · Tap Assign to place your library by key')).toBeVisible({ timeout: 30_000 });
+    expect(dialogs).toEqual([]);
+  });
+
   test('W8. a track deleted while its read fails is neither counted nor skipped: "Nothing left to scan again." @mobile', async ({ page }) => {
     test.setTimeout(150_000);
     const dialogs = await openOld(page, ['rate-06']);
@@ -870,7 +895,25 @@ test.describe('v16.8.1 (D8), when the card plans', () => {
     await page.evaluate(() => (window as any).__releaseDecodes());
     await expect(page.getByTestId('library-health-toggle'), 'the pass done: the card folds').toBeVisible({ timeout: 180_000 });
     await openHealth(page);
-    await expect(healthLine(page, 'crystals'), 'idle: the 40\'s own count').toHaveText(`All 40 have one · Assign would move ${M40} of them`);
+    // v16.8.2: the pass gave its five tones key data, and App plans with their key bands: so does Node, from the key
+    // fields the page stored (M40 is the count without them).)
+    const readKeyFields = (): Promise<Array<[string, Record<string, unknown>]>> => page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((resolve, reject) => { const r = indexedDB.open('aetheria-db'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+      const all: any[] = await new Promise((resolve) => { const r = db.transaction('meta', 'readonly').objectStore('meta').getAll(); r.onsuccess = () => resolve(r.result); });
+      db.close();
+      return all.map((m) => [m.id, { chroma: m.chroma, chromaA4Hz: m.chromaA4Hz, musicKey: m.musicKey, keyConfidence: m.keyConfidence, chromaVersion: m.chromaVersion }]);
+    });
+    // (Once the pass's results are saved: every stored record of this CHROMA_VERSION, the five analysed included.)
+    let keyFields: Array<[string, Record<string, unknown>]> = [];
+    await expect.poll(async () => { keyFields = await readKeyFields(); return keyFields.length === 40 && keyFields.every(([, k]) => k.chromaVersion === 1); }, { message: "the pass's results saved", timeout: 30_000 }).toBe(true);
+    const stored = new Map(keyFields);
+    const lib40 = LIB40.map((x) => ({ ...x, ...(stored.get(x.id) ?? {}) }));
+    const cache = new BandCache();
+    cache.ensureSync(lib40);
+    const m40 = crystalMoves(quietly(() => planAssign(lib40, 'spread', cache.planOptions)));
+    test.info().annotations.push({ type: 'P5 idle count', description: `${lib40.filter((x) => clearKey(x)).length} analysed tones with a clear key: ${m40} with the bands (${M40} without)` });
+    if (!lib40.some((x) => clearKey(x))) expect(m40, 'no clear key: v16.8.1\'s count').toBe(M40);
+    await expect(healthLine(page, 'crystals'), 'idle: the 40\'s own count').toHaveText(`All 40 have one · Assign would move ${m40} of them`);
     expect(dialogs).toEqual([]);
   });
 });
