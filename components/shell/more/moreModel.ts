@@ -4,10 +4,11 @@
 // the clock), Keep screen awake's stored value, About's status lines (aboutStatus), and the statement page's version
 // line. Free of app imports, so Node checks it directly (moreModel.check.ts: `npm run check:shell`).
 
-/** The More tab's pages (v16.5 adds guide, journal and advanced). The Visuals and Record sheets are sheets, not pages. */
-export type MoreView = 'root' | 'safety' | 'statement' | 'about' | 'links' | 'guide' | 'journal' | 'advanced';
+/** The More tab's pages (v16.5 adds guide, journal and advanced; v16.8.3 compose, "Compose for a crystal"). The Visuals
+ *  and Record sheets are sheets, not pages. */
+export type MoreView = 'root' | 'safety' | 'statement' | 'about' | 'links' | 'guide' | 'journal' | 'advanced' | 'compose';
 
-export const MORE_VIEWS: ReadonlyArray<MoreView> = ['root', 'safety', 'statement', 'about', 'links', 'guide', 'journal', 'advanced'];
+export const MORE_VIEWS: ReadonlyArray<MoreView> = ['root', 'safety', 'statement', 'about', 'links', 'guide', 'journal', 'advanced', 'compose'];
 
 export function isMoreView(v: unknown): v is MoreView {
   return typeof v === 'string' && (MORE_VIEWS as ReadonlyArray<string>).includes(v);
@@ -23,6 +24,7 @@ export const VIEW_TITLES: Readonly<Record<MoreView, string>> = {
   guide: 'Guide',
   journal: 'Journal',
   advanced: 'Advanced',
+  compose: 'Compose for a crystal',
 };
 
 /**
@@ -325,6 +327,45 @@ export function onMoreViewRequest(fn: (view: MoreView) => void): () => void {
   return () => {
     viewListeners.delete(fn);
   };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// v16.8.3 (Track Tuning, T9): the Crystal sheet's "Composing for this crystal" opens More › Compose for a crystal on that
+// crystal. The crystal asked for (session only) is kept here; a mounted Compose page answers at once, else reads it when
+// it mounts. A pick on the page is kept the same way.
+// ---------------------------------------------------------------------------------------------------------------
+
+let composeCrystal: number | null = null;
+/** v16.8.3 fix round 1 (N7): the page was asked for a crystal (the Crystal sheet's link), not opened from More's row:
+ *  it then shows that crystal's options first. Taken once. */
+let composeAsked = false;
+const composeListeners = new Set<(crystal: number) => void>();
+
+/** The Compose page, while mounted: called when the crystal is asked for from outside it. */
+export function onComposeCrystal(fn: (crystal: number) => void): () => void {
+  composeListeners.add(fn);
+  return () => {
+    composeListeners.delete(fn);
+  };
+}
+/** Ask for the Compose page on this crystal (or keep the page's own pick, `announce` false). */
+export function requestComposeCrystal(crystal: number, announce = true): void {
+  if (!Number.isFinite(crystal) || crystal <= 0) return;
+  composeCrystal = crystal;
+  if (announce) {
+    composeAsked = true;
+    for (const fn of Array.from(composeListeners)) fn(crystal);
+  }
+}
+/** v16.8.3 fix round 1 (N7): whether the page was asked for a crystal since it last looked (and that it has looked). */
+export function takeComposeAsked(): boolean {
+  const asked = composeAsked;
+  composeAsked = false;
+  return asked;
+}
+/** The crystal last asked for or picked this session, or null. */
+export function composeCrystalNow(): number | null {
+  return composeCrystal;
 }
 
 /** Show this More page: the mounted More tab goes there; with none mounted, it is where More opens (from its top). */

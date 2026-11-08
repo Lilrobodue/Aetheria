@@ -1,6 +1,7 @@
 import { type Locator, type Page } from '@playwright/test';
 import { test, expect, ON_DEVICE } from './fixtures';
 import { planAssign, assignConfirmText, assignNeedsConfirm } from '../../utils/mix/distribution.ts';
+import { offeredShift, solfeggioTone, tuneLabel } from '../../utils/tuning/trackTuning.ts';
 import {
   addFiles,
   cacheCounts,
@@ -799,13 +800,20 @@ test.describe('phone, the row menu', () => {
     await page.getByTestId('library-menu-info').click();
     const info = page.getByRole('dialog', { name: 'Track info', exact: true });
     await expect(info).toBeVisible();
-    const rows = async () => info.locator('dl > div').evaluateAll((ds) => ds.map((d) => [d.querySelector('dt')!.textContent, d.querySelector('dd')!.textContent]));
+    // (v16.8.3: the Tuning row after Key; as a choice it is the kit's labelled select, its dt dropped: its label and value.
+    // Fix round 1, N1: that choice sits between two definition lists, never inside one: the rows in document order.)
+    const rows = async () => info.locator('dl > div, [data-testid="track-info-tuning"]').evaluateAll((ds) => ds.map((d) => (d.querySelector('dt') ? [d.querySelector('dt')!.textContent, d.querySelector('dd')!.textContent] : [d.querySelector('label > span')!.textContent, (d.querySelector('select') as HTMLSelectElement).selectedOptions[0]?.textContent ?? null])));
+    // The seeded key (A minor, its chroma 0.34 on A) on 528 Hz: Track info offers Fit 528 Hz at Node's own shift.
+    const shift = offeredShift(Array.from({ length: 12 }, (_, k) => (k === 9 ? 0.34 : 0.06)), 440, solfeggioTone(528)); // (v16.8.3 fix round 1: the shift Track info offers)
+    expect(shift !== null && shift !== 0, 'Node: a shift for the seeded key on 528 Hz').toBe(true);
     const today = await page.evaluate(() => { const d = new Date(); return `${d.getDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()]} ${d.getFullYear()}`; });
+    await expect(info.getByTestId('track-info-tuning').locator('option')).toHaveText(['Standard (432)', `Fit 528 Hz · ${tuneLabel(shift as number)}`]);
     expect(await rows()).toEqual([
       ['Length', '0:40'],
       // v16.6: the note carries its evidence tag (the button's text, "Design choice"); the copied text stays the words.
       ['Crystal', '528 Hz · GUTAssigned, not scanned yet. An assigned crystal, not a measured pitch.Design choice'],
       ['Key', 'A minor · confidence 0.62From Analyse tracks'],
+      ['Tuning', 'Standard (432)'],
       ['Visual sync', 'From Analyse tracks'],
       ['File', 'tone-0003.wav · 625 KB'],
       ['Added', today],
@@ -814,13 +822,13 @@ test.describe('phone, the row menu', () => {
     await info.getByRole('button', { name: 'Copy', exact: true }).click();
     await expect(info.getByRole('button', { name: 'Copied', exact: true })).toBeVisible();
     expect(await page.evaluate(() => (window as any).__copied)).toBe(
-      ['tone-0003', 'Length: 0:40', 'Crystal: 528 Hz · GUT (Assigned, not scanned yet. An assigned crystal, not a measured pitch.)', 'Key: A minor · confidence 0.62 (From Analyse tracks)', 'Visual sync: From Analyse tracks', 'File: tone-0003.wav · 625 KB', `Added: ${today}`].join('\n')
+      ['tone-0003', 'Length: 0:40', 'Crystal: 528 Hz · GUT (Assigned, not scanned yet. An assigned crystal, not a measured pitch.)', 'Key: A minor · confidence 0.62 (From Analyse tracks)', 'Tuning: Standard (432)', 'Visual sync: From Analyse tracks', 'File: tone-0003.wav · 625 KB', `Added: ${today}`].join('\n')
     );
     await info.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(info).toHaveCount(0);
     await openRowMenu(page, 'tone-0005');
     await page.getByTestId('library-menu-info').click();
-    expect((await rows()).slice(1, 4)).toEqual([['Crystal', 'None yet'], ['Key', 'Not analysed yet'], ['Visual sync', 'None yet']]);
+    expect((await rows()).slice(1, 5)).toEqual([['Crystal', 'None yet'], ['Key', 'Not analysed yet'], ['Tuning', 'Standard (432)No crystal yet'], ['Visual sync', 'None yet']]);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: 'Track info' })).toHaveCount(0);
     expect(dialogs).toEqual([]);

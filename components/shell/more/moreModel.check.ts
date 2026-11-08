@@ -53,6 +53,7 @@ import {
   RELOAD_ANYWAY_LABEL,
 } from './moreModel.ts';
 import type { AboutInput, MoreView, MoreViewState, UpdateCheck } from './moreModel.ts';
+import { composeCrystalNow, onComposeCrystal, requestComposeCrystal, takeComposeAsked } from './moreModel.ts';
 import {
   RECORD_CLASSIC_LINE,
   RECORD_OPTIONS,
@@ -73,14 +74,14 @@ const eq = (a: unknown, b: unknown, what: string) => {
 };
 
 // The pages.
-eq(MORE_VIEWS, ['root', 'safety', 'statement', 'about', 'links', 'guide', 'journal', 'advanced'], "v16.5's pages");
+eq(MORE_VIEWS, ['root', 'safety', 'statement', 'about', 'links', 'guide', 'journal', 'advanced', 'compose'], "v16.5's pages, and v16.8.3's Compose for a crystal");
 eq([isMoreView('about'), isMoreView('guide'), isMoreView('advanced'), isMoreView('record'), isMoreView(null), isMoreView(3)], [true, true, true, false, false, false], 'a page or not');
-eq(MORE_VIEWS.map((v) => VIEW_TITLES[v]), ['More', 'Safety & comfort', 'Safety statement', 'About', 'Links', 'Guide', 'Journal', 'Advanced'], 'the headers');
-eq(MORE_VIEWS.map((v) => backTarget(v)), ['root', 'root', 'safety', 'root', 'root', 'root', 'root', 'root'], 'where Back goes');
+eq(MORE_VIEWS.map((v) => VIEW_TITLES[v]), ['More', 'Safety & comfort', 'Safety statement', 'About', 'Links', 'Guide', 'Journal', 'Advanced', 'Compose for a crystal'], 'the headers');
+eq(MORE_VIEWS.map((v) => backTarget(v)), ['root', 'root', 'safety', 'root', 'root', 'root', 'root', 'root', 'root'], 'where Back goes');
 eq([backLabel('safety'), backLabel('statement'), backLabel('links'), backLabel('guide')], ['Back to More', 'Back to Safety & comfort', 'Back to More', 'Back to More'], "Back's name");
 // v16.4 review: Links opened from About's row goes back to About; from the root, to the root.
-eq(MORE_VIEWS.map((v) => openerOf(v, 'links') ?? null), [null, null, null, 'about', null, null, null, null], "only About is remembered as Links' opener");
-eq(MORE_VIEWS.map((v) => openerOf('about', v) ?? null), [null, null, null, null, 'about', null, null, null], 'and only for Links');
+eq(MORE_VIEWS.map((v) => openerOf(v, 'links') ?? null), [null, null, null, 'about', null, null, null, null, null], "only About is remembered as Links' opener");
+eq(MORE_VIEWS.map((v) => openerOf('about', v) ?? null), [null, null, null, null, 'about', null, null, null, null], 'and only for Links');
 eq([backTarget('links', 'about'), backTarget('links', 'root'), backTarget('links', null), backTarget('about', 'about'), backTarget('statement', 'about'), backTarget('guide', 'about')], ['about', 'root', 'root', 'root', 'safety', 'root'], 'Back with an opener');
 eq([backLabel('links', 'about'), backLabel('links')], ['Back to About', 'Back to More'], "Back's name with an opener");
 
@@ -240,6 +241,22 @@ eq(recordingRowText('3:12'), 'Recording · 3:12', "the Record row's line while r
   requestMoreRoot(kept);
   off2();
   eq([heard, kept.current.view], [1, 'safety'], "mounted: the tab hears it; the ref is the tab's to move");
+}
+
+// v16.8.3 fix round 1 (N7): the Compose page knows it was asked for a crystal (the Crystal sheet’s link), once; a pick
+// on the page keeps the crystal but is no ask.
+{
+  takeComposeAsked();
+  eq(takeComposeAsked(), false, "N7: nothing asked");
+  requestComposeCrystal(963, false);
+  eq([composeCrystalNow(), takeComposeAsked()], [963, false], "N7: the page’s own pick is kept, and is no ask");
+  const heard: number[] = [];
+  const off = onComposeCrystal((f) => heard.push(f));
+  requestComposeCrystal(174);
+  eq([composeCrystalNow(), heard, takeComposeAsked(), takeComposeAsked()], [174, [174], true, false], "N7: the link asks once: the mounted page hears it, and the ask is taken once");
+  off();
+  requestComposeCrystal(-1);
+  eq([composeCrystalNow(), takeComposeAsked()], [174, false], "N7: a bad crystal asks nothing");
 }
 
 console.log(`moreModel: ${passed} checks passed, ${failures.length} failed`);

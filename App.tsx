@@ -86,6 +86,8 @@ import type { MixInput, MixResult } from './utils/mix/recipes';
 import { planAssign, assignDoneText, assignNothingText, deepScanQueue, crystalOrigin, readByDeepScan, spreadFromScan, DEEP_SCAN_RATE, rescanQueue, rescanReadPatch, scanCrystalOf, crystalMoves } from './utils/mix/distribution';
 import type { AssignPlan } from './utils/mix/distribution';
 import { BandCache, bandsOf } from './utils/mix/keyBands';
+// v16.8.3 (Track Tuning): a track's tuning (its rate, the patch, the live switch).
+import { LIVE_TUNE_SWITCH, fitShift, loShuTone, solfeggioTone, trackRate, tuneById, tuneChip, tuneChipName, tuneRate, validTuning, withTrackTuning } from './utils/tuning/trackTuning';
 import { getHarmonicSolfeggio, PRESETS } from './utils/crystalData';
 // v15.9: the mix catalogue (names, sub-lines, counts) and the Undo toast's words.
 import { mixStartText } from './utils/mix/catalog';
@@ -269,7 +271,7 @@ import { EvidenceLink, scrollToEvidence, commitTag, refocusTag, forgetTag } from
 import type { EvidenceOriginValue } from './components/guide/evidenceLink';
 import type { Tier } from './utils/copy/evidence';
 import { HOW_SURE_JUMP, HOW_SURE_SAFETY_BUTTON } from './utils/copy/evidence';
-import { requestMoreView, requestGuideAnchor } from './components/shell/more/moreModel';
+import { requestMoreView, requestGuideAnchor, requestComposeCrystal } from './components/shell/more/moreModel';
 import { RETUNE_SHORT, BEAT_EVIDENCE, BEAT_HEADING, bandLine, TAGGED_SHAPES } from './utils/copy/crystalCopy';
 import {
   RANGE_LABEL, COMFORT_HEADING, HIGH_CRYSTALS_LINE, TRADITIONAL_SOLFEGGIO, CLASSIC_LEVEL_OPTIONS, highCrystalHumLine, READOUT_TITLE, readoutReading,
@@ -2146,6 +2148,15 @@ const App: React.FC = () => {
   const planBand: Band = render === 'pulse' ? capBand(presetBand, 'alpha') : presetBand;
   const isGammaPlan = render === 'binaural' && planBand === 'gamma';
   const v2Wanted = v2Active && !musicOnly && layer.f > 0 && (isPlaying || isSolfeggioActive);
+  // v16.8.3 fix round 1 (A3, SF3): with LIVE_TUNE_SWITCH false, the tuning the music element still plays a track at
+  // after a change made while it held it: { id, cents } (the track's tuning before the change; 0 for Standard), until
+  // that element's next load (any load fires loadstart: playTrack, the gapless swap, a restart). Everything that says
+  // what is heard follows it meanwhile: the card's rate (nowPlayingRate), Key fit's rate and the chip; Track info shows
+  // and stores the new choice ("From the next play."). Set only by setTrackTuning's tail, and never with the flag true.
+  const [heldTune, setHeldTune] = useState<{ id: string; cents: number } | null>(null);
+  const heldTuneRef: { current: { id: string; cents: number } | null } = useRef(null);
+  /** The cents the element plays this track at while a tuning is held for it, else null (its own tuning applies). */
+  const heldCentsFor = (song: Song | undefined): number | null => (heldTune !== null && song !== undefined && heldTune.id === song.id ? heldTune.cents : null);
   // Key fit (v15.2): the playing track's fit, from plain values (never the pinned currentTrack). Recomputed only when
   // the track, its key data, the crystal or the output changes (keyFit.ts caches by content behind this).
   const fitSong = currentSongIndex >= 0 ? playlist[currentSongIndex] : undefined;
@@ -2154,12 +2165,21 @@ const App: React.FC = () => {
   // Analysed by this CHROMA_VERSION's Analyse tracks: a track it stored no key for (empty, too short) is never retried.
   const fitAnalysed = fitHasTrack && !needsKey({ chromaVersion: fitSong?.chromaVersion });
   const fitTrackId: string | null = fitSong ? fitSong.id : null;
+  // v16.8.3 (Track Tuning): the track is heard at its own rate (trackRate: PITCH_SHIFT_FACTOR itself without a tuning),
+  // so the fit is too; its tuning's fields are in the deps, so a switch on the playing track re-fits it (Key fit then
+  // glides to the new duck over its own τ).
+  const fitTuneCents = fitSong?.tuneCents, fitTuneFor = fitSong?.tuneFor;
+  // (Fix round 1, A3: while a tuning is held for it, at the rate the element plays it at.)
+  const fitHeldCents = heldCentsFor(fitSong);
   const keyFit: KeyFit | null = useMemo(
     () => (v2Active && fitHasTrack
-      ? keyFitFor({ chroma: fitChroma, chromaA4Hz: fitA4, keyConfidence: fitConf, musicKey: fitKeyName }, layer.f, planOutput, PITCH_SHIFT_FACTOR)
+      ? keyFitFor({ chroma: fitChroma, chromaA4Hz: fitA4, keyConfidence: fitConf, musicKey: fitKeyName }, layer.f, planOutput, fitHeldCents !== null ? tuneRate(fitHeldCents) : trackRate(fitSong))
       : null),
-    [v2Active, fitHasTrack, fitChroma, fitA4, fitConf, fitKeyName, layer.f, planOutput]
+    [v2Active, fitHasTrack, fitChroma, fitA4, fitConf, fitKeyName, layer.f, planOutput, fitTuneCents, fitTuneFor, fitHeldCents]
   );
+  // (The tuning tests read Key fit's heard A4 through the dev hook: dev builds only.)
+  const keyFitNowRef: { current: KeyFit | null } = useRef(null);
+  keyFitNowRef.current = keyFit;
   const keyFitView: KeyFitView = useMemo(
     () => keyFitViewOf({ on: keyFitOn, fit: keyFit, hasTrack: fitHasTrack, musicPlaying: isPlaying, layersOn: v2Wanted, available: !keyFitFailed, analysed: fitAnalysed }),
     [keyFitOn, keyFit, fitHasTrack, isPlaying, v2Wanted, keyFitFailed, fitAnalysed]
@@ -6330,7 +6350,7 @@ Run Deep Scan to analyse this track.
     el.src = url;
     // Re-assert after the src swap so the gapless path can never drift from a
     // normally-started track (rate AND pitch-preservation together).
-    applyPlaybackRate(el);
+    applyPlaybackRate(el, trackRate(nextSong));
     const p = el.play();
     if (p) p.catch((err: unknown) => console.error('Gapless swap play() failed:', err));
     applyMusicElementVolume();
@@ -6409,11 +6429,11 @@ Run Deep Scan to analyse this track.
   //
   // Keep these two properties set TOGETHER — that is why this helper exists
   // rather than a bare `el.playbackRate = ...` at each call site.
-  const applyPlaybackRate = (el: HTMLAudioElement) => {
+  const applyPlaybackRate = (el: HTMLAudioElement, rate: number = PITCH_SHIFT_FACTOR) => {
     el.preservesPitch = false;
     (el as any).webkitPreservesPitch = false;  // Safari 15–16.3
     (el as any).mozPreservesPitch = false;     // legacy Firefox
-    el.playbackRate = PITCH_SHIFT_FACTOR;
+    el.playbackRate = rate;
   };
 
   // Attach the standard listeners to the audio element. The `el === mainAudioRef
@@ -6681,7 +6701,7 @@ Run Deep Scan to analyse this track.
       // detection runs on the UNSHIFTED source buffer, so it is compensated at
       // the detection boundary (toHeardHz) — keep the two in step or the app will
       // report frequencies 31.8 cents away from what is actually heard.
-      applyPlaybackRate(mainAudioRef.current);
+      applyPlaybackRate(mainAudioRef.current, trackRate(song));
       // Set a conservative volume on the element itself as additional safety
       // Don't set volume on the element - we want pure Web Audio output only
       await mainAudioRef.current.play();
@@ -7610,6 +7630,12 @@ registerProcessor('wav-capture', WavCapture);
       artworkUrl: '/images/icon-192x192.png',
     };
   }, [currentSongIndex, nowPlayingId, nowPlayingName, nowPlayingCrystal, selectedSolfeggio]);
+  // v16.8.3 (Track Tuning): the playing track's rate (Standard, PITCH_SHIFT_FACTOR itself, for an untuned track), for the
+  // lock-screen card's position below. A plain number from the playing song, outside every protected region; the hook
+  // re-sends the position when it changes (a tuned track, a switch made on the playing track). Fix round 1 (A3): while a
+  // tuning is held for it (LIVE_TUNE_SWITCH false), the rate the element plays it at.
+  const nowPlayingHeld = heldCentsFor(nowPlaying);
+  const nowPlayingRate = nowPlayingHeld !== null ? tuneRate(nowPlayingHeld) : trackRate(nowPlaying);
 
   useMediaSession({
     track: currentTrack,
@@ -7619,7 +7645,7 @@ registerProcessor('wav-capture', WavCapture);
     // Both of the above are ELEMENT time. Hand the OS the real rate so it
     // extrapolates the lock-screen scrubber correctly between updates —
     // defaulting to 1 would drift it 1.85% fast across a track.
-    playbackRate: PITCH_SHIFT_FACTOR,
+    playbackRate: nowPlayingRate,
     // Explicit, not the toggle — a head-unit/lock-screen PLAY must always resume
     // and PAUSE must always pause, even if React's isPlaying briefly desyncs when
     // the head unit pauses the element itself. (Was the car resume bug.)
@@ -7647,6 +7673,38 @@ registerProcessor('wav-capture', WavCapture);
       setCurrTime(t);
     },
   });
+
+  // v16.8.3 fix round 2: the lock-screen card's position at `rate`, from the music element's own duration and time (fix
+  // round 1's A2 update in setTrackTuning, in one place): finite values only (a still-loading track has no duration),
+  // in try/catch as the hook's own send. Outside every protected region, after the pinned useMediaSession call.
+  const sendCardPosition = (el: HTMLAudioElement, rate: number) => {
+    try {
+      const ms = 'mediaSession' in navigator ? navigator.mediaSession : null;
+      const d = el.duration, t = el.currentTime;
+      if (ms && typeof ms.setPositionState === 'function' && Number.isFinite(d) && d > 0 && Number.isFinite(t) && t >= 0 && Number.isFinite(rate) && rate > 0) {
+        ms.setPositionState({ duration: d, position: Math.min(t, d), playbackRate: rate });
+      }
+    } catch {}
+  };
+  // Fix round 2 (app SF-1): a new rate always reaches the card last. A render committed before a switch can still have
+  // the hook's passive effect pending, with the OLD rate and its 1 s throttle run out; React flushes it after
+  // setTrackTuning's direct update, and the switch's own render is then throttled, so a locked phone (no frame, no later
+  // send) would keep the old rate for the rest of the track. This effect is declared after the hook's, so in every flush
+  // it runs after it: on a change of nowPlayingRate it sends the card the new rate from the element. Never on the first
+  // render (the ref starts empty), and only on a change: with no tuning anywhere nowPlayingRate is always
+  // PITCH_SHIFT_FACTOR, so it never sends and the card's updates are v16.8.2's.
+  const cardRateRef: { current: number | null } = useRef(null);
+  // (How many times it sent: the dev hook's cardSends, so a test can show it never sends without a tuning.)
+  const cardRateSendsRef: { current: number } = useRef(0);
+  useEffect(() => {
+    const prev = cardRateRef.current;
+    cardRateRef.current = nowPlayingRate;
+    if (prev === null || prev === nowPlayingRate) return;
+    const el = mainAudioRef.current;
+    if (!el) return;
+    sendCardPosition(el, nowPlayingRate);
+    cardRateSendsRef.current++;
+  }, [nowPlayingRate]);
 
   // ---------------------------------------------------------------------------------------------------------------
   // v15.5: the new layout (beta). After the pinned useMediaSession call, never inside it. App stays the only owner of
@@ -9182,6 +9240,10 @@ registerProcessor('wav-capture', WavCapture);
   const shellTrackHz = shellTrackRawHz ? applyLoShuPerfectMap(shellTrackRawHz) : null;
   const shellBeatText = v2Active || v2CarFallback ? bandChipLabel : selectedBinaural.name;
   const shellPhi = enablePhiMode && phiTimingEnabled;
+  // v16.8.3 (T4): Now Playing's tuning chip, from the playing track's cents (null at Standard): one plain number, so the
+  // memo below re-makes the chip's text and its spoken name (fix round 1, N2: "Tuned +1 cent", from tuneLabel) from it.
+  // (Fix round 1, A3: while a tuning is held for it, the one the element plays.)
+  const shellTuneCents: number | null = heldCentsFor(nowPlaying) ?? validTuning(nowPlaying);
   const shellSound = useMemo(
     () => ({
       crystalHz: shellCrystalHz,
@@ -9204,11 +9266,14 @@ registerProcessor('wav-capture', WavCapture);
       keyFitLook: keyFitChipLook,
       keyFitOn,
       keyFitRowLine,
+      tuneChip: shellTuneCents ? tuneChip(shellTuneCents) : null,
+      tuneChipName: shellTuneCents ? tuneChipName(shellTuneCents) : null,
+      planOutput, // v16.8.3 fix round 1 (S2): Track info's Lo Shu fit is made for the tone this output plays
       musicOnly,
       layerPanelProps,
       phi: shellPhi,
     }),
-    [shellCrystalHz, shellTrackHz, shellTrackRawHz, loShuPerfectGUT, layerEngine, v2Active, v2Failed, v2CarFallback, layerOutput, outputEffective, showLayerChrome, layersBadgeLabel, layersBadgeTooltip, shellBeatText, keyFitChipShown, keyFitChipLabel, keyFitChipHint, keyFitChipLook, keyFitOn, keyFitRowLine, musicOnly, layerPanelProps, shellPhi]
+    [shellCrystalHz, shellTrackHz, shellTrackRawHz, loShuPerfectGUT, layerEngine, v2Active, v2Failed, v2CarFallback, layerOutput, outputEffective, showLayerChrome, layersBadgeLabel, layersBadgeTooltip, shellBeatText, keyFitChipShown, keyFitChipLabel, keyFitChipHint, keyFitChipLook, keyFitOn, keyFitRowLine, shellTuneCents, planOutput, musicOnly, layerPanelProps, shellPhi]
   );
   const shellLevels = useMemo(
     () => ({ volume, toneLevel: solfeggioVolume, beatLevel: binauralVolume, toneText: toneLevelText, beatText: beatLevelText, outputRender, v2Active, v2CarFallback }),
@@ -9276,6 +9341,7 @@ registerProcessor('wav-capture', WavCapture);
       discardArmed,
       lastImport,
       analyseMobile: ANALYSE_MOBILE,
+      analyseCaps: ANALYSE_CAPS, // v16.8.3 fix round 1 (S3): Track info's "Too long for Analyse tracks on this device"
       storedTrackCount, // v16.1: the new layout's Clear dialog
       playlistCount: savedPlaylists ? savedPlaylists.length : 0,
       scanRun, // v16.8.1 (D4): Scan again's progress line
@@ -9455,6 +9521,32 @@ registerProcessor('wav-capture', WavCapture);
       pending: () => keyWarmRef.current.dirty && keyWarmRef.current.saveTimer !== 0,
     };
     return () => { delete w.__aetheriaKeyBands; };
+  }, []);
+  // v16.8.3 (Track Tuning): the tuning tests drive and read it through this hook (dev builds only; production strips it):
+  // set is Track info's choice (setTrackTuning, through its ref); rate the music element's playbackRate now; trackRate(id)
+  // a library track's rate by the rule; fitShift and the tones on this page's JS engine (the K-8-style check of the
+  // phone's maths); tunings each library track's stored fields.
+  useEffect(() => {
+    if (!IS_DEV_BUILD) return;
+    const w = window as unknown as { __aetheriaTuning?: unknown };
+    w.__aetheriaTuning = {
+      set: (id: string, cents: number | null, forCrystal?: number | null, loShu?: boolean) => trackTuningApiRef.current?.set(id, cents, forCrystal, loShu),
+      rate: () => (mainAudioRef.current ? mainAudioRef.current.playbackRate : null),
+      trackRate: (id: string) => { const s = libraryRef.current.find((x: Song) => x.id === id); return s ? trackRate(s) : null; },
+      psf: PITCH_SHIFT_FACTOR,
+      live: LIVE_TUNE_SWITCH,
+      // (Fix round 1: the tuning held for the element's track with the flag false, and Key fit's heard A4 now.)
+      held: () => (heldTuneRef.current ? { ...heldTuneRef.current } : null),
+      keyFitA4: () => keyFitNowRef.current?.a4Heard ?? null,
+      // (Fix round 2: the card sends of SF-1's effect so far, and the decode window's pending listener's track, if any.)
+      cardSends: () => cardRateSendsRef.current,
+      retunePending: () => retuneOnPlayRef.current?.id ?? null,
+      fitShift: (chroma: unknown, a4: unknown, tone: unknown, limit?: number) => fitShift(chroma, a4, tone, limit),
+      solfeggioTone: (f: number) => solfeggioTone(f),
+      loShuTone: (f: number) => loShuTone(f),
+      tunings: () => libraryRef.current.map((s: Song) => ({ id: s.id, tuneCents: s.tuneCents ?? null, tuneFor: s.tuneFor ?? null, tuneLoShu: s.tuneLoShu ?? null })),
+    };
+    return () => { delete w.__aetheriaTuning; };
   }, []);
   // v16.0: the queue's tests drive it and read it through this hook (dev builds only; production strips it).
   useEffect(() => {
@@ -9687,6 +9779,89 @@ registerProcessor('wav-capture', WavCapture);
       toast: (msg: string) => showStatusToast(msg),
     };
   });
+  // v16.8.3 (Track Tuning): a track's tuning, from Track info. The cents and the crystal they were chosen for are set
+  // together (A1: and tuneLoShu, a fit for the Lo Shu tone of one of the six crystals Perfect GUT swaps), or all removed
+  // with null; a tuning that doesn't hold together (validTuning) writes nothing. By id in the library and the play order
+  // (every repeat of the track), as the other id patches do; Deep Scan's, Analyse tracks' and Assign's patches merge field
+  // by field (patchById), so they never touch it, and Assign never writes or clears one. The library's one new writer
+  // (check:writers pins it and its one reference, trackTuningApiRef's effect below).
+  // Decision T5: on the track loaded in the music element the new rate applies at once (LIVE_TUNE_SWITCH), through the
+  // pinned applyPlaybackRate, from here: never inside the protected regions, and never a duck or a fade of the music.
+  // With LIVE_TUNE_SWITCH false it applies from the track's next play (playTrack and the swap read trackRate).
+  // Fix round 1: the track is the one the element holds, by its src (blobUrlsRef, as restoreLibrary and the queue find
+  // it), never the app's state, which lags a start (playTrack's play() wait, the swap before its commit): a choice for
+  // the outgoing track never reaches the incoming one, and a choice for the incoming one does (A1). Right after a
+  // switch the lock-screen card hears of the rate from the element's own values (A2: the hook's 1 s throttle could skip
+  // it, and a locked phone runs no frame to send it later). With the flag false the element's rate is held (A3).
+  const setTrackTuning = (id: string, cents: number | null, forCrystal?: number | null, loShu = false) => {
+    if (cents !== null && validTuning({ tuneCents: cents, tuneFor: forCrystal }) === null) return;
+    // (The track's tuning before this change: what the element plays it at, when a tuning is to be held for it.)
+    const before = validTuning(libraryRef.current.find((x: Song) => x.id === id) ?? stateRef.current.playlist.find((x: Song) => x.id === id)) ?? 0;
+    setOriginalPlaylist((prev: Song[]) => tuneById(prev, id, cents, forCrystal, loShu));
+    setPlaylist((prev: Song[]) => tuneById(prev, id, cents, forCrystal, loShu));
+    // The music element, and the track it holds now (its src). The silent anchor is another element, never touched.
+    const el = mainAudioRef.current;
+    if (!el) return;
+    const src = el.getAttribute('src');
+    const urls = blobUrlsRef.current;
+    const heldId = src ? (Object.keys(urls).find((k: string) => urls[k] === src) ?? null) : null;
+    if (heldId !== id) return;
+    if (LIVE_TUNE_SWITCH) {
+      // T5, the live switch: its new rate at once.
+      const rate = trackRate(withTrackTuning({}, cents, forCrystal, loShu));
+      applyPlaybackRate(el, rate);
+      // A2: the card at once, from the element's own values (finite only; a still-loading track has no duration yet).
+      sendCardPosition(el, rate);
+      // Fix round 2 (app N-a): playTrack still decoding this track (playStartBusyRef) applies the rate it read at its
+      // start once the decode is done; the track's own rate goes back on when it plays.
+      if (playStartBusyRef.current) retuneWhenPlaying(el, id);
+      return;
+    }
+    // A3: the flag false: the element keeps the rate it plays at until its next load; hold that tuning (once per load:
+    // a second change keeps the first hold, which is what the element still plays).
+    if (heldTuneRef.current !== null && heldTuneRef.current.id === id) return;
+    const hold = { id, cents: before };
+    heldTuneRef.current = hold;
+    setHeldTune(hold);
+    el.addEventListener('loadstart', () => {
+      if (heldTuneRef.current !== hold) return;
+      heldTuneRef.current = null;
+      setHeldTune(null);
+    }, { once: true });
+  };
+  // Fix round 2 (app N-a): the decode window. A choice made while playTrack is still decoding the incoming track (no
+  // harmonicFreq yet: arrayBuffer, decodeAudioData and detection, seconds on a phone) is applied to the element at once,
+  // then overwritten when playTrack applies the trackRate(song) it captured at its start, so the music would play at the
+  // old rate while the card, Key fit and the chip say the new one. One { once: true } 'playing' listener on the music
+  // element (at most one pending: a newer one replaces it) puts the track's own rate back when it plays, if the element
+  // still holds that track (its src, as setTrackTuning finds it) and plays it at another rate: through the pinned
+  // applyPlaybackRate, then the card. The silent anchor is another element, never touched. Outside every protected region.
+  const retuneOnPlayRef: { current: { el: HTMLAudioElement; id: string; fn: () => void } | null } = useRef(null);
+  const retuneWhenPlaying = (el: HTMLAudioElement, id: string) => {
+    const pending = retuneOnPlayRef.current;
+    if (pending && pending.el === el && pending.id === id) return; // it reads the track's tuning when it fires
+    if (pending) pending.el.removeEventListener('playing', pending.fn);
+    const fn = () => {
+      if (retuneOnPlayRef.current?.fn !== fn) return;
+      retuneOnPlayRef.current = null;
+      const src = el.getAttribute('src');
+      const urls = blobUrlsRef.current;
+      const heldId = src ? (Object.keys(urls).find((k: string) => urls[k] === src) ?? null) : null;
+      if (heldId !== id) return;
+      const rate = trackRate(libraryRef.current.find((x: Song) => x.id === id) ?? stateRef.current.playlist.find((x: Song) => x.id === id));
+      if (el.playbackRate === rate) return;
+      applyPlaybackRate(el, rate);
+      sendCardPosition(el, rate);
+    };
+    retuneOnPlayRef.current = { el, id, fn };
+    el.addEventListener('playing', fn, { once: true });
+  };
+  // Its one reference, in its own effect (as more2ApiRef), so neither the shell actions' effect nor another pinned one
+  // is edited: the shell's action and the dev hook call through the ref.
+  const trackTuningApiRef: { current: { set: (id: string, cents: number | null, forCrystal?: number | null, loShu?: boolean) => void } | null } = useRef(null);
+  useLayoutEffect(() => {
+    trackTuningApiRef.current = { set: setTrackTuning };
+  });
   // v16.5, Export with layers: the snapshot of what the layers do now (the addendum §3.2), from state, never the clock.
   const exportSnapshot: ExportSnapshot = useMemo(() => {
     const low = toneLoweringRef.current;
@@ -9846,6 +10021,7 @@ registerProcessor('wav-capture', WavCapture);
               spec,
               envelope: song.bandEnvelope ?? null,
               name: fileNameFor(song.name, spec.crystalHz, madeFor, spec.layers),
+              rate: trackRate(song), // v16.8.3 (T8): the track renders at its tuning
             };
           });
         const kind: 'track' | 'playlist' | 'long' = target.kind === 'track' ? 'track' : files === 'long' ? 'long' : 'playlist';
@@ -10049,7 +10225,7 @@ registerProcessor('wav-capture', WavCapture);
         const songs: Song[] = o.playlistId ? (() => { const pl = playlistById(o.playlistId); const idx = libraryIndex(); return pl ? pl.entries.map((e) => resolveEntry(e, idx)).filter(Boolean) as Song[] : []; })() : lib.filter((x: Song) => x.id === id);
         const items = songs.map((song) => {
           const spec = exportSpecFor(snap, song, madeFor);
-          return { id: song.id, title: song.name, duration: typeof song.duration === 'number' && song.duration > 0 ? song.duration : null, file: song.file ?? null, fileName: song.file?.name ?? '', spec, envelope: song.bandEnvelope ?? null, name: fileNameFor(song.name, spec.crystalHz, madeFor, spec.layers) };
+          return { id: song.id, title: song.name, duration: typeof song.duration === 'number' && song.duration > 0 ? song.duration : null, file: song.file ?? null, fileName: song.file?.name ?? '', spec, envelope: song.bandEnvelope ?? null, name: fileNameFor(song.name, spec.crystalHz, madeFor, spec.layers), rate: trackRate(song) };
         });
         const kept: Blob[] = [];
         const longTasks: number[] = [];
@@ -10082,8 +10258,9 @@ registerProcessor('wav-capture', WavCapture);
         return {
           outcome: res.outcome, reason: res.reason, ms: res.ms, steps: res.steps, longTasks, skipped: res.skipped, cap: res.cap ?? null, failedTitle: res.failedTitle ?? null,
           sources: res.sources.map((s) => ({ id: s.id, seconds: s.seconds, capSeconds: s.capSeconds, costPerMin: s.costPerMin, container: s.info.container, codec: s.info.codec, sampleRate: s.info.sampleRate, channels: s.info.channels, scan: s.scan ?? null, scanMs: s.scanMs ?? null, decodedChannels: s.decodedChannels ?? null })),
-          files: res.files.map((f) => ({ name: f.name, bytes: f.bytes, frames: f.frames, outSeconds: f.outSeconds, clipped: f.clipped, catchFraction: f.catchFraction, catchMeanDb: f.catchMeanDb, loud: f.loud, plan: f.plan, joins: (f as any).joins ?? null })),
+          files: res.files.map((f) => ({ name: f.name, bytes: f.bytes, frames: f.frames, outSeconds: f.outSeconds, clipped: f.clipped, catchFraction: f.catchFraction, catchMeanDb: f.catchMeanDb, loud: f.loud, plan: f.plan, joins: (f as any).joins ?? null, layerStarts: (f as any).layerStarts ?? null, layerEnd: (f as any).layerEnd ?? null })),
           spec: items.map((it) => it.spec),
+          rates: items.map((it) => it.rate), // v16.8.3 (T8): each track's rate
         };
       },
       compare: async (id: string, seconds = 20, madeFor: ExportMadeFor = 'headphones', snap: Partial<ExportSnapshot> = {}) => {
@@ -10434,6 +10611,17 @@ registerProcessor('wav-capture', WavCapture);
       journalEnd: (data: any) => more2ApiRef.current?.journalEnd(data),
       journalNote: (note: string) => more2ApiRef.current?.journalNote(note),
       closeTrackInfo: () => setShellTrackInfoId(null),
+      // v16.8.3 (Track Tuning): Track info's Tuning choice, through setTrackTuning's own ref (never a writer here).
+      setTrackTuning: (id: string, cents: number | null, forCrystal?: number | null, loShu?: boolean) => trackTuningApiRef.current?.set(id, cents, forCrystal, loShu),
+      // v16.8.3 (T9): the Crystal sheet's "Composing for this crystal": More › Compose for a crystal, on it (setters and
+      // refs only, as openEvidence).
+      openCompose: (crystal: number) => {
+        requestComposeCrystal(crystal);
+        setShellSheet(null);
+        setSheetFocus(null);
+        requestMoreView(moreViewRef, 'compose');
+        setShellTab('more');
+      },
       // v16.6, "How sure are we?": an evidence tag opens More › Guide at its tier, in one tap (the open sheet or Track
       // info closes; the Guide's view is kept); the Guide's chip goes back to where the tag was. Setters and refs only.
       openEvidence: (tier: Tier | 'section', origin: EvidenceOriginValue | null) => {
@@ -10926,7 +11114,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.8.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.8.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

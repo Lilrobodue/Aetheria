@@ -25,6 +25,14 @@
 // multiset as without keys. Section 2b (v16.7.1 keyed by the file) runs on the libraries with their keys stripped. 2c:
 // on "general" libraries of 270 (every track a clear key), at least 55 % of the keyed tracks land on a crystal whose
 // tone fits their key (band 0), against at most 30 % with the bands off.
+// v16.8.3 ("Track Tuning", M1: Assign follows the tuning), section 2g: libraries with key data and a share of their
+// clear-key tracks tuned (some by Track info's own fitShift for their crystal, some Lo Shu, A1). (f) No tuning anywhere
+// (garbage tuning fields included) gives v16.8.2's plan patch for patch: today's cache against v16.8.2's provider
+// restated (keyRanks of bandsOf), and distribution.ts is v16.8.2's file (its sha256, pinned); (g) the same tunings on a
+// second device give the same crystals; (h) the oracle, restating the per-track factor, places every tuned library as the
+// code does; (i) a retune changes only that track's content key's bands; (j) Assign never writes or clears a tuning; (k)
+// A1: tuneLoShu never changes a plan (Perfect GUT is a per-device setting the planner never reads), so a device with it on
+// and one with it off give the same crystals; (l) the tunings matter (some libraries plan otherwise without them).
 //
 //   node utils/mix/devices.check.ts                     the working tree
 //   node utils/mix/devices.check.ts --collect           failures counted by kind instead of stopping at the first
@@ -41,7 +49,8 @@ import { libraryHealth } from '../../components/shell/library/libraryModel.ts';
 import { oracleRole, spreadOracle } from '../../scripts/mix-golden/spread-oracle.ts';
 import { spreadV1671 } from '../../scripts/mix-golden/spread-v1671.ts';
 import { spreadV1681, wordsV1681 } from '../../scripts/mix-golden/spread-v1681.ts';
-import { BandCache, KEY_MAX_BYTES, KEY_MAX_SECONDS, awaitingKey, clearKey } from './keyBands.ts';
+import { BandCache, KEY_MAX_BYTES, KEY_MAX_SECONDS, awaitingKey, bandsOf, clearKey, contentKey } from './keyBands.ts';
+import { LO_SHU_CRYSTALS, fitShift, solfeggioTone, validTuning } from '../tuning/trackTuning.ts';
 import { musicFit, toneOf, smoothstep } from '../soundV2/aetheria_sound_v2.ts';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -62,6 +71,9 @@ const FROZEN_V1681_SHA = 'dcb453f49ef2b2b72f386ada6f1877aabc5108df3c3dc9adb1178c
  *  shipped. The one place it is named: e428022, v16.8.1 on main (220fa83's tree, the tip of v16.8.1-devices, squashed
  *  onto 9541b9d; `git diff 220fa83 e428022` is empty, so its distribution.ts is the same file). */
 const FROZEN_V1681_REF = 'e428022';
+/** v16.8.3: utils/mix/distribution.ts at 862d960 (v16.8.2), sha256 of its LF text: M1 changes nothing in the planner
+ *  (the spread reads each track's own bands), so the file must stay v16.8.2's. */
+const DISTRIBUTION_V1682_SHA = 'e81d532276e7826acc855901b2e65b39fba0e0eff572abce845d6629b60b8c00';
 /** fix round 1 (§2d), measured on these fixtures (the report has the table) and set with a margin: the keyed open
  *  tracks on a fitting crystal at least, on a worse band than v16.8.1 at most (%). */
 // Measured: 10 % keyed 95.9 % fit, 0.0 % worse (NEUTRAL 1.5 gave 51.9 % and 3.2 %); 30 % keyed 88.1 % and 1.5 % (62.2 %, 2.5 %).
@@ -87,6 +99,7 @@ const same = (kind: string, a: unknown, b: unknown, msg: string) => {
   try { assert.deepStrictEqual(a, b); } catch { fail(kind, `${msg}: ${JSON.stringify(a)?.slice(0, 300)} vs ${JSON.stringify(b)?.slice(0, 300)}`); }
 };
 const realLog = console.log, realRandom = Math.random;
+let tuningSeen = '';
 console.log = () => {};
 Math.random = () => { throw new Error('Math.random used'); };
 
@@ -391,6 +404,102 @@ ok('fit', fit.keyed >= 2000 && fit.on / fit.keyed >= 0.55 && fit.off / fit.keyed
 
 ok('words', staysWaiting >= 50, `R22: ${staysWaiting} libraries hold an unreadable scan that stays and waits for a key (none counted)`);
 
+// ---- 2g. v16.8.3 (Track Tuning, M1): Assign follows the tuning ---------------------------------------------------
+{
+  const distText = readFileSync(new URL('./distribution.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  same('tuning', createHash('sha256').update(distText).digest('hex'), DISTRIBUTION_V1682_SHA, '(f) distribution.ts is v16.8.2\'s file (M1 changes only the bands)');
+  /** v16.8.2's band provider, restated (its BandCache.ranks): keyRanks of bandsOf for a clear-key track. */
+  const v1682Memo = new Map<string, ArrayLike<number>>();
+  const v1682Ranks = (x: T) => { const k = `${x.chromaA4Hz}|${(x.chroma as number[]).join(',')}`; let r = v1682Memo.get(k); if (!r) v1682Memo.set(k, (r = keyRanks(bandsOf(x.chroma as number[], x.chromaA4Hz as number)))); return r; };
+  const v1682Opts = { bands: (x: T) => (clearKey(x as never) ? v1682Ranks(x) : null), awaiting: OPTS.awaiting };
+  const shiftMemo = new Map<string, number | null>();
+  const shiftFor = (x: T, f: number) => { const k = `${x.chromaA4Hz}|${(x.chroma as number[]).join(',')}|${f}`; if (!shiftMemo.has(k)) shiftMemo.set(k, fitShift(x.chroma, x.chromaA4Hz, solfeggioTone(f))); return shiftMemo.get(k)!; };
+  /** A share of the clear-key tracks tuned: the first one in a library by Track info's own fitShift for its crystal (when
+   *  that gives a shift), the rest any whole cents in ±50 for their crystal or another; some A1 Lo Shu ones; some garbage
+   *  (Standard). */
+  let fitUsed = false;
+  const tune = (lib: readonly T[], seed: number, share: number): T[] => {
+    fitUsed = false;
+    const r = mulberry32(81000 + seed);
+    let first = true;
+    return lib.map((x) => {
+      if (!clearKey(x as never) || r() >= share) return x;
+      const own = x.closestSolfeggio && ALL_CRYSTALS.includes(x.closestSolfeggio) ? x.closestSolfeggio : ALL_CRYSTALS[Math.floor(r() * 27)];
+      let cents = 0;
+      if (first) { first = false; const sh = shiftFor(x, own); if (sh) { cents = sh; fitUsed = true; } }
+      if (!cents) { cents = Math.floor(r() * 101) - 50; if (cents === 0) cents = 7; }
+      const u = r();
+      if (u < 0.1) return { ...x, tuneCents: 51, tuneFor: own } as T; // garbage: Standard
+      if (u < 0.25) { const f = LO_SHU_CRYSTALS[Math.floor(r() * 6)]; return { ...x, tuneCents: cents, tuneFor: f, tuneLoShu: true } as T; }
+      return { ...x, tuneCents: cents, tuneFor: r() < 0.7 ? own : ALL_CRYSTALS[Math.floor(r() * 27)] } as T;
+    });
+  };
+  const strip = (x: T, f: string[]) => { const c = { ...x } as Record<string, unknown>; for (const k of f) delete c[k]; return c as T; };
+  const TUNE_FIELDS = ['tuneCents', 'tuneFor', 'tuneLoShu'];
+  const garbage = (lib: readonly T[], seed: number) => { const r = mulberry32(82000 + seed); return lib.map((x) => (r() < 0.3 ? ({ ...x, ...[{ tuneCents: 0, tuneFor: 963 }, { tuneCents: 2.5, tuneFor: 528 }, { tuneCents: 12, tuneFor: 1000 }, { tuneCents: 12 }, { tuneFor: 963 }][Math.floor(r() * 5)] } as T) : x)); };
+  let tunedLibs = 0, tunedTracks = 0, tuningMoved = 0, retunes = 0, loShuLibs = 0, fitLibs = 0;
+  const TSIZES = [20, 27, 54, 100, 270];
+  for (let seed = 0; seed < 240; seed++) {
+    const size = TSIZES[seed % TSIZES.length];
+    const kind = (['scanned', 'partly', 'unscanned', 'stays'] as Kind[])[seed % 4];
+    const base = withKeys(library(7000 + seed, size, kind, [0, 0.03][seed % 2]), 7000 + seed, { all: seed % 3 === 0 });
+    const tag = `2g #${seed} (${size} ${kind})`;
+    // (f) no tuning anywhere, and garbage tuning fields: v16.8.2's plan, patch for patch.
+    for (const [what, l] of [['no tuning', base], ['garbage tunings', garbage(base, seed)]] as const) {
+      const now = plan(l);
+      const old = planAssign(l, 'spread', v1682Opts as never);
+      same('tuning', sortedPatches(now), sortedPatches(old), `${tag}: (f) ${what}: v16.8.2's patches`);
+      same('tuning', counts(now), counts(old), `${tag}: (f) ${what}: v16.8.2's counts`);
+      ok('tuning', l.every((x) => !clearKey(x as never) || contentKey(x as never).split('|').length === 3), `${tag}: (f) ${what}: every content key v16.8.2's`);
+    }
+    const lib = tune(base, seed, 0.25);
+    const tuned = lib.filter((x) => validTuning(x as never) !== null);
+    if (!tuned.length) continue;
+    tunedLibs++;
+    tunedTracks += tuned.length;
+    if (lib.some((x) => (x as Record<string, unknown>).tuneLoShu === true)) loShuLibs++;
+    const pA = plan(lib);
+    const a = apply(lib, pA);
+    // (g) a second device with the same files and the same tunings.
+    const lib2 = secondDevice(lib, 7000 + seed);
+    const b = apply(lib2, plan(lib2));
+    same('tuning', byFile(b), byFile(a), `${tag}: (g) the same tunings on a second device: the same records`);
+    // (h) the oracle, the per-track factor restated.
+    const o = spreadOracle(lib as never);
+    same('tuning', a.filter((x) => JSON.stringify(recOf(x)) !== JSON.stringify(o.after.get(x.id))).map((x) => x.id), [], `${tag}: (h) every track as the oracle places it, with tunings`);
+    same('tuning', [pA.perCrystal, pA.keyed, pA.keyFits], [o.perCrystal, o.keyed, o.keyFits], `${tag}: (h) the oracle's counts`);
+    // (j) Assign never writes or clears a tuning.
+    ok('tuning', [...pA.patches.values()].every((x) => !Object.keys(x).some((k) => k.startsWith('tune'))), `${tag}: (j) no patch carries a tuning field`);
+    same('tuning', a.map((x) => [x.id, (x as Record<string, unknown>).tuneCents, (x as Record<string, unknown>).tuneFor, (x as Record<string, unknown>).tuneLoShu]), lib.map((x) => [x.id, (x as Record<string, unknown>).tuneCents, (x as Record<string, unknown>).tuneFor, (x as Record<string, unknown>).tuneLoShu]), `${tag}: (j) every tuning survives the apply`);
+    // (k) A1: tuneLoShu never changes the plan.
+    const noLo = lib.map((x) => strip(x, ['tuneLoShu']));
+    same('tuning', sortedPatches(plan(noLo)), sortedPatches(pA), `${tag}: (k) tuneLoShu never changes the plan (Perfect GUT on or off)`);
+    // (l) the tunings matter, and (i) a retune changes only that track's key.
+    const bare = lib.map((x) => strip(x, TUNE_FIELDS));
+    if (JSON.stringify(byFile(apply(bare, plan(bare)))) !== JSON.stringify(byFile(a))) tuningMoved++;
+    if (seed % 4 === 0) {
+      // (A copy of the run's cache, the library's bands made already: a fresh cache would make them all again.)
+      const cache = new BandCache();
+      for (const [key, v] of CACHE.map) cache.map.set(key, v);
+      cache.ensureSync(lib as never);
+      const before = new Map([...cache.map]);
+      // (A Standard clear-key track whose tuned key isn't cached yet: none of the run's libraries has made it.)
+      const rc = 1 + (seed % 49);
+      const k = lib.findIndex((x) => clearKey(x as never) && validTuning(x as never) === null && !cache.map.has(contentKey({ ...x, tuneCents: rc, tuneFor: 963 } as never)));
+      if (k >= 0) {
+        const re = lib.map((x, i) => (i === k ? ({ ...x, tuneCents: rc, tuneFor: 963 } as T) : x));
+        same('tuning', cache.ensureSync(re as never), 1, `${tag}: (i) a retune makes one content key`);
+        ok('tuning', [...before].every(([key, v]) => cache.map.get(key) === v), `${tag}: (i) every other entry the same object`);
+        same('tuning', [...cache.map.keys()].filter((key) => !before.has(key)), [contentKey(re[k] as never)], `${tag}: (i) the new key is the retuned track's`);
+        retunes++;
+      }
+    }
+    if (fitUsed) fitLibs++;
+  }
+  ok('tuning', tunedLibs >= 150 && tunedTracks >= 2000 && tuningMoved >= 50 && retunes >= 40 && loShuLibs >= 60 && fitLibs >= 50, `2g exercised: ${tunedLibs} tuned libraries (${tunedTracks} tuned tracks; ${loShuLibs} with Lo Shu ones; ${fitLibs} with a Track info fit), ${tuningMoved} where the tunings move a crystal, ${retunes} retunes`);
+  tuningSeen = `${tunedLibs} tuned libraries, ${tunedTracks} tuned tracks, ${tuningMoved} moved by their tunings, ${retunes} retunes`;
+}
+
 // ---- 2d. Keys still arriving (fix round 1, L-S1): a fitting crystal first, then no key, then a partly fitting one ---
 // NEUTRAL_BAND (0.5) sits between "fits" (0) and "partly fits" (1). pK, the smallest case: one keyed track among 26
 // keyless ones, its band 1 on 174 Hz (SPREAD_ORDER's first) and 0 on 2907 Hz; every crystal is empty when the fill
@@ -436,7 +545,9 @@ ok('words', staysWaiting >= 50, `R22: ${staysWaiting} libraries hold an unreadab
   ok('fitnowhere', nowhere > 0, `KEY_POOL holds keys that fit no crystal (${nowhere} of ${KEY_POOL.length}), so the sections above plan them`);
 }
 const TONES_HEARD = ALL_CRYSTALS.map((f) => toneOf(f, 'headphones'));
-const duckOf = (x: T, f: number) => 6 * smoothstep(0.35, 0.75, musicFit(TONES_HEARD[ALL_CRYSTALS.indexOf(f)], x.chroma as number[], (x.chromaA4Hz as number) * 0.981818).rel);
+/** v16.8.3: the rate a track is heard at, restated: 0.981818, times 2^(cents/1200) for a tuned one (M1). */
+const heardFactor = (x: T) => { const c = validTuning(x as never); return c === null ? 0.981818 : 0.981818 * Math.pow(2, c / 1200); };
+const duckOf = (x: T, f: number) => 6 * smoothstep(0.35, 0.75, musicFit(TONES_HEARD[ALL_CRYSTALS.indexOf(f)], x.chroma as number[], (x.chromaA4Hz as number) * heardFactor(x)).rel);
 const ONE_HALF_AND_HALF = ALL_CRYSTALS.map(() => 1.5);
 /** How the keyed tracks are given to the spread: 'r1' the app's (planOptions: ranks, fix round 2); 'raw' their bands
  *  as they are (bec9f23, NEUTRAL 0.5 without R1); '1.5' their bands with 1.5 on every keyless track (96d4639). */
@@ -623,4 +734,4 @@ if (COLLECT) {
   for (const [k, m] of Object.entries(firstFailure)) console.log(`  first ${k}: ${m.slice(0, 400)}`);
   process.exit(Object.keys(failures).length ? 1 : 0);
 }
-console.log(`devices.check: ${checks} checks passed (2d keys arriving: ${arrivingSeen.join('; ')}; 2d fit nowhere (54 tracks): ${nowhereSeen.join('; ')}; ${staysWaiting} libraries with an unreadable scan that stays and waits for a key (R22); 2f one track either side of 720 s: ${edge720[0]}-${edge720[edge720.length - 1]} tracks differ, median ${edge720[edge720.length >> 1]}; fit ${(100 * fit.on / fit.keyed).toFixed(1)} % with the bands, ${(100 * fit.off / fit.keyed).toFixed(1)} % without; ${keyedLibs} libraries with keys, ${keyedTracks} tracks placed by key, ${overCapLibs} (b), ${otherVersionLibs} (c), ${byV1681} (d); ${libs} libraries: ${withSource} with Source tracks, ${withStays} with unreadable scans that stay, ${fullyScanned} fully scanned, ${balanced} balance cases, ${small} small with Source, ${withStandIns} with stand-ins (${standIns} unmeasured tracks, every one with a fresh id on the second device), ${byV1671} against v16.7.1 keyed by the file (${byV1671Short} short), ${moved} where a press moves crystals)`);
+console.log(`devices.check: ${checks} checks passed (2g tunings: ${tuningSeen}; 2d keys arriving: ${arrivingSeen.join('; ')}; 2d fit nowhere (54 tracks): ${nowhereSeen.join('; ')}; ${staysWaiting} libraries with an unreadable scan that stays and waits for a key (R22); 2f one track either side of 720 s: ${edge720[0]}-${edge720[edge720.length - 1]} tracks differ, median ${edge720[edge720.length >> 1]}; fit ${(100 * fit.on / fit.keyed).toFixed(1)} % with the bands, ${(100 * fit.off / fit.keyed).toFixed(1)} % without; ${keyedLibs} libraries with keys, ${keyedTracks} tracks placed by key, ${overCapLibs} (b), ${otherVersionLibs} (c), ${byV1681} (d); ${libs} libraries: ${withSource} with Source tracks, ${withStays} with unreadable scans that stay, ${fullyScanned} fully scanned, ${balanced} balance cases, ${small} small with Source, ${withStandIns} with stand-ins (${standIns} unmeasured tracks, every one with a fresh id on the second device), ${byV1671} against v16.7.1 keyed by the file (${byV1671Short} short), ${moved} where a press moves crystals)`);

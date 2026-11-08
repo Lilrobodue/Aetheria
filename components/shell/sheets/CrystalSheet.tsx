@@ -7,16 +7,44 @@
 // closes (2 taps from Now Playing). The subtitle says both ("Playing 528 Hz · this track's crystal is 396 Hz").
 // v16.6 ("How sure are we?"): the crystal's meaning block (CrystalMeaning) opens the body, above the picker; its tag
 // leads to the Guide, and the Guide's "Back to Crystal" reopens this sheet over the tab it was on.
+// v16.8.3 (Track Tuning, T9): after the picker (so the picker sits where it did), "Composing for this crystal" opens
+// More › Compose for a crystal on the crystal shown (a Lo Shu Perfect tone, its crystal; not for 111 Hz, which has no
+// table).
 
 import React from 'react';
 import Sheet from '../../ui/Sheet';
 import { ViewBoundary } from '../../ErrorBoundary';
 import { useActions, usePlayer, useShell, useSound } from '../contexts';
+import { COMPOSE_LINK, composeEntry } from '../../../utils/tuning/compose';
+import { PERFECT_GUT_MAP } from '../shellModel';
 import CrystalMeaning from '../../guide/CrystalMeaning';
 import { EvidenceOrigin } from '../../guide/evidenceLink';
 import { countRender } from '../devRenders';
 import CrystalPicker from '../layers/CrystalPicker';
 import { sheetFallback } from './sheetFallback';
+
+/** The crystal a shown frequency stands for (a Lo Shu Perfect tone's crystal), or null when the guide has none (111). */
+const composeCrystalOf = (hz: number): number | null => {
+  for (const [f, lo] of Object.entries(PERFECT_GUT_MAP)) if (lo === hz) return Number(f);
+  return composeEntry(hz) ? hz : null;
+};
+
+const ComposeLink = () => {
+  const s = useSound();
+  const actions = useActions();
+  const f = composeCrystalOf(s.crystalHz);
+  if (f === null) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => actions.openCompose(f)}
+      data-testid="crystal-compose-link"
+      className="mt-3 min-h-touch inline-flex items-center text-sm text-ink-soft underline underline-offset-2 hover:text-ink-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400 rounded-control"
+    >
+      {COMPOSE_LINK}
+    </button>
+  );
+};
 
 const CrystalBody = () => {
   countRender('CrystalBody');
@@ -26,6 +54,7 @@ const CrystalBody = () => {
         <CrystalMeaning host="sheet" />
       </div>
       <CrystalPicker host="sheet" />
+      <ComposeLink />
     </div>
   );
 };

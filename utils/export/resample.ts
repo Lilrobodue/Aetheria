@@ -11,6 +11,10 @@
 // track's own band-limited signal laid end to end (the best a rate change allows).
 //
 // The varispeed (432): rOut = 48,000 / PSF, read as 48,000 (as the single-track path's decode at DECODE_RATE).
+// v16.8.3 ("Track Tuning", T8): each track has its own rOut = 48,000 / its rate (a tuned track's grid is a little finer
+// or coarser), so a track's samples are spaced rOut_k / rIn_k output frames apart; joinShift takes both tracks' rOut, and
+// placeTrack carries the fraction from track to track as before. With every track at PSF it is v16.8.2's arithmetic,
+// operation for operation (resample.check pins the rendered samples' hash).
 // Pure on Float32Arrays; Node checks it (resample.check.ts, `npm run check:export`).
 
 export const KERNEL_HALF = 24; // zero crossings each side, at the lower of the two rates
@@ -38,6 +42,22 @@ export interface Kernel {
   phases: number;
   /** Its reach in OUTPUT frames each side (a contribution from a track reaches this far past its ends). */
   reachOut: number;
+}
+
+/** v16.8.3 fix round 1 (X02): the long file's kernels, one per (rIn, rOut). A kernel's taps and reach depend on both
+ *  rates (a source above its grid's rate is cut at the grid's Nyquist: a 96 kHz source, or a 48 kHz one tuned above
+ *  +31.8 cents), so one made for another grid is never reused. */
+export function newKernelCache(): (rIn: number, rOut: number) => Kernel {
+  const kernels = new Map<string, Kernel>();
+  return (rIn: number, rOut: number): Kernel => {
+    const key = `${rIn}|${rOut}`;
+    let k = kernels.get(key);
+    if (!k) {
+      k = designKernel(rIn, rOut);
+      kernels.set(key, k);
+    }
+    return k;
+  };
 }
 
 /** The kernel for rIn → rOut: a Kaiser-windowed sinc cut at KERNEL_CUTOFF of the lower Nyquist, each phase summing to 1. */
@@ -140,7 +160,8 @@ export function addTrack(t: GridTrack, o0: number, n: number, outL: Float32Array
 /**
  * v16.5 re-review (B7): where a track's first sample sits relative to its join, in output frames, when the long file's
  * first track is at rFirst: rOut / (2 · rIn) − rOut / (2 · rFirst). 0 between tracks of one rate (the sum is the
- * resampling of the two back to back, exactly). Between rates: a kernel's sum over a track's samples is, by the
+ * resampling of the two back to back, exactly). v16.8.3: `rOutFirst`, the first track's grid when this one's differs (a
+ * tuned track's): rOut / (2 · rIn) − rOutFirst / (2 · rFirst), the same half-samples on each one's own grid. Between rates: a kernel's sum over a track's samples is, by the
  * midpoint rule, its integral over the track's span, and that span reaches half a sample (of the track's own rate)
  * before its first sample and after its last. Placed this way the first track's span ends exactly where the next
  * one's starts, so near the join their partial sums add to 1 as each kernel's whole sum does (DC carries across the
@@ -149,8 +170,43 @@ export function addTrack(t: GridTrack, o0: number, n: number, outL: Float32Array
  * second-order term, ∝ (1/rA² − 1/rB²) times the kernels' slope at the edge. Nothing is scaled, no sample moves within
  * its track, and the file's length is still Σ n · rOut / rIn.
  */
-export function joinShift(rIn: number, rFirst: number, rOut: number): number {
-  return rOut / (2 * rIn) - rOut / (2 * rFirst);
+export function joinShift(rIn: number, rFirst: number, rOut: number, rOutFirst: number = rOut): number {
+  return rOut / (2 * rIn) - rOutFirst / (2 * rFirst);
+}
+
+/**
+ * v16.8.3: the long file's grid, track by track. A track of n samples at rIn on the output grid rOut (OUT_RATE over its
+ * own rate) starts at the join Tnext (the music placed so far: Σ n_j · rOut_j / rIn_j) and its sample 0 sits
+ * joinShift(rIn, rFirst, rOut, rOutFirst) after it: half a sample of its own, less half of the first track's, so every
+ * track's span (by the midpoint rule) ends exactly where the next one's starts, whatever the rates and grids. The fraction
+ * is carried, never rounded. With one rate and one grid it is the v16.5 re-review's placement exactly.
+ */
+export interface GridPlacer {
+  /** Where the music placed so far ends (output frames, fractional). */
+  Tnext: number;
+  /** The first track's input rate and output grid (0 before one is placed). */
+  rFirst: number;
+  rOutFirst: number;
+}
+export function newGridPlacer(): GridPlacer {
+  return { Tnext: 0, rFirst: 0, rOutFirst: 0 };
+}
+/** Place the next track: its T (where its sample 0 sits), its step (input samples per output frame) and its join (where
+ *  its span starts: the previous Tnext); the placer moves on past it. */
+export function placeTrack(p: GridPlacer, n: number, rIn: number, rOut: number): { T: number; step: number; join: number } {
+  if (p.rFirst === 0) {
+    p.rFirst = rIn;
+    p.rOutFirst = rOut;
+  }
+  const step = rIn / rOut;
+  const join = p.Tnext;
+  const T = p.Tnext + joinShift(rIn, p.rFirst, rOut, p.rOutFirst);
+  p.Tnext += n / step;
+  return { T, step, join };
+}
+/** How far before Tnext the next track may reach (its sample 0 at most half of the first track's sample before it). */
+export function reachBack(p: GridPlacer): number {
+  return p.rFirst > 0 ? p.rOutFirst / (2 * p.rFirst) : 0;
 }
 
 /** Keep only what output frames ≥ `fromOut` still need of a track (its samples from the kernel's first tap on). */

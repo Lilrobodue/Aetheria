@@ -17,7 +17,7 @@ import { stubDownloads, caughtDownloads, wavInfo } from './downloads';
 // tab's row tap after that; v15.8: the walk after Assign after that; v15.9: a mix from the Mixes tab after that; v16.0:
 // the queue after that; v16.1: a saved playlist after that; v16.2: a filtered set after that; v16.3: a built mix after
 // that; v16.4: Keep screen awake off with Pause visuals on after that; v16.5: a recording, then an export, with the
-// screen off, after that).
+// screen off, after that; v16.8.3: a tuned track between Standard ones, and Next / Previous across one, after that).
 // While Playwright is connected, Chrome on Android keeps every tab visible: no test here ever sees a real hide. The
 // tests that need one (v16.0.1's D1-D3, the hide flush; v16.1's D-PL1, a playlist made just before a background kill)
 // are in device-hide.spec.ts, run on their own with E2E_HIDE=1.
@@ -1973,6 +1973,142 @@ test('v16.5: an export with the screen off finishes, its file whole, while the c
   expect(Math.abs(f.outSeconds - 600 / 0.981818), 'the whole 10 minutes, retuned').toBeLessThan(1);
   expect(titles.length, 'the card held two advances or more with the screen off').toBeGreaterThanOrEqual(2);
   expect(await pauseCount(page), 'nothing paused').toBe(pausesBefore);
+  expect(dialogs).toEqual([]);
+});
+
+// ---- v16.8.3 "Track Tuning": the phone's checks (the coordinator's run) --------------------------------------------
+/** Before the first load: each play() of the music (a blob: src) recorded with the element's rate at that moment (the
+ *  swap and playTrack set it just before play()), and decodes counted. */
+async function recordPlays(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__plays = [];
+    w.__decodes = 0;
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+      const src = this.getAttribute('src') || '';
+      if (src.startsWith('blob:')) w.__plays.push({ src, rate: this.playbackRate, at: Date.now() });
+      return play.call(this);
+    };
+    const decode = BaseAudioContext.prototype.decodeAudioData;
+    BaseAudioContext.prototype.decodeAudioData = function (this: BaseAudioContext, ...a: unknown[]) { w.__decodes++; return (decode as any).apply(this, a); } as typeof decode;
+  });
+}
+const TUNE_PSF = 0.981818;
+const tuneRateOf = (c: number) => TUNE_PSF * Math.pow(2, c / 1200);
+/** The rate at each track's first play(), in the order they first played. */
+const firstPlayRates = (plays: Array<{ src: string; rate: number }>) => { const seen = new Map<string, number>(); for (const p of plays) if (!seen.has(p.src)) seen.set(p.src, p.rate); return [...seen.values()]; };
+
+test('v16.8.3 D-T3 (by ear, screen on): the live switch on the playing track, every 8 s for 60 s between Standard and −50 cents; each switch logged', async ({ page }) => {
+  // The coordinator listens (headphones or the speaker) for a click or a glitch at each switch: LIVE_TUNE_SWITCH turns
+  // false if there is one. The screen stays on. The switch is Track info's own path (setTrackTuning, through the dev
+  // hook): one applyPlaybackRate on the playing element, never a duck or a fade.
+  test.setTimeout(240_000);
+  const dialogs = await openSeededNewLayout(page, 2, { real: 2, seconds: 120 });
+  await page.setViewportSize(PHONE_VIEWPORT);
+  await page.waitForFunction(() => typeof (window as any).__aetheriaTuning?.set === 'function', null, { timeout: 30_000 });
+  // (Fix round 1: with LIVE_TUNE_SWITCH false there is no live switch to listen to: a change waits for the next play.)
+  test.skip(!(await page.evaluate(() => (window as any).__aetheriaTuning.live)), 'LIVE_TUNE_SWITCH is false: no live switch');
+  const { at } = await playlistPhone(page);
+  await at(page.getByTestId('tab-library-button'), 'the Library tab');
+  await at(libraryRowButton(page, 'tone-0001'), 'tone-0001');
+  await expect.poll(() => mediaSession(), { timeout: 15_000, message: 'tone-0001 on the card' }).toEqual({ state: 'playing', title: 'tone-0001' });
+  const id = (await libraryState(page)).libraryIds[0];
+  const crystal = (await libraryState(page)).crystals[0] as number;
+  await page.waitForTimeout(4000);
+  const log: string[] = [];
+  const t0 = Date.now();
+  for (let k = 0; k < 8; k++) {
+    const cents = k % 2 === 0 ? -50 : null;
+    const at0 = Date.now();
+    await page.evaluate(({ id, cents, crystal }) => (window as any).__aetheriaTuning.set(id, cents, crystal), { id, cents, crystal });
+    const rate = await page.evaluate(() => (window as any).__aetheriaTuning.rate());
+    log.push(`${((at0 - t0) / 1000).toFixed(1)} s → ${cents === null ? 'Standard' : `${cents} c`} (rate ${rate}; ${new Date(at0).toISOString().slice(11, 23)} UTC)`);
+    expect(rate, 'the element at the new rate at once').toBe(cents === null ? TUNE_PSF : tuneRateOf(cents));
+    await page.waitForTimeout(8000 - (Date.now() - at0));
+  }
+  test.info().annotations.push({ type: 'v16.8.3 D-T3 the switches (listen at each)', description: log.join('; ') });
+  expect(mediaSession()?.state, 'still playing').toBe('playing');
+  expect(dialogs).toEqual([]);
+});
+
+test('v16.8.3 D-T1: a tuned track between Standard ones with the screen off: three gapless advances on the card, each track at its own rate from its play(), no decode on the path @device', async ({ page }) => {
+  // Modelled on v15.8's after-Assign test. tone-0002 is tuned −50 c and tone-0004 +37 c (Track info's own path, through
+  // the dev hook), tone-0001 and tone-0003 Standard. Turns the screen off; a secure lock stays locked after the test.
+  await recordPlays(page);
+  const dialogs = await openSeededNewLayout(page, 8, { real: 8, seconds: 4 });
+  await page.setViewportSize(PHONE_VIEWPORT);
+  await page.waitForFunction(() => typeof (window as any).__aetheriaTuning?.set === 'function', null, { timeout: 30_000 });
+  const s0 = await libraryState(page);
+  await page.evaluate(({ a, b, ca, cb }) => { const h = (window as any).__aetheriaTuning; h.set(a, -50, ca); h.set(b, 37, cb); }, { a: s0.libraryIds[1], b: s0.libraryIds[3], ca: s0.crystals[1], cb: s0.crystals[3] });
+  await expect.poll(() => page.evaluate(() => (window as any).__aetheriaTuning.tunings().filter((t: any) => t.tuneCents !== null).length)).toBe(2);
+  const { at } = await playlistPhone(page);
+  await at(page.getByTestId('tab-library-button'), 'the Library tab');
+  await at(libraryRowButton(page, 'tone-0001'), 'tone-0001');
+  await expect.poll(() => mediaSession(), { timeout: 15_000, message: 'tone-0001 on the card' }).toEqual({ state: 'playing', title: 'tone-0001' });
+  const first = mediaSession()!.title;
+  const pausesBefore = await pauseCount(page);
+  const decodesBefore = await page.evaluate(() => (window as any).__decodes);
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  const titles: string[] = [];
+  try {
+    await expect
+      .poll(
+        () => {
+          const s = mediaSession();
+          if (s && s.state === 'playing' && s.title !== first && !titles.includes(s.title)) titles.push(s.title);
+          return titles.length;
+        },
+        { timeout: 45_000, intervals: [500], message: 'three gapless advances on the PLAYING card, its title following' }
+      )
+      .toBeGreaterThanOrEqual(3);
+    expect(mediaSession()?.state, 'the card still says playing').toBe('playing');
+    expect(chromeSessions().filter((s) => s.state === 'playing').length, 'one PLAYING Chrome card: none stranded').toBe(1);
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  test.info().annotations.push({ type: 'card titles with the screen off', description: [first, ...titles].join(' → ') });
+  // After the wake, DOM and state reads only.
+  expect(titles.slice(0, 3), 'the card followed the library').toEqual(['tone-0002', 'tone-0003', 'tone-0004']);
+  const rates = firstPlayRates(await page.evaluate(() => (window as any).__plays));
+  expect(rates.slice(0, 4), 'each track at its own rate from its play(): Standard, −50 c, Standard, +37 c').toEqual([TUNE_PSF, tuneRateOf(-50), TUNE_PSF, tuneRateOf(37)]);
+  expect(await pauseCount(page), 'the gapless swap never pauses').toBe(pausesBefore);
+  expect(await page.evaluate(() => (window as any).__decodes) - decodesBefore, 'no decode on the path').toBe(0);
+  expect(dialogs).toEqual([]);
+});
+
+test('v16.8.3 D-T2: the car / lock-screen Next and Previous across a tuned track, the screen off: the card follows, and each track starts at its own rate @device', async ({ page }) => {
+  // tone-0002 tuned −50 c between Standard tone-0001 and tone-0003 (30 s tones: no auto-advance meanwhile). Next, Next,
+  // Previous, Previous with the screen off; the card's title after each; after the wake, the rate at each play().
+  await recordPlays(page);
+  const dialogs = await openSeededNewLayout(page, 4, { real: 4, seconds: 30 });
+  await page.setViewportSize(PHONE_VIEWPORT);
+  await page.waitForFunction(() => typeof (window as any).__aetheriaTuning?.set === 'function', null, { timeout: 30_000 });
+  const s0 = await libraryState(page);
+  await page.evaluate(({ a, ca }) => (window as any).__aetheriaTuning.set(a, -50, ca), { a: s0.libraryIds[1], ca: s0.crystals[1] });
+  const { at } = await playlistPhone(page);
+  await at(page.getByTestId('tab-library-button'), 'the Library tab');
+  await at(libraryRowButton(page, 'tone-0001'), 'tone-0001');
+  await expect.poll(() => mediaSession(), { timeout: 15_000, message: 'tone-0001 on the card' }).toEqual({ state: 'playing', title: 'tone-0001' });
+  const n0 = (await page.evaluate(() => (window as any).__plays.length)) as number;
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  const seen: string[] = [];
+  try {
+    for (const [key, want] of [['KEYCODE_MEDIA_NEXT', 'tone-0002'], ['KEYCODE_MEDIA_NEXT', 'tone-0003'], ['KEYCODE_MEDIA_PREVIOUS', 'tone-0002'], ['KEYCODE_MEDIA_PREVIOUS', 'tone-0001']] as const) {
+      adb('shell', 'input', 'keyevent', key);
+      await expect.poll(() => mediaSession(), { timeout: 15_000, intervals: [300], message: `${key}: ${want} on the PLAYING card` }).toEqual({ state: 'playing', title: want });
+      seen.push(want);
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  test.info().annotations.push({ type: 'the card after Next, Next, Previous, Previous', description: seen.join(' → ') });
+  // (A start's play() once per new src: a repeat of the same src, a resume, is left out.)
+  const all = (await page.evaluate(() => (window as any).__plays)) as Array<{ src: string; rate: number }>;
+  const plays = all.slice(n0).filter((p, i, a) => (i === 0 ? p.src !== all[n0 - 1]?.src : p.src !== a[i - 1].src));
+  expect(plays.map((p) => p.rate), 'each start at its track\'s rate: −50 c, Standard, −50 c, Standard').toEqual([tuneRateOf(-50), TUNE_PSF, tuneRateOf(-50), TUNE_PSF]);
+  expect(await page.evaluate(() => (window as any).__aetheriaTuning.rate()), 'tone-0001 plays at Standard').toBe(TUNE_PSF);
   expect(dialogs).toEqual([]);
 });
 

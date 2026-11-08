@@ -12,7 +12,7 @@ import { TIERS, TIER_ORDER, TOPICS, TAG_LABELS, tagLabel, tagName, refsForTier, 
 import type { Tier } from './evidence.ts';
 import {
   CRYSTAL_COPY, CRYSTAL_111, PERFECT_OF, crystalCopy, perfectLine, REGIME_COPY, TRANSITION_COPY, BAND_LINES, bandLine, BEAT_EVIDENCE,
-  RETUNE_SHORT, RETUNE_LONG, RETUNE_HISTORY, orderLine, perfectAssociation,
+  RETUNE_SHORT, RETUNE_LONG, RETUNE_HISTORY, RETUNE_TUNING, orderLine, perfectAssociation,
 } from './crystalCopy.ts';
 import { PLACES, PLACE_KEYS, place } from './places.ts';
 import { TAGGED_SHAPES } from './crystalCopy.ts';
@@ -102,6 +102,11 @@ ok(RETUNE_HISTORY.includes('Verdi') && !/heal|tradition/i.test(RETUNE_HISTORY), 
 ok(RETUNE_LONG[0].text.includes('0.98182') && RETUNE_LONG[0].text.includes('31.8 cents') && RETUNE_LONG[0].text.includes('4:04'), '432: the arithmetic');
 ok(Math.abs(1200 * Math.log2(432 / 440) + 31.77) < 0.01 && Math.abs(240 / (432 / 440) - 244.44) < 0.01, '432: 31.8 cents lower, 4:00 → 4:04 (checked)');
 ok(RETUNE_LONG[0].text.includes('2⁴ × 3³') && 2 ** 4 * 3 ** 3 === 432, '432 = 2⁴ × 3³, under Arithmetic');
+// v16.8.3 fix round 2 (N2): the per-track tuning is a pointer to a setting, not arithmetic: its own untagged line, and
+// neither the Arithmetic paragraph nor the tier's "True by calculation" example says it.
+eq(RETUNE_TUNING, 'You can choose a different tuning for a track in Track info.', '432: where a track\'s tuning is chosen, its own line');
+ok(RETUNE_LONG.every((p) => !p.text.includes('Track info')) && TIERS.arithmetic.examples.every((x) => !x.includes('Track info')), 'N2: no tagged 432 text names Track info');
+eq(TIERS.arithmetic.examples[0], '432 Hz is 440 Hz × 0.98182: every note 31.8 cents lower, and a 4:00 track plays in 4:04.', 'N2: the Arithmetic example, v16.8.2\'s words');
 
 // --- the places -------------------------------------------------------------------------------------------------
 for (const k of PLACE_KEYS) {

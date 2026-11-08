@@ -9,9 +9,15 @@
 //   - v16.5 re-review (B7): between tracks of different rates, joinShift's placement (half a sample by each rate) keeps
 //     the join's error, against the continuous signal and in the band under 16 kHz (the re-reviewer's measure), under
 //     a bound per pair, and at least 15 dB under the bare n · rOut / rIn placement's.
+//   - v16.8.3 (Track Tuning, T8): each track on its own grid (rOut = 48,000 / its rate). With no tuning anywhere the
+//     long file's samples are v16.8.2's, byte for byte (placeTrack against v16.8.2's inline placement, and a hash of the
+//     rendered fixture pinned from 862d960's code); a tuned track between two Standard ones: the length is Σ n · rOut_k /
+//     rIn_k, and its joins stay within today's join tolerances (and well under a placement with one grid's joinShift).
 
-import { KERNEL_PHASES, addTrack, designKernel, joinShift, trackSpan, trimTrack } from './resample.ts';
+import { KERNEL_PHASES, addTrack, designKernel, joinShift, newGridPlacer, newKernelCache, placeTrack, reachBack, trackSpan, trimTrack } from './resample.ts';
 import type { GridTrack } from './resample.ts';
+import * as RESAMPLE from './resample.ts';
+import { createHash } from 'node:crypto';
 
 let passed = 0;
 const failures: string[] = [];
@@ -206,6 +212,134 @@ for (const [rIn, f] of [[44_100, 1000], [48_000, 997], [44_100, 15_000], [96_000
     ok(shifted <= bare - 15, `${rA} → ${rB} Hz: the shift takes at least 15 dB off the bare placement's ${bare.toFixed(1)} dB`);
   }
   console.log(`  (joins between rates, dB under 16 kHz: ${seen.join('; ')})`);
+}
+
+// ---- v16.8.3: each track on its own grid -------------------------------------------------------------------------
+{
+  // joinShift's fourth argument defaults to the one grid: v16.5's formula, operation for operation.
+  for (const [a, b] of [[44_100, 48_000], [96_000, 44_100], [48_000, 48_000]]) ok(Object.is(joinShift(a, b, R_OUT), joinShift(a, b, R_OUT, R_OUT)) && Object.is(joinShift(a, b, R_OUT), R_OUT / (2 * a) - R_OUT / (2 * b)), `joinShift(${a}, ${b}): the one-grid formula`);
+  ok(joinShift(44_100, 44_100, 50_000, 48_000) === 50_000 / 88_200 - 48_000 / 88_200, 'joinShift on two grids: each half-sample on its own grid');
+  // placeTrack with every track at PSF: v16.8.2's inline placement (engine.ts at 862d960), number for number.
+  {
+    const p = newGridPlacer();
+    let Tnext = 0, r0 = 0;
+    let same = 0;
+    for (const [n, rIn] of [[13_337, 44_100], [12_001, 48_000], [9_999, 44_100], [7, 96_000], [100_003, 32_000]]) {
+      if (r0 === 0) r0 = rIn;
+      const step = rIn / R_OUT, T = Tnext + joinShift(rIn, r0, R_OUT);
+      const back = r0 > 0 ? R_OUT / (2 * r0) : 0;
+      const a = placeTrack(p, n, rIn, R_OUT);
+      if (Object.is(a.T, T) && Object.is(a.step, step) && Object.is(a.join, Tnext) && Object.is(reachBack(p), back)) same++;
+      Tnext += n / step;
+      if (!Object.is(p.Tnext, Tnext)) same = -99;
+    }
+    ok(same === 5, `placeTrack at PSF is v16.8.2's placement, number for number (${same} of 5)`);
+  }
+  // The rendered long file with no tuning anywhere: v16.8.2's samples (the hash pinned from 862d960's own code).
+  const PCM_V1682_SHA = '2f860b744ed9768b4aa87750ab01d8f286cd7c8ee459b2a0b33ebcbc0ab551e2';
+  /** Three tracks (44.1, 48 and 44.1 kHz; a sine and a chirp-ish sum, deterministic) placed on the long file's grid by
+   *  `place(n, rIn)` (→ { T, step }) and rendered whole: the samples' hash, and the frames. */
+  function pcmFixture(R: any, place: (n: number, rIn: number) => { T: number; step: number; rOut: number }, totalOf: () => number): { sha: string; frames: number } {
+    const tracks: any[] = [];
+    const specs = [[44_100, 13_337, 440], [48_000, 12_001, 997], [44_100, 9_999, 1500]] as const;
+    for (const [rIn, n, f] of specs) {
+      const x = new Float32Array(n);
+      for (let i = 0; i < n; i++) x[i] = 0.4 * Math.sin((2 * Math.PI * f * i) / rIn) + 0.2 * Math.sin((2 * Math.PI * (f * 2.71) * i) / rIn + 0.3);
+      const at = place(n, rIn);
+      tracks.push({ T: at.T, n, rIn, step: at.step, off: 0, L: x, R: x, kernel: R.designKernel(rIn, at.rOut) });
+    }
+    const N = totalOf();
+    const L = new Float32Array(N), Rr = new Float32Array(N);
+    for (let o0 = 0; o0 < N; o0 += 4096) {
+      const n = Math.min(4096, N - o0);
+      const l = new Float32Array(n), r = new Float32Array(n);
+      for (const t of tracks) R.addTrack(t, o0, n, l, r);
+      L.set(l, o0);
+      Rr.set(r, o0);
+    }
+    return { sha: createHash('sha256').update(Buffer.from(L.buffer)).update(Buffer.from(Rr.buffer)).digest('hex'), frames: N };
+  }
+    const p = newGridPlacer();
+  const v = pcmFixture(RESAMPLE, (n: number, rIn: number) => { const a = placeTrack(p, n, rIn, R_OUT); return { T: a.T, step: a.step, rOut: R_OUT }; }, () => Math.round(p.Tnext));
+  ok(v.sha === PCM_V1682_SHA && v.frames === 38_093, `no tuning anywhere: the long file's samples are v16.8.2's (${v.frames} frames, sha ${v.sha.slice(0, 12)})`);
+
+  // A tuned track's joins: a continuous output-time signal g(o) runs across the join, each track's samples are g at their
+  // own places on their own grids; the error (the output less g, low-passed at 16 kHz) at the join, relative to g's level.
+  const rateOf = (c: number) => (c === 0 ? PSF : PSF * Math.pow(2, c / 1200));
+  const NL = 255, fc = 16_000 / R_OUT, lp = new Float64Array(NL);
+  let lsum = 0;
+  for (let i = 0; i < NL; i++) { const d = i - 127; const sinc = d === 0 ? 2 * fc : Math.sin(2 * Math.PI * fc * d) / (Math.PI * d); lp[i] = sinc * (0.42 - 0.5 * Math.cos((2 * Math.PI * i) / (NL - 1)) + 0.08 * Math.cos((4 * Math.PI * i) / (NL - 1))); lsum += lp[i]; }
+  for (let i = 0; i < NL; i++) lp[i] /= lsum;
+  const tunedJoinDb = (rA: number, cA: number, rB: number, cB: number, oneGrid: boolean): number => {
+    const oA = 48_000 / rateOf(cA), oB = 48_000 / rateOf(cB);
+    let worst = -999;
+    for (const f0 of [60, 1000]) for (const ph of [0, 0.7, 1.2, 2.1]) {
+      const g = (o: number) => 0.5 * Math.sin((2 * Math.PI * f0 * o) / R_OUT + ph);
+      const nA = Math.round(rA * 0.37) + 3, nB = Math.round(rB * 0.31);
+      const pl = newGridPlacer();
+      const a = placeTrack(pl, nA, rA, oA);
+      const b = oneGrid ? { T: pl.Tnext + joinShift(rB, rA, oB), step: rB / oB } : placeTrack(pl, nB, rB, oB);
+      const A = new Float32Array(nA), B = new Float32Array(nB);
+      for (let i = 0; i < nA; i++) A[i] = g(a.T + i / a.step);
+      for (let i = 0; i < nB; i++) B[i] = g(b.T + i / b.step);
+      const J = Math.floor(nA / a.step);
+      const n = 2048, o0 = J - n / 2;
+      const L = new Float32Array(n), R = new Float32Array(n);
+      addTrack({ T: a.T, n: nA, rIn: rA, step: a.step, off: 0, L: A, R: A, kernel: designKernel(rA, oA) }, o0, n, L, R);
+      addTrack({ T: b.T, n: nB, rIn: rB, step: b.step, off: 0, L: B, R: B, kernel: designKernel(rB, oB) }, o0, n, L, R);
+      const e = new Float64Array(n);
+      for (let i = 0; i < n; i++) e[i] = L[i] - g(o0 + i);
+      let peak = 0;
+      for (let i = 300; i < n - 300; i++) { let sum = 0; for (let k = 0; k < NL; k++) sum += lp[k] * e[i + k - 127]; peak = Math.max(peak, Math.abs(sum)); }
+      worst = Math.max(worst, 20 * Math.log10(peak / 0.5 + 1e-12));
+    }
+    return worst;
+  };
+  const tunedSeen: string[] = [];
+  // One rate, a tuned grid next to a Standard one: today's one-rate join is exact; a tuned one stays under −50 dB and at
+  // least 12 dB under the one-grid placement (a joinShift that ignores the first track's grid).
+  for (const [rA, cA, rB, cB] of [[44_100, 0, 44_100, -50], [44_100, -50, 44_100, 0], [44_100, 0, 44_100, 50], [44_100, 50, 44_100, 0], [44_100, 0, 44_100, -14], [48_000, 31, 48_000, 0]]) {
+    const two = tunedJoinDb(rA, cA, rB, cB, false), one = tunedJoinDb(rA, cA, rB, cB, true);
+    tunedSeen.push(`${rA / 1000}@${cA}→${rB / 1000}@${cB} ${two.toFixed(1)} (one grid ${one.toFixed(1)})`);
+    ok(two <= -50, `${rA}@${cA} c → ${rB}@${cB} c: the join's error ${two.toFixed(1)} dB is under −50 dB`);
+    ok(two <= one - 12, `${rA}@${cA} c → ${rB}@${cB} c: two grids take at least 12 dB off one grid's ${one.toFixed(1)} dB`);
+  }
+  // Two rates and a tuned grid: within today's tolerance for a pair of rates (−29 dB), and better than one grid.
+  for (const [rA, cA, rB, cB] of [[48_000, 0, 44_100, 23], [44_100, -50, 48_000, 0], [44_100, 0, 96_000, -50], [96_000, 50, 44_100, 0]]) {
+    const two = tunedJoinDb(rA, cA, rB, cB, false), one = tunedJoinDb(rA, cA, rB, cB, true);
+    tunedSeen.push(`${rA / 1000}@${cA}→${rB / 1000}@${cB} ${two.toFixed(1)} (one grid ${one.toFixed(1)})`);
+    ok(two <= -29 && two < one, `${rA}@${cA} c → ${rB}@${cB} c: ${two.toFixed(1)} dB, under today's −29 dB and under one grid's ${one.toFixed(1)}`);
+  }
+  console.log(`  (joins with a tuned grid, dB under 16 kHz: ${tunedSeen.join('; ')})`);
+  // A tuned track between two Standard ones (a long file of three, one rate): its length is Σ n · rOut_k / rIn_k, each
+  // track where its join puts it.
+  {
+    const pl = newGridPlacer();
+    const parts = [[13_337, 0], [12_001, -23], [9_999, 0]] as const;
+    let want = 0;
+    const at = parts.map(([n, c]) => { const rOut = 48_000 / rateOf(c); const a = placeTrack(pl, n, 44_100, rOut); want += (n * rOut) / 44_100; return a; });
+    ok(Math.abs(pl.Tnext - want) < 1e-6 && Math.round(pl.Tnext) === Math.round(want), `three tracks, the middle one at −23 c: ${Math.round(pl.Tnext)} frames, Σ n · rOut / rIn`);
+    ok(Math.abs(at[1].join - (13_337 * R_OUT) / 44_100) < 1e-6 && Math.abs(at[2].join - at[1].join - (12_001 * 48_000) / rateOf(-23) / 44_100) < 1e-6, 'each join where the music before it ends');
+    ok(Math.round(pl.Tnext) > Math.round(((13_337 + 12_001 + 9_999) * R_OUT) / 44_100), 'the slower middle track makes the file longer than at Standard');
+    ok(Math.abs(at[1].T - at[1].join - joinShift(44_100, 44_100, 48_000 / rateOf(-23), R_OUT)) < 1e-12 && Math.abs(at[2].T - at[2].join) < 1e-12, 'the tuned track sits joinShift on two grids past its join; the next Standard one at its join');
+  }
+}
+
+// v16.8.3 fix round 1 (X02): the long file's kernel cache is keyed by both rates: a kernel made for one grid is never
+// reused for another. Where they differ: a source above its grid's rate (48 kHz tuned above +31.8 c; 96 kHz).
+{
+  const rOutAt = (c: number) => 48_000 / (c === 0 ? PSF : PSF * Math.pow(2, c / 1200));
+  const kf = newKernelCache();
+  for (const [rIn, c1, c2] of [[48_000, 40, 50], [96_000, 0, -50], [96_000, 23, 0], [44_100, 0, -23]] as const) {
+    const a = kf(rIn, rOutAt(c1)), b = kf(rIn, rOutAt(c2));
+    ok(a !== b, `X02: ${rIn} Hz at ${c1} c and at ${c2} c: two kernels, never one reused`);
+    const da = designKernel(rIn, rOutAt(c1)), db = designKernel(rIn, rOutAt(c2));
+    ok(a.S === da.S && a.reachOut === da.reachOut && a.rows.every((v, i) => v === da.rows[i]), `X02: ${rIn} Hz at ${c1} c: the cache's kernel is that grid's own`);
+    ok(b.S === db.S && b.reachOut === db.reachOut && b.rows.every((v, i) => v === db.rows[i]), `X02: ${rIn} Hz at ${c2} c: the cache's kernel is that grid's own`);
+    ok(kf(rIn, rOutAt(c1)) === a, `X02: ${rIn} Hz at ${c1} c again: the same kernel (made once)`);
+  }
+  const k40 = designKernel(48_000, rOutAt(40)), k50 = designKernel(48_000, rOutAt(50));
+  ok(k40.reachOut !== k50.reachOut || k40.rows.some((v, i) => v !== k50.rows[i]), 'X02: (48 kHz above +31.8 c: the two grids\' kernels do differ, so a reuse would be wrong)');
 }
 
 console.log(`resample: ${passed} checks passed, ${failures.length} failed`);

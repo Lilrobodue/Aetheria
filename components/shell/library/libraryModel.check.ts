@@ -52,6 +52,12 @@ import { countAnalysable, capsFor, passButtonText, passEta, passEtaMinutes, PASS
 import { patchById, removeIdsWithCursor } from '../../../utils/library/listOps.ts';
 import { planAssign, needsDeepScan, deepScanQueue, ALL_CRYSTALS, crystalMoves } from '../../../utils/mix/distribution.ts';
 import { buildFacetIndex, filterPass, NO_FILTERS } from '../../../utils/library/filterModel.ts';
+import { readFileSync } from 'node:fs';
+import { FIT_REL_EDGE, LIVE_TUNE_SWITCH, LO_SHU_CRYSTALS, fitShift, loShuHz, loShuTone, offeredShift, relAt, solfeggioTone, speedPercent, tuneLabel } from '../../../utils/tuning/trackTuning.ts';
+import { KEY_FITS_LOSHU_NOTE, KEY_FITS_LOSHU_TUNED_NOTE, KEY_FITS_TUNED_NOTE, TUNE_ASSIGN_LONG_NOTE, TUNE_ASSIGN_LOSHU_NOTE, TUNE_ASSIGN_NOTE, TUNE_FILE_NOTE, TUNE_REASON, TUNE_STANDARD_NOTE, loShuFitsNow, noTuningFits, tooLongToAnalyse, tunableKey, tuneShiftsFor, tunedNote, tuningRow } from './libraryModel.ts';
+import { clearKey, songBands, withinKeyLimits } from '../../../utils/mix/keyBands.ts';
+import { toneOf } from '../../../utils/soundV2/aetheria_sound_v2.ts';
+import type { TuneShifts } from './libraryModel.ts';
 
 let passed = 0;
 const failures: string[] = [];
@@ -245,6 +251,8 @@ eq(trackInfoRows(seeded, NOW), [
   { label: 'Length', value: '3:52' },
   { label: 'Crystal', value: '528 Hz · GUT', note: 'Assigned, not scanned yet. An assigned crystal, not a measured pitch.', tag: 'design' },
   { label: 'Key', value: 'A minor · confidence 0.62', note: 'From Analyse tracks' },
+  // v16.8.3: the Tuning row after Key (no key data, so no clear key: a plain row with the reason).
+  { label: 'Tuning', value: 'Standard (432)', note: 'No clear key', copy: 'Tuning: Standard (432)' },
   { label: 'Visual sync', value: 'From Analyse tracks' },
   { label: 'File', value: 'tone-0142.wav · 4.1 MB' },
   { label: 'Added', value: '25 Oct 2026' },
@@ -253,6 +261,7 @@ eq(trackInfoRows(S('tone-07', 'tone-07', { duration: 0 }), NOW), [
   { label: 'Length', value: 'Reading…' },
   { label: 'Crystal', value: 'None yet' },
   { label: 'Key', value: 'Not analysed yet' },
+  { label: 'Tuning', value: 'Standard (432)', note: 'No crystal yet', copy: 'Tuning: Standard (432)' },
   { label: 'Visual sync', value: 'None yet' },
 ], 'Track info: an unanalysed track, a bad id date omitted, no file');
 const keyRow = (o: Partial<LibSong>) => trackInfoRows(S('x', 'x', o), NOW).find((r) => r.label === 'Key');
@@ -277,6 +286,7 @@ eq(trackInfoText(seeded, NOW).split('\n'), [
   'Length: 3:52',
   'Crystal: 528 Hz · GUT (Assigned, not scanned yet. An assigned crystal, not a measured pitch.)',
   'Key: A minor · confidence 0.62 (From Analyse tracks)',
+  'Tuning: Standard (432)',
   'Visual sync: From Analyse tracks',
   'File: tone-0142.wav · 4.1 MB',
   'Added: 25 Oct 2026',
@@ -778,6 +788,369 @@ eq(recoverWords(0, 1).recover, 'Remove copies', 'copies only');
   });
   eq(hiddenOn, [174, 285, 396, 417, 528, 639], 'K7: Lo Shu on: the note hidden on exactly the six swapped crystals, shown on the 21 others');
   eq(ALL_CRYSTALS.filter((f) => !(trackInfoRows({ ...t, closestSolfeggio: f, harmonicFreq: f }, NOW, ALL_CRYSTALS.map((g) => (g === f ? 0 : 3)), false).find((r) => r.label === 'Crystal')?.note ?? '').includes('Its key fits')), [], 'K7: Lo Shu off: the note on all 27');
+}
+
+// v16.8.3 (Track Tuning): Track info's Tuning row, every state of the spec's table (and amendment A1's Lo Shu fit), its
+// Copy line, the Crystal note at a tuning; on synthetic key readings (utils/tuning/tuning.fixture.json).
+{
+  const FIX = JSON.parse(readFileSync(new URL('../../../utils/tuning/tuning.fixture.json', import.meta.url), 'utf8')) as { reads: Array<{ chroma: number[]; chromaA4Hz: number; musicKey: string }> };
+  const song = (r: { chroma: number[]; chromaA4Hz: number; musicKey: string }, f: number, o: Partial<LibSong> = {}): LibSong => ({
+    ...S(`1772300000000-t${f}`, 'tone-t', { duration: 200, file: { name: 'tone-t.wav', size: 1000 }, closestSolfeggio: f, harmonicFreq: f, harmonicDeviation: 3, crystalSource: 'assigned' as const }),
+    chroma: [...r.chroma], chromaA4Hz: r.chromaA4Hz, musicKey: r.musicKey || 'C', keyConfidence: 0.8, chromaVersion: 1, ...o,
+  });
+  const tuningOf = (x: LibSong, perfectGut = false) => trackInfoRows(x, NOW, null, perfectGut).find((r) => r.label === 'Tuning');
+  // Find fixture cases by the shifts Track info offers (fix round 1, S1: offeredShift, 0 for a key already within the
+  // edge at Standard; was fitShift): (read, crystal) pairs.
+  const pairs: Array<{ r: (typeof FIX.reads)[number]; f: number; sol: number | null; lo: number | null }> = [];
+  for (const r of FIX.reads.slice(0, 8)) for (const f of ALL_CRYSTALS) pairs.push({ r, f, sol: offeredShift(r.chroma, r.chromaA4Hz, solfeggioTone(f)), lo: loShuTone(f) === null ? null : offeredShift(r.chroma, r.chromaA4Hz, loShuTone(f)) });
+  const find = (pred: (x: (typeof pairs)[number]) => boolean, what: string) => { const x = pairs.find(pred); check(!!x, `the fixture has ${what}`); return x!; };
+  const notSix = (f: number) => !LO_SHU_CRYSTALS.includes(f);
+  const shiftCase = find((x) => notSix(x.f) && x.sol !== null && x.sol !== 0, 'a crystal with a shift');
+  const zeroCase = find((x) => notSix(x.f) && x.sol === 0, 'a crystal its key already fits');
+  const nullCase = find((x) => notSix(x.f) && x.sol === null, 'a crystal no tuning within ±50 fits');
+  // fitShift = s: a select, Standard selected, "Fit 963 Hz · −14 cents".
+  {
+    const { r, f, sol } = shiftCase;
+    const row = tuningOf(song(r, f))!;
+    eq([row.value, row.copy, row.choice?.value, row.choice?.options.map((o) => o.label), row.choice?.note], ['Standard (432)', 'Tuning: Standard (432)', 'standard', ['Standard (432)', `Fit ${f} Hz · ${tuneLabel(sol!)}`], LIVE_TUNE_SWITCH ? TUNE_STANDARD_NOTE : `${TUNE_STANDARD_NOTE} From the next play.`], `Tuning: a shift (${f} Hz, ${sol} c): Standard, and Fit`);
+    const fit = row.choice!.options[1];
+    eq([fit.id, fit.cents, fit.forCrystal, fit.loShu], ['fit', sol, f, false], 'Tuning: the Fit choice writes its cents for its crystal');
+    eq(fit.spoken, `Tuning: Fit ${f} hertz, ${sol! < 0 ? 'minus' : 'plus'} ${Math.abs(sol!)} ${Math.abs(sol!) === 1 ? 'cent' : 'cents'}`, 'Tuning: the announcement');
+    eq(row.choice!.options[0].spoken, 'Tuning: Standard', 'Tuning: Standard\'s announcement');
+    check(trackInfoText(song(r, f), NOW).split('\n').includes('Tuning: Standard (432)'), 'Copy: "Tuning: Standard (432)"');
+  }
+  eq([tuningOf(song(zeroCase.r, zeroCase.f))?.note, tuningOf(song(zeroCase.r, zeroCase.f))?.choice], [TUNE_REASON.fits, undefined], 'Tuning: shift 0: plain, "Its key already fits this crystal\'s tone"');
+  eq([tuningOf(song(nullCase.r, nullCase.f))?.note, tuningOf(song(nullCase.r, nullCase.f))?.value], [noTuningFits(nullCase.f), 'Standard (432)'], 'Tuning: no shift: plain, "No tuning within ±50 cents fits …"');
+  eq(noTuningFits(963), 'No tuning within ±50 cents fits 963 Hz', 'the words');
+  // Not analysed / no clear key / no crystal.
+  const r0 = FIX.reads[0];
+  eq(tuningOf(song(r0, 963, { chromaVersion: undefined }))?.note, 'Analyse tracks first', 'Tuning: not analysed');
+  eq(tuningOf(song(r0, 963, { keyConfidence: 0.2 }))?.note, 'No clear key', 'Tuning: no clear key');
+  eq(tuningOf(song(r0, 963, { chroma: undefined, musicKey: '' }))?.note, 'No clear key', 'Tuning: analysed, nothing found');
+  eq(tuningOf(song(r0, 963, { chromaVersion: undefined, analysisFailedV: 1 }))?.note, 'No clear key', 'Tuning: Analyse tracks gave up');
+  eq(tuningOf(song(r0, 963, { closestSolfeggio: undefined }))?.note, 'No crystal yet', 'Tuning: no crystal');
+  // Tuned: the kept choice selected, its note, its Copy line; Fit for the current crystal only when it moved.
+  {
+    const { r, f, sol } = shiftCase;
+    const x = song(r, f, { tuneCents: sol!, tuneFor: f });
+    const row = tuningOf(x)!;
+    const pct = speedPercent(sol!);
+    eq([row.value, row.choice?.value, row.choice?.options.map((o) => o.id), row.copy], [`Tuned ${tuneLabel(sol!)} · chosen for ${f} Hz`, 'kept', ['standard', 'kept'], `Tuning: ${tuneLabel(sol!)} (chosen for ${f} Hz)`], 'Tuning: tuned on its own crystal: Standard and the kept tuning');
+    eq(row.choice?.note, `Plays ${Math.abs(pct).toFixed(1)} % ${pct < 0 ? 'slower' : 'faster'} than Standard, so the crystal's tone fits its key. The file isn't changed. Assign crystals places it by how it sounds at this tuning.${LIVE_TUNE_SWITCH ? '' : ' From the next play.'}`, 'Tuning: the tuned note');
+    check(trackInfoText(x, NOW).split('\n').includes(`Tuning: ${tuneLabel(sol!)} (chosen for ${f} Hz)`), 'Copy: "Tuning: −14 cents (chosen for 963 Hz)"');
+    // Moved by Assign to a crystal with a shift of its own: the kept tuning, and "Fit <new crystal>".
+    const moved = find((y) => y.r === r && y.f !== f && notSix(y.f) && y.sol !== null && y.sol !== 0, 'another crystal with a shift for the same reading');
+    const row2 = tuningOf({ ...x, closestSolfeggio: moved.f, harmonicFreq: moved.f })!;
+    eq(row2.choice?.options.map((o) => o.label), ['Standard (432)', `Tuned ${tuneLabel(sol!)} · chosen for ${f} Hz`, `Fit ${moved.f} Hz · ${tuneLabel(moved.sol!)}`], 'Tuning: moved since: Standard, the kept tuning, Fit the new crystal');
+    // (fix round 1, N8: it says the crystal changed, never that the new crystal's tone fits.)
+    eq(row2.choice!.note.split('. ')[1], `Chosen for ${f} Hz, before it moved to ${moved.f} Hz`, 'Tuning: moved since: the note names the crystal it was chosen for and the one it moved to');
+    check(!row2.choice!.note.includes('fits its key'), 'Tuning: moved since: no claim that a tone fits');
+    // Moved to a crystal its key already fits: no Fit offered (0 changes nothing).
+    const fitsThere = pairs.find((y) => y.r === r && y.f !== f && notSix(y.f) && y.sol === 0);
+    if (fitsThere) eq(tuningOf({ ...x, closestSolfeggio: fitsThere.f, harmonicFreq: fitsThere.f })?.choice?.options.map((o) => o.id), ['standard', 'kept'], 'Tuning: moved to a crystal it fits: no Fit');
+    // An invalid tuning reads as Standard.
+    eq(tuningOf({ ...x, tuneCents: 51 } as LibSong)?.choice?.value, 'standard', 'Tuning: an invalid tuning is Standard');
+  }
+  // The Crystal note at a tuning: band 0 in the track's own (tuned) bands.
+  {
+    const { r, f, sol } = shiftCase;
+    const x = song(r, f, { tuneCents: sol!, tuneFor: f });
+    const bandsHere = ALL_CRYSTALS.map((g) => (g === f ? 0 : 3));
+    check((trackInfoRows(x, NOW, bandsHere).find((rw) => rw.label === 'Crystal')?.note ?? '').endsWith(` ${KEY_FITS_TUNED_NOTE}`), 'the Crystal note: "Its key fits this crystal\'s tone at its tuning."');
+    check((trackInfoRows(song(r, f), NOW, bandsHere).find((rw) => rw.label === 'Crystal')?.note ?? '').endsWith(" Its key fits this crystal's tone."), 'the Crystal note: untuned, v16.8.2\'s words');
+  }
+  // A1: Perfect GUT on, one of the six: Fit the Solfeggio tone and Fit the Lo Shu tone (each only when non-zero).
+  {
+    // (Fix round 2, L-S1: one whose key doesn't fit the crystal's Solfeggio tone at its Lo Shu fit, so a kept Lo Shu
+    // tuning there is still offered the Solfeggio Fit; the other kind is checked below.)
+    const both = find((x) => !notSix(x.f) && x.sol !== null && x.sol !== 0 && x.lo !== null && x.lo !== 0 && x.lo !== x.sol && relAt(x.r.chroma, x.r.chromaA4Hz, solfeggioTone(x.f), x.lo) > FIT_REL_EDGE, 'a swapped crystal with both shifts, different, the Solfeggio tone not fitting at the Lo Shu fit');
+    const lo = loShuHz(both.f)!;
+    const row = tuningOf(song(both.r, both.f), true)!;
+    eq(row.choice?.options.map((o) => o.label), ['Standard (432)', `Fit ${both.f} Hz · ${tuneLabel(both.sol!)}`, `Fit Lo Shu ${lo} Hz · ${tuneLabel(both.lo!)}`], `A1: Perfect GUT on, ${both.f} Hz: Standard, Fit ${both.f}, Fit Lo Shu ${lo}`);
+    const loOpt = row.choice!.options[2];
+    eq([loOpt.id, loOpt.cents, loOpt.forCrystal, loOpt.loShu], ['fitLoShu', offeredShift(both.r.chroma, both.r.chromaA4Hz, loShuTone(both.f)), both.f, true], 'A1: the Lo Shu Fit is the offered shift at the Lo Shu tone (never the Solfeggio one), for that crystal');
+    check(loOpt.cents !== offeredShift(both.r.chroma, both.r.chromaA4Hz, solfeggioTone(both.f)), 'A1: (and here the two tones give different shifts)');
+    eq(loOpt.spoken, `Tuning: Fit Lo Shu ${lo} hertz, ${both.lo! < 0 ? 'minus' : 'plus'} ${Math.abs(both.lo!)} ${Math.abs(both.lo!) === 1 ? 'cent' : 'cents'}`, 'A1: the Lo Shu announcement');
+    // Perfect GUT off: only the Solfeggio Fit, fitShift at the Solfeggio tone (never the Lo Shu one).
+    const off = tuningOf(song(both.r, both.f), false)!;
+    eq(off.choice?.options.map((o) => o.id), ['standard', 'fit'], 'A1: Perfect GUT off: no Lo Shu choice');
+    eq(off.choice?.options[1].cents, offeredShift(both.r.chroma, both.r.chromaA4Hz, solfeggioTone(both.f)), 'the Fit is the offered shift at the Solfeggio tone (keyBands\'), never the Lo Shu one');
+    // Only one of the two non-zero.
+    const onlyLo = pairs.find((x) => !notSix(x.f) && (x.sol === null || x.sol === 0) && x.lo !== null && x.lo !== 0);
+    if (onlyLo) eq(tuningOf(song(onlyLo.r, onlyLo.f), true)?.choice?.options.map((o) => o.id), ['standard', 'fitLoShu'], 'A1: only the Lo Shu tone needs a shift: Standard and Fit Lo Shu');
+    // Neither: the Lo Shu tone's reason.
+    const loZero = pairs.find((x) => !notSix(x.f) && (x.sol === null || x.sol === 0) && x.lo === 0);
+    if (loZero) eq(tuningOf(song(loZero.r, loZero.f), true)?.note, TUNE_REASON.fitsLoShu, 'A1: neither, the Lo Shu tone fits: "Its key already fits the Lo Shu tone"');
+    const loNull = find((x) => !notSix(x.f) && (x.sol === null || x.sol === 0) && x.lo === null, 'a swapped crystal no tuning fits');
+    eq(tuningOf(song(loNull.r, loNull.f), true)?.note, noTuningFits(loShuHz(loNull.f)!), 'A1: neither, nothing fits the Lo Shu tone: "No tuning within ±50 cents fits 75 Hz"');
+    check(!!loZero || !!onlyLo, 'A1: the fixture has a Lo Shu-only case');
+    // A kept Lo Shu tuning: its label, Copy and note; with Perfect GUT off it stays and is offered back, with the
+    // Solfeggio Fit for that crystal.
+    const kept = song(both.r, both.f, { tuneCents: both.lo!, tuneFor: both.f, tuneLoShu: true });
+    const krow = tuningOf(kept, true)!;
+    eq([krow.value, krow.copy], [`Tuned ${tuneLabel(both.lo!)} · chosen for Lo Shu ${lo} Hz (${both.f})`, `Tuning: ${tuneLabel(both.lo!)} (chosen for Lo Shu ${lo} Hz)`], 'A1: a kept Lo Shu tuning: its label and Copy line');
+    eq(krow.choice?.options.map((o) => o.id), ['standard', 'kept', 'fit'], 'A1: kept Lo Shu, Perfect GUT on: Standard, kept, the Solfeggio Fit');
+    check(krow.choice!.note.includes('so the Lo Shu tone fits its key') && krow.choice!.note.includes('so the next Assign may move it'), 'A1: the Lo Shu note');
+    eq(tuningOf(kept, false)?.choice?.options.map((o) => o.id), ['standard', 'kept', 'fit'], 'A1: Perfect GUT off: the kept Lo Shu tuning stays, the Solfeggio Fit offered');
+    // Fix round 1 (N4): with Perfect GUT off, its note says what is true: the Lo Shu tone plays only with Perfect GUT on.
+    const offNote = tuningOf(kept, false)!.choice!.note;
+    eq(offNote.split('. ').slice(0, 2), [`Plays ${Math.abs(speedPercent(both.lo!)).toFixed(1)} % ${both.lo! < 0 ? 'slower' : 'faster'} than Standard`, `Chosen for Lo Shu ${lo} Hz, which plays only with Lo Shu Perfect GUT on`], 'N4: a kept Lo Shu tuning, Perfect GUT off: its note');
+    check(!offNote.includes('fits its key'), 'N4: Perfect GUT off: never "so the Lo Shu tone fits its key"');
+    // (A01) and its Crystal note with Perfect GUT off: never the Lo Shu one, though the Lo Shu tone fits at its rate.
+    check(loShuFitsNow(kept), 'A01: (the Lo Shu tone does fit it at its rate)');
+    for (const b of [null, ALL_CRYSTALS.map(() => 3), ALL_CRYSTALS.map(() => 0)]) {
+      const n = trackInfoRows(kept, NOW, b, false).find((rw) => rw.label === 'Crystal')?.note ?? '';
+      check(!n.includes('Lo Shu'), `A01: Perfect GUT off, a kept Lo Shu tuning: never the Lo Shu note (bands ${b ? b[0] : 'none'})`);
+      check(!trackInfoText(kept, NOW, b, false).includes('Its key fits the Lo Shu tone'), 'A01: nor in Copy');
+      eq(n.endsWith(` ${KEY_FITS_TUNED_NOTE}`), !!b && b[0] === 0, 'A01: Perfect GUT off: the Solfeggio note, from its own bands');
+    }
+    // The Crystal note on the six with Perfect GUT on: the Lo Shu tone's, at the track's rate; never the Solfeggio one.
+    const allBand0 = ALL_CRYSTALS.map(() => 0);
+    for (const x of [song(both.r, both.f), kept]) {
+      const n = trackInfoRows(x, NOW, allBand0, true).find((rw) => rw.label === 'Crystal')?.note ?? '';
+      const fitsLo = relAt(x.chroma as number[], x.chromaA4Hz as number, loShuTone(both.f)!, (x.tuneCents as number) ?? 0) <= 0.35;
+      eq(loShuFitsNow(x), fitsLo, 'A1: loShuFitsNow is the Lo Shu tone\'s rel at the track\'s rate');
+      check(!n.includes("this crystal's tone"), 'A1: Perfect GUT on, on the six: never the Solfeggio note');
+      eq(n.endsWith(x.tuneCents ? ` ${KEY_FITS_LOSHU_TUNED_NOTE}` : ` ${KEY_FITS_LOSHU_NOTE}`), fitsLo, `A1: the Lo Shu note ${fitsLo ? 'shown' : 'hidden'} (${x.tuneCents ? 'tuned' : 'Standard'})`);
+    }
+    check(loShuFitsNow(kept), 'A1: tuned to its Lo Shu fit, the Lo Shu tone fits at its rate');
+  }
+  // A1: with Perfect GUT off, never a Lo Shu choice, whatever shifts are given, and the Solfeggio reasons on the six.
+  {
+    const r = FIX.reads[0];
+    for (const f of LO_SHU_CRYSTALS) {
+      eq(tuningRow(song(r, f), false, { sol: 5, loShu: 9 }).choice?.options.map((o) => o.id), ['standard', 'fit'], `A1: Perfect GUT off on ${f}: no Lo Shu choice, even given a Lo Shu shift`);
+      eq(tuningRow(song(r, f), true, { sol: 5, loShu: 9 }).choice?.options.map((o) => o.id), ['standard', 'fit', 'fitLoShu'], `A1: Perfect GUT on, ${f}: both`);
+      eq(tuningRow(song(r, f), false, { sol: 0, loShu: 9 }).note, TUNE_REASON.fits, `A1: Perfect GUT off on ${f}: shift 0, the Solfeggio reason`);
+      eq(tuningRow(song(r, f), false, { sol: null, loShu: null }).note, noTuningFits(f), `A1: Perfect GUT off on ${f}: none, the crystal's own Hz`);
+      // (Fix round 2, L-S1: the Solfeggio Fit only when the key doesn't already fit that tone at the kept −9 cents; the Lo
+      // Shu Fit only when the Lo Shu tone doesn't fit it there.)
+      const solFitsAt9 = relAt(r.chroma, r.chromaA4Hz, solfeggioTone(f), -9) <= FIT_REL_EDGE;
+      const loFitsAt9 = loShuFitsNow(song(r, f, { tuneCents: -9, tuneFor: f }));
+      eq(tuningRow(song(r, f, { tuneCents: -9, tuneFor: f, tuneLoShu: true }), false, { sol: 5, loShu: 9 }).choice?.options.map((o) => o.id), ['standard', 'kept', ...(solFitsAt9 ? [] : ['fit'])], `A1: a kept Lo Shu tuning, Perfect GUT off on ${f}: no Lo Shu choice, the Solfeggio Fit unless it fits at the tuning`);
+      eq(tuningRow(song(r, f, { tuneCents: -9, tuneFor: f }), true, { sol: 5, loShu: 9 }).choice?.options.map((o) => o.id), ['standard', 'kept', ...(loFitsAt9 ? [] : ['fitLoShu'])], `A1: a kept Solfeggio tuning, Perfect GUT on, ${f}: the Lo Shu Fit (unless it fits at the tuning), not the Solfeggio one again`);
+      eq(tuningRow(song(r, f, { tuneCents: -9, tuneFor: f }), false, { sol: 5, loShu: 9 }).choice?.options.map((o) => o.id), ['standard', 'kept'], `A1: a kept Solfeggio tuning, Perfect GUT off, ${f}: nothing else`);
+    }
+    for (const f of [741, 963, 2178]) eq(tuningRow(song(r, f), true, { sol: 5, loShu: 9 }).choice?.options.map((o) => o.id), ['standard', 'fit'], `A1: Perfect GUT on, ${f} (not swapped): no Lo Shu choice`);
+  }
+  // Fix round 1 (S1): a key already within the edge at Standard (0.30 < rel(0) <= 0.35, where fitShift still finds a
+  // margin shift) is offered nothing: "Its key already fits this crystal's tone" (the Crystal note's band 0), Solfeggio
+  // and Lo Shu alike; a key that doesn't fit keeps rule c's shift.
+  {
+    let margin = 0, lomargin = 0, kept = 0;
+    for (const r of FIX.reads) for (const f of ALL_CRYSTALS) {
+      const tones: Array<[number, boolean]> = [[solfeggioTone(f), false], ...(loShuTone(f) === null ? [] : [[loShuTone(f) as number, true] as [number, boolean]])];
+      for (const [tone, isLo] of tones) {
+        const fs = fitShift(r.chroma, r.chromaA4Hz, tone);
+        const rel0 = relAt(r.chroma, r.chromaA4Hz, tone, 0);
+        const want = fs === null ? null : rel0 <= FIT_REL_EDGE ? 0 : fs;
+        eq(offeredShift(r.chroma, r.chromaA4Hz, tone), want, `S1: offeredShift at ${isLo ? 'Lo Shu ' : ''}${f}: 0 when rel(0) <= 0.35, else fitShift`);
+        if (fs !== null && fs !== 0 && rel0 <= FIT_REL_EDGE) { if (isLo) lomargin++; else margin++; }
+        if (fs !== null && fs !== 0 && rel0 > FIT_REL_EDGE) kept++;
+      }
+    }
+    check(margin > 0 && lomargin > 0 && kept > 0, `S1: the fixture has margin cases (${margin} Solfeggio, ${lomargin} Lo Shu) and kept shifts (${kept})`);
+    const mc = (() => { for (const r of FIX.reads) for (const f of ALL_CRYSTALS) { if (!notSix(f)) continue; const fs = fitShift(r.chroma, r.chromaA4Hz, solfeggioTone(f)); if (fs !== null && fs !== 0 && relAt(r.chroma, r.chromaA4Hz, solfeggioTone(f), 0) <= FIT_REL_EDGE) return { r, f }; } return null; })()!;
+    const mrow = tuningOf(song(mc.r, mc.f))!;
+    eq([mrow.choice, mrow.note], [undefined, TUNE_REASON.fits], `S1: a margin case on ${mc.f}: plain, "Its key already fits this crystal's tone"`);
+    eq(tuneShiftsFor(song(mc.r, mc.f), false).sol, 0, 'S1: tuneShiftsFor gives 0 there');
+    check((trackInfoRows(song(mc.r, mc.f), NOW, ALL_CRYSTALS.map((g) => (g === mc.f ? 0 : 3))).find((rw) => rw.label === 'Crystal')?.note ?? '').endsWith(" Its key fits this crystal's tone."), 'S1: and the Crystal note says it fits (band 0)');
+    const lc = (() => { for (const r of FIX.reads) for (const f of LO_SHU_CRYSTALS) { const lt = loShuTone(f)!; const fs = fitShift(r.chroma, r.chromaA4Hz, lt); if (fs !== null && fs !== 0 && relAt(r.chroma, r.chromaA4Hz, lt, 0) <= FIT_REL_EDGE) return { r, f }; } return null; })()!;
+    eq(tuneShiftsFor(song(lc.r, lc.f), true).loShu, 0, `S1: a Lo Shu margin case on ${lc.f}: no Lo Shu shift`);
+    check(!(tuningOf(song(lc.r, lc.f), true)?.choice?.options ?? []).some((o) => o.id === 'fitLoShu'), 'S1: no Lo Shu Fit offered there');
+  }
+  // Fix round 1 (S2): the Lo Shu fit at the output in effect (the phone's own speaker plays 75 and 186 an octave up);
+  // the Solfeggio Fit at keyBands' headphone tone on every output (T7).
+  {
+    const phoneDiffers = LO_SHU_CRYSTALS.filter((f) => loShuTone(f, 'phone') !== loShuTone(f, 'headphones'));
+    eq(phoneDiffers, [174, 285], 'S2: the phone plays Lo Shu 75 and 186 an octave up (300, 372), the other four as headphones');
+    eq([loShuTone(174, 'phone'), loShuTone(285, 'phone'), loShuTone(174, 'speakers'), loShuTone(174)], [300, 372, toneOf(75, 'speakers'), toneOf(75, 'headphones')], 'S2: the tones');
+    let differ = 0;
+    for (const r of FIX.reads) for (const f of LO_SHU_CRYSTALS) {
+      const x = song(r, f);
+      for (const out of ['headphones', 'speakers', 'phone']) {
+        const sh = tuneShiftsFor(x, true, out);
+        eq(sh.loShu, offeredShift(r.chroma, r.chromaA4Hz, loShuTone(f, out)), `S2: the Lo Shu shift on ${f} for ${out}`);
+        eq(sh.sol, offeredShift(r.chroma, r.chromaA4Hz, solfeggioTone(f)), `S2: the Solfeggio shift on ${f} for ${out}: keyBands' headphone tone`);
+        eq(loShuFitsNow(x, out), relAt(r.chroma, r.chromaA4Hz, loShuTone(f, out)!, 0) <= FIT_REL_EDGE, `S2: loShuFitsNow on ${f} for ${out}`);
+      }
+      if (tuneShiftsFor(x, true, 'phone').loShu !== tuneShiftsFor(x, true, 'headphones').loShu) differ++;
+    }
+    check(differ > 0, `S2: the phone's Lo Shu fit differs from the headphones' in the fixture (${differ} cases)`);
+    eq(tuneShiftsFor(song(FIX.reads[0], 174), true, undefined as unknown as string), tuneShiftsFor(song(FIX.reads[0], 174), true, 'headphones'), 'S2: an unknown output: the headphone tone');
+  }
+  // Fix round 1 (S3): long tracks. A clear key over the phone's caps (a desktop's analysis) is offered its fits from the
+  // key data (Key fit acts on it; placement leaves it out); the Crystal note stays K7's (no bands, nothing extra). With no
+  // key data because this device's Analyse tracks skips it as too long: "Too long for Analyse tracks on this device".
+  {
+    const { r, f, sol } = shiftCase;
+    const long = song(r, f, { duration: 900 });
+    check(!clearKey(long) && tunableKey(long), 'S3: a 900 s track: no clear key for placement, key data Track info can fit');
+    eq(tuneShiftsFor(long, false).sol, sol, 'S3: its shift from the key data');
+    eq(tuningOf(long)?.choice?.options.map((o) => o.label), ['Standard (432)', `Fit ${f} Hz · ${tuneLabel(sol!)}`], 'S3: a long clear-key track: the Fit offered (no "No clear key")');
+    eq(tuningOf(song(r, f, { duration: 900, file: { name: 'x.wav', size: 200 * 2 ** 20 } }))?.choice?.options.length, 2, 'S3: over the size cap too');
+    eq(tuningOf(song(r, f, { duration: 900, keyConfidence: 0.3 }))?.note, TUNE_REASON.noKey, 'S3: a long track with an unclear key: "No clear key"');
+    check(!(trackInfoRows(long, NOW, null).find((rw) => rw.label === 'Crystal')?.note ?? '').includes('Its key fits'), 'S3: its Crystal note: nothing extra (K7: no bands)');
+    const tunedLong = song(r, f, { duration: 900, tuneCents: sol!, tuneFor: f });
+    eq(tuningOf(tunedLong)?.choice?.value, 'kept', 'S3: a long track tuned: its tuning kept');
+    check(!(trackInfoRows(tunedLong, NOW, null).find((rw) => rw.label === 'Crystal')?.note ?? '').includes('Its key fits'), 'S3: tuned, its Crystal note: still nothing (no bands)');
+    const PHONE = { seconds: 720, bytes: 100 * 2 ** 20 }, DESK = { seconds: 1800, bytes: 1024 * 2 ** 20 };
+    const unanalysed = (o: Partial<LibSong>) => song(r, f, { chromaVersion: undefined, chroma: undefined, chromaA4Hz: undefined, musicKey: undefined, keyConfidence: undefined, ...o });
+    const reason = (x: LibSong, caps: { seconds: number; bytes: number } | null) => trackInfoRows(x, NOW, null, false, null, { caps }).find((rw) => rw.label === 'Tuning')?.note;
+    eq(reason(unanalysed({ duration: 900 }), PHONE), TUNE_REASON.tooLong, 'S3: too long for this device\'s Analyse tracks: "Too long for Analyse tracks on this device"');
+    eq(reason(unanalysed({ duration: 900 }), DESK), TUNE_REASON.analyse, 'S3: the desktop analyses it: "Analyse tracks first"');
+    eq(reason(unanalysed({ duration: 2000 }), DESK), TUNE_REASON.tooLong, 'S3: too long for the desktop too');
+    eq(reason(unanalysed({ duration: 600, file: { name: 'x.wav', size: 150 * 2 ** 20 } }), PHONE), TUNE_REASON.tooLong, 'S3: too big for this device');
+    eq(reason(unanalysed({ duration: 600 }), PHONE), TUNE_REASON.analyse, 'S3: within the caps: "Analyse tracks first"');
+    eq(reason(unanalysed({ duration: 900 }), null), TUNE_REASON.analyse, 'S3: caps not known: "Analyse tracks first"');
+    eq(reason(unanalysed({ duration: 900, analysisFailedV: 1 }), PHONE), TUNE_REASON.noKey, 'S3: given up on: "No clear key"');
+    eq([tooLongToAnalyse(unanalysed({ duration: 900 }), PHONE), tooLongToAnalyse(song(r, f, { duration: 900 }), PHONE)], [true, false], 'S3: tooLongToAnalyse: only without key data');
+  }
+  // Fix round 1 (N1, N8): the notes.
+  eq(tunedNote(14, 963, false, 963), `Plays 0.8 % faster than Standard, so the crystal's tone fits its key. The file isn't changed. Assign crystals places it by how it sounds at this tuning.${LIVE_TUNE_SWITCH ? '' : ' From the next play.'}`, 'N1: "than Standard"');
+  eq(tunedNote(-14, 963, false, 852).split('. ')[1], 'Chosen for 963 Hz, before it moved to 852 Hz', 'N8: a moved track\'s kept tuning');
+  eq(tunedNote(-14, 174, true, 285).split('. ')[1], 'Chosen for Lo Shu 75 Hz (174), before it moved to 285 Hz', 'N8: a moved Lo Shu tuning');
+  eq(tunedNote(-14, 174, true, 174, false).split('. ')[1], 'Chosen for Lo Shu 75 Hz, which plays only with Lo Shu Perfect GUT on', 'N4: Perfect GUT off');
+  check(tunedNote(-14, 174, true, 174, true).includes('so the Lo Shu tone fits its key'), 'N4: Perfect GUT on: the Lo Shu tone fits');
+  eq(tunedNote(-14, 963, false, null).split('. ')[1], 'Chosen for 963 Hz', 'no crystal now: what it was chosen for');
+  // Fix round 1 (N7): the dialog's Lo Shu test is the one the Crystal note reads (never recomputed per render).
+  {
+    const x = song(FIX.reads[0], 174);
+    const n = (loShuFits: boolean) => trackInfoRows(x, NOW, null, true, { sol: null, loShu: null }, { loShuFits }).find((rw) => rw.label === 'Crystal')?.note ?? '';
+    eq([n(true).endsWith(` ${KEY_FITS_LOSHU_NOTE}`), n(false).includes('Lo Shu')], [true, false], 'N7: the Crystal note reads the dialog\'s Lo Shu test');
+  }
+  // The shifts are made once (the dialog passes them): rows from given shifts never compute.
+  {
+    const { r, f } = shiftCase;
+    const given: TuneShifts = { sol: 7, loShu: null };
+    eq(tuningRow(song(r, f), false, given).choice?.options[1].label, `Fit ${f} Hz · +7 cents`, 'trackInfoRows takes the shifts it is given (the dialog\'s, made once per open)');
+    eq(tuneShiftsFor(song(r, f), false), { sol: shiftCase.sol, loShu: null }, 'tuneShiftsFor: the Solfeggio shift; no Lo Shu one with Perfect GUT off');
+    eq(tuneShiftsFor(song(r, f, { keyConfidence: 0.1, duration: 900 }), true), { sol: null, loShu: null }, 'tuneShiftsFor: nothing without a clear key, long or not');
+    eq(tuneShiftsFor(song(r, f, { keyConfidence: 0.1 }), true), { sol: null, loShu: null }, 'tuneShiftsFor: nothing without a clear key');
+  }
+
+  // Fix round 2 (L-S1, L-S2): a tuned track's offers are judged at its kept tuning, the Lo Shu ones on the output in
+  // effect; never a Fit at the kept cents. The pairs' readings on every crystal, kept tunings for that crystal and for
+  // another (Solfeggio, and Lo Shu on the six), Perfect GUT off and on, the three outputs. The expectations re-state the
+  // rule with relAt directly; the shifts are the pairs' (headphones) and made once per (reading, crystal, output), as the
+  // dialog makes them once per open. (musicFit is ~0.1 ms in Node, so the costly parts are sampled: the band-0 and
+  // loShuFitsNow equivalences on one reading per crystal.)
+  {
+    const OUTPUTS = ['headphones', 'speakers', 'phone'];
+    const KEPT = [-50, -23, -7, -1, 4, 18, 37, 50];
+    const readsN = FIX.reads.slice(0, 8);
+    let rows = 0, solOffered = 0, solWithheld = 0, loOffered = 0, loWithheld = 0, sameCents = 0, bandsChecked = 0;
+    let contradictions = 0, loContradictions = 0;
+    for (const [ri, r] of readsN.entries()) for (const hz of ALL_CRYSTALS) {
+      const six = LO_SHU_CRYSTALS.includes(hz);
+      const at = ALL_CRYSTALS.indexOf(hz);
+      const solT = solfeggioTone(hz);
+      const pair = pairs.find((p) => p.r === r && p.f === hz)!;
+      const loShift = new Map<string, number | null>(six ? OUTPUTS.map((o) => [o, o === 'headphones' ? pair.lo : offeredShift(r.chroma, r.chromaA4Hz, loShuTone(hz, o)!)]) : []);
+      const ownShifts = [pair.sol, ...loShift.values()].filter((c): c is number => c !== null && c !== 0);
+      const keptSet = [...new Set([...KEPT, ...ownShifts])];
+      const other = hz === 963 ? 852 : 963;
+      const sampled = ri === at % readsN.length;
+      for (const c of keptSet) {
+        // (The Crystal note's own test: band 0 in the track's own bands at its tuning, the same as fitsSolfeggioAt.)
+        const solFitsKept = relAt(r.chroma, r.chromaA4Hz, solT, c) <= FIT_REL_EDGE;
+        if (sampled) {
+          eq(songBands({ chroma: r.chroma, chromaA4Hz: r.chromaA4Hz, tuneCents: c, tuneFor: hz })[at] === 0, solFitsKept, `L-S1: the kept-tuning test is keyBands' band 0 (read ${ri}, ${hz}, ${c} c)`);
+          bandsChecked++;
+        }
+        const tunedBands = ALL_CRYSTALS.map((g) => (g === hz && solFitsKept ? 0 : 3));
+        const loFitsAt = new Map<string, boolean>(six ? OUTPUTS.map((o) => [o, relAt(r.chroma, r.chromaA4Hz, loShuTone(hz, o)!, c) <= FIT_REL_EDGE]) : []);
+        if (sampled && six) for (const o of OUTPUTS) eq(loShuFitsNow(song(r, hz, { tuneCents: c, tuneFor: hz }), o), loFitsAt.get(o), `L-S2: loShuFitsNow at the kept cents on ${o} (read ${ri}, ${hz}, ${c} c)`);
+        const keptOn: Array<Partial<LibSong>> = [{ tuneCents: c, tuneFor: hz }, { tuneCents: c, tuneFor: other }, ...(six ? [{ tuneCents: c, tuneFor: hz, tuneLoShu: true as const }] : [])];
+        for (const kept of keptOn) for (const perfectGut of [false, true]) for (const output of perfectGut && six ? OUTPUTS : ['headphones']) {
+          const sh: TuneShifts = { sol: pair.sol, loShu: perfectGut && six ? loShift.get(output)! : null };
+          const x = song(r, hz, kept);
+          const loFits = perfectGut && six ? loFitsAt.get(output)! : false;
+          const rowsNow = trackInfoRows(x, NOW, tunedBands, perfectGut, sh, { output, loShuFits: loFits });
+          const row = rowsNow.find((rw) => rw.label === 'Tuning')!;
+          const ids = row.choice!.options.map((o) => o.id);
+          const fitO = row.choice!.options.find((o) => o.id === 'fit');
+          const loO = row.choice!.options.find((o) => o.id === 'fitLoShu');
+          const sameSol = kept.tuneFor === hz && !kept.tuneLoShu;
+          const wantSol = sh.sol !== null && sh.sol !== 0 && sh.sol !== c && !sameSol && !solFitsKept;
+          const wantLo = perfectGut && six && sh.loShu !== null && sh.loShu !== 0 && sh.loShu !== c && !loFits;
+          eq([ids.includes('fit'), ids.includes('fitLoShu')], [wantSol, wantLo], `L-S1/L-S2: the offers (read ${ri}, ${hz}, kept ${c} c for ${kept.tuneFor}${kept.tuneLoShu ? ' Lo Shu' : ''}, GUT ${perfectGut}, ${output})`);
+          if (fitO) eq(fitO.cents === c, false, 'L-S1: never a Fit at the kept cents');
+          if (loO) eq(loO.cents === c, false, 'L-S1: never a Lo Shu Fit at the kept cents');
+          if (fitO) solOffered++; else if (sh.sol !== null && sh.sol !== 0 && !sameSol) solWithheld++;
+          if (loO) loOffered++; else if (perfectGut && six && sh.loShu !== null && sh.loShu !== 0) loWithheld++;
+          if ((sh.sol === c && !sameSol) || (perfectGut && six && sh.loShu === c)) sameCents++;
+          // (The reviewer's contradiction: the Crystal note says it fits at its tuning, and a Fit is offered beside it.)
+          const crystalNote = rowsNow.find((rw) => rw.label === 'Crystal')?.note ?? '';
+          if (crystalNote.endsWith(` ${KEY_FITS_TUNED_NOTE}`) && fitO) contradictions++;
+          if (crystalNote.endsWith(` ${KEY_FITS_LOSHU_TUNED_NOTE}`) && loO) loContradictions++;
+          // L-S2: a kept Lo Shu tuning on its own crystal, Perfect GUT on: "so the Lo Shu tone fits its key" only when it
+          // fits on this output; else what it was chosen for.
+          if (kept.tuneLoShu && perfectGut) {
+            const why = row.choice!.note.split(` ${TUNE_FILE_NOTE}`)[0];
+            const speed = `Plays ${Math.abs(speedPercent(c)).toFixed(1)} % ${c < 0 ? 'slower' : 'faster'} than Standard`;
+            eq(why, loFits ? `${speed}, so the Lo Shu tone fits its key.` : `${speed}. Chosen for Lo Shu ${loShuHz(hz)} Hz.`, `L-S2: the kept Lo Shu note on ${output} (read ${ri}, ${hz}, ${c} c)`);
+          }
+        }
+        rows++;
+      }
+    }
+    eq([contradictions, loContradictions], [0, 0], 'L-S1: never "Its key fits … at its tuning" beside a Fit for that tone');
+    check(solOffered > 0 && solWithheld > 0 && loOffered > 0 && loWithheld > 0 && sameCents > 0, `L-S1/L-S2: both ways seen (Solfeggio offered ${solOffered}, withheld ${solWithheld}; Lo Shu offered ${loOffered}, withheld ${loWithheld}; at the kept cents ${sameCents}; ${rows} kept tunings, ${bandsChecked} band checks)`);
+    // The reviewer's case: a tuned track moved by Assign to a crystal it fits at its tuning: no Fit; one it doesn't: the Fit.
+    const movedFits = pairs.find((p) => notSix(p.f) && p.sol !== null && p.sol !== 0 && KEPT.some((c) => c !== p.sol && relAt(p.r.chroma, p.r.chromaA4Hz, solfeggioTone(p.f), c) <= FIT_REL_EDGE))!;
+    const cFits = KEPT.find((c) => c !== movedFits.sol && relAt(movedFits.r.chroma, movedFits.r.chromaA4Hz, solfeggioTone(movedFits.f), c) <= FIT_REL_EDGE)!;
+    const mrow = tuningOf(song(movedFits.r, movedFits.f, { tuneCents: cFits, tuneFor: movedFits.f === 963 ? 852 : 963 }))!;
+    eq(mrow.choice?.options.map((o) => o.id), ['standard', 'kept'], `L-S1: moved to ${movedFits.f}, which its key fits at its kept ${cFits} c: no Fit (offered ${movedFits.sol} c at Standard)`);
+    // L-S2: the reviewer's failure scenario: a Lo Shu Fit chosen on the phone speaker, heard on headphones where it doesn't
+    // fit: "Chosen for Lo Shu 186 Hz.", and the headphones' own Lo Shu Fit is offered (when it has one).
+    const p2h = (() => {
+      for (const r of FIX.reads) for (const f of [174, 285]) {
+        const ph = offeredShift(r.chroma, r.chromaA4Hz, loShuTone(f, 'phone')!);
+        const hp = offeredShift(r.chroma, r.chromaA4Hz, loShuTone(f, 'headphones')!);
+        if (ph !== null && ph !== 0 && hp !== null && hp !== 0 && hp !== ph && relAt(r.chroma, r.chromaA4Hz, loShuTone(f, 'headphones')!, ph) > FIT_REL_EDGE) return { r, f, ph, hp };
+      }
+      return null;
+    })();
+    check(!!p2h, 'L-S2: the fixture has a phone-chosen Lo Shu fit that doesn\'t fit on headphones');
+    if (p2h) {
+      const x = song(p2h.r, p2h.f, { tuneCents: p2h.ph, tuneFor: p2h.f, tuneLoShu: true });
+      const onHp = trackInfoRows(x, NOW, null, true, null, { output: 'headphones' }).find((rw) => rw.label === 'Tuning')!;
+      eq(onHp.choice!.note.split(` ${TUNE_FILE_NOTE}`)[0].split('. ')[1], `Chosen for Lo Shu ${loShuHz(p2h.f)} Hz.`, 'L-S2: chosen on the phone, heard on headphones: what it was chosen for, never "fits"');
+      check(onHp.choice!.options.some((o) => o.id === 'fitLoShu' && o.cents === p2h.hp), `L-S2: and the headphones' own Lo Shu Fit (${p2h.hp} c) is offered`);
+      const onPhone = trackInfoRows(x, NOW, null, true, null, { output: 'phone' }).find((rw) => rw.label === 'Tuning')!;
+      check(onPhone.choice!.note.includes('so the Lo Shu tone fits its key') && !onPhone.choice!.options.some((o) => o.id === 'fitLoShu'), 'L-S2: on the phone it was chosen for: it fits, no Lo Shu Fit');
+    }
+    // tunedNote's own words: the Lo Shu fit at the output, and a track over keyBands' caps.
+    eq(tunedNote(-14, 285, true, 285, true, false).split('. ').slice(0, 2), ['Plays 0.8 % slower than Standard', 'Chosen for Lo Shu 186 Hz'], 'L-S2: tunedNote, a Lo Shu tuning not fitting here');
+    check(tunedNote(-14, 285, true, 285, true, true).includes('so the Lo Shu tone fits its key'), 'L-S2: tunedNote, fitting here');
+    check(tunedNote(-14, 963, false, 963, true, false).includes("so the crystal's tone fits its key"), 'L-S2: the Lo Shu test never touches a Solfeggio tuning\'s note');
+  }
+
+  // Fix round 2 (L-S3): over keyBands' fixed caps (withinKeyLimits: 720 s and 100 MiB, the same on every device) Assign
+  // never reads the key data, so the kept note and the offer's note say so, in place of the Assign sentence.
+  {
+    const { r, f, sol } = shiftCase;
+    const next = LIVE_TUNE_SWITCH ? '' : ' From the next play.';
+    const longTuned = (o: Partial<LibSong>) => tuningOf(song(r, f, { tuneCents: sol!, tuneFor: f, ...o }))!.choice!.note;
+    const pct = speedPercent(sol!);
+    const speed = `Plays ${Math.abs(pct).toFixed(1)} % ${pct < 0 ? 'slower' : 'faster'} than Standard`;
+    eq(longTuned({ duration: 900 }), `${speed}, so the crystal's tone fits its key. ${TUNE_FILE_NOTE} ${TUNE_ASSIGN_LONG_NOTE}${next}`, 'L-S3: a 900 s tuned track: no Assign promise');
+    eq(longTuned({ duration: 720 }), `${speed}, so the crystal's tone fits its key. ${TUNE_FILE_NOTE} ${TUNE_ASSIGN_NOTE}${next}`, 'L-S3: 720 s is within the caps (inclusive): the Assign sentence');
+    eq(longTuned({ duration: 721 }).includes(TUNE_ASSIGN_LONG_NOTE), true, 'L-S3: 721 s: over');
+    eq(longTuned({ file: { name: 'x.wav', size: 100 * 2 ** 20 + 1 } }).includes(TUNE_ASSIGN_LONG_NOTE), true, 'L-S3: over the size cap: no Assign promise');
+    eq(longTuned({ file: { name: 'x.wav', size: 100 * 2 ** 20 } }).includes(TUNE_ASSIGN_NOTE), true, 'L-S3: at the size cap (inclusive): the Assign sentence');
+    check(!longTuned({ duration: 900 }).includes('Assign crystals places'), 'L-S3: never "places it" over the caps');
+    // A long Lo Shu tuning: the long sentence, never the Lo Shu Assign one.
+    const lx = song(r, 174, { duration: 900, tuneCents: -9, tuneFor: 174, tuneLoShu: true });
+    const lnote = trackInfoRows(lx, NOW, null, true, null, { output: 'headphones' }).find((rw) => rw.label === 'Tuning')!.choice!.note;
+    check(lnote.includes(TUNE_ASSIGN_LONG_NOTE) && !lnote.includes(TUNE_ASSIGN_LOSHU_NOTE), 'L-S3: a long Lo Shu tuning: the long sentence, not the Lo Shu Assign one');
+    // The offer's note: an untuned long track with a Fit.
+    const offer = tuningOf(song(r, f, { duration: 900 }))!;
+    eq([offer.choice?.value, offer.choice?.note], ['standard', `${TUNE_STANDARD_NOTE} ${TUNE_ASSIGN_LONG_NOTE}${next}`], 'L-S3: the offer\'s note for a long track');
+    eq(tuningOf(song(r, f))!.choice?.note, `${TUNE_STANDARD_NOTE}${next}`, 'L-S3: a short track\'s offer note: fix round 1\'s');
+    check(!withinKeyLimits(song(r, f, { duration: 900 })) && withinKeyLimits(song(r, f)), '(withinKeyLimits: the fixtures)');
+  }
 }
 
 if (failures.length) {

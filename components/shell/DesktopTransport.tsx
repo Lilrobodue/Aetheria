@@ -14,6 +14,7 @@
 // v16.7 review: the centre 360 px below 1280 and the right group's gaps 6 px there, with a compact REC, keep the title
 // column at 100 px or more while recording at 1024; Output's and Walks' bubbles only below 1280 (their words show from
 // there: decision 9); Music only is the first chip; the seek row fits the bar (decision 8).
+// v16.8.3 fix round 1 (SF5): the tuning chip ("Tuned −14 c") follows Music only, before the crystal chip, so it shows.
 
 import React from 'react';
 import { Ellipsis, ListVideo, Music2, Pause, Play, Repeat, Route, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, Waves } from 'lucide-react';
@@ -112,6 +113,13 @@ const DesktopTransport = () => {
                   Music only
                 </span>
               )
+            ) : null}
+            {/* v16.8.3 (T4): the playing track's tuning while it is tuned (display only, as this row is). Fix round 1 (SF5):
+                before the crystal chip, after Music only (v16.7's rule), so the clipped row shows it from 1024 px. */}
+            {s.tuneChip ? (
+              <span className={CHIP} data-testid="desktop-tuning-chip">
+                {s.tuneChip}
+              </span>
             ) : null}
             <span className={CHIP}>
               <span aria-hidden="true" className={`w-1.5 h-1.5 rounded-pill ${REGIME_DOT[regime]}`} />

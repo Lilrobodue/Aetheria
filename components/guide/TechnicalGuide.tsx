@@ -25,7 +25,7 @@ import EvidenceTag from '../ui/EvidenceTag';
 import HowSure from './HowSure';
 import type { HowSureBack } from './HowSure';
 import {
-  crystalCopy, orderLine, REGIME_COPY, TRANSITION_COPY, REGIMES_TITLE, REGIMES_LEAD_START, HEAD_MARK_TITLE, RETUNE_TITLE, RETUNE_LONG, RETUNE_HISTORY,
+  crystalCopy, orderLine, REGIME_COPY, TRANSITION_COPY, REGIMES_TITLE, REGIMES_LEAD_START, HEAD_MARK_TITLE, RETUNE_TITLE, RETUNE_LONG, RETUNE_HISTORY, RETUNE_TUNING,
 } from '../../utils/copy/crystalCopy';
 import { place } from '../../utils/copy/places';
 import type { Layout } from '../../utils/copy/places';
@@ -353,6 +353,8 @@ const TechnicalGuide = ({
                   <TagRow><EvidenceTag tier={p.tag} /></TagRow>
                 </div>
               ))}
+              {/* v16.8.3 fix round 2 (N2): where a track's own tuning is chosen, untagged (no claim), after the tags. */}
+              <p className="text-slate-400 leading-relaxed">{RETUNE_TUNING}</p>
               <p className="text-slate-400 leading-relaxed">{RETUNE_HISTORY}</p>
             </div>
         </section>

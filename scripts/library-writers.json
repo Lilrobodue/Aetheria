@@ -127,6 +127,10 @@
     "count": 1,
     "sha": "ea710045e12cc443"
   },
+  "setOriginalPlaylist call in App › setTrackTuning": {
+    "count": 1,
+    "sha": "16012900280af89c"
+  },
   "setOriginalPlaylist call in App › startAnalysePass › apply": {
     "count": 1,
     "sha": "f666a469f345873d"
@@ -146,6 +150,10 @@
   "settleOrphans call in App › recoverOrphans": {
     "count": 1,
     "sha": "b6337dad746b1fb2"
+  },
+  "setTrackTuning reference in App › useLayoutEffect(no deps)": {
+    "count": 1,
+    "sha": "61511ad6fd2acfa8"
   },
   "startAnalysePass call in App › onAnalyseTap": {
     "count": 1,

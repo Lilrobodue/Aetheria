@@ -40,6 +40,14 @@ export interface Song {
   // written by a successful scan. Absent on readings made before v16.8.1 (at the device's own rate: Scan again's queue)
   // and on a failed scan's placeholder.
   scanRate?: number;
+  // v16.8.3 (Track Tuning): a shift from Standard in whole cents (1 <= |c| <= 50) and the crystal it was chosen for (one of
+  // the 27), set together by App's setTrackTuning from Track info, or both absent (Standard). Anything else restores as
+  // Standard (utils/tuning/trackTuning.ts validTuning). The track plays at PITCH_SHIFT_FACTOR × 2^(c/1200) (trackRate), and
+  // Assign places it by its key at that speed (M1). Amendment A1: tuneLoShu, the tuning was chosen for the Lo Shu Perfect
+  // GUT tone of tuneFor (one of the six it swaps): a label only, never the rate.
+  tuneCents?: number;
+  tuneFor?: number;
+  tuneLoShu?: true;
 }
 
 /** Per-band energy over time, sampled at `fps` frames/sec. Each array holds

@@ -131,13 +131,20 @@ const data = (chroma: number[], a4: number, conf: number | undefined, key: strin
 }
 
 {
-  // A4: the retune is App's (read as text: never imported at run time).
+  // A4: the retune is App's (read as text: never imported at run time). v16.8.3 (Track Tuning), a deliberate update: the
+  // retune is the playing track's own rate, trackRate(fitSong) (utils/tuning/trackTuning.ts: PITCH_SHIFT_FACTOR itself for
+  // a track with no tuning), with the tuning's fields in the memo's deps. Fix round 1 (A3), a deliberate update: while a
+  // tuning is held for the playing track (LIVE_TUNE_SWITCH false, the element still at its old rate), the held cents'
+  // rate, tuneRate(fitHeldCents), with the held cents in the deps too; else trackRate(fitSong) as before.
   const constants = readFileSync(new URL('../../constants.ts', import.meta.url), 'utf8');
   check(constants.includes('export const PITCH_SHIFT_FACTOR = 0.981818;'), 'A4: constants.ts exports PITCH_SHIFT_FACTOR = 0.981818');
   const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
   const calls = app.split('keyFitFor(').length - 1;
-  const passes = /keyFitFor\([^;]*layer\.f, planOutput, PITCH_SHIFT_FACTOR\)/.test(app);
-  check(calls === 1 && passes, `A4: App.tsx makes exactly one keyFitFor( call, ending "layer.f, planOutput, PITCH_SHIFT_FACTOR)" (${calls} calls)`);
+  const passes = /keyFitFor\([^;]*layer\.f, planOutput, fitHeldCents !== null \? tuneRate\(fitHeldCents\) : trackRate\(fitSong\)\)/.test(app);
+  const deps = /: trackRate\(fitSong\)\)\s*: null\),\s*\[[^\]]*fitTuneCents, fitTuneFor, fitHeldCents\]/.test(app);
+  check(calls === 1 && passes && deps, `A4: App.tsx makes exactly one keyFitFor( call, ending "layer.f, planOutput, fitHeldCents !== null ? tuneRate(fitHeldCents) : trackRate(fitSong))", the tuning and the held cents in its deps (${calls} calls)`);
+  const tuning = readFileSync(new URL('../tuning/trackTuning.ts', import.meta.url), 'utf8');
+  check(/if \(c === 0\) return PITCH_SHIFT_FACTOR;/.test(tuning) && /if \(c === null\) return PITCH_SHIFT_FACTOR;/.test(tuning), 'A4: trackRate is PITCH_SHIFT_FACTOR itself without a tuning');
 }
 
 // ---------------------------------------------------- B. no usable data (D10) --

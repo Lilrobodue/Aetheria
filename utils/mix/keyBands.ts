@@ -5,7 +5,9 @@
 //                          sub-line, K4)
 //   bandsOf(chroma, a4)    27 bands, in ALL_CRYSTALS order: Key fit's own rel of the crystal's canonical tone against the
 //                          track's chroma, cut at KEY_EDGES (0 fits .. 3 the full 6 dB clash)
-//   contentKey(s)          what the bands depend on, exactly as stored (the cache's key)
+//   contentKey(s)          what the bands depend on, exactly as stored (the cache's key); v16.8.3: a tuned track's
+//                          ends in "|t<cents>"
+//   songBands(s)           a track's own bands: bandsOf at Standard, or v16.8.3's tuned bands at its rate (M1)
 //   BandCache              the bands by content: read synchronously (get), filled only by warm (sliced) or ensureSync
 //
 // The spread (distribution.ts planAssign(lib, 'spread', { bands })) compares a track's band on a crystal before Deep
@@ -16,6 +18,16 @@
 // crystals' (never the per-device Lo Shu Perfect GUT tones, never the phone speaker's), heard at the stored chromaA4Hz
 // times the app's one retune; and only the key data a phone can make counts (the 720 s / 100 MiB caps below).
 //
+// v16.8.3 ("Track Tuning", the user's decision T1, M1: Assign follows the tuning). A track with a tuning (Track info's
+// tuneCents and tuneFor: utils/tuning/trackTuning.ts validTuning) is heard at chromaA4Hz × tuneRate(cents), so its bands
+// are made at that rate (bandsWith(…, { ...BANDS_DEF, heard: tuneRate(c) })) under the content key "…|t<c>", and Assign
+// places it by how it sounds. A track with no tuning has v16.8.2's content key and bands, byte for byte, so
+// KEY_BANDS_VERSION, the fingerprint and the persisted record's format are unchanged. Tuned entries are never written to
+// the persisted 'keyBands:v1' record (export leaves them out: a downgraded v16.8.2 never refuses the record); they are few
+// and cheap, and are made again at load (the warm-up finds them missing). Devices with the same tunings give the same
+// crystals; a device without a track's tuning places that track (and through the fill, others) by Standard. A1's
+// tuneLoShu is never read here: placement stays at the 27 Solfeggio tones, at the track's rate.
+//
 // Pure: no DOM, no React, no storage (App persists the cache's export through utils/playlistCache.ts). Erasable
 // TypeScript only, so Node runs keyBands.check.ts on it directly.
 
@@ -25,6 +37,7 @@ import { canonicalLayerHz } from '../soundV2/layerHost.ts';
 import { CHROMA_VERSION } from '../soundV2/keyAnalysis.ts';
 import { PITCH_SHIFT_FACTOR } from '../../constants.ts';
 import { ALL_CRYSTALS, NEUTRAL_BAND, keyRanks } from './distribution.ts';
+import { tuneRate, validTuning } from '../tuning/trackTuning.ts';
 import type { AssignOptions, AssignSong } from './distribution.ts';
 
 /** The band edges on Key fit's rel (K1): rel <= 0.35 fits (no duck), <= 0.55 under 3 dB, <= 0.75 3 to 6 dB, above it
@@ -58,6 +71,9 @@ export interface KeySong {
   analysisFailedV?: number;
   duration?: number;
   file?: { readonly size?: number } | null;
+  /** v16.8.3: the track's tuning (validTuning reads the two together; anything else is Standard). */
+  tuneCents?: unknown;
+  tuneFor?: unknown;
 }
 
 const fin = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
@@ -117,9 +133,11 @@ export function bandOfRel(rel: number): number {
 
 /**
  * The 27 bands of a track's key data, in ALL_CRYSTALS order: musicFit's rel of each crystal's canonical tone against
- * the chroma, the track heard at chromaA4Hz × PITCH_SHIFT_FACTOR (constants.ts: every track plays varispeed at it, so
- * its notes are heard that much lower; Key fit's own a4Heard). v16.8.3 will make the retune per track: it must feed
- * this, the same on every device, with a KEY_BANDS_VERSION bump.
+ * the chroma, the track heard at chromaA4Hz × PITCH_SHIFT_FACTOR (constants.ts: a track with no tuning plays varispeed
+ * at it, so its notes are heard that much lower; Key fit's own a4Heard). v16.8.3 made the retune per track, the same on
+ * every device that holds the same tunings, without a KEY_BANDS_VERSION bump: a tuned track's bands are songBands' (this
+ * definition heard at tuneRate(cents)) under its own content key ("…|t<cents>"), never persisted; these, the Standard
+ * bands, are unchanged.
  */
 export function bandsOf(chroma: readonly number[], chromaA4Hz: number): Uint8Array {
   return bandsWith(chroma, chromaA4Hz, BANDS_DEF);
@@ -132,9 +150,26 @@ export function bandsWith(chroma: readonly number[], chromaA4Hz: number, def: Ba
   return out;
 }
 
-/** What the bands depend on, exactly as stored: the version, the A4 and the 12 weights (their own decimal text). */
-export function contentKey(s: { chroma?: unknown; chromaA4Hz?: number }): string {
-  return `${KEY_BANDS_VERSION}|${s.chromaA4Hz}|${(s.chroma as number[]).join(',')}`;
+/** What the bands depend on, exactly as stored: the version, the A4 and the 12 weights (their own decimal text).
+ *  v16.8.3: a tuned track's (validTuning) ends in "|t<cents>" (its bands are made at its rate: songBands); a track with
+ *  no tuning has v16.8.2's three parts, exactly. */
+export function contentKey(s: { chroma?: unknown; chromaA4Hz?: number; tuneCents?: unknown; tuneFor?: unknown }): string {
+  const key = `${KEY_BANDS_VERSION}|${s.chromaA4Hz}|${(s.chroma as number[]).join(',')}`;
+  const c = validTuning(s);
+  return c === null ? key : `${key}|t${c}`;
+}
+
+/** v16.8.3: a content key of a tuned track (four parts, the last "t<cents>"): kept in memory, never persisted. */
+export function isTunedKey(k: string): boolean {
+  return k.split('|').length === 4;
+}
+
+/** v16.8.3 (M1): a track's own bands. A track with no tuning: bandsOf (v16.8.2's, at PITCH_SHIFT_FACTOR); a tuned one: the
+ *  same definition heard at its rate, tuneRate(cents) (chromaA4Hz × tuneRate(c): Key fit's and Track info's a4). */
+export function songBands(s: { chroma?: unknown; chromaA4Hz?: number; tuneCents?: unknown; tuneFor?: unknown }): Uint8Array {
+  const c = validTuning(s);
+  if (c === null) return bandsOf(s.chroma as number[], s.chromaA4Hz as number);
+  return bandsWith(s.chroma as number[], s.chromaA4Hz as number, { ...BANDS_DEF, heard: tuneRate(c) });
 }
 
 /** The persisted form (App's 'keyBands:v1' record holds it): each content key with its 27 bands as digits, and (fix
@@ -197,11 +232,17 @@ export interface WarmResult {
 
 const BANDS_RE = /^[0-3]{27}$/;
 const exactNumber = (t: string): boolean => t !== '' && fin(Number(t)) && String(Number(t)) === t;
-/** A content key of this version: the version, an A4 above 0 and 12 non-negative weights, each as String(n) writes it. */
-function validKey(k: unknown): boolean {
+/** A content key of this version: the version, an A4 above 0 and 12 non-negative weights, each as String(n) writes it.
+ *  v16.8.3: `inMemory` also accepts a tuned track's fourth part, "t<cents>" (a valid tuning's cents, as String writes
+ *  them); the persisted record's reader (import) still accepts exactly v16.8.2's three parts. */
+export function validKey(k: unknown, inMemory = false): boolean {
   if (typeof k !== 'string') return false;
   const parts = k.split('|');
-  if (parts.length !== 3 || parts[0] !== String(KEY_BANDS_VERSION)) return false;
+  if (parts.length === 4 && inMemory) {
+    const m = /^t(-?[1-9]\d*)$/.exec(parts[3]);
+    if (!m || validTuning({ tuneCents: Number(m[1]), tuneFor: ALL_CRYSTALS[0] }) === null) return false;
+  } else if (parts.length !== 3) return false;
+  if (parts[0] !== String(KEY_BANDS_VERSION)) return false;
   if (!exactNumber(parts[1]) || !(Number(parts[1]) > 0)) return false;
   const w = parts[2].split(',');
   return w.length === 12 && w.every((x) => exactNumber(x) && Number(x) >= 0);
@@ -216,14 +257,15 @@ export class BandCache {
   map: Map<string, Uint8Array> = new Map();
   /** The latest warm's figures (the dev hook reports them), or null before one made anything. */
   lastWarm: WarmResult | null = null;
-  /** contentKey per track object (a patch makes a new object), checked against the fields it was made from. */
-  memo: WeakMap<object, { a4: unknown; chroma: unknown; key: string }> = new WeakMap();
+  /** contentKey per track object (a patch makes a new object), checked against the fields it was made from (v16.8.3:
+   *  the tuning's two too). */
+  memo: WeakMap<object, { a4: unknown; chroma: unknown; tc: unknown; tf: unknown; key: string }> = new WeakMap();
 
   keyOf(s: KeySong): string {
     const m = this.memo.get(s as object);
-    if (m && m.a4 === s.chromaA4Hz && m.chroma === s.chroma) return m.key;
+    if (m && m.a4 === s.chromaA4Hz && m.chroma === s.chroma && m.tc === s.tuneCents && m.tf === s.tuneFor) return m.key;
     const key = contentKey(s);
-    this.memo.set(s as object, { a4: s.chromaA4Hz, chroma: s.chroma, key });
+    this.memo.set(s as object, { a4: s.chromaA4Hz, chroma: s.chroma, tc: s.tuneCents, tf: s.tuneFor, key });
     return key;
   }
 
@@ -297,7 +339,7 @@ export class BandCache {
         const s = todo[i++];
         const k = this.keyOf(s);
         if (!this.map.has(k)) {
-          this.map.set(k, bandsOf(s.chroma as number[], s.chromaA4Hz as number));
+          this.map.set(k, songBands(s));
           added++;
         }
         left -= tracksOf.get(k) ?? 0;
@@ -319,7 +361,7 @@ export class BandCache {
       if (!clearKey(s)) continue;
       const k = this.keyOf(s);
       if (this.map.has(k)) continue;
-      this.map.set(k, bandsOf(s.chroma as number[], s.chromaA4Hz as number));
+      this.map.set(k, songBands(s));
       added++;
     }
     return added;
@@ -337,8 +379,10 @@ export class BandCache {
     this.lastWarm = null;
   }
 
+  /** The persisted form: every Standard entry (v16.8.3: never a tuned one, isTunedKey: the record's format is v16.8.2's,
+   *  and a downgraded v16.8.2 reads it whole). */
   export(): KeyBandsExport {
-    return { v: KEY_BANDS_VERSION, fp: [...bandsFingerprint()], entries: [...this.map.entries()].map(([k, b]): [string, string] => [k, Array.from(b).join('')]) };
+    return { v: KEY_BANDS_VERSION, fp: [...bandsFingerprint()], entries: [...this.map.entries()].filter(([k]) => !isTunedKey(k)).map(([k, b]): [string, string] => [k, Array.from(b).join('')]) };
   }
 
   /** A persisted record, validated whole: another KEY_BANDS_VERSION, another fingerprint, a malformed entry or a shape that isn't one is

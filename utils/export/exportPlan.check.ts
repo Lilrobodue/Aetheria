@@ -58,6 +58,11 @@ import {
   MADE_FOR,
 } from './exportPlan.ts';
 import type { ExportSnapshot, ExportSong, MadeFor } from './exportPlan.ts';
+import * as PLAN_MODULE from './exportPlan.ts';
+import { decodeRateFor, exportRate, exportSheetNumbers, standardSeconds } from './exportPlan.ts';
+import { keyFitFor } from '../soundV2/keyFit.ts';
+import { tuneRate } from '../tuning/trackTuning.ts';
+import { createHash } from 'node:crypto';
 import * as W from './exportWords.ts';
 import { BandHysteresis, readIntensity, capBand } from '../soundV2/layerHost.ts';
 import { bandForIntensity, toneOf } from '../soundV2/aetheria_sound_v2.ts';
@@ -421,6 +426,102 @@ eq([STOPPING_LONG_MS, CANCEL_WAIT_MS], [60_000, 10_000], 'a minute after it was 
 // A refusal where not even a minute fits (a 96 kHz WAV on a ≤ 2 GB phone), and a long file with no room.
 eq(W.overCapInfo(capInfoFor(3 * 60, 'other', 2, { sampleRate: 96_000, lossless: true, bytesPerSecond: 96_000 * 6 }), true), "This track is 3 minutes long. On this phone, Export with layers can't take this kind of file (96 kHz); on a computer, up to 10 minutes.", 'no minute on this phone: the words');
 eq(W.longOverCap(9 * 60, longFileCapSeconds(true, exportPeakMB('other', 4 * 60, true), 4), true), 'This playlist is 9 minutes long. On this phone, its tracks need more memory than one long file can have: export one file per track instead.', 'no long file at all: the words');
+
+// ---- v16.8.3 (Track Tuning, T8): each track at its own rate; with no tuning anywhere, v16.8.2's plan ------------------
+// The plan with no tuning anywhere, hashed on a fixed fixture: the lengths and sizes, every spec over the Outputs, Key fit,
+// Perfect GUT and Made for, the adaptive band's schedules, the long file's caps and peaks. The pinned hash is v16.8.2's
+// (the same function run on 862d960's exportPlan.ts: the v1683 build's export-fixture.ts).
+const PLAN_V1682_SHA = 'edf27e650f356f9cbbb4ca79a3ddd825b11a04927313512944e90455e05016ee';
+function planFixture(P: any): string {
+  const out: unknown[] = [P.DECODE_RATE, P.PSF];
+  for (const s of [0, 1, 59.9, 60, 61.5, 180, 245.3, 600, 3600, NaN, -5]) out.push([P.outSeconds(s), P.wavBytes(s)]);
+  const env = { fps: 20, sub: new Uint8Array(2400), bass: new Uint8Array(2400), mid: new Uint8Array(2400), high: new Uint8Array(2400) };
+  for (let i = 0; i < 2400; i++) { const v = (i * 37) % 256; env.sub[i] = v; env.bass[i] = (v * 3) % 256; env.mid[i] = (i * 11) % 256; env.high[i] = (i * 5 + 40) % 256; }
+  const chroma = [0.1211, 0.0123, 0.0954, 0.0187, 0.1032, 0.0811, 0.0245, 0.1702, 0.0161, 0.0988, 0.0204, 0.2382];
+  const songs = [
+    { id: 'a', name: 'tone-a', duration: 120, closestSolfeggio: 528 },
+    { id: 'b', name: 'tone-b', duration: 95.5, closestSolfeggio: 963, bandEnvelope: env, chroma, chromaA4Hz: 440, keyConfidence: 0.8, musicKey: 'G' },
+    { id: 'c', name: 'tone-c', duration: 61, closestSolfeggio: 2178, chroma, chromaA4Hz: 436.5, keyConfidence: 0.6, musicKey: 'G' },
+    { id: 'd', name: 'tone-d', duration: 200, closestSolfeggio: 174, bandEnvelope: env, chroma, chromaA4Hz: 445, keyConfidence: 0.95, musicKey: 'G' },
+  ];
+  for (const output of ['headphones', 'speakers', 'phone', 'car', null]) {
+    for (const keyFitOn of [true, false]) {
+      for (const perfectGut of [false, true]) {
+        const snap = { engine: 'v2', musicOnly: false, output, droneEnabled: true, keyFitOn, toneLevel: 0.5, lowering: null, beatLevel: 0.4, presetName: 'Theta', adaptive: true, phiOn: true, perfectGut, playingId: 'b', selectedHz: 963 };
+        for (const madeFor of ['headphones', 'speakers', 'tone']) for (const s of songs) out.push(P.exportSpecFor(snap, s, madeFor));
+      }
+    }
+  }
+  for (const [band, render, secs] of [['alpha', 'binaural', 120], ['theta', 'pulse', 95.5], ['beta', 'binaural', 200], ['delta', 'off', 61]] as const) {
+    out.push(P.bandSchedule(env, band, render, secs / P.PSF, true));
+    out.push(P.bandSchedule(env, band, render, secs / P.PSF, false));
+  }
+  for (const mobile of [true, false]) for (const dm of [null, 2, 4, 8]) for (const heavy of [100, 300, 576, 900]) out.push([P.longFileCapSeconds(mobile, heavy, dm), P.longFilePeakMB(mobile, heavy, 2700)]);
+  return createHash('sha256').update(JSON.stringify(out)).digest('hex');
+}
+eq(planFixture(PLAN_MODULE), PLAN_V1682_SHA, 'no tuning anywhere: the plan is v16.8.2\'s, byte for byte (its hash on the fixture)');
+{
+  ok(Object.is(decodeRateFor(), DECODE_RATE) && Object.is(decodeRateFor(PSF), DECODE_RATE), 'decodeRateFor(PSF) is DECODE_RATE itself');
+  for (const s of [0.5, 60, 61.5, 245.3, 3600]) ok(Object.is(standardSeconds(s), s) && Object.is(standardSeconds(s, PSF), s), `standardSeconds(${s}) at PSF is ${s} itself`);
+  ok(Object.is(exportRate(undefined), PSF) && Object.is(exportRate({ tuneCents: 51, tuneFor: 963 }), PSF), 'exportRate: Standard for no tuning or an invalid one');
+  for (const c of [-50, -14, 23, 50]) {
+    const r = tuneRate(c);
+    const song = { tuneCents: c, tuneFor: 963 };
+    ok(Object.is(exportRate(song), r), `exportRate of a ${c}-cent track is tuneRate(${c})`);
+    ok(Object.is(outSeconds(180, r), 180 / r) && Math.abs(outSeconds(180, r) - outSeconds(180) * (PSF / r)) < 1e-9, `a ${c}-cent track's planned length: 180 / its rate (${outSeconds(180, r).toFixed(3)} s)`);
+    eq(wavBytes(180, r), HEADER_ALLOWANCE + Math.round((180 / r) * 48_000) * 6, `a ${c}-cent track's bytes`);
+    ok(Object.is(decodeRateFor(r), 48_000 / r), `its decode rate: 48,000 / its rate (${decodeRateFor(r).toFixed(1)})`);
+    ok(Math.abs(standardSeconds(180, r) - (180 * PSF) / r) < 1e-9 && Math.abs(outSeconds(standardSeconds(180, r)) - outSeconds(180, r)) < 1e-9, `its Standard seconds play as long (${standardSeconds(180, r).toFixed(3)})`);
+  }
+  ok(outSeconds(180, tuneRate(-50)) > outSeconds(180) && outSeconds(180, tuneRate(50)) < outSeconds(180), 'slower plays longer, faster shorter');
+  // The adaptive band at the track's own media time (t × rate).
+  const env = { fps: 20, sub: new Uint8Array(4000), bass: new Uint8Array(4000), mid: new Uint8Array(4000), high: new Uint8Array(4000) };
+  for (let i = 0; i < 4000; i++) { const v = Math.round(127 + 120 * Math.sin(i / 37)); env.sub[i] = v; env.bass[i] = v; env.mid[i] = (i * 7) % 256; env.high[i] = 255 - v; }
+  const restated = (rate: number, outS: number) => {
+    const out: Array<{ t: number; band: Band }> = [{ t: 0, band: 'alpha' }];
+    const h = new BandHysteresis();
+    let cur: Band = 'alpha';
+    for (let t = 3; t < outS; t += 3) { const nx = h.tick(capBand(bandForIntensity(readIntensity(env, t * rate)), 'beta'), cur); if (nx) { cur = nx; out.push({ t, band: nx }); } }
+    return out;
+  };
+  const r = tuneRate(-50);
+  eq(bandSchedule(env, 'alpha', 'binaural', 190 / r, true, r), restated(r, 190 / r), 'bandSchedule reads the media time at t × the track\'s rate');
+  ok(JSON.stringify(bandSchedule(env, 'alpha', 'binaural', 190 / r, true, r)) !== JSON.stringify(bandSchedule(env, 'alpha', 'binaural', 190 / r, true)), 'a tuned track\'s schedule is its own (not PSF\'s)');
+  // Key fit's duck at the track's rate.
+  const snap: ExportSnapshot = { engine: 'v2', musicOnly: false, output: 'headphones', droneEnabled: true, keyFitOn: true, toneLevel: 0.5, lowering: null, beatLevel: 0.5, presetName: 'Alpha', adaptive: false, phiOn: false, perfectGut: false, playingId: null, selectedHz: 0 };
+  const chroma = [0.0712, 0.0098, 0.0856, 0.0143, 0.1655, 0.0731, 0.0126, 0.0814, 0.0109, 0.3021, 0.0152, 0.1583];
+  let differ = 0;
+  for (const c of [-40, -14, 9, 33]) {
+    const keyed = { id: 'k', name: 'tone-k', closestSolfeggio: 528, chroma, chromaA4Hz: 441.2, keyConfidence: 0.9, musicKey: 'A', tuneCents: c, tuneFor: 528 };
+    const want = keyFitFor(keyed, 528, 'headphones', tuneRate(c)).duck_db;
+    eq(exportSpecFor(snap, keyed, 'headphones').duckDb, Number.isFinite(want) ? want : 0, `Key fit's duck at a ${c}-cent track's rate`);
+    if (exportSpecFor(snap, keyed, 'headphones').duckDb !== exportSpecFor(snap, { ...keyed, tuneCents: undefined, tuneFor: undefined }, 'headphones').duckDb) differ++;
+  }
+  ok(differ > 0, `a tuning changes the export's duck (${differ} of 4)`);
+}
+
+// ---- v16.8.3 fix round 1 (X04): the Export sheet's numbers (exportSheetNumbers) ------------------------------------
+{
+  const r = tuneRate(-50), q = tuneRate(37);
+  // One track: its output length and bytes at its rate.
+  const one = exportSheetNumbers([{ seconds: 300, rate: r }]);
+  eq([one.trackOut, one.bytes], [300 / r, HEADER_ALLOWANCE + Math.round((300 / r) * OUT_RATE) * BYTES_PER_FRAME], 'X04: one tuned track: its length and size at its rate');
+  ok(one.trackOut > 300 / PSF + 8 && W.fileLine(one.trackOut, one.bytes) !== W.fileLine(300 / PSF, wavBytes(300)), 'X04: and the file line is not Standard\'s (5:15 against 5:06)');
+  eq(W.fileLine(one.trackOut, one.bytes).split(' · ').slice(3, 4), ['5:15'], 'X04: the file line: 300 s at −50 c plays 5:15');
+  const std = exportSheetNumbers([{ seconds: 300, rate: PSF }]);
+  ok(Object.is(std.trackOut, outSeconds(300)) && std.bytes === wavBytes(300) && Object.is(std.longOut, outSeconds(300)) && Object.is(std.standardTotal, 300), 'X04: no tuning: v16.8.2\'s numbers, exactly');
+  // A playlist: the bytes of each file at its rate; the long file in Standard seconds over PSF; the cap's total.
+  const list = [{ seconds: 120, rate: PSF }, { seconds: 300, rate: r }, { seconds: 95.5, rate: q }];
+  const n = exportSheetNumbers(list);
+  eq(n.bytes, wavBytes(120) + wavBytes(300, r) + wavBytes(95.5, q), 'X04: a playlist: every file\'s bytes at its rate');
+  const st = 120 + 300 * (PSF / r) + 95.5 * (PSF / q);
+  ok(Math.abs(n.standardTotal - st) < 1e-9 && Math.abs(n.longOut - st / PSF) < 1e-9, 'X04: the long file: the sum in Standard seconds, over PSF');
+  ok(Math.abs(n.longOut - (120 / PSF + 300 / r + 95.5 / q)) < 1e-9, 'X04: (which is each track at its own rate, summed)');
+  ok(n.standardTotal > 120 + 300 + 95.5, 'X04: a −50 c track counts longer than its source against the cap');
+  eq(exportSheetNumbers([]), { bytes: 0, standardTotal: 0, longOut: 0, trackOut: 0 }, 'X04: nothing usable: zeros');
+  const allStd = exportSheetNumbers([{ seconds: 120, rate: PSF }, { seconds: 95.5, rate: PSF }]);
+  ok(allStd.bytes === wavBytes(120) + wavBytes(95.5) && Object.is(allStd.longOut, outSeconds(120 + 95.5)), 'X04: a playlist with no tuning: v16.8.2\'s total and long length');
+}
 
 if (failures.length) {
   console.error(`exportPlan: ${failures.length} failed, ${passed} passed`);

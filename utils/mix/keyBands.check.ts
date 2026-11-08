@@ -8,10 +8,15 @@
 //     never the Lo Shu Perfect GUT tones, never without the retune (K5);
 //   - contentKey; the cache: get never computes, missing, warm in slices (its yields, progress, cancel), ensureSync,
 //     export / import (round trip, another KEY_BANDS_VERSION and malformed entries refused, nothing added), prune.
+//   - v16.8.3 (Track Tuning, M1): a Standard track's content key and bands byte-identical to v16.8.2's (the three-part
+//     key, bandsOf), whatever garbage its tuning fields hold; a tuned track's key carries "|t<cents>" and its bands are
+//     the definition heard at tuneRate(cents); the persisted record never holds a tuned entry (export leaves them out,
+//     import refuses one), validKey accepts the suffix only in memory; a retune makes a new key for that track alone.
 // Synthetic chroma only; no Math.random.
 import { strict as assert } from 'node:assert';
 import {
   BANDS_DEF, BandCache, FINGERPRINT_INPUTS, KEY_BANDS_VERSION, KEY_EDGES, KEY_MAX_BYTES, KEY_MAX_SECONDS, NEUTRAL_BAND, awaitingKey, bandOfRel, bandsFingerprint, bandsOf, bandsWith, clearKey, contentKey, fingerprintOf, withinKeyLimits,
+  isTunedKey, songBands, validKey,
 } from './keyBands.ts';
 import type { KeySong } from './keyBands.ts';
 import { ALL_CRYSTALS } from './distribution.ts';
@@ -19,6 +24,7 @@ import { capsFor } from '../library/analysePass.ts';
 import { CHROMA_VERSION } from '../soundV2/keyAnalysis.ts';
 import { PERFECT_GUT, toneOf } from '../soundV2/aetheria_sound_v2.ts';
 import { canonicalLayerHz } from '../soundV2/layerHost.ts';
+import { tuneRate } from '../tuning/trackTuning.ts';
 
 let checks = 0;
 let refusals = 0;
@@ -314,5 +320,85 @@ const lib = (n: number, seed = 0): KeySong[] => Array.from({ length: n }, (_, i)
   eq([c.size, c.lastWarm], [0, null], 'clear');
 }
 
+// ---- v16.8.3 (Track Tuning, M1): a tuned track's key and bands; the Standard ones byte-identical -------------------
+let tunedChecks = 0;
+{
+  const c0 = checks;
+  const std = good();
+  const v1682Key = `1|${std.chromaA4Hz}|${(std.chroma as number[]).join(',')}`;
+  eq(contentKey(std), v1682Key, 'a Standard track: v16.8.2\'s three-part content key, exactly');
+  eq(Array.from(songBands(std)), Array.from(bandsOf(std.chroma as number[], std.chromaA4Hz as number)), 'a Standard track: songBands is bandsOf');
+  // Garbage in the tuning fields is Standard: the same key, the same bands.
+  for (const [what, g] of [['0 cents', { tuneCents: 0, tuneFor: 963 }], ['51 cents', { tuneCents: 51, tuneFor: 963 }], ['2.5 cents', { tuneCents: 2.5, tuneFor: 963 }],
+    ['tuneFor 1000', { tuneCents: 10, tuneFor: 1000 }], ['cents alone', { tuneCents: 10 }], ['tuneFor alone', { tuneFor: 963 }], ["'10'", { tuneCents: '10', tuneFor: 963 }]] as const) {
+    const x = good(g as never);
+    eq(contentKey(x), v1682Key, `garbage (${what}): the Standard key`);
+    eq(Array.from(songBands(x)), Array.from(bandsOf(x.chroma as number[], x.chromaA4Hz as number)), `garbage (${what}): the Standard bands`);
+  }
+  // A tuned track: the suffix, and its bands heard at its rate.
+  let differ = 0;
+  for (const cents of [-50, -14, -1, 1, 23, 50]) {
+    const x = good({ tuneCents: cents, tuneFor: 963 } as never);
+    eq(contentKey(x), `${v1682Key}|t${cents}`, `a ${cents}-cent tuning: the key ends in |t${cents}`);
+    ok(isTunedKey(contentKey(x)) && !isTunedKey(v1682Key), 'isTunedKey');
+    const want = Array.from(bandsWith(x.chroma as number[], x.chromaA4Hz as number, { ...BANDS_DEF, heard: tuneRate(cents) }));
+    eq(Array.from(songBands(x)), want, `a ${cents}-cent tuning: the definition heard at tuneRate(${cents})`);
+    eq(contentKey({ ...x, tuneFor: 174 }), contentKey(x), 'the key reads the cents, not the crystal it was chosen for');
+    if (want.join('') !== Array.from(songBands(std)).join('')) differ++;
+  }
+  ok(differ > 0, `a tuning changes the bands (${differ} of 6 tunings)`);
+  // The cache: a tuned track gets its own key and bands; the record never holds one.
+  const cache = new BandCache();
+  const a = good(), b = good({ chromaA4Hz: 437.5 }), at = { ...a, tuneCents: -14, tuneFor: 963 } as KeySong;
+  cache.ensureSync([a, b, at]);
+  eq([cache.size, cache.missing([a, b, at])], [3, 0], 'the cache: the tuned track is its own entry');
+  eq(Array.from(cache.get(at)!), Array.from(songBands(at)), 'get: a tuned track\'s own bands');
+  ok(cache.get(a) !== cache.get(at), 'get: the Standard entry stays apart');
+  const ex = cache.export();
+  eq(ex.entries.map((e) => e[0]).sort(), [contentKey(a), contentKey(b)].sort(), 'export: never a tuned entry');
+  ok(ex.entries.every(([k]) => k.split('|').length === 3), 'export: v16.8.2\'s three-part keys only');
+  const back = new BandCache();
+  ok(back.import(ex) && back.size === 2 && back.missing([a, b]) === 0 && back.missing([at]) === 1, 'import: the Standard entries; the tuned one is made again (missing 1)');
+  const withTuned = { ...ex, entries: [...ex.entries, [contentKey(at), Array.from(songBands(at)).join('')]] };
+  eq([new BandCache().import(withTuned)], [false], 'import: a record holding a tuned entry is refused (v16.8.2\'s reader)');
+  refusals++;
+  // validKey: the suffix in memory only.
+  ok(validKey(contentKey(a)) && validKey(contentKey(a), true), 'validKey: a Standard key, persisted or in memory');
+  ok(!validKey(contentKey(at)) && validKey(contentKey(at), true), 'validKey: a tuned key in memory only');
+  for (const suffix of ['t0', 't51', 't-51', 't2.5', 't+5', 't-0', 't05', 'x5', 't', '']) ok(!validKey(`${contentKey(a)}|${suffix}`, true), `validKey: "|${suffix}" is not a tuning`);
+  // A retune makes a new key for that track alone; every other entry stays the same object.
+  const lib = [good(), good({ chromaA4Hz: 436.5 }), good({ chromaA4Hz: 441.2 }), good({ chromaA4Hz: 443 })];
+  const c2 = new BandCache();
+  c2.ensureSync(lib);
+  const before = new Map([...c2.map]);
+  const retuned = lib.map((x, i) => (i === 2 ? { ...x, tuneCents: 31, tuneFor: 528 } : x));
+  eq(c2.missing(retuned), 1, 'a retune: one track to warm');
+  eq(c2.ensureSync(retuned), 1, 'a retune: one content key made');
+  ok([...before].every(([k, v]) => c2.map.get(k) === v), 'a retune: every entry before is the same object');
+  eq([...c2.map.keys()].filter((k) => !before.has(k)), [contentKey(retuned[2])], 'a retune: the new key is that track\'s tuned one');
+  // The memo sees a tuning written onto the same object (a check's mutation; the app patches a new object).
+  const m = good();
+  const k0 = c2.keyOf(m);
+  (m as Record<string, unknown>).tuneCents = -7;
+  (m as Record<string, unknown>).tuneFor = 852;
+  eq(c2.keyOf(m), `${k0}|t-7`, 'keyOf: the memo reads the tuning too');
+  // Fix round 1 (P01): warm, App's only fill path, makes exactly ensureSync's keys and bands on a tuned library (Standard,
+  // tuned, a Lo Shu tuning, garbage), each its songBands.
+  {
+    const lib2 = [good(), good({ chromaA4Hz: 436.5, tuneCents: -23, tuneFor: 852 }), good({ chromaA4Hz: 441.2, tuneCents: 31, tuneFor: 528 }), good({ chromaA4Hz: 443 }),
+      good({ chromaA4Hz: 438, tuneCents: 50, tuneFor: 174, tuneLoShu: true }), good({ chromaA4Hz: 439, tuneCents: 51, tuneFor: 963 }), good({ chromaA4Hz: 436.5, tuneCents: -1, tuneFor: 963 })];
+    const viaSync = new BandCache();
+    viaSync.ensureSync(lib2);
+    const viaWarm = new BandCache();
+    let clk = 0;
+    const r = await viaWarm.warm(lib2, { sliceMs: 5, yieldFn: async () => {}, now: () => (clk += 2) });
+    eq([...viaWarm.map.keys()].sort(), [...viaSync.map.keys()].sort(), 'P01: warm makes the content keys ensureSync makes, on a tuned library');
+    eq([viaWarm.missing(lib2), r.cancelled, r.added], [0, false, viaSync.size], 'P01: warm leaves nothing missing, uncancelled, every key made once');
+    for (const x of lib2) eq(Array.from(viaWarm.get(x)!), Array.from(songBands(x)), `P01: warm: ${contentKey(x).split('|').slice(3).join('|') || 'Standard'} has its songBands`);
+    for (const x of lib2) eq(Array.from(viaWarm.get(x)!), Array.from(viaSync.get(x)!), 'P01: warm and ensureSync give the same bands');
+  }
+  tunedChecks = checks - c0;
+}
+
 Math.random = realRandom;
-console.log(`keyBands.check: ${checks} checks passed (clearKey ${arms.length} arms, awaitingKey ${waits.length}, bandsOf ${INPUTS.length} fixed inputs by hand and pinned, contentKey, the cache: get, missing, warm with cancel, export/import with ${refusals} refusals, prune)`);
+console.log(`keyBands.check: ${checks} checks passed (v16.8.3: ${tunedChecks} on tuned keys and bands) (clearKey ${arms.length} arms, awaitingKey ${waits.length}, bandsOf ${INPUTS.length} fixed inputs by hand and pinned, contentKey, the cache: get, missing, warm with cancel, export/import with ${refusals} refusals, prune)`);

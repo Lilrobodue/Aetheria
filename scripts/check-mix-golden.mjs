@@ -19,6 +19,10 @@
 //                                                         v16.8.1: --step=10, against v16.8's, with --impl=FILE to
 //                                                         run another distribution.ts as the code under test;
 //                                                         v16.8.2: --step=11, against v16.8.1's)
+//   node scripts/check-mix-golden.mjs --step=12 [--report=FILE]
+//                                                         v16.8.3: the spread with tunings (M1), in memory: the key
+//                                                         fixtures tuned, Assign through App's own code against the
+//                                                         oracle; golden.json is unchanged (no fixture has a tuning)
 //   node scripts/check-mix-golden.mjs --via=builder       v16.3: the working tree against the golden with every recipe
 //                                                         the generators call (gutAlignment … loShuWalk, crystalSetMix)
 //                                                         replaced by Create a mix's model (utils/mix/builder.ts) at that
@@ -151,6 +155,7 @@ function viaBuilder(BLD, C) {
   };
 }
 
+let runCtx = null;
 function run(src) {
   let lifted, deps;
   if (!src.modules) {
@@ -180,6 +185,8 @@ function run(src) {
     deps = { ...moduleImports, dedupeById: L.dedupeById, patchById: L.patchById, sameIdOrder: L.sameIdOrder, BandCache: KB && KB.BandCache };
   }
   const live = materialize(lifted);
+  // v16.8.3 (step 12): what a run needs to run more scenarios on other fixtures (in memory, never in the golden).
+  runCtx = { makeApp: evalCjs(lifted.js).makeApp, deps, live };
   // The copied debug logging (Golden Φ, 111, SOURCE, getHarmonicSolfeggio) prints names: keep it out of the output.
   const realLog = console.log, realWarn = console.warn;
   console.log = () => {}; console.warn = () => {};
@@ -1028,6 +1035,150 @@ function stepKeys(A, B, ctx) {
   return { step: '11', runs: Object.keys(B.runs).length, newRuns: Object.keys(B.runs).filter((k) => !(k in A.runs)).length, violations: violations.length, firstViolations: violations.slice(0, 10), touched, assertionFailures: asserts.length, firstAssertionFailures: asserts.slice(0, 10) };
 }
 
+// ---- v16.8.3's step (12): "Track Tuning", the spread with tunings (M1: Assign follows the tuning) ---------------------
+// In memory: the key fixtures (FKEY, FKEYU) with a share of their clear-key tracks tuned (whole cents in ±50 for their
+// crystal or another; some Lo Shu, A1; some garbage that reads as Standard), Assign (autoDistribute) run through App's
+// own lifted code on each, its BandCache warmed by the recorder as the press needs it. Each run, from the library it
+// writes:
+//   oracle    every track as the independent restatement places it, the per-track factor restated (spread-oracle.ts);
+//   words     the run's message re-derived whole from the fixture and the oracle (step 11's words);
+//   devices   the fixture on a second device (fresh ids, shuffled, the same files, key data and tunings): the same records;
+//   tunings   the tunings matter (the fixture without them is planned otherwise), Assign writes no tuning field, and A1's
+//             tuneLoShu changes nothing;
+//   garbage   the fixture with only garbage tunings gives step 11's runs exactly (calls, draws), as golden.json holds them.
+// No run draws at random, none throws, and the press never finds bands missing.
+const TUNED_FIXTURES = [['FKEY', 'FKEYT'], ['FKEYU', 'FKEYUT']];
+function stepTunings(G, ctx) {
+  const { live, D, O, KB } = ctx;
+  const asserts = [];
+  const touched = {};
+  const touch = (k) => { touched[k] = (touched[k] || 0) + 1; };
+  const uniqOf = (list) => { const seen = new Set(); return list.filter((x) => x && typeof x === 'object' && !seen.has(x.id) && seen.add(x.id)); };
+  const crystals = D.ALL_CRYSTALS;
+  const six = crystals.filter((c) => [174, 285, 396, 417, 528, 639].includes(c));
+  const tuneOf = (list, seed, garbageOnly) => {
+    const r = mulberry32(seed);
+    return list.map((x) => {
+      if (!x || typeof x !== 'object' || !KB.clearKey(x)) return x;
+      const u = r();
+      if (garbageOnly) return u < 0.4 ? { ...x, ...[{ tuneCents: 0, tuneFor: 963 }, { tuneCents: 51, tuneFor: 528 }, { tuneCents: 2.5, tuneFor: 852 }, { tuneCents: 12, tuneFor: 1000 }, { tuneCents: 12 }][Math.floor(r() * 5)] } : x;
+      if (u >= 0.35) return x;
+      let c = Math.floor(r() * 101) - 50;
+      if (c === 0) c = 13;
+      const v = r();
+      if (v < 0.1) return { ...x, tuneCents: 60, tuneFor: x.closestSolfeggio ?? 528 };
+      if (v < 0.25) return { ...x, tuneCents: c, tuneFor: six[Math.floor(r() * six.length)], tuneLoShu: true };
+      return { ...x, tuneCents: c, tuneFor: v < 0.75 && crystals.includes(x.closestSolfeggio) ? x.closestSolfeggio : crystals[Math.floor(r() * 27)] };
+    });
+  };
+  const fields = (x) => [x.harmonicFreq ?? null, x.closestSolfeggio ?? null, x.harmonicDeviation ?? null, x.crystalSource ?? null];
+  const fk = (x) => (x.file ? `${x.file.name}|${x.file.size}` : x.id);
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  // Step 11's words, re-derived from the oracle (stepKeys' prepare, restated).
+  const textOf = (uniq, o) => {
+    const n = { off: 0, again: 0, back: 0, restored: 0, readings: 0, source: 0, open: 0, given: 0, moved: 0 };
+    for (const x of uniq) {
+      const role = o.role.get(x.id), had = x.closestSolfeggio, now = o.after.get(x.id)[0];
+      const read = O.oracleReading(x);
+      if (read) n.readings++;
+      if (role === 'source') { n.source++; if (!had) n.given++; else if (had !== 2178) n.restored++; continue; }
+      if (role !== 'open') continue;
+      n.open++;
+      if (!read) { if (!had) n.given++; else if (now !== had) n.moved++; continue; }
+      if (!had || now === had) continue;
+      const own = O.oracleScanCrystal(x.harmonicFreq);
+      if (had === own) n.off++; else if (now === own) n.back++; else n.again++;
+    }
+    const cab = o.perCrystal.filter((c) => c >= 3).length;
+    const head = n.source > 0 && n.open === 0 ? 'Crystals assigned' : o.emptyAfter === 0 ? 'Tracks spread over all 27 crystals' : 'Tracks spread over the crystals';
+    const parts = [
+      n.off ? `${plural(n.off, 'scanned track', 'scanned tracks')} moved off Deep Scan's crystal` : '',
+      n.again ? `${plural(n.again, 'scanned track', 'scanned tracks')} moved again` : '',
+      n.back ? `${plural(n.back, 'track', 'tracks')} back on Deep Scan's crystal` : '',
+      n.restored ? `${plural(n.restored, 'track', 'tracks')} back on 2178 Hz` : '',
+      n.given ? `${plural(n.given, 'track', 'tracks')} got a crystal` : '',
+      n.moved ? `${plural(n.moved, 'assigned crystal', 'assigned crystals')} moved` : '',
+      o.keyed ? `${o.keyed} placed by key (${o.keyFits} where the tone fits)` : '',
+    ].filter(Boolean);
+    return ['notice', `${head}: ${parts.length ? parts.join(', ') : 'every track keeps its crystal'}. ` +
+      (o.emptyAfter === 0 ? 'Every crystal has a track, so walks have no gaps. ' : `${plural(o.emptyAfter, 'crystal still has', 'crystals still have')} no track. `) +
+      (cab === 27 ? 'CAB-ready: all 27 crystals have 3 or more.' : `CAB readiness: ${cab}/27 crystals at 3 or more.`) +
+      (n.readings > 0 ? " Deep Scan's readings are kept." : '') + (n.source > 0 ? ' Tracks Deep Scan placed on 2178 Hz keep the SOURCE crystal.' : '')];
+  };
+  const fixtures = {};
+  const scenarios = [];
+  for (const [base, name] of TUNED_FIXTURES) {
+    if (!live[base]) { asserts.push([base, 'the harness no longer builds this key fixture']); continue; }
+    fixtures[name] = tuneOf(live[base], 1683 + name.length, false);
+    fixtures[`${name}0`] = tuneOf(live[base], 1693 + name.length, true);
+    for (const exp of ['beginner', 'expert']) {
+      scenarios.push({ fixture: name, exp, historyName: 'none', history: null, seed: 1, width: 411, only: ['autoDistribute'] });
+      scenarios.push({ fixture: `${name}0`, exp, historyName: 'none', history: null, seed: 1, width: 411, only: ['autoDistribute'] });
+    }
+  }
+  const realLog = console.log, realWarn = console.warn;
+  console.log = () => {}; console.warn = () => {};
+  let results;
+  try { results = runScenarios(runCtx.makeApp, runCtx.deps, fixtures, scenarios, GENS, mulberry32.toString()); } finally { console.log = realLog; console.warn = realWarn; }
+  let tunedTracks = 0;
+  for (const [key, r] of Object.entries(results)) {
+    const fixture = key.split('|')[1];
+    const lib = fixtures[fixture];
+    const uniq = uniqOf(lib);
+    if (r.canon.thrown) asserts.push([key, 'threw: ' + r.canon.thrown]);
+    if (r.rngCalls !== 0) asserts.push([key, 'draws ' + r.rngCalls]);
+    if (r.calls.some((c) => c[0] === 'keysThenAssign')) asserts.push([key, 'the press found bands missing (the recorder warms every fixture)']);
+    if (fixture.endsWith('0')) {
+      // Garbage tunings only: step 11's run of the untuned fixture, call for call (the golden's).
+      const baseName = fixture.slice(0, -2);
+      const gKey = key.replace(`|${fixture}|`, `|${baseName}|`);
+      const want = G.outputs[G.runs[gKey]];
+      const got = compactOutput(r);
+      if (!want) { asserts.push([key, 'no golden run ' + gKey]); continue; }
+      // The ids are the base fixture's (tuneOf keeps them), so the calls compare directly once compacted alike.
+      if (JSON.stringify(got.calls) !== JSON.stringify(want.calls) || got.rngCalls !== want.rngCalls) asserts.push([key, `garbage tunings: not step 11's run (${gKey})`]);
+      else touch('garbage tunings: step 11\'s run, call for call');
+      continue;
+    }
+    tunedTracks += uniq.filter((x) => typeof x.tuneCents === 'number' && x.tuneCents !== 0 && Math.abs(x.tuneCents) <= 50).length;
+    const o = O.spreadOracle(uniq);
+    const want = new Map(uniq.map((x) => { const rec = o.after.get(x.id); return [x.id, [rec[1], rec[0], rec[2], rec[3]]]; }));
+    const said = r.calls.filter((c) => (c[0] === 'notice' || c[0] === 'toast') && typeof c[1] === 'string');
+    const text = textOf(uniq, o);
+    if (said.length !== 1 || said[0][0] !== text[0] || said[0][1] !== text[1]) asserts.push([key, `the message: ${JSON.stringify(said.map((c) => [c[0], c[1]]))} vs ${JSON.stringify(text)}`]);
+    else touch('words: re-derived whole, with tunings');
+    const writes = r.calls.filter((c) => c[0] === 'setOriginalPlaylist' || c[0] === 'setPlaylist');
+    if (writes.length !== 2) asserts.push([key, `${writes.length} list writes (the library and the play order: 2)`]);
+    for (const c of writes) {
+      const changed = new Map(c[1].changed ?? []);
+      let bad = 0;
+      for (const x of uniq) if (JSON.stringify(changed.get(x.id) ?? fields(x)) !== JSON.stringify(want.get(x.id))) bad++;
+      if (bad) asserts.push([key, `${c[0]}: ${bad} tracks differ from the oracle`]);
+      else touch(`oracle with tunings (${c[0]})`);
+    }
+    // The code under test's own plan (as App plans: a BandCache, its bands made first): devices, tunings, no tuning field.
+    const recs = (l) => { const cache = new KB.BandCache(); cache.ensureSync(l); const pl = D.planAssign(l, 'spread', cache.planOptions); return { pl, recs: l.map((x) => { const y = { ...x, ...(pl.patches.get(x.id) ?? {}) }; return [fk(x), [y.closestSolfeggio ?? null, y.harmonicFreq ?? null, y.harmonicDeviation ?? null, y.crystalSource ?? null, y.tuneCents ?? null, y.tuneFor ?? null]]; }).sort((a, b) => (a[0] < b[0] ? -1 : 1)) }; };
+    const mine = recs(uniq);
+    const rnd = mulberry32(116830 + uniq.length);
+    const second = uniq.map((x) => ({ ...x, id: `${1790000000000 + Math.floor(rnd() * 1e9)}-${Math.floor(rnd() * 36 ** 8).toString(36)}` }));
+    for (let i = second.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [second[i], second[j]] = [second[j], second[i]]; }
+    if (new Set(uniq.map(fk)).size === uniq.length) {
+      if (JSON.stringify(recs(second).recs) !== JSON.stringify(mine.recs)) asserts.push([key, 'a second device with the same tunings gives other records']);
+      else touch('devices: the same tunings, the same records by file');
+    } else asserts.push([key, 'two tracks share a file key: the device property is not checked']);
+    const strip = (l, f) => l.map((x) => { const c = { ...x }; for (const k of f) delete c[k]; return c; });
+    if (JSON.stringify(recs(strip(uniq, ['tuneCents', 'tuneFor', 'tuneLoShu'])).recs.map((e) => e[1].slice(0, 4))) === JSON.stringify(mine.recs.map((e) => e[1].slice(0, 4)))) asserts.push([key, 'the fixture is planned the same without its tunings: it tests none']);
+    else touch('tunings: they change the plan');
+    if ([...mine.pl.patches.values()].some((pt) => Object.keys(pt).some((k) => k.startsWith('tune')))) asserts.push([key, 'a patch carries a tuning field']);
+    else touch('Assign writes no tuning field');
+    if (JSON.stringify(recs(strip(uniq, ['tuneLoShu'])).recs) !== JSON.stringify(mine.recs)) asserts.push([key, 'tuneLoShu changes the plan (A1: it never may)']);
+    else touch('A1: tuneLoShu changes nothing');
+  }
+  if (tunedTracks < 40) asserts.push(['step 12', `only ${tunedTracks} tuned tracks across the runs`]);
+  touch(`tuned tracks across the runs: ${tunedTracks}`);
+  return { step: '12', runs: Object.keys(results).length, violations: 0, firstViolations: [], touched, assertionFailures: asserts.length, firstAssertionFailures: asserts.slice(0, 10) };
+}
+
 // ---- main -------------------------------------------------------------------------------------------------------------
 const STEP = arg('step');
 const CAPTURE = arg('capture');
@@ -1060,6 +1211,14 @@ if (STEP) {
     const realLog = console.log;
     console.log = () => {};
     try { stepped = stepKeys(load(arg('from')), load(arg('to')), { live: materialize(lifted), D, O, KB }); } finally { console.log = realLog; }
+  } else if (STEP === '12') {
+    // v16.8.3: the working tree's code on the tuned key fixtures, in memory; golden.json for step 11's runs.
+    const src = await sources('');
+    run(src);
+    const [D, O, KB] = await Promise.all([ROOT + '/utils/mix/distribution.ts', ROOT + '/scripts/mix-golden/spread-oracle.ts', ROOT + '/utils/mix/keyBands.ts'].map((p) => import(pathToFileURL(p).href)));
+    const realLog = console.log;
+    console.log = () => {};
+    try { stepped = stepTunings(load(arg('golden', GOLDEN_DEFAULT)), { live: runCtx.live, D, O, KB }); } finally { console.log = realLog; }
   } else stepped = ['4', '5', '6', '7', '8'].includes(STEP) ? await stepV159(STEP, load(arg('from')), load(arg('to'))) : stepDiff(STEP, load(arg('from')), load(arg('to')));
   const report = { ...stepped, from: arg('from'), to: arg('to') };
   if (arg('report')) writeFileSync(arg('report'), JSON.stringify(report, null, 1) + '\n');

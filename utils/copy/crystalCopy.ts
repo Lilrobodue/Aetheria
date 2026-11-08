@@ -149,6 +149,9 @@ export const RETUNE_LONG = [
   { text: 'Aetheria plays your music at 432/440 of its speed (× 0.98182): every pitch 31.8 cents lower, so A = 440 Hz becomes A = 432 Hz, and a 4:00 track plays in 4:04. 432 is a whole number (2⁴ × 3³), so it isn’t tied to the golden ratio, which is irrational.', tag: 'arithmetic' },
   { text: 'Some listeners find 432 Hz warmer. A handful of small studies have compared the two tunings since 2019; their results point both ways.', tag: 'tier3' },
 ] as const;
+/** v16.8.3 (Track Tuning): where a track's own tuning is chosen. Fix round 2 (N2): its own line, untagged (a pointer to a
+ *  setting, no claim), after the tagged paragraphs; it was inside the Arithmetic one, which it isn't. */
+export const RETUNE_TUNING = 'You can choose a different tuning for a track in Track info.';
 /** 432's history (a sourced fact, Lockhart 2025; How sure are we?'s "432 Hz and 440 Hz" topic carries it under that
  *  topic's own tags, Arithmetic and Early evidence): no claim, so no tag of its own. */
 export const RETUNE_HISTORY = 'Verdi argued for a lower pitch, and Italy’s army bands used A = 432 for a time; 440 Hz later became the international standard.';

@@ -5,9 +5,12 @@
 // (while on). They wrap onto a second row when needed (decision 2), gap-y-3 so the 44 px hit boxes never overlap.
 // The crystal chip names the crystal the layers PLAY (selectedSolfeggio), not the track's: classic's pill keeps the
 // track's after a pick (spec §2.8). The crystal chip opens the Crystal sheet; the others the Sound sheet.
+// v16.8.3 (T4): while the playing track is tuned, "Tuned −14 c" after the Key fit chip; it opens Track info for that
+// track (the ⋯ menu's action). Nothing on the Car screen, the mini-player or the lock screen. Fix round 1 (N2): its
+// spoken name is App's, from tuneLabel ("Tuned +1 cent, Track info").
 
 import React from 'react';
-import { Music2, VolumeX, Waves } from 'lucide-react';
+import { Gauge, Music2, VolumeX, Waves } from 'lucide-react';
 import Chip from '../ui/Chip';
 import { useActions, useSound } from './contexts';
 import { countRender } from './devRenders';
@@ -48,6 +51,11 @@ const NowPlayingChips = () => {
           data-testid="chip-keyfit"
         >
           {s.keyFitText}
+        </Chip>
+      ) : null}
+      {s.tuneChip ? (
+        <Chip label={`${s.tuneChipName ?? s.tuneChip}, Track info`} icon={<Gauge size={14} className="text-ink-muted" aria-hidden="true" />} onClick={actions.trackInfo} data-testid="chip-tuning">
+          {s.tuneChip}
         </Chip>
       ) : null}
       {s.musicOnly ? (

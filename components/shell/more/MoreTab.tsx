@@ -24,9 +24,11 @@
 // more-guide, more-journal, more-advanced.
 // v16.5, Export with layers (mockup more-exporting-phone): while an export runs, a card tops the root ("Exporting <title> ·
 // 62 %", the time left, a thin bar: the progress leaf) with Open (the running sheet); the Record row's line follows it.
+// v16.8.3 (Track Tuning, T9): Learn gains "Compose for a crystal" (ComposePage, its own region more-compose), which the
+// Crystal sheet's "Composing for this crystal" also opens on that crystal.
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { BookOpen, ChevronLeft, Circle, ExternalLink, FlaskConical, Info, NotebookPen, Shield, SlidersHorizontal, Square, X } from 'lucide-react';
+import { BookOpen, ChevronLeft, Circle, ExternalLink, FlaskConical, Info, Music, NotebookPen, Shield, SlidersHorizontal, Square, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import Badge from '../../ui/Badge';
 import IconButton from '../../ui/IconButton';
@@ -42,6 +44,8 @@ import LinksPage from './LinksPage';
 import GuidePage from './GuidePage';
 import JournalPage from './JournalPage';
 import AdvancedPage from './AdvancedPage';
+import ComposePage from './ComposePage';
+import { COMPOSE_ROW_SUBTITLE, COMPOSE_TITLE } from '../../../utils/tuning/compose';
 import RecordElapsed from './RecordElapsed';
 import { RECORDING_WORD, STOP_AND_SAVE, recordCardLine } from './recordModel';
 import { visualsSummary } from './visualsModel';
@@ -79,6 +83,7 @@ const OPENED_FROM: Readonly<Record<MoreView, string | null>> = {
   guide: 'more-guide-row',
   journal: 'more-journal-row',
   advanced: 'more-advanced-row',
+  compose: 'more-compose-row',
 };
 
 /** That row, for a page with an opener: Links opened from About returns to About's Links row. */
@@ -194,6 +199,7 @@ const MoreRoot = React.memo(({ go }: { go: (v: MoreView) => void }) => {
           onClick={() => go('journal')}
           data-testid="more-journal-row"
         />
+        <ListRow title={COMPOSE_TITLE} subtitle={COMPOSE_ROW_SUBTITLE} icon={<Music size={20} />} chevron onClick={() => go('compose')} data-testid="more-compose-row" />
       </Group>
       <Group id="safety" title={GROUP_SAFETY}>
         <ListRow title="Safety & comfort" subtitle={SAFETY_ROW_SUBTITLE} icon={<Shield size={20} />} chevron onClick={() => go('safety')} data-testid="more-safety-row" />
@@ -352,6 +358,7 @@ const MoreTab = ({ inPanel = false }: MoreTabProps) => {
         <ViewBoundary name="more-guide" fallback={(api) => (view === 'guide' ? <PageCrash api={api} /> : null)} render={() => view === 'guide' && <GuidePage />} />
         <ViewBoundary name="more-journal" fallback={(api) => (view === 'journal' ? <PageCrash api={api} /> : null)} render={() => view === 'journal' && <JournalPage />} />
         <ViewBoundary name="more-advanced" fallback={(api) => (view === 'advanced' ? <PageCrash api={api} /> : null)} render={() => view === 'advanced' && <AdvancedPage />} />
+        <ViewBoundary name="more-compose" fallback={(api) => (view === 'compose' ? <PageCrash api={api} /> : null)} render={() => view === 'compose' && <ComposePage />} />
         <div ref={spacerRef} aria-hidden="true" data-testid="more-notice-spacer" />
       </div>
     </div>

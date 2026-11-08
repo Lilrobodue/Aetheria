@@ -11,13 +11,14 @@
 // Undo never brings back a stale copy of a track's metadata.
 
 import { PERFECT_GUT_MAP, formatTime, formatTotal, regimeName, regimeOf } from '../shellModel.ts';
-import { passButtonText, passEta, passEtaMinutes } from '../../../utils/library/analysePass.ts';
-import type { PassProgress } from '../../../utils/library/analysePass.ts';
+import { needOf, passButtonText, passEta, passEtaMinutes } from '../../../utils/library/analysePass.ts';
+import type { Caps, PassProgress, PassSong } from '../../../utils/library/analysePass.ts';
 import { CHROMA_VERSION } from '../../../utils/soundV2/keyAnalysis.ts';
 import { BUSY_EXPORT, BUSY_STOPPING, BUSY_STOPPING_LONG } from '../../../utils/export/exportWords.ts';
 import { ALL_CRYSTALS, DEEP_SCAN_RATE, awaitingKeyCount, crystalOrigin, deepScanQueue, needsRescan, readByDeepScan, scanCrystalChanged, spreadFromScan, spreadRole } from '../../../utils/mix/distribution.ts';
 import { SOURCE_FREQ } from '../../../utils/crystalData.ts';
-import { awaitingKey, clearKey } from '../../../utils/mix/keyBands.ts';
+import { awaitingKey, clearKey, withinKeyLimits } from '../../../utils/mix/keyBands.ts';
+import { FIT_REL_EDGE, LIVE_TUNE_SWITCH, loShuHz, loShuTone, offeredShift, relAt, solfeggioTone, speedPercent, tuneLabel, validLoShu, validTuning } from '../../../utils/tuning/trackTuning.ts';
 import type { CrystalSource } from '../../../utils/mix/distribution.ts';
 
 /** What the tab reads of a track (types.ts Song; `file` only for Track info). */
@@ -43,6 +44,10 @@ export interface LibSong {
   chromaA4Hz?: number;
   /** v16.8.1 (D1): the rate Deep Scan read it at (absent: an older reading, which Scan again offers). */
   scanRate?: number;
+  /** v16.8.3 (Track Tuning): the track's tuning (utils/tuning/trackTuning.ts validTuning; A1: tuneLoShu). */
+  tuneCents?: number;
+  tuneFor?: number;
+  tuneLoShu?: true;
   file?: { name?: string; size?: number } | null;
 }
 
@@ -340,6 +345,224 @@ export interface InfoRow {
   note?: string;
   /** v16.6: the note's evidence tag (the assigned crystal: Design choice); the dialog renders it beside the note. */
   tag?: 'design';
+  /** v16.8.3: the Tuning row's choice (the dialog renders a select, its note read with it), or none (a plain row). */
+  choice?: TuningChoice;
+  /** v16.8.3: the row's line in Copy, when it isn't "Label: value (note)". */
+  copy?: string;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// v16.8.3 (Track Tuning): Track info's Tuning row, after Key. A track's tuning (utils/tuning/trackTuning.ts) is chosen
+// here, from two kinds of choice: Standard, and "Fit <its crystal> · ±N cents" (fitShift for the crystal's Solfeggio
+// tone, the one Assign places by), shown only when it changes something, else a plain line with the reason.
+// Amendment A1: with Lo Shu Perfect GUT on, one of the six crystals it swaps also offers "Fit Lo Shu 75 Hz · ±N cents"
+// (fitShift for the Lo Shu tone the device plays). A kept tuning is always offered back (it stays, and applies, whatever
+// the crystal and the Perfect GUT setting now), with the fits for the current crystal it doesn't already hold.
+// ---------------------------------------------------------------------------------------------------------------
+
+export const TUNING_LABEL = 'Tuning';
+export const STANDARD_CHOICE = 'Standard (432)';
+export const TUNE_STANDARD_NOTE = 'Plays at 432/440 of its speed, like every track.';
+export const TUNE_FILE_NOTE = "The file isn't changed.";
+export const TUNE_ASSIGN_NOTE = 'Assign crystals places it by how it sounds at this tuning.';
+/** A1: a Lo Shu fit is placed by the Solfeggio tones at its speed, so the next Assign may move it. */
+export const TUNE_ASSIGN_LOSHU_NOTE = 'Assign crystals places it by how it sounds at this tuning, so the next Assign may move it.';
+/** Fix round 2 (L-S3): over keyBands' fixed caps (withinKeyLimits: 720 s and 100 MiB, the same on every device) placement
+ *  never reads a track's key data, so a tuning can't move it: this replaces the Assign sentence. */
+export const TUNE_ASSIGN_LONG_NOTE = "Assign crystals doesn't place a track this long by its key.";
+/** With LIVE_TUNE_SWITCH false (the Note 20's by-ear check found a click), a change waits for the track's next play. */
+export const TUNE_NEXT_PLAY = 'From the next play.';
+export const TUNE_REASON = {
+  noCrystal: 'No crystal yet',
+  analyse: 'Analyse tracks first',
+  noKey: 'No clear key',
+  fits: "Its key already fits this crystal's tone",
+  /** A1. */
+  fitsLoShu: 'Its key already fits the Lo Shu tone',
+  /** Fix round 1 (S3): no key data, and this device's Analyse tracks skips the track as too long for it. */
+  tooLong: 'Too long for Analyse tracks on this device',
+} as const;
+/** "No tuning within ±50 cents fits 963 Hz" (A1: "… fits 75 Hz", the Lo Shu tone). */
+export function noTuningFits(hz: number): string {
+  return `No tuning within ±50 cents fits ${hz} Hz`;
+}
+/** v16.8.3: the Crystal note for a tuned track whose key fits the crystal's tone at its tuning. */
+export const KEY_FITS_TUNED_NOTE = "Its key fits this crystal's tone at its tuning.";
+/** A1: Perfect GUT on, on one of the six, when the Lo Shu tone fits at the track's rate (untuned, and tuned). */
+export const KEY_FITS_LOSHU_NOTE = 'Its key fits the Lo Shu tone.';
+export const KEY_FITS_LOSHU_TUNED_NOTE = 'Its key fits the Lo Shu tone at its tuning.';
+
+export type TuneOptionId = 'standard' | 'kept' | 'fit' | 'fitLoShu';
+export interface TuneOption {
+  id: TuneOptionId;
+  label: string;
+  /** What choosing it writes (setTrackTuning): the cents (null: Standard), the crystal it is for, a Lo Shu fit. */
+  cents: number | null;
+  forCrystal: number | null;
+  loShu: boolean;
+  /** The announcement after the choice ("Tuning: Fit 963 hertz, minus 14 cents"). */
+  spoken: string;
+}
+export interface TuningChoice {
+  value: TuneOptionId;
+  options: TuneOption[];
+  /** The line under the select, read with it (aria-describedby). */
+  note: string;
+}
+/** The shifts for the track's crystal, made once when Track info opens (never per render): for its Solfeggio tone, and
+ *  (A1) for its Lo Shu tone, null when not asked for (Perfect GUT off, or not one of the six). Fix round 1 (S1): each is
+ *  offeredShift's, so 0 also for a key already within the edge at Standard. */
+export interface TuneShifts {
+  sol: number | null;
+  loShu: number | null;
+}
+
+const isCrystal = (hz: unknown): hz is number => typeof hz === 'number' && ALL_CRYSTALS.includes(hz);
+
+/** Fix round 1 (S3): key data Track info can fit a tuning to. clearKey's own rules (this CHROMA_VERSION's key data, a
+ *  key name, a confidence of at least 0.45) with the phone's length and size caps left out: a long track analysed on a
+ *  desktop has a clear key that Key fit acts on, though keyBands makes it no bands and placement leaves it out. (The
+ *  caps are the only fields clearKey reads the length and file for, so they are given as within them.) */
+export function tunableKey(s: LibSong): boolean {
+  return clearKey({ ...s, duration: 1, file: { size: 0 } });
+}
+
+/** Fix round 1 (S3): no key data, because this device's Analyse tracks skips the track as too long for it
+ *  (analysePass needOf's 'too-long', on the device's own caps): Analyse tracks can never give it a key here. */
+export function tooLongToAnalyse(s: LibSong, caps: Caps | null | undefined): boolean {
+  if (!caps || s.chromaVersion === CHROMA_VERSION) return false;
+  return needOf({ ...s, file: s.file ?? null } as unknown as PassSong, caps) === 'too-long';
+}
+
+/** The shifts Track info offers for this track on its crystal (offeredShift, at most two full scans): none without a
+ *  crystal or key data it can fit (tunableKey). The Lo Shu tone's only with Perfect GUT on, on one of the six (A1), as
+ *  the device plays it on `output` (fix round 1, S2: planOutputFor's; headphones when it isn't known). The Solfeggio
+ *  tone stays keyBands' own (headphones, decision T7: placement never depends on the device). */
+export function tuneShiftsFor(s: LibSong, perfectGut: boolean, output: string = 'headphones'): TuneShifts {
+  const hz = s.closestSolfeggio;
+  if (!isCrystal(hz) || !tunableKey(s)) return { sol: null, loShu: null };
+  const lo = perfectGut ? loShuTone(hz, output) : null;
+  return {
+    sol: offeredShift(s.chroma, s.chromaA4Hz, solfeggioTone(hz)),
+    loShu: lo === null ? null : offeredShift(s.chroma, s.chromaA4Hz, lo),
+  };
+}
+
+/** A1: the Lo Shu tone fits the track's key at the speed it plays (keyBands' edge, at its tuning's cents), as the device
+ *  plays it on `output` (fix round 1, S2): the Crystal note's test on the six with Perfect GUT on. One musicFit: the
+ *  dialog makes it once per change of what it reads (fix round 1, N7), never per render. */
+export function loShuFitsNow(s: LibSong, output: string = 'headphones'): boolean {
+  const hz = s.closestSolfeggio;
+  if (!isCrystal(hz) || !tunableKey(s)) return false;
+  const lo = loShuTone(hz, output);
+  if (lo === null) return false;
+  const c = validTuning(s) ?? 0;
+  return relAt(s.chroma as number[], s.chromaA4Hz as number, lo, c) <= FIT_REL_EDGE;
+}
+
+const spokenCents = (c: number) => `${c < 0 ? 'minus' : 'plus'} ${Math.abs(c)} ${Math.abs(c) === 1 ? 'cent' : 'cents'}`;
+const forLabel = (f: number, loShu: boolean) => (loShu ? `Lo Shu ${loShuHz(f)} Hz (${f})` : `${f} Hz`);
+
+/** The line under a tuned choice: how much faster or slower than Standard, why, and what Assign does with it. Fix
+ *  round 1: "than Standard" (N1: the speed is Standard's, not the file's); a track whose crystal has changed since says
+ *  so (N8: "Chosen for 963 Hz, before it moved to 852 Hz."); a Lo Shu tuning kept with Perfect GUT off says what is true
+ *  (N4: "Chosen for Lo Shu 75 Hz, which plays only with Lo Shu Perfect GUT on."), never that the Lo Shu tone fits.
+ *  Fix round 2 (L-S2): a stored Lo Shu tuning carries no output, so "so the Lo Shu tone fits its key" only when it fits
+ *  on the output in effect (`loShuFits`: the dialog's loShuFitsNow, the Crystal note's own test), else "Chosen for Lo Shu
+ *  186 Hz."; (L-S3) over keyBands' caps (`placedByKey` false) the Assign sentence is TUNE_ASSIGN_LONG_NOTE. */
+export function tunedNote(cents: number, forCrystal: number, loShu: boolean, crystalNow: number | null, perfectGut = true, loShuFits = true, placedByKey = true): string {
+  const pct = speedPercent(cents);
+  const speed = `Plays ${Math.abs(pct).toFixed(1)} % ${pct < 0 ? 'slower' : 'faster'} than Standard`;
+  const chosenFor = loShu ? `Lo Shu ${loShuHz(forCrystal)} Hz` : `${forCrystal} Hz`;
+  const why = crystalNow === null
+    ? `${speed}. Chosen for ${chosenFor}.`
+    : forCrystal !== crystalNow
+      ? `${speed}. Chosen for ${loShu ? `${chosenFor} (${forCrystal})` : chosenFor}, before it moved to ${crystalNow} Hz.`
+      : loShu && !perfectGut
+        ? `${speed}. Chosen for ${chosenFor}, which plays only with Lo Shu Perfect GUT on.`
+        : loShu && !loShuFits
+          ? `${speed}. Chosen for ${chosenFor}.`
+          : `${speed}, so ${loShu ? 'the Lo Shu tone' : "the crystal's tone"} fits its key.`;
+  const parts = [why, TUNE_FILE_NOTE, !placedByKey ? TUNE_ASSIGN_LONG_NOTE : loShu ? TUNE_ASSIGN_LOSHU_NOTE : TUNE_ASSIGN_NOTE];
+  if (!LIVE_TUNE_SWITCH) parts.push(TUNE_NEXT_PLAY);
+  return parts.join(' ');
+}
+/** The note under the select of an untuned track with a Fit (the offer's note). Fix round 2 (L-S3): over keyBands' caps
+ *  it says Assign doesn't place the track by its key, so a Fit can't move it. */
+function standardNote(placedByKey = true): string {
+  const parts = [TUNE_STANDARD_NOTE];
+  if (!placedByKey) parts.push(TUNE_ASSIGN_LONG_NOTE);
+  if (!LIVE_TUNE_SWITCH) parts.push(TUNE_NEXT_PLAY);
+  return parts.join(' ');
+}
+/** Fix round 2 (L-S1): the track's key fits the crystal's Solfeggio tone at `cents` (keyBands' band 0 there: the same
+ *  rel, chromaA4Hz × tuneRate(cents), against the same edge; libraryModel.check pins it equal to songBands' band). The
+ *  caller has checked tunableKey. */
+function fitsSolfeggioAt(s: LibSong, hz: number, cents: number): boolean {
+  return relAt(s.chroma as number[], s.chromaA4Hz as number, solfeggioTone(hz), cents) <= FIT_REL_EDGE;
+}
+const standardOption = (): TuneOption => ({ id: 'standard', label: STANDARD_CHOICE, cents: null, forCrystal: null, loShu: false, spoken: 'Tuning: Standard' });
+const fitOption = (hz: number, cents: number): TuneOption => ({ id: 'fit', label: `Fit ${hz} Hz · ${tuneLabel(cents)}`, cents, forCrystal: hz, loShu: false, spoken: `Tuning: Fit ${hz} hertz, ${spokenCents(cents)}` });
+const fitLoShuOption = (hz: number, cents: number): TuneOption => ({ id: 'fitLoShu', label: `Fit Lo Shu ${loShuHz(hz)} Hz · ${tuneLabel(cents)}`, cents, forCrystal: hz, loShu: true, spoken: `Tuning: Fit Lo Shu ${loShuHz(hz)} hertz, ${spokenCents(cents)}` });
+
+/**
+ * The Tuning row (in order of precedence):
+ *   - a tuning (valid): a select of Standard, "Tuned −14 cents · chosen for 963 Hz" (A1: "… chosen for Lo Shu 75 Hz
+ *     (174)"; selected), and the fits for the current crystal it doesn't already hold (non-zero shifts only; the Lo Shu
+ *     one with Perfect GUT on, on the six);
+ *   - no crystal: plain, "No crystal yet";
+ *   - not analysed / no clear key: plain, "Analyse tracks first" / "No clear key" (fix round 1, S3: key data with a
+ *     clear key over the phone's caps is offered its fits; none because this device's Analyse tracks skips the track as
+ *     too long: "Too long for Analyse tracks on this device");
+ *   - A1, Perfect GUT on and one of the six: a select of Standard and each non-zero fit (Solfeggio, Lo Shu), else plain
+ *     with the Lo Shu tone's reason ("Its key already fits the Lo Shu tone" / "No tuning within ±50 cents fits 75 Hz");
+ *   - the shift 0: plain, "Its key already fits this crystal's tone"; none: plain, "No tuning within ±50 cents fits
+ *     963 Hz"; a shift: a select of Standard (selected) and "Fit 963 Hz · −14 cents".
+ * Copy: "Tuning: Standard (432)", or "Tuning: −14 cents (chosen for 963 Hz)" (A1: "… (chosen for Lo Shu 75 Hz)").
+ * Fix round 2: a tuned track is heard at its tuning, so its fits are judged there (L-S1): "Fit <crystal>" only when its
+ * key doesn't already fit that crystal's tone at the kept cents (the Crystal note's band-0 test, fitsSolfeggioAt), the
+ * Lo Shu Fit only when the Lo Shu tone doesn't fit it on the output in effect (`loShuFits`: the dialog's loShuFitsNow;
+ * L-S2: so a Lo Shu tuning chosen on another output gets this output's own Fit), and never a Fit at the kept cents (it
+ * would only relabel the tuning). An untuned track keeps fix round 1's rule (B1). Over keyBands' caps the notes say
+ * Assign doesn't place it by its key (L-S3).
+ */
+export function tuningRow(s: LibSong, perfectGut: boolean, shifts: TuneShifts, caps?: Caps | null, loShuFits?: boolean): InfoRow {
+  const hz = isCrystal(s.closestSolfeggio) ? s.closestSolfeggio : null;
+  const tuned = validTuning(s);
+  const plain = (note: string): InfoRow => ({ label: TUNING_LABEL, value: STANDARD_CHOICE, note, copy: `${TUNING_LABEL}: ${STANDARD_CHOICE}` });
+  // A1: the Lo Shu fit, only with Perfect GUT on and on one of the six it swaps (the one place it is decided).
+  const loShuOn = perfectGut && hz !== null && loShuHz(hz) !== null;
+  // (Fix round 2, L-S3: placement reads key data only within keyBands' fixed caps, the same on every device.)
+  const placedByKey = withinKeyLimits(s);
+  if (tuned !== null) {
+    const f = s.tuneFor as number;
+    const lo = validLoShu(s);
+    const kept: TuneOption = { id: 'kept', label: `Tuned ${tuneLabel(tuned)} · chosen for ${forLabel(f, lo)}`, cents: tuned, forCrystal: f, loShu: lo, spoken: '' };
+    const options = [standardOption(), kept];
+    // (Fix round 2, L-S2: the Lo Shu test at the track's tuning on the output in effect; headphones when not given.)
+    const loFits = loShuOn && (typeof loShuFits === 'boolean' ? loShuFits : loShuFitsNow(s));
+    if (hz !== null && tunableKey(s)) {
+      if (shifts.sol !== null && shifts.sol !== 0 && shifts.sol !== tuned && !(f === hz && !lo) && !fitsSolfeggioAt(s, hz, tuned)) options.push(fitOption(hz, shifts.sol));
+      if (loShuOn && shifts.loShu !== null && shifts.loShu !== 0 && shifts.loShu !== tuned && !loFits) options.push(fitLoShuOption(hz, shifts.loShu));
+    }
+    return { label: TUNING_LABEL, value: kept.label, copy: `${TUNING_LABEL}: ${tuneLabel(tuned)} (chosen for ${lo ? `Lo Shu ${loShuHz(f)} Hz` : `${f} Hz`})`, choice: { value: 'kept', options, note: tunedNote(tuned, f, lo, hz, perfectGut, loFits, placedByKey) } };
+  }
+  if (hz === null) return plain(TUNE_REASON.noCrystal);
+  if (!tunableKey(s)) {
+    if (s.chromaVersion === CHROMA_VERSION || s.analysisFailedV === CHROMA_VERSION) return plain(TUNE_REASON.noKey);
+    return plain(tooLongToAnalyse(s, caps) ? TUNE_REASON.tooLong : TUNE_REASON.analyse);
+  }
+  const select = (fits: TuneOption[]): InfoRow => ({ label: TUNING_LABEL, value: STANDARD_CHOICE, copy: `${TUNING_LABEL}: ${STANDARD_CHOICE}`, choice: { value: 'standard', options: [standardOption(), ...fits], note: standardNote(placedByKey) } });
+  if (loShuOn) {
+    const fits: TuneOption[] = [];
+    if (shifts.sol !== null && shifts.sol !== 0) fits.push(fitOption(hz, shifts.sol));
+    if (shifts.loShu !== null && shifts.loShu !== 0) fits.push(fitLoShuOption(hz, shifts.loShu));
+    if (fits.length) return select(fits);
+    return plain(shifts.loShu === 0 ? TUNE_REASON.fitsLoShu : noTuningFits(loShuHz(hz) as number));
+  }
+  if (shifts.sol === 0) return plain(TUNE_REASON.fits);
+  if (shifts.sol === null) return plain(noTuningFits(hz));
+  return select([fitOption(hz, shifts.sol)]);
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -402,16 +625,37 @@ const hasBass = (e: LibSong['bandEnvelope']) => (e?.bass?.length ?? 0) > 0;
 /** Track info's rows (mockup library-track-info-phone): Length, Crystal, Key, Visual sync, File, Added. v16.8.2 (K7):
  *  `bands`, the track's key bands (App's cache: BandCache.get, null without a clear key or before they are made).
  *  Fix round 1 (L-N3): `perfectGut`, Lo Shu Perfect GUT on: the six crystals it swaps play another tone, so their
- *  key note is left out there (PERFECT_GUT_MAP, the shell's copy of App's swap table). */
-export function trackInfoRows(s: LibSong, now: number, bands?: ArrayLike<number> | null, perfectGut = false): InfoRow[] {
+ *  key note is left out there (PERFECT_GUT_MAP, the shell's copy of App's swap table).
+ *  v16.8.3 (Track Tuning): the Tuning row after Key (tuningRow), from `shifts` (the dialog makes them once per open:
+ *  tuneShiftsFor; made here when not given); a tuned track's band-0 note says "… at its tuning" (its bands are its
+ *  own: M1). A1: with Perfect GUT on, on the six, the note is the Lo Shu tone's ("Its key fits the Lo Shu tone.", at
+ *  the track's rate: loShuFitsNow), never the Solfeggio one's.
+ *  Fix round 1: `ctx`, what the dialog knows of the device: the plan output in effect (S2: the Lo Shu tone as it plays
+ *  there), Analyse tracks' caps here (S3's reason) and the Lo Shu test already made (N7: the dialog memoises it; made
+ *  here when not given). */
+export interface TrackInfoCtx {
+  /** planOutputFor's output in effect ('headphones' when not known). */
+  output?: string;
+  /** This device's Analyse tracks caps (App's ANALYSE_CAPS), or null when not known. */
+  caps?: Caps | null;
+  /** loShuFitsNow(s, output), made by the dialog (only read on the six with Perfect GUT on). */
+  loShuFits?: boolean;
+}
+export function trackInfoRows(s: LibSong, now: number, bands?: ArrayLike<number> | null, perfectGut = false, shifts?: TuneShifts | null, ctx?: TrackInfoCtx | null): InfoRow[] {
+  const output = ctx?.output ?? 'headphones';
   const rows: InfoRow[] = [];
   const d = s.duration;
   rows.push({ label: 'Length', value: Number.isFinite(d) && (d as number) > 0 ? formatTime(d as number) : d === 0 ? 'Reading…' : 'Unknown' });
   const hz = s.closestSolfeggio;
   if (Number.isFinite(hz) && (hz as number) > 0) {
     const at = ALL_CRYSTALS.indexOf(hz as number);
-    const fits = !!bands && bands.length === ALL_CRYSTALS.length && at >= 0 && bands[at] === 0 && clearKey(s) && !(perfectGut && PERFECT_GUT_MAP[hz as number] !== undefined);
-    rows.push({ label: 'Crystal', value: `${Math.round(hz as number)} Hz · ${regimeName(regimeOf(hz as number))}`, note: `${crystalSource(s)}. ${ASSIGNED_NOTE}${fits ? ` ${KEY_FITS_NOTE}` : ''}`, tag: 'design' });
+    const swappedNow = perfectGut && PERFECT_GUT_MAP[hz as number] !== undefined;
+    const fits = !!bands && bands.length === ALL_CRYSTALS.length && at >= 0 && bands[at] === 0 && clearKey(s) && !swappedNow;
+    const tuned = validTuning(s) !== null;
+    // (A1: on the six with Perfect GUT on, the Lo Shu tone's own test, at the track's rate.)
+    const loFits = swappedNow && (typeof ctx?.loShuFits === 'boolean' ? ctx.loShuFits : loShuFitsNow(s, output));
+    const keyNote = fits ? (tuned ? KEY_FITS_TUNED_NOTE : KEY_FITS_NOTE) : loFits ? (tuned ? KEY_FITS_LOSHU_TUNED_NOTE : KEY_FITS_LOSHU_NOTE) : '';
+    rows.push({ label: 'Crystal', value: `${Math.round(hz as number)} Hz · ${regimeName(regimeOf(hz as number))}`, note: `${crystalSource(s)}. ${ASSIGNED_NOTE}${keyNote ? ` ${keyNote}` : ''}`, tag: 'design' });
   } else {
     rows.push({ label: 'Crystal', value: 'None yet' });
   }
@@ -427,6 +671,8 @@ export function trackInfoRows(s: LibSong, now: number, bands?: ArrayLike<number>
   } else {
     rows.push({ label: 'Key', value: 'Not analysed yet' });
   }
+  // (Fix round 2, L-S2: the Tuning row's Lo Shu test is the Crystal note's, at the output in effect.)
+  rows.push(tuningRow(s, perfectGut, shifts ?? tuneShiftsFor(s, perfectGut, output), ctx?.caps, typeof ctx?.loShuFits === 'boolean' ? ctx.loShuFits : perfectGut ? loShuFitsNow(s, output) : false));
   rows.push({ label: 'Visual sync', value: hasBass(s.bandEnvelope) ? 'From Deep Scan' : hasBass(s.visualEnvelope) ? 'From Analyse tracks' : 'None yet' });
   const fileName = typeof s.file?.name === 'string' && s.file.name ? s.file.name : null;
   const size = formatBytes(s.file?.size);
@@ -436,10 +682,11 @@ export function trackInfoRows(s: LibSong, now: number, bands?: ArrayLike<number>
   return rows;
 }
 
-/** Track info as plain text, for Copy: the name, then "Label: value (note)" per row. */
-export function trackInfoText(s: LibSong, now: number, bands?: ArrayLike<number> | null, perfectGut = false): string {
+/** Track info as plain text, for Copy: the name, then "Label: value (note)" per row (v16.8.3: the Tuning row's own line,
+ *  "Tuning: Standard (432)" or "Tuning: −14 cents (chosen for 963 Hz)"). */
+export function trackInfoText(s: LibSong, now: number, bands?: ArrayLike<number> | null, perfectGut = false, shifts?: TuneShifts | null, ctx?: TrackInfoCtx | null): string {
   const lines = [String(s.name ?? '')];
-  for (const r of trackInfoRows(s, now, bands, perfectGut)) lines.push(`${r.label}: ${r.value}${r.note ? ` (${r.note})` : ''}`);
+  for (const r of trackInfoRows(s, now, bands, perfectGut, shifts, ctx)) lines.push(r.copy ?? `${r.label}: ${r.value}${r.note ? ` (${r.note})` : ''}`);
   return lines.join('\n');
 }
 

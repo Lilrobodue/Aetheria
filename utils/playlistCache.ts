@@ -53,6 +53,8 @@ export type { SavedWalk } from './library/walkRecord';
 import { restoredQueue } from './queue/queueModel';
 import type { Mark, SavedQueue } from './queue/queueModel';
 export type { SavedQueue } from './queue/queueModel';
+// v16.8.3: a track's tuning restores only when it holds together (tuningFieldsOf).
+import { restoredTuning } from './tuning/trackTuning';
 
 const DB_NAME = 'aetheria-db';
 // v2: split the old combined `songs` store into `blobs` + `meta`. The schema is
@@ -102,6 +104,9 @@ interface CachedMeta {
   analysisFailedV?: Song['analysisFailedV'];
   crystalSource?: Song['crystalSource'];
   scanRate?: Song['scanRate']; // v16.8.1 (D1)
+  tuneCents?: Song['tuneCents']; // v16.8.3 (Track Tuning)
+  tuneFor?: Song['tuneFor']; // v16.8.3
+  tuneLoShu?: Song['tuneLoShu']; // v16.8.3 (A1)
 }
 
 interface CachedState {
@@ -251,6 +256,9 @@ function toMeta(song: Song): CachedMeta {
     analysisFailedV: song.analysisFailedV,
     crystalSource: song.crystalSource,
     scanRate: song.scanRate,
+    tuneCents: song.tuneCents, // v16.8.3 (Track Tuning)
+    tuneFor: song.tuneFor,
+    tuneLoShu: song.tuneLoShu, // v16.8.3 (A1)
   };
 }
 
@@ -265,6 +273,15 @@ function keyFieldsOf(meta: CachedMeta | undefined): Pick<Song, 'chroma' | 'chrom
   return ok
     ? { chroma: c, chromaA4Hz: meta.chromaA4Hz, musicKey: meta.musicKey, keyConfidence: meta.keyConfidence, chromaVersion: meta.chromaVersion }
     : {};
+}
+
+/** v16.8.3 (Track Tuning): a stored record's tuning, only when it holds together (validTuning: an integer 1..50 cents
+ *  either way and one of the 27 crystals): both fields, or neither (garbage, a future version's, or one without the
+ *  other restores as Standard). A1: tuneLoShu only with them and only on one of the six (validLoShu). A track with no
+ *  tuning gets no keys at all, so its restored Song is v16.8.2's. (The rule is trackTuning's restoredTuning, which
+ *  tuning.check checks in Node.) */
+function tuningFieldsOf(meta: CachedMeta | undefined): Pick<Song, 'tuneCents' | 'tuneFor' | 'tuneLoShu'> {
+  return restoredTuning(meta);
 }
 
 /** Dedupe songs across playlist + originalPlaylist (a track can appear in both),
@@ -712,6 +729,7 @@ async function readSavedPlaylist(): Promise<RestoredPlaylist | null> {
         analysisFailedV: typeof meta?.analysisFailedV === 'number' ? meta.analysisFailedV : undefined,
         crystalSource: meta?.crystalSource === 'scan' || meta?.crystalSource === 'assigned' ? meta.crystalSource : undefined,
         scanRate: typeof meta?.scanRate === 'number' ? meta.scanRate : undefined, // v16.8.1 (D1)
+        ...tuningFieldsOf(meta), // v16.8.3 (Track Tuning)
       };
     };
     const songsOf = (ids: readonly string[]): Song[] =>

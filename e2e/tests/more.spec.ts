@@ -99,7 +99,9 @@ test.describe('phone', () => {
       const by = await s.getAttribute('aria-labelledby');
       expect(by && (await page.locator(`#${by}`).count()), 'each group is labelled by its heading').toBe(1);
     }
-    await expect(root.getByRole('button')).toHaveText([/^Visualizer/, /^Record/, /^Guide/, /^Journal/, /^Safety & comfort/, /^About/, /^Links/, /^Advanced/]);
+    // (v16.8.3: Learn gains Compose for a crystal, after Journal.)
+    await expect(root.getByRole('button')).toHaveText([/^Visualizer/, /^Record/, /^Guide/, /^Journal/, /^Compose for a crystal/, /^Safety & comfort/, /^About/, /^Links/, /^Advanced/]);
+    await expect(moreRow(page, 'more-compose-row')).toContainText('The keys and DAW tunings that fit each crystal’s tone');
     const viz = moreRow(page, 'more-visualizer');
     await expect(viz).toContainText('Spectrum Lens · Chakra · wandering hexes · 30 fps');
     await expect(moreRow(page, 'more-safety-row')).toContainText('Stop all sound, Music only, the safety statement');
@@ -112,11 +114,11 @@ test.describe('phone', () => {
     await expect(moreRow(page, 'more-back-to-classic'), 'the classic row moved into Advanced').toHaveCount(0);
     // About: the version, then "an update is ready" and its dot once one is.
     const about = moreRow(page, 'more-about-row');
-    await expect(about).toContainText('Version v16.8.2');
+    await expect(about).toContainText('Version v16.8.3');
     await expect(about).not.toContainText('an update is ready');
     await expect(page.getByTestId('more-update-dot')).toHaveCount(0);
     await page.evaluate(() => window.dispatchEvent(new Event('aetheria:update-ready')));
-    await expect(about).toContainText('Version v16.8.2 · an update is ready');
+    await expect(about).toContainText('Version v16.8.3 · an update is ready');
     await expect(page.getByTestId('more-update-dot')).toBeVisible();
     // The Visualizer line follows a setting changed in the sheet, and Pause visuals.
     await viz.click();

@@ -35,7 +35,7 @@ import type { ShellSheet, ShellTab, PeekPanel, LayoutPref } from './shellModel';
 import type { Song } from '../../types';
 import type { LayersSection } from './layers/layersModel';
 import type { LastImport } from './library/libraryModel';
-import type { PassProgress } from '../../utils/library/analysePass';
+import type { Caps, PassProgress } from '../../utils/library/analysePass';
 import type { Filters } from '../../utils/library/filterModel';
 import type { BuilderSettings, SourceRef } from '../../utils/mix/builder';
 import type { MixId } from '../../utils/mix/catalog';
@@ -97,6 +97,13 @@ export interface SoundValue {
   keyFitLook: 'duck' | 'plain' | 'none';
   keyFitOn: boolean;
   keyFitRowLine: string;
+  /** v16.8.3 (T4): the playing track's tuning chip ("Tuned −14 c"), or null at Standard: per track, never per tick. */
+  tuneChip: string | null;
+  /** v16.8.3 fix round 1 (N2): the chip's spoken name ("Tuned −14 cents", "Tuned +1 cent"), or null with no chip. */
+  tuneChipName: string | null;
+  /** v16.8.3 fix round 1 (S2): the plan output in effect (planOutputFor: the car plans as speakers), for the tone the
+   *  layers play (Track info's Lo Shu fit). */
+  planOutput: 'headphones' | 'speakers' | 'phone';
   musicOnly: boolean;
   /** LayerSoundPanel's props (App's one memoised object, shared with classic). */
   layerPanelProps: any;
@@ -403,6 +410,8 @@ export interface LibraryStatusValue {
   lastImport: LastImport | null;
   /** Analyse tracks treats this device as a phone. */
   analyseMobile: boolean;
+  /** v16.8.3 fix round 1 (S3): Analyse tracks' length and size caps on this device (App's ANALYSE_CAPS). */
+  analyseCaps: Caps;
   /** v16.1: what Clear deletes (the library plus stored tracks on the Recover offer: classic's own count), and the
    *  saved playlists (the new layout's Clear dialog: "Also delete my 5 playlists"). */
   storedTrackCount: number;
@@ -723,6 +732,12 @@ export interface ShellActions {
   journalNote: (note: string) => void;
   /** Close the honest Track info (TrackInfoHost). */
   closeTrackInfo: () => void;
+  /** v16.8.3 (Track Tuning): Track info's Tuning choice, applied at once: a track's tuning (the cents and the crystal it
+   *  was chosen for; A1: `loShu`, for that crystal's Lo Shu tone), or Standard with null. App's setTrackTuning, through
+   *  its ref (the library's one new writer). */
+  setTrackTuning: (id: string, cents: number | null, forCrystal?: number | null, loShu?: boolean) => void;
+  /** v16.8.3 (T9): More › Compose for a crystal, on this crystal (the Crystal sheet's link; the sheet closes first). */
+  openCompose: (crystal: number) => void;
   // v16.6, "How sure are we?" (App's setters and refs only: no state, no storage).
   /** An evidence tag: More › Guide at the tier (the open sheet or Track info closes; the Guide's view is kept), with the
    *  way back to `origin`. */

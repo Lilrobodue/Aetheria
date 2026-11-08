@@ -7,6 +7,12 @@
 // the memory caps per file type, the long file's cap, and the share rule. Everything the summary needs at once (this
 // module is in the main chunk; the engine is lazy). Free of React and of the app's state; Node checks it
 // (exportPlan.check.ts: `npm run check:export`).
+//
+// v16.8.3 ("Track Tuning", decision T8): each track renders at its own rate, trackRate(song) (utils/tuning: PSF itself
+// for a track with no tuning, so its file is v16.8.2's byte for byte): its output length (outSeconds), size (wavBytes),
+// Key fit's duck, the adaptive band's media time (bandSchedule) and the engine's decode (decodeRateFor). The long file's
+// cap and budget count every track in Standard seconds (standardSeconds: the source seconds at PSF that play as long),
+// so a tuned track counts by how long it plays; a playlist with no tuning counts exactly as before.
 
 import { canonicalLayerHz, renderForOutput, planOutputFor, bandOfPresetName, capBand, sliderGain, readIntensity, BandHysteresis, TONE_SLIDER_DEFAULT, BEAT_SLIDER_DEFAULT } from '../soundV2/layerHost.ts';
 import type { LayerEngine, LayerOutput, BeatRender, EnvelopeLike } from '../soundV2/layerHost.ts';
@@ -14,6 +20,7 @@ import { bandForIntensity } from '../soundV2/aetheria_sound_v2.ts';
 import type { Band } from '../soundV2/aetheria_sound_v2.ts';
 import { keyFitFor } from '../soundV2/keyFit.ts';
 import { PITCH_SHIFT_FACTOR } from '../../constants.ts';
+import { trackRate } from '../tuning/trackTuning.ts';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The file (decision 4 B: 24-bit, 48 kHz, like Record)
@@ -29,6 +36,10 @@ export const LAYER_FACTOR = 4;
 export const LAYER_RATE = OUT_RATE / LAYER_FACTOR;
 /** The music's decode context runs at this rate; its samples read as OUT_RATE are the 432 varispeed (pitch and tempo). */
 export const DECODE_RATE = OUT_RATE / PSF;
+/** v16.8.3: a track's decode rate at its own rate (OUT_RATE / rate: DECODE_RATE itself at PSF). */
+export function decodeRateFor(rate: number = PSF): number {
+  return OUT_RATE / rate;
+}
 /** App's level tick, the adaptive band's tick, the layers' end fade, a track change's host glide (seconds). */
 export const HOST_STEP_S = 0.25;
 export const ADAPT_STEP_S = 3;
@@ -39,14 +50,41 @@ export const HEADER_ALLOWANCE = 512;
 /** RIFF sizes are 32-bit: a file's data must stay under this (a long file above it is refused). */
 export const RIFF_MAX_BYTES = 0xffff_ffff;
 
-/** Output seconds for source seconds (the varispeed plays slower: 0.981818). */
-export function outSeconds(sourceSeconds: number): number {
-  return Number.isFinite(sourceSeconds) && sourceSeconds > 0 ? sourceSeconds / PSF : 0;
+/** Output seconds for source seconds (the varispeed plays slower: 0.981818; v16.8.3: a track at its own rate). */
+export function outSeconds(sourceSeconds: number, rate: number = PSF): number {
+  return Number.isFinite(sourceSeconds) && sourceSeconds > 0 ? sourceSeconds / rate : 0;
 }
 
-/** The WAV's bytes for this many source seconds. */
-export function wavBytes(sourceSeconds: number): number {
-  return HEADER_ALLOWANCE + Math.round(outSeconds(sourceSeconds) * OUT_RATE) * BYTES_PER_FRAME;
+/** The WAV's bytes for this many source seconds (v16.8.3: at this rate). */
+export function wavBytes(sourceSeconds: number, rate: number = PSF): number {
+  return HEADER_ALLOWANCE + Math.round(outSeconds(sourceSeconds, rate) * OUT_RATE) * BYTES_PER_FRAME;
+}
+
+/** v16.8.3: the source seconds at Standard that play as long as these do at `rate` (sourceSeconds × PSF / rate): what the
+ *  long file's cap, budget and the sheet's totals count in. The same number at PSF (PSF / PSF is exactly 1). */
+export function standardSeconds(sourceSeconds: number, rate: number = PSF): number {
+  return sourceSeconds * (PSF / rate);
+}
+
+/**
+ * v16.8.3 fix round 1 (X04): the Export sheet's numbers, from the tracks it will export (each its stated source seconds
+ * and its rate), in one place: the bytes (every file at its own rate); the long file's output seconds (the sum in
+ * Standard seconds, over PSF) and that sum in Standard seconds (its cap counts them); one track's output seconds at its
+ * own rate. With no tuning anywhere, v16.8.2's numbers (PSF / PSF is exactly 1).
+ */
+export function exportSheetNumbers(usable: ReadonlyArray<{ seconds: number; rate: number }>): { bytes: number; standardTotal: number; longOut: number; trackOut: number } {
+  let bytes = 0, standardTotal = 0, seconds = 0;
+  for (const e of usable) {
+    bytes += wavBytes(e.seconds, e.rate);
+    standardTotal += standardSeconds(e.seconds, e.rate);
+    seconds += e.seconds;
+  }
+  return { bytes, standardTotal, longOut: outSeconds(standardTotal), trackOut: outSeconds(seconds, usable.length ? usable[0].rate : PSF) };
+}
+
+/** v16.8.3: a track's export rate: its playback rate (trackRate: PSF itself without a tuning). */
+export function exportRate(song: { tuneCents?: unknown; tuneFor?: unknown } | null | undefined): number {
+  return trackRate(song);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -108,6 +146,9 @@ export interface ExportSong {
   chromaA4Hz?: number;
   keyConfidence?: number;
   musicKey?: string;
+  /** v16.8.3: the track's tuning (trackRate reads it; anything else is Standard). */
+  tuneCents?: number;
+  tuneFor?: number;
 }
 
 export type CrystalOrigin = 'assigned' | 'playing' | '111' | 'none';
@@ -157,7 +198,8 @@ export function exportSpecFor(snap: ExportSnapshot, song: ExportSong, madeFor: M
   const low = snap.lowering;
   const toneLevel = !playing && low && low.trackId !== song.id && snap.toneLevel === low.after ? low.before : snap.toneLevel;
   const gains = { tone: sliderGain(toneLevel, TONE_SLIDER_DEFAULT), beat: sliderGain(snap.beatLevel, BEAT_SLIDER_DEFAULT), drone: snap.droneEnabled ? 1 : 0 };
-  const duckDb = snap.keyFitOn && layers ? keyFitFor(song, layer.f, planOutput, PSF).duck_db : 0;
+  // v16.8.3: Key fit at the track's own rate (PSF itself without a tuning), as playback fits it.
+  const duckDb = snap.keyFitOn && layers ? keyFitFor(song, layer.f, planOutput, exportRate(song)).duck_db : 0;
   return {
     crystalRaw,
     crystalHz: layer.f > 0 ? layer.f : null,
@@ -181,15 +223,15 @@ export function exportSpecFor(snap: ExportSnapshot, song: ExportSong, madeFor: M
 
 /** The adaptive band, run ahead: App's own 3 s loop (BandHysteresis, readIntensity at the media time t × PSF, capBand to
  *  beta, or alpha for the pulse), ticking every 3 s of output time from the band in effect at the tap. The first entry
- *  is { t: 0, band: startBand }. */
-export function bandSchedule(env: EnvelopeLike | null | undefined, startBand: Band, render: BeatRender, outSecondsTotal: number, adaptive = true): Array<{ t: number; band: Band }> {
+ *  is { t: 0, band: startBand }. v16.8.3: the media time is t × the track's rate. */
+export function bandSchedule(env: EnvelopeLike | null | undefined, startBand: Band, render: BeatRender, outSecondsTotal: number, adaptive = true, rate: number = PSF): Array<{ t: number; band: Band }> {
   const out: Array<{ t: number; band: Band }> = [{ t: 0, band: startBand }];
   if (!adaptive || !env || render === 'off' || !((env.bass?.length ?? 0) > 0)) return out;
   const hyst = new BandHysteresis();
   const cap: Band = render === 'pulse' ? 'alpha' : 'beta';
   let current = startBand;
   for (let t = ADAPT_STEP_S; t < outSecondsTotal; t += ADAPT_STEP_S) {
-    const target = capBand(bandForIntensity(readIntensity(env, t * PSF)), cap);
+    const target = capBand(bandForIntensity(readIntensity(env, t * rate)), cap);
     const next = hyst.tick(target, current);
     if (next) {
       current = next;
@@ -496,13 +538,15 @@ export const OUT_PART_BYTES = 4 * 1024 * 1024;
 /** Two of the engine's output parts: the one being written and one in transit to the browser (MB). */
 export const OUT_TRANSIT_MB = (2 * OUT_PART_BYTES) / (1024 * 1024);
 
-/** The long file's peak (MB) for this many source seconds in all, given the heaviest track's export peak. */
+/** The long file's peak (MB) for this many source seconds in all, given the heaviest track's export peak. v16.8.3: the
+ *  seconds are Standard seconds (standardSeconds: a tuned track counts by how long it plays). */
 export function longFilePeakMB(mobile: boolean, heaviestPeakMB: number, sourceSeconds: number): number {
   const minutes = Math.max(0, sourceSeconds || 0) / 60;
   const perMin = mobile ? PHONE_LONG_MB_PER_MIN : LAYERS_MB_PER_MIN / PSF; // a source minute
   return Math.max(0, heaviestPeakMB || 0) + perMin * minutes + OUT_TRANSIT_MB;
 }
 
+/** The long file's cap, in Standard seconds of source (v16.8.3: compare it with the tracks' standardSeconds, summed). */
 export function longFileCapSeconds(mobile: boolean, heaviestDecodeMB: number, deviceMemoryGB?: number | null): number {
   const dm = typeof deviceMemoryGB === 'number' && Number.isFinite(deviceMemoryGB) && deviceMemoryGB > 0 ? deviceMemoryGB : null;
   const tier = mobile ? (dm !== null && dm <= 2 ? 5 / 12 : dm !== null && dm <= 4 ? 8 / 12 : 1) : 1;

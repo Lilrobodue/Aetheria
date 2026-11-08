@@ -25,6 +25,10 @@
 // decision 2026-11-06): a clear-key track that is band 0 on no crystal at all compares as 0.25 on each crystal where its
 // band is its lowest (after a fitting track, before a track with no key), and as its band elsewhere; only a real band 0
 // counts as fitting. It takes musicFit and toneOf from the vendored v2 (as Key fit does) and restates the rest here.
+// v16.8.3 (Track Tuning, M1: the user's decision T1): a track with a tuning (tuneCents an integer, 1 to 50 cents either way,
+// and tuneFor one of the 27 crystals: both, or it is no tuning) is heard at chromaA4Hz × 432/440 × 2^(cents/1200), so its
+// bands are cut there; a tuning never makes or unmakes a Source track (the reading is the file's) and tuneLoShu (A1) is
+// never read. Restated here from the decision, never from utils/tuning.
 // What it gives: each track's record after (closestSolfeggio, harmonicFreq, harmonicDeviation, crystalSource), each
 // crystal's tracks (Source tracks included) and its fill (without them), the empty crystals, and each track's role.
 
@@ -49,6 +53,9 @@ export interface OracleSong {
   musicKey?: string;
   keyConfidence?: number;
   chromaVersion?: number;
+  // v16.8.3: the tuning, as Track info stores it.
+  tuneCents?: unknown;
+  tuneFor?: unknown;
 }
 export type OracleRecord = [closestSolfeggio: number | null, harmonicFreq: number | null, harmonicDeviation: number | null, crystalSource: string | null];
 export type OracleRole = 'source' | 'stays' | 'left' | 'open';
@@ -147,6 +154,19 @@ const MIN_CONFIDENCE = 0.45;
 const MAX_SECONDS = 720; // the 8 GB phone's Analyse tracks caps, on every device
 const MAX_BYTES = 100 * 1024 * 1024;
 const HEARD = 0.981818; // the app's PITCH_SHIFT_FACTOR (constants.ts), its own literal: 432/440 differs by 1.9e-7 (fix round 1, L-N1)
+const TUNE_LIMIT = 50; // v16.8.3 (T2): ±50 cents from Standard
+/** v16.8.3: the cents of a tuning that holds together (an integer, 1..50 either way, chosen for one of the 27), or 0. */
+export function oracleCents(s: OracleSong): number {
+  const c = s.tuneCents, f = s.tuneFor;
+  if (typeof c !== 'number' || !Number.isInteger(c) || c === 0 || Math.abs(c) > TUNE_LIMIT) return 0;
+  return typeof f === 'number' && CRYSTALS.includes(f) ? c : 0;
+}
+/** v16.8.3: the rate a track is heard at: 432/440's literal, times 2^(cents/1200) for a tuned one (the same product the
+ *  app forms, so the same float). */
+export function oracleRate(s: OracleSong): number {
+  const c = oracleCents(s);
+  return c === 0 ? HEARD : HEARD * Math.pow(2, c / 1200);
+}
 /** A clear key: every condition of the rule. */
 export function oracleClearKey(s: OracleSong): boolean {
   const c = s.chroma;
@@ -164,10 +184,10 @@ const bandMemo = new Map<string, number[]>();
 export function oracleBands(s: OracleSong): number[] | null {
   if (!oracleClearKey(s)) return null;
   const chroma = s.chroma as number[];
-  const k = `${s.chromaA4Hz}|${chroma.join(',')}`;
+  const k = `${s.chromaA4Hz}|${chroma.join(',')}|${oracleCents(s)}`;
   let b = bandMemo.get(k);
   if (!b) {
-    const heard = (s.chromaA4Hz as number) * HEARD;
+    const heard = (s.chromaA4Hz as number) * oracleRate(s);
     b = CRYSTALS.map((c) => { const rel = musicFit(toneOf(c, 'headphones'), chroma, heard).rel; return rel <= EDGES[0] ? 0 : rel <= EDGES[1] ? 1 : rel <= EDGES[2] ? 2 : 3; });
     bandMemo.set(k, b);
   }

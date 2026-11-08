@@ -67,6 +67,14 @@
 //     before the next (exportPlan OUT_PART_BYTES); the Note 20's 45-minute long file peaked at 1,865 MB in its renderer.
 //   - The caps are exportPlan's: a phone's peak the larger of the step and the Note 20's line; the long file's the
 //     heaviest track's + its growth a minute + the parts in transit (longFilePeakMB).
+//
+// v16.8.3 ("Track Tuning", decision T8): each track renders at its own rate (EngineItem.rate: trackRate(song), PSF itself
+// for a track with no tuning, so an export with no tuning is v16.8.2's, sample for sample):
+//   - one track: decoded at OUT_RATE / rate (decodeRateFor), its adaptive band read at t × rate;
+//   - the long file: each track's output grid is rOut = OUT_RATE / its rate (placeTrack: the joins as before, the
+//     fraction carried; joinShift on two grids), the kernels by (rIn, rOut); the planned length a sum per track; the cap
+//     and the decodes' own lengths counted in Standard seconds (standardSeconds), so a tuned track counts by how long it
+//     plays.
 
 import { renderLayers } from './renderLayers';
 import type { LayerSegment, LayerPlanRecord } from './renderLayers';
@@ -74,13 +82,13 @@ import { CEILING, SLICE_FRAMES, catchConfig, designInterp, encodePcm24, interpRa
 import type { WavInfo } from './mixWav';
 import {
   BYTES_PER_FRAME, DECODE_RATE, END_FADE_S, LAYER_FACTOR, LAYER_RATE, OUT_PART_BYTES, OUT_RATE, PROGRESS_WEIGHTS, PSF, RIFF_MAX_BYTES,
-  bandSchedule, capInfoFor, decodeCostPerMin, exportCapSeconds, exportPeakMB, fileKind, fileKindOf, longFileCapSeconds,
+  bandSchedule, capInfoFor, decodeCostPerMin, decodeRateFor, exportCapSeconds, exportPeakMB, fileKind, fileKindOf, longFileCapSeconds, standardSeconds,
 } from './exportPlan';
 import type { CapInfo, ExportSpec, FileKind, SourceCost } from './exportPlan';
 import type { Phase, SkipWhy } from './exportWords';
 import { lengthLowerBound, newStreamScan, scanPlanFor, scanStream, scanTrusted, sniffFile } from './sourceInfo';
 import type { Mp3Scan, ScanPlan, SourceInfo } from './sourceInfo';
-import { addTrack, designKernel, joinShift, trackSpan, trimTrack } from './resample';
+import { addTrack, newGridPlacer, newKernelCache, placeTrack, reachBack, trackSpan, trimTrack } from './resample';
 import type { GridTrack, Kernel } from './resample';
 import { holdFor } from '../library/analysePass';
 import type { PlaybackSnapshot } from '../library/analysePass';
@@ -113,6 +121,13 @@ export interface EngineItem {
   envelope: EnvelopeLike | null;
   /** The file's name in Downloads. */
   name: string;
+  /** v16.8.3: the track's rate (its playback rate: trackRate(song)); absent or not a positive number: PSF (Standard). */
+  rate?: number;
+}
+
+/** v16.8.3: the rate an item renders at (PSF for a missing or odd one). */
+export function itemRate(it: { rate?: number }): number {
+  return typeof it.rate === 'number' && Number.isFinite(it.rate) && it.rate > 0 ? it.rate : PSF;
 }
 
 export interface EngineDeps {
@@ -151,6 +166,9 @@ export interface FileResult {
   plan: LayerPlanRecord | null;
   /** A long file's joins (output frames, rounded), the music's own frames. */
   joins?: number[];
+  /** v16.8.3 fix round 1: a long file's layer plan, in output frames (rounded): each track's start, and its end. */
+  layerStarts?: number[];
+  layerEnd?: number;
 }
 
 export interface StepLog {
@@ -766,7 +784,9 @@ export function createJob(kind: 'track' | 'playlist' | 'long', items: EngineItem
     // B1 (re-review): an MP3's frames, from the bytes just read, before the decode.
     scanHeld(it, est, bytes);
     await hold(it.id, 'decode', base + span * PROGRESS_WEIGHTS.read);
-    let buf: AudioBuffer | null = await decode(bytes, base, span);
+    // v16.8.3: at the track's own rate (DECODE_RATE itself at PSF).
+    const rate = itemRate(it);
+    let buf: AudioBuffer | null = await decode(bytes, base, span, decodeRateFor(rate));
     bytes = null;
     let layers: AudioBuffer | null = null;
     // v16.5 final: the decode and the layers are let go (letGo) however this file ends: made, refused, cancelled.
@@ -780,7 +800,7 @@ export function createJob(kind: 'track' | 'playlist' | 'long', items: EngineItem
         await hold(it.id, 'layers', base + span * (PROGRESS_WEIGHTS.read + PROGRESS_WEIGHTS.decode));
         const l0 = performance.now();
         emit({ phase: 'layers' }, true);
-        const segs: LayerSegment[] = [{ spec: it.spec, startS: 0, durS: outS, bands: bandSchedule(it.envelope, it.spec.startBand, it.spec.render, outS, it.spec.adaptive) }];
+        const segs: LayerSegment[] = [{ spec: it.spec, startS: 0, durS: outS, bands: bandSchedule(it.envelope, it.spec.startBand, it.spec.render, outS, it.spec.adaptive, rate) }];
         const r = await renderLayers(segs, outS, deps.layerRate ?? LAYER_RATE, { endFade: false });
         layers = r.buf; // before the check: a cancel there lets them go (the finally)
         plan = r.rec;
@@ -831,7 +851,8 @@ export function createJob(kind: 'track' | 'playlist' | 'long', items: EngineItem
       const firstOther = skipped.find((s) => s.why !== 'missing' && s.why !== 'too-long');
       throw new Failed(firstOther ? REASON_FOR[firstOther.why] : 'missing', 'nothing to export');
     }
-    const planned = usable.map((u) => u.est.seconds / PSF);
+    // v16.8.3: each track's output seconds at its own rate; the cap counts Standard seconds (totalPlanned × PSF).
+    const planned = usable.map((u) => u.est.seconds / itemRate(u.it));
     const totalPlanned = planned.reduce((a, b) => a + b, 0);
     // v16.5 final: the heaviest track's export peak as the per-track caps count it (exportPeakMB: on a phone its decode's room).
     const heaviest = Math.max(...usable.map((u) => exportPeakMB(u.est.kind, u.est.seconds, deps.mobile, u.est.src)));
@@ -850,7 +871,7 @@ export function createJob(kind: 'track' | 'playlist' | 'long', items: EngineItem
     for (let k = 0; k < usable.length; k++) {
       const it = usable[k].it;
       const spec = { ...it.spec, startBand: band };
-      const bands = bandSchedule(it.envelope, band, spec.render, planned[k], spec.adaptive);
+      const bands = bandSchedule(it.envelope, band, spec.render, planned[k], spec.adaptive, itemRate(it));
       segs.push({ spec, startS: start, durS: planned[k], bands });
       band = bands[bands.length - 1].band;
       start += planned[k];
@@ -877,29 +898,22 @@ export function createJob(kind: 'track' | 'playlist' | 'long', items: EngineItem
       // B7: the music. Each track is decoded at its own rate (no resampling by Chrome) and placed on the output grid at
       // its exact fractional start; near a join the two tracks' kernels add (resample.ts). Before decoding the next, the
       // current one is trimmed to what the next slices still need: one decode in memory at a time.
-      const rOut = OUT_RATE / PSF;
-      const kernels = new Map<number, Kernel>();
-      const kernelFor = (rIn: number): Kernel => {
-        let k = kernels.get(rIn);
-        if (!k) {
-          k = designKernel(rIn, rOut);
-          kernels.set(rIn, k);
-        }
-        return k;
-      };
-      const maxReach = Math.max(...usable.map((u) => kernelFor(nativeRate(u.est.info)).reachOut));
+      // v16.8.3: each track's own output grid, rOut = OUT_RATE / its rate (OUT_RATE / PSF without a tuning), and the
+      // kernels by (rIn, rOut) (fix round 1: resample.newKernelCache, which resample.check pins).
+      const rOutOf = (it: EngineItem) => OUT_RATE / itemRate(it);
+      const kernelFor: (rIn: number, rOut: number) => Kernel = newKernelCache();
+      const maxReach = Math.max(...usable.map((u) => kernelFor(nativeRate(u.est.info), rOutOf(u.it)).reachOut));
       const starts: number[] = [];
       let next = 0;
-      // Tnext: where the music decoded so far ends on the output grid (Σ n · rOut / rIn: the file's length, the joins);
-      // r0: the first track's rate. Each track's samples sit joinShift(rIn, r0, rOut) from its join (re-review B7: 0
-      // between tracks of one rate; half a sample by each rate between two), so the next track may reach back that much
-      // more (at most rOut / 2r0).
-      let Tnext = 0;
-      let r0 = 0;
+      // The placer (resample.placeTrack): Tnext, where the music decoded so far ends on the output grid (Σ n · rOut / rIn:
+      // the file's length, the joins); the first track's rate and grid. Each track's samples sit joinShift(rIn, r0, rOut,
+      // rOut0) from its join (re-review B7: 0 between tracks of one rate and grid; half a sample by each between two), so
+      // the next track may reach back that much more (at most rOut0 / 2r0: reachBack).
+      const placer = newGridPlacer();
       const final = () => next >= usable.length;
-      const total = () => Math.round(Tnext);
+      const total = () => Math.round(placer.Tnext);
       // Frames complete now: all of them once every track is decoded; else those the next track can't reach back into.
-      const ready = () => (final() ? total() : Math.max(0, Math.floor(Tnext - (r0 > 0 ? rOut / (2 * r0) : 0)) - maxReach - 1));
+      const ready = () => (final() ? total() : Math.max(0, Math.floor(placer.Tnext - reachBack(placer)) - maxReach - 1));
       // B1 (re-review): the decodes' own lengths against the long file's cap (a header that understated).
       let decodedS = 0;
       const reader: MusicReader = {
@@ -935,7 +949,8 @@ export function createJob(kind: 'track' | 'playlist' | 'long', items: EngineItem
               bytes = null;
               // The decode's own length and channels (B09b on this path too), and the long file's cap on the sum.
               checkDecoded(it, est, buf, it.title);
-              decodedS += buf.length / buf.sampleRate;
+              // (v16.8.3: in Standard seconds, as the cap counts them: the same sum without a tuning.)
+              decodedS += standardSeconds(buf.length / buf.sampleRate, itemRate(it));
               if (decodedS > longCap + 1) {
                 const m = Math.floor(longCap / 60);
                 throw new Failed('cap', String(decodedS), { seconds: decodedS, phoneMin: m, computerMin: m, what: 'long', kHz: null }, it.title);
@@ -949,16 +964,17 @@ export function createJob(kind: 'track' | 'playlist' | 'long', items: EngineItem
             }
             bytes = null;
             const rIn = buf.sampleRate;
-            if (r0 === 0) r0 = rIn;
+            const rOut = rOutOf(it);
             const L = buf.getChannelData(0);
             const R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
             originals.push(L, R);
-            // B7 (re-review): its first sample half a sample of its own rate past the join, as the first track's is.
-            const t: GridTrack = { T: Tnext + joinShift(rIn, r0, rOut), n: buf.length, rIn, step: rIn / rOut, off: 0, L, R, kernel: kernelFor(rIn) };
+            // B7 (re-review): its first sample half a sample of its own rate past the join, as the first track's is
+            // (v16.8.3: on its own grid).
+            const at = placeTrack(placer, buf.length, rIn, rOut);
+            const t: GridTrack = { T: at.T, n: buf.length, rIn, step: at.step, off: 0, L, R, kernel: kernelFor(rIn, rOut) };
             buf = null;
             grid.push(t);
-            starts.push(Tnext);
-            Tnext += t.n / t.step;
+            starts.push(at.join);
             next++;
             emit({ phase: 'mix' }, true);
           }
@@ -975,6 +991,10 @@ export function createJob(kind: 'track' | 'playlist' | 'long', items: EngineItem
       emit({ phase: 'save' }, true);
       const f = finishFile({ id: null, name: longName }, mixed, infoFor(title, usable[0].it.spec), plan, anyLayers);
       f.joins = starts.slice(1).map((s) => Math.round(s));
+      // (v16.8.3 fix round 1: the layers' plan, in frames: each track's start and the plan's end, for the tests' check
+      // that the layers follow each track's own length.)
+      f.layerStarts = segs.map((s) => Math.round(s.startS * OUT_RATE));
+      f.layerEnd = Math.round(totalPlanned * OUT_RATE);
       files.push(f);
     } finally {
       await letGo([...originals, ...grid.flatMap((t) => [t.L, t.R]), ...channelsOf(layers)]);

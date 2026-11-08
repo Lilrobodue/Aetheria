@@ -12,6 +12,9 @@
 // slice. Made for and Files are the sheet's own choices (never saved). Its body is a region (sheet-export).
 // v16.5 review: Done and the stopped screen name the files saved and each track skipped, with why (B6); once Share's
 // 10 minutes have passed, Share goes and the line says where the file is (B12).
+// v16.8.3 (Track Tuning, T8): each track's output length and size are at its own rate (exportRate: PSF without a tuning),
+// and the long file's total and cap count Standard seconds (standardSeconds), so a playlist with no tuning reads as before.
+// Fix round 1 (X04): those numbers come from one pure place, exportPlan's exportSheetNumbers (exportPlan.check pins it).
 
 import React, { useMemo, useState } from 'react';
 import { CheckCircle2, Clock, Download, FileAudio, Share2 } from 'lucide-react';
@@ -29,11 +32,11 @@ import {
   exportCapSeconds,
   fileKind,
   madeForDefault,
-  outSeconds,
-  wavBytes,
   estimateSeconds,
   longFileCapSeconds,
   exportPeakMB,
+  exportRate,
+  exportSheetNumbers,
 } from '../../../utils/export/exportPlan';
 import type { ExportSpec, MadeFor as MadeForValue } from '../../../utils/export/exportPlan';
 import * as W from '../../../utils/export/exportWords';
@@ -47,7 +50,7 @@ const CHOICE_ON =
 const CHOICE_OFF =
   'flex-1 min-h-touch px-3 rounded-control border flex items-center justify-center gap-2 text-sm border-line-strong bg-surface-deep text-ink-soft hover:border-ink-faint transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400';
 
-type EntryState = { entry: ExportEntry; spec: ExportSpec | null; skip: 'too-long' | 'missing' | null; seconds: number };
+type EntryState = { entry: ExportEntry; spec: ExportSpec | null; skip: 'too-long' | 'missing' | null; seconds: number; rate: number };
 
 /** What each entry gets, from the snapshot as it is now (pure: exportPlan). */
 function entriesOf(ex: ExportValue, madeFor: MadeForValue): EntryState[] {
@@ -55,11 +58,11 @@ function entriesOf(ex: ExportValue, madeFor: MadeForValue): EntryState[] {
   if (!target) return [];
   return target.entries.map((entry) => {
     const song = entry.song;
-    if (!song || !song.file) return { entry, spec: null, skip: 'missing' as const, seconds: song?.duration ?? 0 };
+    if (!song || !song.file) return { entry, spec: null, skip: 'missing' as const, seconds: song?.duration ?? 0, rate: exportRate(song) };
     const spec = exportSpecFor(ex.snapshot, song, madeFor);
     const seconds = typeof song.duration === 'number' && song.duration > 0 ? song.duration : 0;
     const cap = ex.capSeconds ?? exportCapSeconds(fileKind({ name: song.file.name, type: song.file.type }), ex.mobile, ex.deviceMemory);
-    return { entry, spec, skip: seconds > cap ? ('too-long' as const) : null, seconds };
+    return { entry, spec, skip: seconds > cap ? ('too-long' as const) : null, seconds, rate: exportRate(song) };
   });
 }
 
@@ -135,7 +138,8 @@ function particularReason(ex: ExportValue, entries: EntryState[], files: 'each' 
   const usable = entries.filter((e) => !e.skip);
   if (!usable.length) return W.AUDIO_MISSING;
   if (files === 'long') {
-    const total = usable.reduce((a, e) => a + e.seconds, 0);
+    // (v16.8.3: in Standard seconds, a tuned track by how long it plays: the same sum without a tuning.)
+    const total = exportSheetNumbers(usable).standardTotal;
     if (usable.some((e) => !(e.seconds > 0))) return W.SOMETHING;
     const heaviest = Math.max(...usable.map((e) => exportPeakMB(fileKind({ name: e.entry.song?.file?.name, type: e.entry.song?.file?.type }), e.seconds, ex.mobile)));
     const cap = ex.capSeconds ?? longFileCapSeconds(ex.mobile, heaviest, ex.deviceMemory);
@@ -172,7 +176,11 @@ const Summary = ({ ex }: { ex: ExportValue }) => {
   const seconds = usable.reduce((a, e) => a + e.seconds, 0);
   const eta = estimateSeconds(seconds, ex.mobile, ex.playing, ex.learnedRate);
   const playlist = ex.target?.kind === 'playlist';
-  const bytes = usable.reduce((a, e) => a + wavBytes(e.seconds), 0);
+  // v16.8.3: the bytes at each track's rate; the long file's length, Standard seconds over PSF (each track at its own
+  // rate); one track's at its rate (fix round 1: exportSheetNumbers).
+  const nums = exportSheetNumbers(usable);
+  const bytes = nums.bytes;
+  const longOut = nums.longOut;
   if (!playlist && reason && entries[0]?.skip === 'too-long') return <OverCap reason={reason} mobile={ex.mobile} />;
   return (
     <div data-testid="export-summary" className="px-4 pt-1 pb-3 space-y-4">
@@ -180,7 +188,7 @@ const Summary = ({ ex }: { ex: ExportValue }) => {
         <>
           <p data-testid="export-totals" className="flex items-center gap-3 text-sm text-ink-strong">
             <FileAudio size={20} className="shrink-0 text-ink-muted" aria-hidden="true" />
-            {files === 'long' ? W.longTotals(outSeconds(seconds), bytes, eta) : W.playlistTotals(usable.length, bytes, eta)}
+            {files === 'long' ? W.longTotals(longOut, bytes, eta) : W.playlistTotals(usable.length, bytes, eta)}
           </p>
           <ul data-testid="export-tracks" className="divide-y divide-line">
             {entries.map((e, i) => {
@@ -223,7 +231,7 @@ const Summary = ({ ex }: { ex: ExportValue }) => {
       {!playlist && entries[0]?.spec ? (
         <p data-testid="export-file-line" className="flex items-center gap-3 text-sm text-ink-strong">
           <FileAudio size={20} className="shrink-0 text-ink-muted" aria-hidden="true" />
-          {W.fileLine(outSeconds(seconds), bytes)}
+          {W.fileLine(nums.trackOut, bytes)}
         </p>
       ) : null}
       {reason ? (

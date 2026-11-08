@@ -29,7 +29,17 @@ const asClassicPlaces = (nodes: string[]): string[] => {
 // v16.8.2 fix round 1 (B3): that sentence now reads "a song with a clear key goes first to a crystal whose tone fits its
 // key" (evidence.ts), with places.ts's "go first to crystals whose tone fits their key"; with 96d4639's two copy files
 // this build gives 3cee2bb820544f0a again, so those words are the only change. Was '3cee2bb820544f0a'.
-const TECHNICAL_TEXT_SHA = 'fc0c8cd57a91a81a'; // 1158 text nodes, v16.8.2 fix round 1 (v16.6 review round 2: 00bb58554f82ecf0)
+// v16.8.3 (Track Tuning): the 432 arithmetic gains "unless you choose a tuning for a track in Track info" (crystalCopy's
+// RETUNE_LONG, evidence.ts's Arithmetic example); with 862d960's two copy files this build gives fc0c8cd57a91a81a again,
+// so those words are the only change. Was 'fc0c8cd57a91a81a'.
+// v16.8.3 fix round 1 (N3): the arithmetic sentence ends, and "You can choose a different tuning for a track in Track info."
+// follows as its own sentence (crystalCopy, evidence.ts); with feca83e's two copy files this build gives 61cae505b6720070
+// again, so those words are the only change. Was '61cae505b6720070'.
+// v16.8.3 fix round 2 (N2): that sentence leaves the Arithmetic paragraph (crystalCopy's RETUNE_LONG) for a line of its
+// own, untagged, after the tagged paragraphs (RETUNE_TUNING), and the Arithmetic example (evidence.ts) is v16.8.2's
+// again; with 10477d4's two copy files and TechnicalGuide.tsx this build gives b530b5a8edfc6dd8 again, so that move is
+// the only change. Was 'b530b5a8edfc6dd8'.
+const TECHNICAL_TEXT_SHA = '436af1b00ec82474'; // 1159 text nodes, v16.8.3 fix round 2 (fix round 1: b530b5a8edfc6dd8, 1158)
 
 const sha = (parts: string[]) => createHash('sha256').update(parts.join('\n'), 'utf8').digest('hex').slice(0, 16);
 
