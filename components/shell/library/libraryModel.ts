@@ -369,7 +369,8 @@ export const TUNE_ASSIGN_NOTE = 'Assign crystals places it by how it sounds at t
 export const TUNE_ASSIGN_LOSHU_NOTE = 'Assign crystals places it by how it sounds at this tuning, so the next Assign may move it.';
 /** Fix round 2 (L-S3): over keyBands' fixed caps (withinKeyLimits: 720 s and 100 MiB, the same on every device) placement
  *  never reads a track's key data, so a tuning can't move it: this replaces the Assign sentence. */
-export const TUNE_ASSIGN_LONG_NOTE = "Assign crystals doesn't place a track this long by its key.";
+// v16.8.4 (rev3 N3): "this long or this large": a track is over the caps by its length (720 s) or its size (100 MiB).
+export const TUNE_ASSIGN_LONG_NOTE = "Assign crystals doesn't place a track this long or this large by its key.";
 /** With LIVE_TUNE_SWITCH false (the Note 20's by-ear check found a click), a change waits for the track's next play. */
 export const TUNE_NEXT_PLAY = 'From the next play.';
 export const TUNE_REASON = {

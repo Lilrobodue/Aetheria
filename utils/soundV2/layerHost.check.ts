@@ -505,7 +505,7 @@ check(formatDb(gainToDb(MAX_BOOST)!) === '+12.0 dB' && formatDb(gainToDb(MAX_BOO
     && copy.SHEET_LATER === 'Ask me later' && copy.QUICK_SWITCH_LABEL === 'Layer sound and output',
     "copy: the sheet ('Ask me later', never the orphan banner's 'Not now') and the quick switch");
   check(copy.TONE_LEVEL_LABEL === 'Tone level'
-    && copy.PRESETS_NOTE_V2 === 'Adaptive stops at Beta; Gamma is a manual choice. Off headphones the beat is a gentle pulse, capped at Alpha.'
+    && copy.PRESETS_NOTE_V2 === 'Adaptive reaches Gamma on headphones. Off headphones the beat is a gentle pulse, capped at Alpha.' // v16.8.4
     && copy.PRESETS_NOTE_CAR_V2 === 'Car: tone only, so there is no beat or pulse.'
     && copy.GAMMA_DESCRIPTION_V2 === 'Gamma (40 Hz) is a design choice: the MIT 40 Hz work used light flicker and click trains, not binaural beats, '
       + 'and above about 30 Hz a binaural beat is heard as two tones rather than a beat.', 'copy: tone level, presets note, Gamma (v2)');

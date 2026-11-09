@@ -7,11 +7,17 @@
 // PRESETS_NOTE_CAR_V2 says why. The status line is the beat actually delivered (the Beat chip's words).
 // v16.6 ("How sure are we?"): the card's lead is BEAT_EVIDENCE with its Mixed-evidence tag (whether a beat moves your
 // brainwaves), and each band's subtitle names what the EEG band is usually seen with (BAND_LINES).
+// v16.8.4 (Adaptive gamma): under the Adaptive switch, Gamma in Adaptive (Smooth / Sticky: utils/soundV2/adaptiveBand), a
+// native radio group, shown where v2 plays a beat; off headphones (the pulse, capped at Alpha) it is disabled and says
+// why. Adaptive off leaves it enabled: it is a saved preference. Classic's layout has no control and uses the choice.
+// Fix round 1 (rev1 app S1): the bands' legend, "Beat band", shows too (whenever the bands do: classic sound and Car
+// included), so the card reads as two labelled groups and Gamma · 40 Hz never reads as a third choice of the setting.
 
 import React from 'react';
 import Toggle from '../../ui/Toggle';
 import RadioList from '../../ui/RadioList';
-import { HEADPHONES_HINT, PRESETS_NOTE_CAR_V2, PRESETS_NOTE_V2 } from '../../layers/layerCopy';
+import { GAMMA_MODE_ITEMS, GAMMA_MODE_LEGEND, GAMMA_MODE_OFF_HEADPHONES, HEADPHONES_HINT, PRESETS_NOTE_CAR_V2, PRESETS_NOTE_V2 } from '../../layers/layerCopy';
+import { parseGammaMode } from '../../../utils/soundV2/adaptiveBand';
 import { useActions, useSound, useTuning } from '../contexts';
 import { countRender } from '../devRenders';
 import SectionCard from './SectionCard';
@@ -42,8 +48,22 @@ const BeatSection = () => {
         </div>
       </div>
       <Toggle label="Adaptive" description={ADAPTIVE_DESCRIPTION} checked={t.adaptive} onChange={actions.setAdaptive} data-testid="layers-adaptive" />
+      {t.v2Beat && !noBeat ? (
+        <RadioList
+          legend={GAMMA_MODE_LEGEND}
+          showLegend
+          name="layers-gamma-mode"
+          items={GAMMA_MODE_ITEMS}
+          value={t.gammaMode}
+          onChange={(id) => actions.setGammaMode(parseGammaMode(id))}
+          disabled={t.render !== 'binaural'}
+          disabledNote={GAMMA_MODE_OFF_HEADPHONES}
+          data-testid="layers-gamma-mode"
+        />
+      ) : null}
       <RadioList
         legend="Beat band"
+        showLegend
         name="layers-beat-band"
         items={items}
         value={t.presetName}

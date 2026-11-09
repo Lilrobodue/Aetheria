@@ -1364,6 +1364,21 @@ export type LayersSectionName = 'sound' | 'crystal' | 'levels' | 'beat' | 'advan
 /** A card of the Layers tab (its region's content; `layers-<name>-fallback` while it has crashed). */
 export const layersSection = (page: Page, name: LayersSectionName) => page.getByTestId(`layers-${name}`);
 
+/**
+ * v16.8.4 fix round 1 (rev1 tests SF6): a radio group's legend is SHOWN (RadioList's showLegend), not screen-reader
+ * only: its text, no sr-only class, and a box at least 10 px tall (an sr-only legend is a 1×1 box that toBeVisible()
+ * passes). Fix round 2 (rev2 tests N3): and visible (a visibility:hidden legend keeps its text, its class and its box).
+ */
+export async function expectLegendShown(group: Locator, text: string, what: string): Promise<void> {
+  const legend = group.locator(':scope > legend');
+  await expect(legend, `${what}: the legend`).toHaveText(text);
+  await expect(legend, `${what}: the legend is visible`).toBeVisible();
+  const cls = (await legend.getAttribute('class')) ?? '';
+  expect(cls.split(' ').filter(Boolean), `${what}: not screen-reader only`).not.toContain('sr-only');
+  const box = await legend.boundingBox();
+  expect(box?.height ?? 0, `${what}: at least 10 px tall`).toBeGreaterThanOrEqual(10);
+}
+
 /** The eye button that turns the new layout's Zen on and off (Now Playing's top bar; the desktop transport's). */
 export const zenToggle = (page: Page) =>
   page.getByTestId('zen-button').or(page.getByTestId('zen-button-desktop')).or(page.getByTestId('zen-button-landscape'));

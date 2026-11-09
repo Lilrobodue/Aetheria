@@ -4,7 +4,7 @@
 // KeyFitDuck), in an OfflineAudioContext at a quarter of the output rate, driven by a virtual clock through the calls
 // App makes, in App's order: the duck's target, the host level, the gains, the plan, the beat; App's 0.25 s level tick
 // (φ timing's envelope over each track, a track change's 1.5 s glide for 2 s); the adaptive band's steps (a retune
-// when "binaural gamma or not" changes, else a τ 3 s beat glide); at the end the layers fade to 0 over 2 s.
+// when the plan's carrier moves, v16.8.4, else a τ 3 s beat glide); at the end the layers fade to 0 over 2 s.
 // Everything is scheduled before startRendering(), so there is one render pass and no suspend(); the player's mirrors
 // only ever see increasing times. One segment is one track; a long file (decision 2 B) is several, rendered as ONE
 // continuous player: the layers carry on across the joins (a new crystal is a retune through silence, as live).
@@ -18,10 +18,15 @@
 //   - B11: at a long file's join the duck's rise is held as App holds it (keyFitHold: the player's own holds and the
 //     track change's 2 s glide), and a fall with both gates shut lands at once;
 //   - B18: the record says the rate the layers were rendered at.
+// v16.8.4 ("Adaptive gamma", decision G4): the plan is the live app's (adaptivePlan: Smooth's carrier while Adaptive is
+// on, else v16.8.3's plan), and a band step plays the new plan (the player's designed fade) exactly when its carrier
+// differs from the one sounding, as App's plan effect re-plans on its carrier: Sticky into and out of Gamma on 11 of
+// the 33 tones; Smooth's steps and every step within one carrier are setBeat alone. The record counts those retunes.
 
 import { LayerPlayer, DUTY_HORIZON_S, DUTY_EXTEND_BELOW_S } from '../soundV2/layerPlayer';
 import { KeyFitDuck, DUCK_TAU_S, riseHold, trackHold, gatesSilent } from '../soundV2/keyFit';
-import { plan as v2Plan, BANDS, phiEnvelope } from '../soundV2/aetheria_sound_v2';
+import { BANDS, phiEnvelope } from '../soundV2/aetheria_sound_v2';
+import { adaptivePlan } from '../soundV2/adaptiveBand';
 import type { Band, Plan } from '../soundV2/aetheria_sound_v2';
 import { capBand } from '../soundV2/layerHost';
 import type { BeatRender } from '../soundV2/layerHost';
@@ -46,6 +51,8 @@ export interface LayerPlanRecord {
   rate: number;
   /** v16.5 review (B9): the player's timer ticks (each after the first hour, once a minute). */
   ticks: number;
+  /** v16.8.4: band steps that played a new plan, its carrier moved (Sticky into and out of Gamma on the 11 tones). */
+  retunes: number;
 }
 
 /** v16.5 review (B9): the virtual timer ticks from here (the duty is pre-scheduled DUTY_HORIZON_S ahead and extended
@@ -57,8 +64,11 @@ const planBandOf = (b: Band, render: BeatRender): Band => (render === 'pulse' ? 
 
 function planFor(spec: ExportSpec, band: Band): Plan | null {
   if (!spec.layers) return null;
-  return v2Plan(spec.f, spec.planOutput, spec.render === 'binaural' ? 'binaural' : 'monaural', BANDS[planBandOf(band, spec.render)]);
+  return adaptivePlan(spec.f, spec.planOutput, planBandOf(band, spec.render), spec.gammaMode, spec.adaptiveOn, spec.render);
 }
+
+/** The carrier a plan sounds (0 for none: no layers). */
+const carrierOf = (p: Plan | null): number => p?.carrier_hz ?? 0;
 
 const sameVoice = (a: ExportSpec, b: ExportSpec): boolean => a.layers === b.layers && a.f === b.f && a.render === b.render && a.planOutput === b.planOutput;
 
@@ -68,7 +78,7 @@ export function driveLayers(
   segs: LayerSegment[], totalS: number, player: LayerPlayer, duck: KeyFitDuck, at: (t: number) => void,
   o: { endFade?: boolean; tick?: ((t: number) => void) | null } = {},
 ): LayerPlanRecord {
-  const rec: LayerPlanRecord = { segments: [], hostSteps: 0, calls: 0, rate: 0, ticks: 0 };
+  const rec: LayerPlanRecord = { segments: [], hostSteps: 0, calls: 0, rate: 0, ticks: 0, retunes: 0 };
   if (!segs.length) return rec;
   const endFade = o.endFade !== false;
   const fadeAt = endFade ? Math.max(0, totalS - END_FADE_S) : totalS;
@@ -83,7 +93,6 @@ export function driveLayers(
     if (!s.spec.layers) return 0;
     return s.spec.phi ? phiEnvelope(Math.max(0, t - s.startS), s.durS) : 1;
   };
-  const gamma = (spec: ExportSpec, band: Band) => spec.render === 'binaural' && planBandOf(band, spec.render) === 'gamma';
   for (const s of segs) {
     const p = planFor(s.spec, s.bands[0]?.band ?? s.spec.startBand);
     rec.segments.push({ toneHz: p?.tone_hz ?? 0, carrierHz: p?.carrier_hz ?? 0, droneHz: p?.drone_hz ?? 0, duckDb: s.spec.duckDb, bands: Math.max(0, s.bands.length - 1), layers: s.spec.layers });
@@ -94,11 +103,12 @@ export function driveLayers(
   let cur = 0;
   let spec = segs[0].spec;
   let band = segs[0].bands[0]?.band ?? spec.startBand;
-  let isGamma = gamma(spec, band);
+  const first = planFor(spec, band);
+  let sounding = carrierOf(first);
   duck.setTarget(spec.duckDb, { tauS: DUCK_TAU_S, silent: true });
   player.setHostLevel(host(0));
   player.setLayerGains(spec.gains);
-  player.play(planFor(spec, band), spec.render, true);
+  player.play(first, spec.render, true);
   player.setBeat(BANDS[planBandOf(band, spec.render)]);
   rec.calls += 5;
 
@@ -119,12 +129,13 @@ export function driveLayers(
       spec = next.spec;
       // The band carries over (App's preset state), unless the new track starts elsewhere.
       band = next.bands[0]?.band ?? band;
-      if (!sameVoice(prevSpec, spec)) {
+      const joined = planFor(spec, band);
+      if (!sameVoice(prevSpec, spec) || carrierOf(joined) !== sounding) {
         player.setHostLevel(host(next.startS), { glideS: 1.5 });
         player.setLayerGains(spec.gains);
-        player.play(planFor(spec, band), spec.render, true);
+        player.play(joined, spec.render, true);
         rec.calls += 3;
-        isGamma = gamma(spec, band);
+        sounding = carrierOf(joined);
       } else if (JSON.stringify(prevSpec.gains) !== JSON.stringify(spec.gains)) {
         player.setLayerGains(spec.gains);
         rec.calls++;
@@ -143,13 +154,14 @@ export function driveLayers(
       if (st.seg !== cur) continue;
       at(st.t);
       band = st.band;
-      const g = gamma(spec, band);
-      if (g !== isGamma) {
-        isGamma = g;
+      const stepped = planFor(spec, band);
+      if (carrierOf(stepped) !== sounding) {
+        sounding = carrierOf(stepped);
         player.setHostLevel(host(st.t));
         player.setLayerGains(spec.gains);
-        player.play(planFor(spec, band), spec.render, true);
+        player.play(stepped, spec.render, true);
         rec.calls += 3;
+        rec.retunes++;
       }
       player.setBeat(BANDS[planBandOf(band, spec.render)]);
       rec.calls++;

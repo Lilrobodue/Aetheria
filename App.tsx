@@ -171,10 +171,13 @@ import { feltCarrierHz, thetaAlphaModHz, solfeggioHz } from './utils/frequencyMa
 // source network-first).
 import { LayerPlayer } from './utils/soundV2/layerPlayer';
 import type { LayerPlayerState } from './utils/soundV2/layerPlayer';
-import { plan as v2Plan, toneOf, BANDS, BAND_ORDER, bandForIntensity, phiEnvelope, LEVEL_TONE, LEVEL_BEAT, LEVEL_DRONE_SUB } from './utils/soundV2/aetheria_sound_v2';
+import { toneOf, BANDS, BAND_ORDER, phiEnvelope, LEVEL_TONE, LEVEL_BEAT, LEVEL_DRONE_SUB } from './utils/soundV2/aetheria_sound_v2';
 import type { Band } from './utils/soundV2/aetheria_sound_v2';
-import { canonicalLayerHz, renderForOutput, planOutputFor, bandOfPresetName, capBand, sliderGain, gainToDb, readIntensity, BandHysteresis, musicGainFactor, parseLayerEngine, parseLayerOutput, parseOutputAskAgain, parseDroneEnabled, DEFAULT_LAYER_ENGINE, DEFAULT_DRONE_ENABLED, KEY_LAYER_ENGINE, KEY_LAYER_OUTPUT, KEY_LAYER_OUTPUT_ASK_AGAIN, KEY_DRONE_ENABLED, TONE_SLIDER_DEFAULT, BEAT_SLIDER_DEFAULT, V2_TONE_SLIDER_MAX, V2_TONE_SLIDER_STEP, V2_BEAT_SLIDER_MAX, toneLevelKey, defaultToneLevel, parseToneLevel } from './utils/soundV2/layerHost';
+import { canonicalLayerHz, renderForOutput, planOutputFor, bandOfPresetName, capBand, sliderGain, gainToDb, readIntensity, musicGainFactor, parseLayerEngine, parseLayerOutput, parseOutputAskAgain, parseDroneEnabled, DEFAULT_LAYER_ENGINE, DEFAULT_DRONE_ENABLED, KEY_LAYER_ENGINE, KEY_LAYER_OUTPUT, KEY_LAYER_OUTPUT_ASK_AGAIN, KEY_DRONE_ENABLED, TONE_SLIDER_DEFAULT, BEAT_SLIDER_DEFAULT, V2_TONE_SLIDER_MAX, V2_TONE_SLIDER_STEP, V2_BEAT_SLIDER_MAX, toneLevelKey, defaultToneLevel, parseToneLevel } from './utils/soundV2/layerHost';
 import type { LayerEngine, LayerOutput, CanonicalLayer, BeatRender } from './utils/soundV2/layerHost';
+// v16.8.4 (Adaptive gamma): v2's Adaptive reaches Gamma on headphones; Gamma in Adaptive, Smooth or Sticky.
+import { AdaptiveBand, adaptivePlan, parseGammaMode, KEY_ADAPTIVE_GAMMA, DEFAULT_GAMMA_MODE } from './utils/soundV2/adaptiveBand';
+import type { GammaMode } from './utils/soundV2/adaptiveBand';
 import { createSoundLog } from './utils/soundV2/soundLog';
 import type { SoundLog, SoundLogFields, StorageLike } from './utils/soundV2/soundLog';
 // Analyse tracks (v15.1): key analysis and visual sync. Static imports, so they are in the offline precache.
@@ -1890,6 +1893,30 @@ const App: React.FC = () => {
   }, [playlist, loShuWalkMode]);
   const [useChakraOrder, setUseChakraOrder] = useState(false);
   const [isAdaptiveBinaural, setIsAdaptiveBinaural] = useState(true); // Default ON
+  // v16.8.4 (Adaptive gamma): Gamma in Adaptive, for v2's adaptive band on headphones (utils/soundV2/adaptiveBand): Smooth
+  // (the default) keeps Gamma's beat pair for every band while Adaptive is on, Sticky plays v2's own pair per band and holds
+  // Gamma 30 s. Read once, lazily; saved only from its radio (chooseGammaMode), never from an effect. Both layouts use it.
+  const [gammaMode, setGammaModeState] = useState<GammaMode>(() => {
+    try {
+      return parseGammaMode(typeof localStorage !== 'undefined' ? localStorage.getItem(KEY_ADAPTIVE_GAMMA) : null);
+    } catch {
+      return DEFAULT_GAMMA_MODE;
+    }
+  });
+  // Fix round 1 (rev1 app N4): a tap on the mode already in effect is not a choice, as the engine's (chooseLayerEngine,
+  // I9): nothing is saved, so a profile that never chose keeps following the release default (RadioList calls onChange
+  // on the checked row too). The ref holds the mode in effect (only this callback changes it), so the callback keeps no
+  // deps and stays stable: actions.setGammaMode calls it directly and the actions ref's pinned block is unchanged.
+  const gammaModeRef: { current: GammaMode } = useRef(gammaMode);
+  const chooseGammaMode = useCallback((m: GammaMode) => {
+    const next = parseGammaMode(m);
+    if (next === gammaModeRef.current) return;
+    gammaModeRef.current = next;
+    setGammaModeState(next);
+    try {
+      localStorage.setItem(KEY_ADAPTIVE_GAMMA, next);
+    } catch {}
+  }, []);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   // Advanced Features State
@@ -2146,7 +2173,17 @@ const App: React.FC = () => {
   );
   const presetBand: Band = bandOfPresetName(selectedBinaural.name);
   const planBand: Band = render === 'pulse' ? capBand(presetBand, 'alpha') : presetBand;
-  const isGammaPlan = render === 'binaural' && planBand === 'gamma';
+  // v16.8.4 (Adaptive gamma): the carrier the plan would use now (adaptivePlan's), the plan effect's dependency in place
+  // of v16.8.3's isGammaPlan: the effect re-plans only when the carrier moves (the voice key holds the carrier, not the
+  // beat), and a band step within one carrier reaches the player through the beat effect alone, a glide. Smooth keeps
+  // Gamma's carrier through every band while Adaptive is on, so its band steps never re-plan; Sticky and a manual band
+  // move it where plan() does (into and out of Gamma, on 11 of the 33 tones). A number, memoised: never per frame.
+  // Fix round 1 (rev1 app N2): a constant under 'off' (Car, tone only), whose voice ignores the carrier, so a band
+  // crossing Gamma there re-plans exactly as at 6303c43 (isGammaPlan was false under 'off'): never.
+  const planCarrier: number = useMemo(
+    () => (v2Active && layer.f > 0 && render !== 'off' ? (adaptivePlan(layer.f, planOutput, planBand, gammaMode, isAdaptiveBinaural, render)?.carrier_hz ?? 0) : 0),
+    [v2Active, layer.f, planOutput, planBand, gammaMode, isAdaptiveBinaural, render]
+  );
   const v2Wanted = v2Active && !musicOnly && layer.f > 0 && (isPlaying || isSolfeggioActive);
   // v16.8.3 fix round 1 (A3, SF3): with LIVE_TUNE_SWITCH false, the tuning the music element still plays a track at
   // after a change made while it held it: { id, cents } (the track's tuning before the change; 0 for Standard), until
@@ -4390,9 +4427,9 @@ const App: React.FC = () => {
     }
   };
 
-  // The plan, in one task per change (the player batches nothing across tasks). planBand is read but only
-  // isGammaPlan is a dependency: within delta…beta the carrier never moves, so band steps reach the player
-  // through the beat effect alone.
+  // The plan, in one task per change (the player batches nothing across tasks). planBand, gammaMode and Adaptive are
+  // read but only the plan's carrier is a dependency (v16.8.4, planCarrier above): within one carrier the voice never
+  // moves, so band steps reach the player through the beat effect alone.
   const prevV2ActiveRef: { current: boolean } = useRef(false);
   const prevMusicOnlyRef: { current: boolean } = useRef(musicOnly);
   useEffect(() => {
@@ -4402,11 +4439,11 @@ const App: React.FC = () => {
     cancelLayerDispose();                                                   // back within 3 s: keep the player (S24)
     if (!v2Wanted) { if (musicOnlyOn) stopLayersNow(0.1); else { holdKeyFitRise(); callPlayer((p) => p.play(null)); } return; }  // pause = designed fades
     if (!ensureLayerPlayer()) return;
-    const p2 = v2Plan(layer.f, planOutput, render === 'binaural' ? 'binaural' : 'monaural', BANDS[planBand]);
+    const p2 = adaptivePlan(layer.f, planOutput, planBand, gammaMode, isAdaptiveBinaural, render);
     callPlayer((p) => { p.setHostLevel(hostLevelNow()); setV2Gains(p); p.play(p2, render, !toneOnly); });
     // Key fit (v15.2, critique M2): a retune closes the gates, so a duck rise in flight waits for its silence.
     try { const st = layerPlayerRef.current?.state() ?? null; if (st && st.phase === 'retuning') holdKeyFitRise(keyFitHold()); } catch {}
-  }, [v2Active, v2Wanted, layer.f, planOutput, render, toneOnly, isGammaPlan, musicOnly, ensureLayerPlayer, callPlayer, stopLayersNow, hostLevelNow, scheduleLayerDispose, cancelLayerDispose, holdKeyFitRise, keyFitHold]);
+  }, [v2Active, v2Wanted, layer.f, planOutput, render, toneOnly, planCarrier, musicOnly, ensureLayerPlayer, callPlayer, stopLayersNow, hostLevelNow, scheduleLayerDispose, cancelLayerDispose, holdKeyFitRise, keyFitHold]);
 
   // Slider gains and the beat (band steps glide, τ 3 s, in the player).
   useEffect(() => { if (v2Active) callPlayer((p) => setV2Gains(p)); }, [v2Active, solfeggioVolume, binauralVolume, droneEnabled, callPlayer]);
@@ -4499,25 +4536,26 @@ const App: React.FC = () => {
     return () => window.clearTimeout(id);
   }, [v2Active]);
 
-  // v2 adaptive band: direction hysteresis (two agreeing 3 s ticks per step) and caps (beta on headphones, alpha
-  // for the pulse); off for the car and tone-only. Keyed on the playing song's envelope object, so a band step or a
-  // Deep Scan patch of another song doesn't re-arm it. The preset it writes is UI-only under v2 (updateBinaural is
-  // guarded); the beat effect above hands the band to the player.
+  // v2 adaptive band: direction hysteresis (two agreeing 3 s ticks per step) and caps (v16.8.4: Gamma on headphones,
+  // alpha for the pulse; adaptiveCap); off for the car and tone-only. Sticky holds Gamma 10 ticks once reached
+  // (AdaptiveBand, utils/soundV2/adaptiveBand); a change of the setting re-arms it, as a new track or a resume does.
+  // Keyed on the playing song's envelope object, so a band step or a Deep Scan patch of another song doesn't re-arm
+  // it. The preset it writes is UI-only under v2 (updateBinaural is guarded); the beat effect above hands the band to
+  // the player.
   const selectedBinauralRef: { current: BinauralPreset } = useRef(selectedBinaural);
   useEffect(() => { selectedBinauralRef.current = selectedBinaural; }, [selectedBinaural]);
   const currentBandEnvelope = currentSongIndex >= 0 ? (playlist[currentSongIndex]?.bandEnvelope ?? null) : null;   // not named currentTrack (pinned)
   useEffect(() => {
     if (!v2Active || !isAdaptiveBinaural || !isPlaying || render === 'off' || !currentBandEnvelope) return;
-    const env = currentBandEnvelope, hyst = new BandHysteresis(), cap: Band = render === 'pulse' ? 'alpha' : 'beta';
+    const env = currentBandEnvelope, band = new AdaptiveBand(gammaMode, render, bandOfPresetName(selectedBinauralRef.current.name));
     const id = window.setInterval(() => {
       const el = mainAudioRef.current;
       if (!el) return;
-      const target = capBand(bandForIntensity(readIntensity(env, el.currentTime || 0)), cap);
-      const next = hyst.tick(target, bandOfPresetName(selectedBinauralRef.current.name));
+      const next = band.tick(readIntensity(env, el.currentTime || 0), bandOfPresetName(selectedBinauralRef.current.name));
       if (next) setSelectedBinaural(BINAURAL_PRESETS[BAND_ORDER.indexOf(next)]);
     }, 3000);
     return () => window.clearInterval(id);
-  }, [v2Active, isAdaptiveBinaural, isPlaying, render, currentBandEnvelope]);
+  }, [v2Active, isAdaptiveBinaural, isPlaying, render, currentBandEnvelope, gammaMode]);
 
   // The output question (v2 only), opened here and never from playTrack, once the v2 layers are wanted (a play or a
   // tone with Music only off: a saved Music only, v14.6's, keeps it away until the layers can be heard). The music
@@ -4603,6 +4641,7 @@ const App: React.FC = () => {
         drone_db: droneOn ? gainToDb(LEVEL_DRONE_SUB * g.drone) : null,
         drone_resting: !!st && st.resting, music_only: musicOnly, v2_failed: v2Failed,
         ...keyFitLogFields(keyFitView),
+        gamma_mode: gammaMode, // v16.8.4
       };
     }
     const mapped = applyLoShuPerfectMap(selectedSolfeggio), music = on && isPlaying;
@@ -4641,7 +4680,7 @@ const App: React.FC = () => {
     }
     if (!S.open || (v2Active && layersOnNow && !layerStatus)) return;   // v2: wait for the player's first transition
     if (log.note(soundLogEntry(), now)) saveSoundLogSoon();
-  }, [listeningNow, v2Active, v2Failed, musicOnly, layersOnNow, layerOutput, logRender, logF, droneEnabled, statusKey, statusResting, flushSoundLog, saveSoundLogSoon, fitLogKey]);
+  }, [listeningNow, v2Active, v2Failed, musicOnly, layersOnNow, layerOutput, logRender, logF, droneEnabled, statusKey, statusResting, flushSoundLog, saveSoundLogSoon, fitLogKey, gammaMode]);
   // Band steps, retunes and drone rests are counted into the open session.
   const prevBandNameRef: { current: string } = useRef(selectedBinaural.name);
   useEffect(() => {
@@ -9296,6 +9335,7 @@ registerProcessor('wav-capture', WavCapture);
   const shellTuning = useMemo(
     () => ({
       adaptive: isAdaptiveBinaural,
+      gammaMode,
       presetName: selectedBinaural.name,
       nowBand: shellNowBand,
       render: outputRender,
@@ -9308,7 +9348,7 @@ registerProcessor('wav-capture', WavCapture);
       heardHz: shellHeardHz,
       canExportLog: soundLogOn,
     }),
-    [isAdaptiveBinaural, selectedBinaural.name, shellNowBand, outputRender, v2Active, v2CarFallback, enablePhiMode, phiTimingEnabled, userExperienceLevel, crystalFilter, shellTrackPeakS, shellHeardHz, soundLogOn]
+    [isAdaptiveBinaural, gammaMode, selectedBinaural.name, shellNowBand, outputRender, v2Active, v2CarFallback, enablePhiMode, phiTimingEnabled, userExperienceLevel, crystalFilter, shellTrackPeakS, shellHeardHz, soundLogOn]
   );
   // v16.0: the play order's count is its own entries' (a queue's are counted by the queue).
   const shellLibrary = useMemo(
@@ -9877,12 +9917,13 @@ registerProcessor('wav-capture', WavCapture);
       beatLevel: binauralVolume,
       presetName: selectedBinaural.name,
       adaptive: isAdaptiveBinaural,
+      gammaMode, // v16.8.4: the export follows Gamma in Adaptive (decision G4)
       phiOn: enablePhiMode && phiTimingEnabled,
       perfectGut: loShuPerfectGUT,
       playingId: playingSong?.id ?? null,
       selectedHz: selectedSolfeggio,
     };
-  }, [layerEngine, musicOnly, layerOutput, droneEnabled, keyFitOn, toneLevelV2, binauralVolume, selectedBinaural, isAdaptiveBinaural, enablePhiMode, phiTimingEnabled, loShuPerfectGUT, currentSongIndex, playlist, selectedSolfeggio]);
+  }, [layerEngine, musicOnly, layerOutput, droneEnabled, keyFitOn, toneLevelV2, binauralVolume, selectedBinaural, isAdaptiveBinaural, gammaMode, enablePhiMode, phiTimingEnabled, loShuPerfectGUT, currentSongIndex, playlist, selectedSolfeggio]);
   const exportSnapshotRef: { current: ExportSnapshot } = useRef(exportSnapshot);
   exportSnapshotRef.current = exportSnapshot;
   const exportSheetOpenRef: { current: boolean } = useRef(false);
@@ -10400,6 +10441,9 @@ registerProcessor('wav-capture', WavCapture);
       peekClassic: (p: PeekPanel) => A().peekClassic(p),
       // v15.6, the Layers tab: App's own setters.
       setAdaptive: (on: boolean) => setIsAdaptiveBinaural(on),
+      // v16.8.4: Gamma in Adaptive (saved from the tap). chooseGammaMode is stable (useCallback, no deps), so it is
+      // called directly and the actions ref's pinned block (check:writers) stays as it was.
+      setGammaMode: (m: GammaMode) => chooseGammaMode(m),
       // Classic's band row: the preset, and Adaptive off.
       choosePreset: (name: string) => {
         const preset = BINAURAL_PRESETS.find((p) => p.name === name);
@@ -11114,7 +11158,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.8.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.8.4</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

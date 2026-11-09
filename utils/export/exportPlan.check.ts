@@ -65,6 +65,8 @@ import { tuneRate } from '../tuning/trackTuning.ts';
 import { createHash } from 'node:crypto';
 import * as W from './exportWords.ts';
 import { BandHysteresis, readIntensity, capBand } from '../soundV2/layerHost.ts';
+import { AdaptiveBand, adaptivePlan } from '../soundV2/adaptiveBand.ts';
+import type { GammaMode } from '../soundV2/adaptiveBand.ts';
 import { bandForIntensity, toneOf } from '../soundV2/aetheria_sound_v2.ts';
 import type { Band } from '../soundV2/aetheria_sound_v2.ts';
 
@@ -158,7 +160,8 @@ eq(combos, 2 * 2 * 4 * 3 * 2 * 3 * 2, 'every combination');
   eq(exportSpecFor({ ...base, musicOnly: true }, keyed, 'headphones').duckDb, 0, 'no layers: no duck');
 }
 
-// ---- bandSchedule equals App's own loop (BandHysteresis, readIntensity at t × PSF, capBand) at equal ticks.
+// ---- bandSchedule equals App's own loop (BandHysteresis, readIntensity at t × PSF, capBand) at equal ticks. (v16.8.4: these
+// envelopes never reach Gamma's 0.75, so v16.8.3's Beta-capped loop is still the answer; the Gamma cases are at the end.)
 {
   const n = 20 * 400; // 400 s of envelope at 20 fps
   const mk = (f: (i: number) => number) => {
@@ -432,6 +435,10 @@ eq(W.longOverCap(9 * 60, longFileCapSeconds(true, exportPeakMB('other', 4 * 60, 
 // Perfect GUT and Made for, the adaptive band's schedules, the long file's caps and peaks. The pinned hash is v16.8.2's
 // (the same function run on 862d960's exportPlan.ts: the v1683 build's export-fixture.ts).
 const PLAN_V1682_SHA = 'edf27e650f356f9cbbb4ca79a3ddd825b11a04927313512944e90455e05016ee';
+// v16.8.4 (Adaptive gamma): a spec gains gammaMode and adaptiveOn. They are taken out of each spec before the hash (on
+// 862d960's module, which has neither, that is a no-op, so this is still the same function on both), and checked on their
+// own below; every v16.8.2 field, and the schedules (whose envelope never reaches Gamma's 0.75), hash as before.
+const V1682_FIELDS = (spec: any) => { const { gammaMode: _g, adaptiveOn: _a, ...rest } = spec; return rest; };
 function planFixture(P: any): string {
   const out: unknown[] = [P.DECODE_RATE, P.PSF];
   for (const s of [0, 1, 59.9, 60, 61.5, 180, 245.3, 600, 3600, NaN, -5]) out.push([P.outSeconds(s), P.wavBytes(s)]);
@@ -448,7 +455,7 @@ function planFixture(P: any): string {
     for (const keyFitOn of [true, false]) {
       for (const perfectGut of [false, true]) {
         const snap = { engine: 'v2', musicOnly: false, output, droneEnabled: true, keyFitOn, toneLevel: 0.5, lowering: null, beatLevel: 0.4, presetName: 'Theta', adaptive: true, phiOn: true, perfectGut, playingId: 'b', selectedHz: 963 };
-        for (const madeFor of ['headphones', 'speakers', 'tone']) for (const s of songs) out.push(P.exportSpecFor(snap, s, madeFor));
+        for (const madeFor of ['headphones', 'speakers', 'tone']) for (const s of songs) out.push(V1682_FIELDS(P.exportSpecFor(snap, s, madeFor)));
       }
     }
   }
@@ -459,7 +466,9 @@ function planFixture(P: any): string {
   for (const mobile of [true, false]) for (const dm of [null, 2, 4, 8]) for (const heavy of [100, 300, 576, 900]) out.push([P.longFileCapSeconds(mobile, heavy, dm), P.longFilePeakMB(mobile, heavy, 2700)]);
   return createHash('sha256').update(JSON.stringify(out)).digest('hex');
 }
-eq(planFixture(PLAN_MODULE), PLAN_V1682_SHA, 'no tuning anywhere: the plan is v16.8.2\'s, byte for byte (its hash on the fixture)');
+// v16.8.4 fix round 1 (rev1 tests N4): the hash covers the fixture's specs (v16.8.4's two fields taken out) and its band
+// schedules, not renderLayers' plans (the Gamma cases below and gamma.spec GA5 pin those), so the message says just that.
+eq(planFixture(PLAN_MODULE), PLAN_V1682_SHA, 'no tuning anywhere: the export specs\' v16.8.2 fields and the schedules are v16.8.2\'s (their hash on the fixture)');
 {
   ok(Object.is(decodeRateFor(), DECODE_RATE) && Object.is(decodeRateFor(PSF), DECODE_RATE), 'decodeRateFor(PSF) is DECODE_RATE itself');
   for (const s of [0.5, 60, 61.5, 245.3, 3600]) ok(Object.is(standardSeconds(s), s) && Object.is(standardSeconds(s, PSF), s), `standardSeconds(${s}) at PSF is ${s} itself`);
@@ -521,6 +530,81 @@ eq(planFixture(PLAN_MODULE), PLAN_V1682_SHA, 'no tuning anywhere: the plan is v1
   eq(exportSheetNumbers([]), { bytes: 0, standardTotal: 0, longOut: 0, trackOut: 0 }, 'X04: nothing usable: zeros');
   const allStd = exportSheetNumbers([{ seconds: 120, rate: PSF }, { seconds: 95.5, rate: PSF }]);
   ok(allStd.bytes === wavBytes(120) + wavBytes(95.5) && Object.is(allStd.longOut, outSeconds(120 + 95.5)), 'X04: a playlist with no tuning: v16.8.2\'s total and long length');
+}
+
+// ---- v16.8.4 (Adaptive gamma, decision G4): the export follows Gamma in Adaptive ------------------------------------
+{
+  const snap: ExportSnapshot = { engine: 'v2', musicOnly: false, output: 'headphones', droneEnabled: true, keyFitOn: false, toneLevel: 0.5, lowering: null, beatLevel: 0.5, presetName: 'Beta', adaptive: true, phiOn: false, perfectGut: false, playingId: null, selectedHz: 0 };
+  const n = 20 * 200;
+  // Loud (all four bands at 250: intensity 0.98, Gamma's) for the first 20 s of media time, then quiet (Delta).
+  const loud = { fps: 20, sub: new Uint8Array(n), bass: new Uint8Array(n), mid: new Uint8Array(n), high: new Uint8Array(n) };
+  for (const b of [loud.sub, loud.bass, loud.mid, loud.high]) b.fill(250, 0, 20 * 20);
+  const keyed = (hz: number) => ({ id: 'g', name: 'tone-g', duration: 180, closestSolfeggio: hz, bandEnvelope: loud });
+  // The spec: the snapshot's setting, parsed (absent, as in a snapshot from before v16.8.4: Smooth), and the switch.
+  eq(
+    [exportSpecFor(snap, keyed(852), 'headphones').gammaMode, exportSpecFor({ ...snap, gammaMode: 'sticky' }, keyed(852), 'headphones').gammaMode, exportSpecFor({ ...snap, gammaMode: 'Sticky' as GammaMode }, keyed(852), 'headphones').gammaMode],
+    ['smooth', 'sticky', 'smooth'],
+    "the spec's Gamma in Adaptive: Smooth by default, Sticky when chosen, anything else the default",
+  );
+  const plain = { id: 'h', name: 'tone-h', duration: 180, closestSolfeggio: 852 };
+  eq([exportSpecFor(snap, plain, 'headphones').adaptive, exportSpecFor(snap, plain, 'headphones').adaptiveOn], [false, true], "no envelope: no band steps, but the switch is on (Smooth's carrier, as live)");
+  eq([exportSpecFor({ ...snap, adaptive: false }, keyed(852), 'headphones').adaptiveOn, exportSpecFor(snap, keyed(852), 'tone').adaptiveOn], [false, true], 'adaptiveOn is the switch itself');
+  // The steps, as App's own loop (an AdaptiveBand at each 3 s tick of output time, the media time t × PSF), both modes.
+  const app = (mode: GammaMode, start: Band, render: 'binaural' | 'pulse', T: number) => {
+    const want: Array<{ t: number; band: Band }> = [{ t: 0, band: start }];
+    const ab = new AdaptiveBand(mode, render, start);
+    let cur = start;
+    for (let t = 3; t < T; t += 3) {
+      const next = ab.tick(readIntensity(loud, t * PSF), cur);
+      if (next) {
+        cur = next;
+        want.push({ t, band: next });
+      }
+    }
+    return want;
+  };
+  const T = 120;
+  for (const mode of ['smooth', 'sticky'] as GammaMode[]) {
+    for (const render of ['binaural', 'pulse'] as const) {
+      for (const start of ['alpha', 'beta', 'gamma'] as Band[]) {
+        eq(bandSchedule(loud, start, render, T, true, PSF, mode), app(mode, start, render, T), `bandSchedule = App's loop (${mode}, ${render}, from ${start})`);
+      }
+    }
+  }
+  const smooth = bandSchedule(loud, 'beta', 'binaural', T, true, PSF, 'smooth');
+  const sticky = bandSchedule(loud, 'beta', 'binaural', T, true, PSF, 'sticky');
+  const at = (sch: Array<{ t: number; band: Band }>, b: Band) => sch.find((x) => x.band === b)?.t ?? -1;
+  const down = (sch: Array<{ t: number; band: Band }>) => sch.find((x, k) => k > 0 && x.band === 'beta')?.t ?? -1;
+  ok(at(smooth, 'gamma') === 6 && at(sticky, 'gamma') === 6, `headphones: Gamma at the 2nd loud tick, both modes (${at(smooth, 'gamma')}, ${at(sticky, 'gamma')} s)`);
+  ok(down(smooth) - at(smooth, 'gamma') < 33, `Smooth: no hold (Gamma for ${down(smooth) - at(smooth, 'gamma')} s)`);
+  ok(down(sticky) - at(sticky, 'gamma') >= 33, `Sticky: Gamma holds 11 ticks once reached (${down(sticky) - at(sticky, 'gamma')} s)`);
+  eq(bandSchedule(loud, 'beta', 'binaural', T, true), smooth, 'the default is Smooth');
+  eq(bandSchedule(loud, 'beta', 'binaural', T, true, PSF, 'x' as GammaMode), smooth, 'an unknown mode: Smooth');
+  for (const mode of ['smooth', 'sticky'] as GammaMode[]) {
+    const p = bandSchedule(loud, 'delta', 'pulse', T, true, PSF, mode);
+    ok(p.every((x) => x.band !== 'beta' && x.band !== 'gamma') && p.some((x) => x.band === 'alpha'), `the pulse stays capped at Alpha (${mode})`);
+    eq(bandSchedule(loud, 'beta', 'off', T, true, PSF, mode), [{ t: 0, band: 'beta' }], `Tone only: no steps (${mode})`);
+  }
+  // v16.8.3's loop (the Beta cap) stopped there: the lift is the change on a loud track.
+  const old: Array<{ t: number; band: Band }> = [{ t: 0, band: 'beta' }];
+  {
+    const h = new BandHysteresis();
+    let cur: Band = 'beta';
+    for (let t = 3; t < T; t += 3) {
+      const nx = h.tick(capBand(bandForIntensity(readIntensity(loud, t * PSF)), 'beta'), cur);
+      if (nx) {
+        cur = nx;
+        old.push({ t, band: nx });
+      }
+    }
+  }
+  ok(!old.some((x) => x.band === 'gamma') && smooth.some((x) => x.band === 'gamma'), 'v16.8.3 stopped at Beta; v16.8.4 reaches Gamma');
+  // The plan a segment plays (renderLayers' planFor: adaptivePlan with the spec's setting and switch): Smooth on 852 keeps
+  // Gamma's carrier (426) at every band; Sticky, v2's own (213 below Gamma).
+  const sp = exportSpecFor(snap, keyed(852), 'headphones');
+  const st = exportSpecFor({ ...snap, gammaMode: 'sticky' }, keyed(852), 'headphones');
+  eq((['beta', 'gamma'] as Band[]).map((b) => adaptivePlan(sp.f, sp.planOutput, b, sp.gammaMode, sp.adaptiveOn, sp.render)?.carrier_hz), [426, 426], 'Smooth on 852: one carrier for the file');
+  eq((['beta', 'gamma'] as Band[]).map((b) => adaptivePlan(st.f, st.planOutput, b, st.gammaMode, st.adaptiveOn, st.render)?.carrier_hz), [213, 426], "Sticky on 852: v2's pair per band");
 }
 
 if (failures.length) {

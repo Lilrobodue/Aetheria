@@ -15,6 +15,8 @@
 // Each claim sits in a data-evidence block with its EvidenceTag (Arithmetic, Tradition, Early evidence, Design choice),
 // at most one or two per section. `layout` names the places the guide points to (utils/copy/places); `back` is the new
 // layout's "Back to …" chip in the HowSure section, which closes the view.
+// v16.8.4: the tuning line (RETUNE_TUNING, "… in Track info.") is the new layout's only (layout 'new'): classic, which
+// stays for good, has no Track info Tuning row.
 
 import React from 'react';
 import { Activity, ArrowRight, Box, Calculator, ChevronsUp, Eye, Heart, Info, Map as MapIcon, Sparkles, Target, User, Waves } from 'lucide-react';
@@ -353,8 +355,9 @@ const TechnicalGuide = ({
                   <TagRow><EvidenceTag tier={p.tag} /></TagRow>
                 </div>
               ))}
-              {/* v16.8.3 fix round 2 (N2): where a track's own tuning is chosen, untagged (no claim), after the tags. */}
-              <p className="text-slate-400 leading-relaxed">{RETUNE_TUNING}</p>
+              {/* v16.8.3 fix round 2 (N2): where a track's own tuning is chosen, untagged (no claim), after the tags.
+                  v16.8.4: the new layout's Guide only; classic's Guidebook has no Track info Tuning row to point to. */}
+              {layout === 'new' ? <p className="text-slate-400 leading-relaxed">{RETUNE_TUNING}</p> : null}
               <p className="text-slate-400 leading-relaxed">{RETUNE_HISTORY}</p>
             </div>
         </section>

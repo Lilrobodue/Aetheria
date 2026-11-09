@@ -5,6 +5,7 @@ import {
   countConsole,
   crash,
   expectCache,
+  expectLegendShown,
   layerIntensity,
   openHarmonicControl,
   seedTracks,
@@ -536,9 +537,12 @@ test.describe('phone, controls', () => {
     await expect(page.getByTestId('chip-beat')).toHaveAttribute('aria-label', 'Beat Alpha');
     await openLayersTab(page);
 
-    // Classic: the chip reads the preset.
+    // Classic: the chip reads the preset. v16.8.4 fix round 1 (rev1 tests SF7): classic sound has no Gamma in Adaptive
+    // (v2's alone); the bands keep their shown legend, 'Beat band' (B: whenever the bands show).
     await chooseEngine(page, 'Classic');
     await layersJump(page, 'beat').click();
+    await expect(beat.getByRole('group', { name: 'Gamma in Adaptive' }), 'classic sound: no Gamma in Adaptive').toHaveCount(0);
+    await expectLegendShown(beat.getByRole('group', { name: 'Beat band', exact: true }), 'Beat band', 'classic sound: the bands’ legend');
     await beat.getByText('Theta · 6 Hz', { exact: true }).click();
     await expect(beat.getByTestId('layers-beat-status')).toHaveText('Theta');
     await chooseEngine(page, 'v2');
@@ -550,6 +554,7 @@ test.describe('phone, controls', () => {
     await expect(radios).toHaveCount(5);
     for (let i = 0; i < 5; i++) await expect(radios.nth(i)).toBeDisabled();
     await expect(beat.getByText('Car: tone only, so there is no beat or pulse.', { exact: true })).toBeVisible();
+    await expectLegendShown(beat.getByRole('group', { name: 'Beat band', exact: true }), 'Beat band', 'Car: the bands’ legend');
     expect(dialogs).toEqual([]);
   });
 

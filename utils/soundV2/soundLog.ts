@@ -10,7 +10,7 @@
 // write: nothing is written before load() has read what is there, and every
 // flush re-reads the store and merges by session id, so sessions another tab
 // wrote in between survive. Records it cannot read are dropped; fields it
-// does not know are kept (v15.2 adds key_fit, duck_db and fit_*). A stored value that
+// does not know are kept (v15.2 adds key_fit, duck_db and fit_*; v16.8.4 gamma_mode). A stored value that
 // is not a list of sessions is replaced, so a new format takes a new key.
 //
 // Pure: the storage is injected (null = none) and times come from the caller.
@@ -57,6 +57,9 @@ export type SoundLogFields = {
   fit_a4_hz?: number | null; // the A the notes are heard at
   track_key?: string | null;
   key_confidence?: number | null;
+  // v16.8.4 (Adaptive gamma), v2 entries only: Gamma in Adaptive, the saved choice (optional: older entries have none).
+  // On each entry, not the session, as the setting can change within one.
+  gamma_mode?: 'smooth' | 'sticky';
 };
 
 export interface SoundLogEntry extends SoundLogFields {

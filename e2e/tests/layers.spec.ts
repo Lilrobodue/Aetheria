@@ -1588,7 +1588,8 @@ test("v2's presets note follows the output: under Car there is no beat or pulse 
   const dialogs = await openApp(page);
   const carNote = page.getByText('Car: tone only, so there is no beat or pulse.', { exact: true });
   const note = page.getByText(
-    'Adaptive stops at Beta; Gamma is a manual choice. Off headphones the beat is a gentle pulse, capped at Alpha.',
+    // v16.8.4: Adaptive reaches Gamma on headphones (it stopped at Beta).
+    'Adaptive reaches Gamma on headphones. Off headphones the beat is a gentle pulse, capped at Alpha.',
     { exact: true }
   );
   await seedLayers(page, { engine: 'v2', output: 'car' });
@@ -1874,7 +1875,9 @@ test('a recording of the A/B flips holds one engine at a time (desktop only)', a
   const [L, R] = channels;
 
   // Each engine's components at 852 Hz: classic tone 86.16, beat 200 (L) / 210 (R), drone 53.25; v2 tone 852,
-  // beat 213 (L) / 223 (R), drone 26.625 — the ones checked are unique and ≥ 13 Hz from every other.
+  // beat 426 (L) / 436 (R), drone 26.625 — the ones checked are unique and ≥ 13 Hz from every other. (v16.8.4: Adaptive
+  // is on by default and Gamma in Adaptive is Smooth by default, so on headphones 852 plays on Gamma's pair, 426, at
+  // every band; v16.8.3 played 213 / 223 here.)
   // tA = v2's onset: its tone (nothing else near 852 Hz) first within 40 dB of its peak.
   const v2Tone = sweep(L, rate, 852);
   const v2Peak = Math.max(...v2Tone.map((p) => p.v));
@@ -1892,7 +1895,7 @@ test('a recording of the A/B flips holds one engine at a time (desktop only)', a
 
   const components = (list: [string, Float32Array, number][]) => list.map(([name, x, hz]) => ({ name, x, hz }));
   const classic = components([['classic beat 200 Hz L', L, 200], ['classic tone L', L, 86.16], ['classic tone R', R, 86.16], ['classic drone L', L, 53.25], ['classic drone R', R, 53.25]]);
-  const v2 = components([['v2 beat 223 Hz R', R, 223], ['v2 tone L', L, 852], ['v2 tone R', R, 852], ['v2 drone L', L, 26.625], ['v2 drone R', R, 26.625]]);
+  const v2 = components([['v2 beat 436 Hz R', R, 436], ['v2 tone L', L, 852], ['v2 tone R', R, 852], ['v2 drone L', L, 26.625], ['v2 drone R', R, 26.625]]);
   const report: string[] = [`tA ${tA.toFixed(3)} s, tB ${tB!.toFixed(3)} s, taps ${visit.toFixed(3)} s apart`];
   // classic → v2: the outgoing classic layers ≥ 35 dB down 1 s after v2's onset and ≥ 60 dB down 2 s after (classic's
   // validated τ 0.25 fade reaches −60 dB at 1.73 s).
@@ -1985,7 +1988,10 @@ const beatAndChip = (page: Page) =>
 const adaptiveReport = (log: AdaptiveEvent[], t0: number) =>
   log.filter((x) => x.t > t0).map((x) => `${x.e}${x.text ? ' ' + x.text : ''} +${((x.t - t0) / 1000).toFixed(2)} s`).join(', ');
 
-test("v2's adaptive band steps through its hysteresis, stops at its cap, and classic's adaptive stays off under v2", async ({ page }) => {
+// v16.8.4 (Adaptive gamma): on headphones v2's Adaptive reaches Gamma (it stopped at Beta), one band a step; off headphones
+// the pulse stays capped at Alpha (decision 6). 528 is one of the 22 tones whose beat pair doesn't move at Gamma.
+test("v2's adaptive band steps through its hysteresis a band at a time to Gamma, the pulse stays capped at Alpha, and classic's adaptive stays off under v2", async ({ page }) => {
+  test.setTimeout(150_000);
   const errors = pageErrors(page);
   await recordAdaptive(page);
   const dialogs = await openApp(page);
@@ -1998,9 +2004,9 @@ test("v2's adaptive band steps through its hysteresis, stops at its cap, and cla
   await acceptDisclaimer(page);
   await expect(bandChip(page)).toHaveText('Alpha'); // the preset starts at Alpha; adaptive is on by default
 
-  // Headphones: the play arms the 3 s interval; a step needs two agreeing ticks in a row, and headphones stop at Beta.
-  // Six ticks: the step at the second, then none. (The waits count every 3 s tick, so a second interval or a re-arm
-  // fails below, by name; the times judged are the play's own interval's.)
+  // Headphones: the play arms the 3 s interval; a step needs two agreeing ticks in a row and moves one band: Beta at the
+  // second tick, Gamma (v16.8.4: the binaural cap) at the fourth, then none. (The waits count every 3 s tick, so a
+  // second interval or a re-arm fails below, by name; the times judged are the play's own interval's.)
   const played = await pageNow(page);
   await listed(page, 'tone-01').click();
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
@@ -2015,17 +2021,20 @@ test("v2's adaptive band steps through its hysteresis, stops at its cap, and cla
   const [armed, ...rearmed] = eventsAfter(hp, played, 'arm');
   expect(armed, 'the play arms the interval').toBeDefined();
   expect([...rearmed, ...eventsAfter(hp, played, 'clear')], 'no re-arm (it would reset the hysteresis): not even the band step').toEqual([]);
-  const [, t2, t3] = ticksOfArmAfter(hp, played);
+  const [, t2, t3, t4, t5] = ticksOfArmAfter(hp, played);
   const steps = eventsAfter(hp, played, 'chip');
-  expect(steps.map((x) => x.text), 'the chip over six ticks: one step, to the binaural cap').toEqual(['Beta']);
+  expect(steps.map((x) => x.text), 'the chip over six ticks: a band a step, to the binaural cap, Gamma').toEqual(['Beta', 'Gamma']);
   expect(steps[0].t, 'one tick is not enough').toBeGreaterThan(t2);
   expect(steps[0].t, 'two agreeing ticks are: the step comes before the third').toBeLessThan(t3);
-  expect(await beatAndChip(page), "Beta's beat reaches the player").toBe('20 Hz · Beta');
+  expect(steps[1].t, 'the next band takes two more ticks').toBeGreaterThan(t4);
+  expect(steps[1].t, 'and comes before the fifth').toBeLessThan(t5);
+  expect(await beatAndChip(page), "Gamma's beat reaches the player").toBe('40 Hz · Gamma');
 
   // Off headphones the pulse is capped at Alpha at once (the render change re-arms the interval with the pulse's cap);
-  // the preset follows after two agreeing ticks, then holds: six ticks, the pulse sampled meanwhile.
+  // the preset follows a band a step (Gamma, Beta, Alpha: two agreeing ticks each), then holds: six ticks, the pulse
+  // sampled meanwhile.
   const toSpeakers = await clickAt(outputButton(page, 'Speakers'));
-  // The player plays Alpha's pulse while the preset is still Beta: the cap, not a step (that would take two ticks).
+  // The player plays Alpha's pulse while the preset is still Gamma: the cap, not a step (that would take four ticks).
   await expect.poll(() => beatAndChip(page), { timeout: 5_000 }).toBe('10 Hz · Pulse · Alpha (capped)');
   const deadline = Date.now() + 40_000;
   while (eventsAfter(await adaptiveLog(page), toSpeakers, 'tick').length < 6) {
@@ -2040,12 +2049,12 @@ test("v2's adaptive band steps through its hysteresis, stops at its cap, and cla
   expect(pulseArmed, 'the render change re-arms the interval').toBeDefined();
   expect(more, 'once').toEqual([]);
   expect(eventsAfter(sp, toSpeakers, 'clear').map((x) => x.id), "the headphones interval's clear").toEqual([armed.id]);
-  const [p1, p2, p3] = ticksOfArmAfter(sp, toSpeakers);
+  const [p1, , , p4, p5] = ticksOfArmAfter(sp, toSpeakers);
   const chips = eventsAfter(sp, toSpeakers, 'chip');
   expect(chips.map((x) => x.text), 'the chip over six ticks off headphones').toEqual(['Pulse · Alpha (capped)', 'Pulse · Alpha']);
   expect(chips[0].t, 'capped at once, before any tick').toBeLessThan(p1);
-  expect(chips[1].t, 'one tick is not enough').toBeGreaterThan(p2);
-  expect(chips[1].t, 'two agreeing ticks are: the preset steps before the third').toBeLessThan(p3);
+  expect(chips[1].t, 'Gamma to Beta to Alpha: the preset reaches Alpha after the fourth tick').toBeGreaterThan(p4);
+  expect(chips[1].t, 'and before the fifth').toBeLessThan(p5);
   expect(await chipText(page)).toBe('Pulse · Alpha');
   expect(errors).toEqual([]);
   expect(dialogs).toEqual([]);

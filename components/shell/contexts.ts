@@ -50,6 +50,7 @@ import type { ExportSnapshot, MadeFor } from '../../utils/export/exportPlan';
 import type { Phase as ExportPhase } from '../../utils/export/exportWords';
 import type { Tier } from '../../utils/copy/evidence';
 import type { EvidenceOriginValue } from '../guide/evidenceLink';
+import type { GammaMode } from '../../utils/soundV2/adaptiveBand';
 
 /** The transport's state. Changes on play/pause, a track change, shuffle/repeat, a new play order. */
 export interface PlayerValue {
@@ -131,6 +132,8 @@ export interface LevelsValue {
 export interface TuningValue {
   /** isAdaptiveBinaural. */
   adaptive: boolean;
+  /** v16.8.4: Gamma in Adaptive (v2 on headphones), the saved choice: 'smooth' (the default) or 'sticky'. */
+  gammaMode: GammaMode;
   /** selectedBinaural.name ('Delta' … 'Gamma'). */
   presetName: string;
   /** The band the beat delivers now ('Alpha'; v2's pulse may cap it), or null with no beat (Car, the layers off). */
@@ -595,6 +598,8 @@ export interface ShellActions {
   peekClassic: (panel: PeekPanel) => void;
   // v15.6, the Layers tab (references to App's existing setters; the Sound section uses layerPanelProps' handlers).
   setAdaptive: (on: boolean) => void;
+  /** v16.8.4: Gamma in Adaptive's radio (saved, from the tap only). */
+  setGammaMode: (m: GammaMode) => void;
   /** A band picked by hand: the preset, and Adaptive off (classic's row click). */
   choosePreset: (name: string) => void;
   setPhiMode: (on: boolean) => void;

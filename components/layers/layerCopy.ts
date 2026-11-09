@@ -90,8 +90,21 @@ export const QUICK_SWITCH_LABEL = 'Layer sound and output';
 
 export const TONE_LEVEL_LABEL = 'Tone level';
 export const BEAT_LEVEL_LABEL = 'Beat level';
+// v16.8.4 (Adaptive gamma): Adaptive reaches Gamma on headphones (it stopped at Beta before).
 export const PRESETS_NOTE_V2 =
-  'Adaptive stops at Beta; Gamma is a manual choice. Off headphones the beat is a gentle pulse, capped at Alpha.';
+  'Adaptive reaches Gamma on headphones. Off headphones the beat is a gentle pulse, capped at Alpha.';
+/** v16.8.4: Gamma in Adaptive, the new layout's radio group under the Adaptive switch (Layers › Beat), as the user
+ *  reviewed it (v1684 review page). The counts are adaptiveBand.check's, which derives them from plan().
+ *  Fix round 1 (rev1 logic S1, S2, N1): the pair moves an octave on 9 of the 11 and two on 417 and Lo Shu 408; Sticky's
+ *  retune waits for the drone gate, so the layers are out for a few seconds, not a short fade; the hold is every tone's. */
+export const GAMMA_MODE_LEGEND = 'Gamma in Adaptive';
+export const GAMMA_MODE_ITEMS: ReadonlyArray<{ id: 'smooth' | 'sticky'; title: string; subtitle: string }> = [
+  { id: 'smooth', title: 'Smooth', subtitle: 'No fade. On 11 of the 33 tones the beat pair sits an octave or two higher all track.' },
+  { id: 'sticky', title: 'Sticky', subtitle: 'The usual beat pair. On 11 tones the layers drop out for a few seconds when Gamma starts or ends; once reached, Gamma holds at least 30 s.' },
+];
+/** Under the group while it is disabled (speakers, the phone speaker: the pulse). Fix round 1 (rev1 logic N2, app N1):
+ *  just this, as DRONE_HEADPHONES_ONLY; PRESETS_NOTE_V2, on the same card, says the pulse and its cap. */
+export const GAMMA_MODE_OFF_HEADPHONES = 'Headphones only.';
 /** The presets note under Car, whose render is off: no beat, no pulse, no adaptive band. */
 export const PRESETS_NOTE_CAR_V2 = 'Car: tone only, so there is no beat or pulse.';
 export const GAMMA_DESCRIPTION_V2 =

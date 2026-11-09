@@ -265,7 +265,7 @@ const speedWords = (c: number) => { const p = speedPercent(c); return `Plays ${M
 /** A tuned choice's note (fix round 1: "than Standard"; a moved track names both crystals, never a fit). Fix round 2:
  *  a Lo Shu tuning that doesn't fit on this output says what it was chosen for (`chosenFor`, L-S2); a track over
  *  keyBands' caps never promises Assign (`long`, L-S3). */
-const LONG_NOTE = "Assign crystals doesn't place a track this long by its key.";
+const LONG_NOTE = "Assign crystals doesn't place a track this long or this large by its key."; // v16.8.4 (rev3 N3)
 const tunedNote = (c: number, live: boolean, o: { movedFrom?: number; movedTo?: number; tone?: string; chosenFor?: string; long?: boolean; loShu?: boolean } = {}) =>
   (o.movedFrom !== undefined ? `${speedWords(c)}. Chosen for ${o.movedFrom} Hz, before it moved to ${o.movedTo} Hz.` : o.chosenFor !== undefined ? `${speedWords(c)}. Chosen for ${o.chosenFor}.` : `${speedWords(c)}, so ${o.tone ?? "the crystal's tone"} fits its key.`) +
   ` The file isn't changed. ${o.long ? LONG_NOTE : `Assign crystals places it by how it sounds at this tuning${o.loShu ? ', so the next Assign may move it' : ''}.`}${nextPlay(live)}`;

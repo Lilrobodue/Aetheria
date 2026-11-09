@@ -90,7 +90,7 @@ export const TIERS: Readonly<Record<Tier, TierCopy>> = {
     technical: 'A decision of the app’s design (values, names, structure). It can be judged by ear or by taste, not by evidence.',
     examples: [
       'The 27 crystals, the three ranges, and the crystal each track gets (an assignment, not a measured pitch); a song with a clear key goes first to a crystal whose tone fits its key.',
-      'The layers’ levels under the music, Gamma as a manual choice, Key fit, the drone’s rests, φ timing.',
+      'The layers’ levels under the music, how Adaptive reaches Gamma, Key fit, the drone’s rests, φ timing.',
       'The crystal sets and their names; the experimental scan scores.',
     ],
   },

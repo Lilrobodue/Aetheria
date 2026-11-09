@@ -13,11 +13,17 @@
 // Key fit's duck, the adaptive band's media time (bandSchedule) and the engine's decode (decodeRateFor). The long file's
 // cap and budget count every track in Standard seconds (standardSeconds: the source seconds at PSF that play as long),
 // so a tuned track counts by how long it plays; a playlist with no tuning counts exactly as before.
+//
+// v16.8.4 ("Adaptive gamma", decision G4): a file follows Gamma in Adaptive as the live app does. The snapshot carries the
+// setting, a track's spec holds it (gammaMode) with the Adaptive switch itself (adaptiveOn: Smooth's beat pair follows
+// the switch), and bandSchedule ticks the live app's own AdaptiveBand (Gamma on headphones, Sticky's hold).
 
-import { canonicalLayerHz, renderForOutput, planOutputFor, bandOfPresetName, capBand, sliderGain, readIntensity, BandHysteresis, TONE_SLIDER_DEFAULT, BEAT_SLIDER_DEFAULT } from '../soundV2/layerHost.ts';
+import { canonicalLayerHz, renderForOutput, planOutputFor, bandOfPresetName, sliderGain, readIntensity, TONE_SLIDER_DEFAULT, BEAT_SLIDER_DEFAULT } from '../soundV2/layerHost.ts';
 import type { LayerEngine, LayerOutput, BeatRender, EnvelopeLike } from '../soundV2/layerHost.ts';
-import { bandForIntensity } from '../soundV2/aetheria_sound_v2.ts';
 import type { Band } from '../soundV2/aetheria_sound_v2.ts';
+// v16.8.4 (Adaptive gamma): the adaptive band and the plan as live (the same AdaptiveBand, the same setting).
+import { AdaptiveBand, parseGammaMode, DEFAULT_GAMMA_MODE } from '../soundV2/adaptiveBand.ts';
+import type { GammaMode } from '../soundV2/adaptiveBand.ts';
 import { keyFitFor } from '../soundV2/keyFit.ts';
 import { PITCH_SHIFT_FACTOR } from '../../constants.ts';
 import { trackRate } from '../tuning/trackTuning.ts';
@@ -127,6 +133,8 @@ export interface ExportSnapshot {
   /** selectedBinaural.name: the band in effect now. */
   presetName: string;
   adaptive: boolean;
+  /** v16.8.4: Gamma in Adaptive (absent: the default, Smooth). */
+  gammaMode?: GammaMode;
   /** enablePhiMode && phiTimingEnabled. */
   phiOn: boolean;
   perfectGut: boolean;
@@ -167,7 +175,13 @@ export interface ExportSpec {
   planOutput: 'headphones' | 'speakers' | 'phone';
   /** The band in effect at the tap. */
   startBand: Band;
+  /** The band steps: the Adaptive switch, with a beat to adapt (not Tone only) and the track's band envelope. */
   adaptive: boolean;
+  /** v16.8.4: Gamma in Adaptive (the snapshot's, parsed), for the steps (Sticky's hold) and the plan (Smooth's carrier). */
+  gammaMode: GammaMode;
+  /** v16.8.4: the Adaptive switch itself (the snapshot's), which Smooth's beat pair follows as live: with or without an
+   *  envelope, so a track Deep Scan never read plays on the carrier the live app gives it. */
+  adaptiveOn: boolean;
   gains: { tone: number; beat: number; drone: number };
   toneLevel: number;
   duckDb: number;
@@ -211,6 +225,8 @@ export function exportSpecFor(snap: ExportSnapshot, song: ExportSong, madeFor: M
     planOutput,
     startBand,
     adaptive: snap.adaptive && render !== 'off' && hasEnvelope(song),
+    gammaMode: parseGammaMode(snap.gammaMode),
+    adaptiveOn: snap.adaptive === true,
     gains,
     toneLevel,
     duckDb: Number.isFinite(duckDb) ? duckDb : 0,
@@ -221,18 +237,17 @@ export function exportSpecFor(snap: ExportSnapshot, song: ExportSong, madeFor: M
   };
 }
 
-/** The adaptive band, run ahead: App's own 3 s loop (BandHysteresis, readIntensity at the media time t × PSF, capBand to
- *  beta, or alpha for the pulse), ticking every 3 s of output time from the band in effect at the tap. The first entry
- *  is { t: 0, band: startBand }. v16.8.3: the media time is t × the track's rate. */
-export function bandSchedule(env: EnvelopeLike | null | undefined, startBand: Band, render: BeatRender, outSecondsTotal: number, adaptive = true, rate: number = PSF): Array<{ t: number; band: Band }> {
+/** The adaptive band, run ahead: App's own 3 s loop (an AdaptiveBand: readIntensity at the media time t × PSF, the cap
+ *  by render, the hysteresis; v16.8.4: Gamma on headphones, alpha for the pulse, and Sticky's hold), ticking every 3 s
+ *  of output time from the band in effect at the tap. The first entry is { t: 0, band: startBand }. v16.8.3: the media
+ *  time is t × the track's rate. v16.8.4: gammaMode is the export's Gamma in Adaptive (the default Smooth). */
+export function bandSchedule(env: EnvelopeLike | null | undefined, startBand: Band, render: BeatRender, outSecondsTotal: number, adaptive = true, rate: number = PSF, gammaMode: GammaMode = DEFAULT_GAMMA_MODE): Array<{ t: number; band: Band }> {
   const out: Array<{ t: number; band: Band }> = [{ t: 0, band: startBand }];
   if (!adaptive || !env || render === 'off' || !((env.bass?.length ?? 0) > 0)) return out;
-  const hyst = new BandHysteresis();
-  const cap: Band = render === 'pulse' ? 'alpha' : 'beta';
+  const band = new AdaptiveBand(gammaMode, render, startBand);
   let current = startBand;
   for (let t = ADAPT_STEP_S; t < outSecondsTotal; t += ADAPT_STEP_S) {
-    const target = capBand(bandForIntensity(readIntensity(env, t * rate)), cap);
-    const next = hyst.tick(target, current);
+    const next = band.tick(readIntensity(env, t * rate), current);
     if (next) {
       current = next;
       out.push({ t, band: next });

@@ -800,7 +800,7 @@ export function createJob(kind: 'track' | 'playlist' | 'long', items: EngineItem
         await hold(it.id, 'layers', base + span * (PROGRESS_WEIGHTS.read + PROGRESS_WEIGHTS.decode));
         const l0 = performance.now();
         emit({ phase: 'layers' }, true);
-        const segs: LayerSegment[] = [{ spec: it.spec, startS: 0, durS: outS, bands: bandSchedule(it.envelope, it.spec.startBand, it.spec.render, outS, it.spec.adaptive, rate) }];
+        const segs: LayerSegment[] = [{ spec: it.spec, startS: 0, durS: outS, bands: bandSchedule(it.envelope, it.spec.startBand, it.spec.render, outS, it.spec.adaptive, rate, it.spec.gammaMode) }];
         const r = await renderLayers(segs, outS, deps.layerRate ?? LAYER_RATE, { endFade: false });
         layers = r.buf; // before the check: a cancel there lets them go (the finally)
         plan = r.rec;
@@ -871,7 +871,7 @@ export function createJob(kind: 'track' | 'playlist' | 'long', items: EngineItem
     for (let k = 0; k < usable.length; k++) {
       const it = usable[k].it;
       const spec = { ...it.spec, startBand: band };
-      const bands = bandSchedule(it.envelope, band, spec.render, planned[k], spec.adaptive, itemRate(it));
+      const bands = bandSchedule(it.envelope, band, spec.render, planned[k], spec.adaptive, itemRate(it), spec.gammaMode);
       segs.push({ spec, startS: start, durS: planned[k], bands });
       band = bands[bands.length - 1].band;
       start += planned[k];

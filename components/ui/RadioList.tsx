@@ -5,6 +5,8 @@
 // pick, and Tab reaches the group once), a drawn circle, a title and a subtitle. Every activation is a pick, the
 // checked row's included (onChange(id) on the radio's click). Disabled, the fieldset disables every
 // radio and `disabledNote` says why, in text. Neutral: the checked circle is ink, never gold.
+// v16.8.4 (additive; absent, as before): `showLegend` shows the legend as the group's heading (Layers › Beat's Gamma in
+// Adaptive), for a group the card's title doesn't already name.
 
 import React from 'react';
 
@@ -24,14 +26,16 @@ interface RadioListProps {
   onChange: (id: string) => void;
   disabled?: boolean;
   disabledNote?: string;
+  /** v16.8.4: the legend shown (else screen readers only). */
+  showLegend?: boolean;
   'data-testid'?: string;
 }
 
 const noop = () => {};
 
-const RadioList = ({ legend, name, items, value, onChange, disabled = false, disabledNote, 'data-testid': testId }: RadioListProps) => (
+const RadioList = ({ legend, name, items, value, onChange, disabled = false, disabledNote, showLegend = false, 'data-testid': testId }: RadioListProps) => (
   <fieldset disabled={disabled} className="min-w-0" data-testid={testId}>
-    <legend className="sr-only">{legend}</legend>
+    <legend className={showLegend ? (disabled ? 'pt-1 text-xs font-semibold text-ink-soft opacity-50' : 'pt-1 text-xs font-semibold text-ink-soft') : 'sr-only'}>{legend}</legend>
     <div className={disabled ? 'opacity-50' : undefined}>
       {items.map((it) => {
         const checked = value === it.id;

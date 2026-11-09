@@ -4,6 +4,7 @@ import { test, expect } from './fixtures';
 import { PHONE_VIEWPORT, libraryState, openSeededNewLayout, openLibraryTab, libraryRowButton, renders, resetRenders, tab, undoToast, backToClassicViaMore, phoneSize } from './helpers';
 import { moreRow, moreView, textNodes } from './moreKit';
 import { PLACES } from '../../utils/copy/places.ts';
+import { RETUNE_TUNING } from '../../utils/copy/crystalCopy.ts';
 
 /** v16.6: the views name each layout's own places (utils/copy/places: the Tree of Life, the cube's notes); the rest of the
  *  text is the same node for node, so the new layout's place lines are read as classic's before the comparison. */
@@ -39,7 +40,20 @@ const asClassicPlaces = (nodes: string[]): string[] => {
 // own, untagged, after the tagged paragraphs (RETUNE_TUNING), and the Arithmetic example (evidence.ts) is v16.8.2's
 // again; with 10477d4's two copy files and TechnicalGuide.tsx this build gives b530b5a8edfc6dd8 again, so that move is
 // the only change. Was 'b530b5a8edfc6dd8'.
-const TECHNICAL_TEXT_SHA = '436af1b00ec82474'; // 1159 text nodes, v16.8.3 fix round 2 (fix round 1: b530b5a8edfc6dd8, 1158)
+// v16.8.4 fix round 1 (the user's OK, 2026-11-08): the Design choice example (utils/copy/evidence.ts, shown by HowSure in
+// both layouts' guides) reads "how Adaptive reaches Gamma" for "Gamma as a manual choice"; with 7cfecb5's evidence.ts
+// this build gives 436af1b00ec82474 again (the fix round's words control), so that line is the only change. Was
+// '436af1b00ec82474'.
+const TECHNICAL_TEXT_SHA = 'a9d9190fbba89855'; // 1159 text nodes, v16.8.4 fix round 1 (v16.8.3: 436af1b00ec82474)
+// v16.8.4 (spec §2.6): classic stays for good, and its Guidebook leaves out the tuning line (RETUNE_TUNING, "… in Track
+// info.": classic has no Track info Tuning row); the new layout's Guide keeps it. So TECHNICAL_TEXT_SHA is now the new
+// layout's Guide (read as classic's places), unchanged from v16.8.3, and classic's own text is pinned apart: the same
+// nodes but that one (G2 shows it node for node; G2b is its source, run on this build).
+// Measured by G2b on this build: fc0c8cd57a91a81a, which is v16.8.2's pin again (fix round 2 of v16.8.3 had moved the
+// sentence out of the Arithmetic paragraph, leaving that paragraph v16.8.2's), so classic reads as it did in v16.8.2.
+// v16.8.4 fix round 1 (approved): classic's Guidebook shows the same Design choice line, so its pin moves too; with
+// 7cfecb5's evidence.ts this build gives fc0c8cd57a91a81a again, so that line is the only change. Was 'fc0c8cd57a91a81a'.
+const CLASSIC_TECHNICAL_TEXT_SHA = '9cfdeff6ef19c552'; // 1158 text nodes, v16.8.4 fix round 1 (stage 4: fc0c8cd57a91a81a)
 
 const sha = (parts: string[]) => createHash('sha256').update(parts.join('\n'), 'utf8').digest('hex').slice(0, 16);
 
@@ -261,19 +275,26 @@ test.describe('desktop', () => {
     const classic = await classicTechnicalText(page);
     test.info().annotations.push({ type: 'technical text', description: `${classic.length} text nodes, sha ${sha(classic)}` });
     expect(mine.length).toBeGreaterThan(300);
-    expect(asClassicPlaces(mine), 'the Guide shows classic’s Technical view, node for node (each layout’s places aside)').toEqual(classic);
-    if (TECHNICAL_TEXT_SHA) expect(sha(classic), 'the same text as the previous release’s classic Guidebook').toBe(TECHNICAL_TEXT_SHA);
+    // v16.8.4: the tuning line is the new layout's alone (once); classic's Guidebook leaves it out.
+    const asClassic = asClassicPlaces(mine);
+    test.info().annotations.push({ type: 'the Guide’s technical text, as classic’s places', description: `${asClassic.length} text nodes, sha ${sha(asClassic)}` });
+    expect(asClassic.filter((n) => n === RETUNE_TUNING), 'the new layout’s Guide has the tuning line, once').toHaveLength(1);
+    expect(classic, 'classic’s Guidebook leaves the tuning line out (no Track info Tuning row there)').not.toContain(RETUNE_TUNING);
+    expect(asClassic.filter((n) => n !== RETUNE_TUNING), 'the Guide shows classic’s Technical view, node for node (each layout’s places and the tuning line aside)').toEqual(classic);
+    if (TECHNICAL_TEXT_SHA) expect(sha(asClassic), 'the new layout’s Guide: the same text as the previous release’s').toBe(TECHNICAL_TEXT_SHA);
+    if (CLASSIC_TECHNICAL_TEXT_SHA) expect(sha(classic), 'classic’s Guidebook: v16.8.4’s pin').toBe(CLASSIC_TECHNICAL_TEXT_SHA);
     expect(dialogs).toEqual([]);
   });
 
-  test('G2b. (the pin’s source) classic’s Technical Guidebook text, hashed: run on the previous release’s build for TECHNICAL_TEXT_SHA', async ({ page }) => {
+  test('G2b. (the classic pin’s source) classic’s Technical Guidebook text, hashed, without the tuning line: CLASSIC_TECHNICAL_TEXT_SHA', async ({ page }) => {
     test.setTimeout(120_000);
     const { openApp } = await import('./helpers');
     const dialogs = await openApp(page);
     const classic = await classicTechnicalText(page);
     test.info().annotations.push({ type: 'technical text sha', description: `${classic.length} nodes, ${sha(classic)}` });
     expect(classic.length).toBeGreaterThan(300);
-    if (TECHNICAL_TEXT_SHA) expect(sha(classic)).toBe(TECHNICAL_TEXT_SHA);
+    expect(classic, 'no tuning line in classic (v16.8.4)').not.toContain(RETUNE_TUNING);
+    if (CLASSIC_TECHNICAL_TEXT_SHA) expect(sha(classic)).toBe(CLASSIC_TECHNICAL_TEXT_SHA);
     expect(dialogs).toEqual([]);
   });
 });

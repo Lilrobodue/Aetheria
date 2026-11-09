@@ -318,6 +318,32 @@ check(SOUND_LOG_KEY === 'aetheria.soundSessions.v1' && SOUND_LOG_MAX_SESSIONS ==
     `Key fit: the nine fields round-trip through flush() and a new log's load() unchanged (${JSON.stringify(got.map((e: Record<string, unknown>) => [e.duck_db, e.fit_db, e.track_key]))})`);
 }
 
+{
+  // v16.8.4 (Adaptive gamma): v2 entries carry the Gamma in Adaptive setting (gamma_mode). Optional: entries from before
+  // it (none of the field) stay valid next to new ones; a change of the setting alone is an entry; the field round-trips
+  // through a flush and a new log's load; the budgets are unchanged.
+  const st = fakeStorage();
+  const log = createSoundLog(st);
+  log.load();
+  log.open(1);
+  const old = entry(0), smooth = entry(0, { gamma_mode: 'smooth' }), sticky = entry(0, { gamma_mode: 'sticky' });
+  check(log.note(old, 2) === true && log.note(smooth, 3) === true && log.note(sticky, 4) === true, 'gamma_mode: an entry without it, then Smooth, then Sticky: three entries');
+  check(log.note(sticky, 5) === false, 'gamma_mode: the same setting again is no new entry');
+  check(log.flush() === true, 'gamma_mode: flushed');
+  const back = createSoundLog(st);
+  back.load();
+  const got = JSON.parse(back.exportJson()).sessions[0]?.entries ?? [];
+  check(got.length === 3 && !('gamma_mode' in got[0]) && got[1].gamma_mode === 'smooth' && got[2].gamma_mode === 'sticky',
+    `gamma_mode: round-trips, and the entry from before it stays as it was (${JSON.stringify(got.map((e: Record<string, unknown>) => e.gamma_mode ?? null))})`);
+  // A stored session written before v16.8.4 (no gamma_mode anywhere) loads whole.
+  const st2 = fakeStorage();
+  st2.m.set(SOUND_LOG_KEY, JSON.stringify([{ id: 'v1683', started: 1, ended: 2, entries: [{ at: 1, ...entry(0) }, { at: 2, ...entry(1) }], retunes: 1, band_steps: 2, drone_rests: 0 }]));
+  const l2 = createSoundLog(st2);
+  l2.load();
+  check(l2.sessions().length === 1 && l2.sessions()[0].entries.length === 2, 'gamma_mode: a v16.8.3 session loads whole');
+  check(SOUND_LOG_MAX_SESSIONS === 200 && SOUND_LOG_MAX_ENTRIES === 50 && SOUND_LOG_MAX_BYTES === 262144, 'gamma_mode: the budgets are unchanged');
+}
+
 console.log(`soundLog: ${passed} checks passed, ${failures.length} failed`);
 for (const f of failures.slice(0, 20)) console.log('  FAILED ' + f);
 process.exit(failures.length ? 1 : 0);
