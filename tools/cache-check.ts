@@ -23,6 +23,9 @@ import {
   readSavedPlaylists,
   writePlaylistRecords,
   playlistWriteFailure,
+  // v16.8.5: big libraries save (B1-B9).
+  __setCacheLimitsForTests,
+  __resetPersistRequestForTests,
 } from '../utils/playlistCache';
 
 const RUN = `aetheria-cache-check-${Date.now()}`;
@@ -47,17 +50,195 @@ const keyOfWrite = (method: string, args: unknown[]): string => {
   return String(a?.key ?? a?.id ?? '?');
 };
 const failing = new Set<string>();
+// v16.8.5: a real quota error, faked. While `quota` is set, an audio put that would take its transaction past what
+// the committed transactions left (`quota.left` bytes) makes that whole transaction abort, as Chrome does at commit
+// (in a microtask, after the save has put the rest of its batch and is waiting for the commit), and its requests' and
+// its own error read as a QuotaExceededError DOMException (a plain abort() reads as AbortError, which the module
+// rightly reports as 'write-failed'). The estimate is never consulted.
+// v16.8.5 fix round 1 (T4): `form: 'commit'` is Chrome's own form instead (the build's quota-result.json): every put of
+// that transaction succeeds, then it aborts from the success of its last pending put, so no request fails and only
+// 'abort' fires (the module's txDone settles through onabort, not onerror). Request errors on 'blobs' are counted in
+// blobRequestErrors either way.
+let quota: { left: number; form?: 'pending' | 'commit' } | null = null;
+const quotaTxs = new WeakSet<IDBTransaction>();
+const pendingPuts = new WeakMap<IDBTransaction, number>();
+let blobRequestErrors = 0;
+// v16.8.5 fix round 1 (A3): a put of one of these ids throws, as a DataCloneError does, before it is made.
+const throwOn = new Set<string>();
+const txBytes = new WeakMap<IDBTransaction, number>();
+const quotaError = () => new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+for (const [proto, owner] of [[IDBRequest.prototype, 'request'], [IDBTransaction.prototype, 'transaction']] as const) {
+  const real = Object.getOwnPropertyDescriptor(proto, 'error')!;
+  Object.defineProperty(proto, 'error', {
+    configurable: true,
+    enumerable: real.enumerable,
+    get(this: IDBRequest | IDBTransaction) {
+      const tx = owner === 'request' ? (this as IDBRequest).transaction : (this as IDBTransaction);
+      return tx && quotaTxs.has(tx) ? quotaError() : real.get!.call(this);
+    },
+  });
+}
+// v16.8.5: every audio batch, a readwrite transaction on 'blobs' alone as writeNewBlobs makes them, with the ids it put
+// (blobBatches), and the order things happened in (events: 'batch#n' as each is made, 'persist', ...).
+const blobBatches: string[][] = [];
+const batchOf = new WeakMap<IDBTransaction, string[]>();
+const events: string[] = [];
 for (const method of ['put', 'add', 'delete', 'clear'] as const) {
   const original = (IDBObjectStore.prototype as any)[method];
   (IDBObjectStore.prototype as any)[method] = function (this: IDBObjectStore, ...args: unknown[]) {
     const name = `${this.name}.${method}`;
+    if (name === 'blobs.put' && throwOn.has(String((args[0] as any)?.id))) {
+      throw new DOMException('The object could not be cloned.', 'DataCloneError');
+    }
     writes.push(name);
     keyedWrites.push(`${name}(${keyOfWrite(method, args)})`);
     const request = original.apply(this, args);
     if (failing.has(name)) this.transaction.abort();
+    if (name === 'blobs.put') {
+      const tx = this.transaction;
+      batchOf.get(tx)?.push(String((args[0] as any)?.id));
+      pendingPuts.set(tx, (pendingPuts.get(tx) ?? 0) + 1);
+      request.addEventListener('error', () => { blobRequestErrors++; });
+      request.addEventListener('success', () => {
+        const left = (pendingPuts.get(tx) ?? 1) - 1;
+        pendingPuts.set(tx, left);
+        // Chrome's form: the last put has succeeded, and the commit is refused.
+        if (left === 0 && quotaTxs.has(tx) && quota?.form === 'commit') { try { tx.abort(); } catch { /* already over */ } }
+      });
+      const q = quota;
+      if (q && !quotaTxs.has(tx)) {
+        if (!txBytes.has(tx)) {
+          txBytes.set(tx, 0);
+          tx.addEventListener('complete', () => { q.left -= txBytes.get(tx) ?? 0; });
+        }
+        const bytes = (txBytes.get(tx) ?? 0) + ((args[0] as any)?.fileBlob?.size ?? 0);
+        txBytes.set(tx, bytes);
+        if (bytes > q.left) {
+          quotaTxs.add(tx);
+          if (q.form !== 'commit') queueMicrotask(() => { try { tx.abort(); } catch { /* already over */ } });
+        }
+      }
+    }
     return request;
   };
 }
+
+/** Run `fn` while the audio has `bytes` of room (see `quota` above), refused in `form`; the room is gone again afterwards. */
+async function withQuota(bytes: number, fn: () => Promise<void>, form: 'pending' | 'commit' = 'pending'): Promise<void> {
+  quota = { left: bytes, form };
+  try {
+    await fn();
+  } finally {
+    quota = null;
+  }
+}
+
+/** `run`, failing rather than hanging the page when it doesn't settle within `ms` (a save that never ends). */
+async function within<T>(ms: number, what: string, run: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([run, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(what)), ms); })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// v16.8.5: hold a save, until release(), at one of two points:
+//   'keys'   its read of the stored tracks (every getAllKeys on 'blobs' while held, the point the old free-space check
+//            held them at: between the read and the first write);
+//   'batch'  the commit of the n-th audio batch made from now on (committed; the save goes on once released).
+// reached() resolves when a save gets there, and fails, rather than hanging the page, if none does within 5 s.
+// restore() releases and takes the hold away.
+let keyHold: { gate: Promise<void>; entered: () => void } | null = null;
+let batchHold: { left: number; gate: Promise<void>; entered: () => void } | null = null;
+function holdSave(at: 'keys' | 'batch', n = 1) {
+  let entered!: () => void;
+  const reachedP = new Promise<void>((resolve) => (entered = resolve));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  if (at === 'keys') keyHold = { gate, entered };
+  else batchHold = { left: n, gate, entered };
+  const reached = () =>
+    Promise.race([
+      reachedP,
+      sleep(5000).then(() => {
+        throw new Error(`no save reached its ${at === 'keys' ? 'read of the stored tracks' : `batch ${n}`}`);
+      }),
+    ]);
+  const restore = () => {
+    release();
+    if (at === 'keys') keyHold = null;
+    else batchHold = null;
+  };
+  return { reached, release, restore };
+}
+/** A request whose success is delivered only once `gate` resolves (the module sets onsuccess on what it gets back). */
+function heldRequest<T extends IDBRequest>(request: T, gate: Promise<void>): T {
+  return new Proxy(request, {
+    set(t, k, v) {
+      if (k === 'onsuccess' && typeof v === 'function') {
+        t.onsuccess = (ev) => { gate.then(() => v.call(t, ev)); };
+        return true;
+      }
+      (t as any)[k] = v;
+      return true;
+    },
+    get(t, k) {
+      const x = (t as any)[k];
+      return typeof x === 'function' ? x.bind(t) : x;
+    },
+  });
+}
+// v16.8.5 fix round 2 (B15, B16): a save that fails before it knows its tracks. While `keysFail` is set, a read of the
+// stored tracks (getAllKeys on 'blobs') fails (its transaction aborts: the request's error event); while `openFail` is
+// set, opening a database fails (asked at an older version than the database's: a VersionError). Each counted.
+let keysFail = false;
+let openFail = false;
+let keysFailed = 0;
+let opensFailed = 0;
+const realGetAllKeys = IDBObjectStore.prototype.getAllKeys;
+IDBObjectStore.prototype.getAllKeys = function (this: IDBObjectStore, ...args: unknown[]) {
+  const request = (realGetAllKeys as any).apply(this, args);
+  if (keysFail && this.name === 'blobs') {
+    keysFailed++;
+    try { this.transaction.abort(); } catch { /* already over */ }
+    return request;
+  }
+  const hold = keyHold;
+  if (this.name !== 'blobs' || !hold) return request;
+  hold.entered();
+  return heldRequest(request, hold.gate);
+} as typeof IDBObjectStore.prototype.getAllKeys;
+const realTransaction = IDBDatabase.prototype.transaction;
+IDBDatabase.prototype.transaction = function (this: IDBDatabase, ...args: unknown[]) {
+  const tx: IDBTransaction = (realTransaction as any).apply(this, args);
+  if (args[0] !== 'blobs' || args[1] !== 'readwrite') return tx;
+  const ids: string[] = [];
+  blobBatches.push(ids);
+  batchOf.set(tx, ids);
+  const n = blobBatches.length;
+  events.push(`batch#${n}`);
+  // v16.8.5 fix round 1 (T7): its commit, when it happens (before the module hears of it: this listener comes first).
+  tx.addEventListener('complete', () => events.push(`commit#${n}`));
+  const hold = batchHold;
+  if (!hold || --hold.left !== 0) return tx;
+  // The held batch's settling reaches the module only once released: its commit, or (fix round 1, A4's test) its
+  // failure, the requests' errors and the abort alike.
+  return new Proxy(tx, {
+    set(t, k, v) {
+      if ((k === 'oncomplete' || k === 'onerror' || k === 'onabort') && typeof v === 'function') {
+        (t as any)[k] = (ev: Event) => { hold.entered(); hold.gate.then(() => v.call(t, ev)); };
+        return true;
+      }
+      (t as any)[k] = v;
+      return true;
+    },
+    get(t, k) {
+      const x = (t as any)[k];
+      return typeof x === 'function' ? x.bind(t) : x;
+    },
+  });
+} as typeof IDBDatabase.prototype.transaction;
 
 // v16.0.1: hold the success of every indexedDB.open made while `openGate` is set (openDB sets onsuccess on the
 // request it gets back), so a save can be kept "still opening its connection" (U6).
@@ -65,6 +246,10 @@ let openGate: Promise<void> | null = null;
 let heldOpens = 0;
 const realOpen = IDBFactory.prototype.open;
 IDBFactory.prototype.open = function (this: IDBFactory, ...args: unknown[]) {
+  if (openFail) {
+    opensFailed++;
+    return (realOpen as any).call(this, args[0], 1);
+  }
   const request: IDBOpenDBRequest = (realOpen as any).apply(this, args);
   const gate = openGate;
   if (!gate) return request;
@@ -86,56 +271,16 @@ IDBFactory.prototype.open = function (this: IDBFactory, ...args: unknown[]) {
 } as typeof IDBFactory.prototype.open;
 
 // What the module reports to the App: failures, and saves that stored everything.
-const cacheErrors: { count: number; reason: string; what: string; seq: number }[] = [];
+const cacheErrors: { count: number; reason: string; what: string; seq: number; total?: number }[] = [];
 const cacheOks: { what: string; seq: number }[] = [];
+// v16.8.5: a big save's progress reports.
+const cacheProgress: { saved: number; total: number; seq: number }[] = [];
 window.addEventListener('aetheria:cache-error', (e) => cacheErrors.push((e as CustomEvent).detail));
 window.addEventListener('aetheria:cache-ok', (e) => cacheOks.push((e as CustomEvent).detail));
+window.addEventListener('aetheria:cache-progress', (e) => cacheProgress.push((e as CustomEvent).detail));
 
 const MB = 1024 * 1024;
-const FULL = { quota: MB, usage: MB };
-const ROOMY = { quota: 1e12, usage: 0 };
-
-/** Run `fn` while navigator.storage.estimate reports a full device. */
-async function withFullStorage(fn: () => Promise<void>): Promise<void> {
-  const storage = navigator.storage as any;
-  const had = Object.prototype.hasOwnProperty.call(storage, 'estimate');
-  storage.estimate = async () => FULL;
-  try {
-    await fn();
-  } finally {
-    if (!had) delete storage.estimate;
-  }
-}
-
-/** Hold the next audio saves inside their free-space check, all answering
- *  `answer` once `release()` is called. `inEstimate()` resolves when a save
- *  gets there — and fails, rather than hanging the page, if none does within
- *  5 s. `restore()` puts the real estimate back. */
-function gateEstimate(answer: { quota: number; usage: number }) {
-  const storage = navigator.storage as any;
-  const had = Object.prototype.hasOwnProperty.call(storage, 'estimate');
-  let entered!: () => void;
-  const reached = new Promise<void>((resolve) => (entered = resolve));
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => (release = resolve));
-  storage.estimate = async () => {
-    entered();
-    await gate;
-    return answer;
-  };
-  const inEstimate = () =>
-    Promise.race([
-      reached,
-      sleep(5000).then(() => {
-        throw new Error('the save never reached its free-space check');
-      }),
-    ]);
-  const restore = () => {
-    release();
-    if (!had) delete storage.estimate;
-  };
-  return { inEstimate, release, restore };
-}
+const KB = 1024;
 
 // --- helpers -----------------------------------------------------------------
 function song(id: string, extra: Partial<Song> = {}, bytes = 8): Song {
@@ -413,29 +558,29 @@ test('Reload can wait for a blob save in progress (waitForBlobSaves)', async () 
   useDb('wait-blobs');
   const p = song('p');
   const q = song('q');
-  // Hold the save in its free-space check for 200 ms: a wait that returned at
-  // once would read the store before the write.
-  const g = gateEstimate(ROOMY);
+  // Hold the save in its read of the stored tracks for 200 ms: a wait that
+  // returned at once would read the store before the write.
+  const g = holdSave('keys');
   try {
     saveBlobsNow([p, q], [p, q], 0);
-    await g.inEstimate();
+    await g.reached();
     setTimeout(g.release, 200);
     await waitForBlobSaves();
-    const stored = (await keys('blobs')).join();
-    expect(stored === 'p,q', `both stored once the wait resolves (saw ${stored})`);
   } finally {
     g.restore();
   }
+  const stored = (await keys('blobs')).join();
+  expect(stored === 'p,q', `both stored once the wait resolves (saw ${stored})`);
 });
 
-test('A delete during the free-space check is neither written back, counted for room, nor reported', async () => {
+test('A delete while the save reads the stored tracks is neither written back, counted, nor reported', async () => {
   useDb('delete-in-check');
   const s1 = song('s1');
   const t1 = song('t1');
-  let g = gateEstimate(ROOMY);
+  let g = holdSave('keys');
   try {
     const run = saveBlobs([s1, t1], [s1, t1]);
-    await g.inEstimate();
+    await g.reached();
     await deleteTracksFromCache(['t1']);
     g.release();
     await run;
@@ -445,60 +590,66 @@ test('A delete during the free-space check is neither written back, counted for 
   let stored = (await keys('blobs')).join();
   expect(stored === 's1', `the deleted track is not written back (saw ${stored})`);
 
-  // On a full device the report counts only the track that is still wanted.
+  // With no room left the report counts only the track that is still wanted.
   useDb('delete-in-check-full');
   const s2 = song('s2');
   const t2 = song('t2');
   cacheErrors.length = 0;
-  g = gateEstimate(FULL);
-  try {
-    const run = saveBlobs([s2, t2], [s2, t2]);
-    await g.inEstimate();
-    await deleteTracksFromCache(['t2']);
-    g.release();
-    await run;
-  } finally {
-    g.restore();
-  }
-  expect(cacheErrors.length === 1 && cacheErrors[0].count === 1,
+  await withQuota(0, async () => {
+    g = holdSave('keys');
+    try {
+      const run = saveBlobs([s2, t2], [s2, t2]);
+      await g.reached();
+      await deleteTracksFromCache(['t2']);
+      g.release();
+      await run;
+    } finally {
+      g.restore();
+    }
+  });
+  expect(cacheErrors.length === 1 && cacheErrors[0].count === 1 && cacheErrors[0].reason === 'storage-full',
     `storage-full reported for 1 track (saw ${JSON.stringify(cacheErrors)})`);
 
-  // And the room needed is sized without it: 60 MB free fits a small track
-  // plus the 50 MB margin, but not the 30 MB one that was deleted meanwhile.
+  // And it isn't written: 20 MB of room fits the small track, not the 30 MB one
+  // that was deleted meanwhile.
   useDb('delete-in-check-sized');
   const small = song('small');
   const big = song('big', {}, 30 * MB);
   cacheErrors.length = 0;
-  g = gateEstimate({ quota: 60 * MB, usage: 0 });
-  try {
-    const run = saveBlobs([small, big], [small, big]);
-    await g.inEstimate();
-    await deleteTracksFromCache(['big']);
-    g.release();
-    await run;
-  } finally {
-    g.restore();
-  }
+  await withQuota(20 * MB, async () => {
+    g = holdSave('keys');
+    try {
+      const run = saveBlobs([small, big], [small, big]);
+      await g.reached();
+      await deleteTracksFromCache(['big']);
+      g.release();
+      await run;
+    } finally {
+      g.restore();
+    }
+  });
   stored = (await keys('blobs')).join();
   expect(stored === 'small' && cacheErrors.length === 0,
     `the small track is stored and nothing reported (saw ${stored}; ${JSON.stringify(cacheErrors)})`);
 });
 
-test('A Clear during the free-space check writes and reports nothing', async () => {
+test('A Clear while the save reads the stored tracks writes and reports nothing', async () => {
   for (const full of [false, true]) {
     useDb(`clear-in-check-${full ? 'full' : 'roomy'}`);
     const u1 = song('u1');
     const v1 = song('v1');
     cacheErrors.length = 0;
-    const g = gateEstimate(full ? FULL : ROOMY);
+    const g = holdSave('keys');
+    quota = full ? { left: 0 } : null;
     try {
       const run = saveBlobs([u1, v1], [u1, v1]);
-      await g.inEstimate();
+      await g.reached();
       await clearPlaylistCache();
       g.release();
       await run;
     } finally {
       g.restore();
+      quota = null;
     }
     expect((await keys('blobs')).length === 0, `nothing written after Clear (${full ? 'full' : 'roomy'})`);
     expect(cacheErrors.length === 0, `nothing reported after Clear (saw ${JSON.stringify(cacheErrors)})`);
@@ -506,9 +657,9 @@ test('A Clear during the free-space check writes and reports nothing', async () 
 });
 
 test('Blob saves run one at a time, in order: a later save never re-counts an earlier one', async () => {
-  // Two saves called back to back while the first is held in its free-space
-  // check with 60 MB free. The first stores x; the second must see x stored
-  // and need room only for the 30 MB y (80 MB with the margin: too much). Run
+  // Two saves called back to back while the first is held in its read of the
+  // stored tracks, with 20 MB of room. The first stores x; the second must see
+  // x stored and store only the 30 MB y (too much: only y is reported). Run
   // side by side, the second counted x as missing too, and its seq said
   // nothing about which snapshot was newer.
   useDb('serial');
@@ -521,15 +672,17 @@ test('Blob saves run one at a time, in order: a later save never re-counts an ea
   const onOk = (e: Event) => events.push(`ok:${(e as CustomEvent).detail.seq}`);
   window.addEventListener('aetheria:cache-error', onErr);
   window.addEventListener('aetheria:cache-ok', onOk);
-  const g = gateEstimate({ quota: 60 * MB, usage: 0 });
+  const g = holdSave('keys');
+  quota = { left: 20 * MB };
   try {
     const first = saveBlobs([x], [x]);
     const second = saveBlobs([x, y], [x, y]);
-    await g.inEstimate();
+    await g.reached();
     g.release();
     await Promise.all([first, second]);
   } finally {
     g.restore();
+    quota = null;
     window.removeEventListener('aetheria:cache-error', onErr);
     window.removeEventListener('aetheria:cache-ok', onOk);
   }
@@ -547,8 +700,8 @@ test('A save that starts after a failure and stores everything says so (cache-ok
   const w1 = song('w1');
   cacheErrors.length = 0;
   cacheOks.length = 0;
-  await withFullStorage(() => saveBlobs([w1], [w1]));
-  expect(cacheErrors.length === 1, 'the full device was reported');
+  await withQuota(0, () => saveBlobs([w1], [w1]));
+  expect(cacheErrors.length === 1 && cacheErrors[0].reason === 'storage-full', 'the quota error was reported');
   await saveBlobs([w1], [w1]); // room now
   const failedSeq = cacheErrors[0].seq;
   expect(cacheOks.some((o) => o.what === 'tracks' && o.seq > failedSeq),
@@ -572,11 +725,11 @@ test('Storage-full is reported, but not for a save a Clear cancelled', async () 
   useDb('storage-full');
   const s = song('s');
   const t = song('t');
-  await withFullStorage(async () => {
+  await withQuota(0, async () => {
     cacheErrors.length = 0;
     await saveBlobs([s, t], [s, t]);
     expect(cacheErrors.length === 1 && cacheErrors[0].reason === 'storage-full' && cacheErrors[0].count === 2,
-      `a full device is reported for both tracks (saw ${JSON.stringify(cacheErrors)})`);
+      `a quota error is reported for both tracks (saw ${JSON.stringify(cacheErrors)})`);
     cacheErrors.length = 0;
     const running = saveBlobs([s, t], [s, t]);
     await clearPlaylistCache();
@@ -1035,6 +1188,575 @@ test('V12. A hide or pagehide with nothing pending writes nothing; a delete land
   expect(keyedWrites.length === 0, `nothing written (saw ${keyedWrites.join(' ')})`);
   const ok = await writePlaylistRecords([], ['pl:phhhhhhhh']);
   expect(ok === true && (await stateKey('pl:phhhhhhhh')) === null, `the delete landed (got ${ok})`);
+});
+
+// --- v16.8.5: big libraries save (B1-B9) --------------------------------------------------------------------------
+// No free-space gate: real write errors decide (the quota fake above), and the audio goes in batches, each its own
+// transaction, in library order. Small files with the dev page's limits (__setCacheLimitsForTests), put back after each
+// test. Fresh ids (bNN): the tombstones of the tests above persist on this page.
+
+/** `n` tracks `prefix`0.. of `bytes` each. */
+const tracks = (prefix: string, n: number, bytes: number): Song[] => Array.from({ length: n }, (_, i) => song(`${prefix}${i}`, {}, bytes));
+/** The batches made since `from` (blobBatches' index), as ids joined per batch: 'a,b | c,d'. */
+const batchesSince = (from: number) => blobBatches.slice(from).map((b) => b.join()).join(' | ');
+
+test('B1. The estimate decides nothing: with 1 MB free reported, three 2 MB tracks are stored and the save says cache-ok', async () => {
+  useDb('b1-estimate');
+  const list = tracks('b1t', 3, 2 * MB);
+  const storage = navigator.storage as any;
+  const had = Object.prototype.hasOwnProperty.call(storage, 'estimate');
+  const real = storage.estimate?.bind(storage);
+  let asked = 0;
+  storage.estimate = async () => {
+    asked++;
+    const usage = (await real?.())?.usage ?? 0;
+    return { quota: usage + MB, usage };
+  };
+  cacheErrors.length = 0;
+  cacheOks.length = 0;
+  try {
+    await saveBlobs(list, list);
+  } finally {
+    if (!had) delete storage.estimate;
+  }
+  const stored = (await keys('blobs')).join();
+  expect(stored === 'b1t0,b1t1,b1t2', `all three stored (saw ${stored})`);
+  expect(cacheErrors.length === 0 && cacheOks.some((o) => o.what === 'tracks'),
+    `cache-ok, no error (errors ${JSON.stringify(cacheErrors)}, oks ${JSON.stringify(cacheOks)})`);
+  expect(asked === 0, `the save never asked the estimate (${asked} times)`);
+});
+
+test('B2. The release limits: batches of up to 256 MB; progress over 50 tracks or 1 GB (50 tracks: none, 51: reported)', async () => {
+  const limits = __setCacheLimitsForTests(null);
+  expect(limits.batchBytes === 256 * MB && limits.progressTracks === 50 && limits.progressBytes === 1024 * MB,
+    `the release values (saw ${JSON.stringify(limits)})`);
+  useDb('b2-fifty');
+  const fifty = tracks('b2a', 50, 8);
+  cacheProgress.length = 0;
+  await saveBlobs(fifty, fifty);
+  expect(cacheProgress.length === 0, `no progress for 50 tracks (saw ${JSON.stringify(cacheProgress)})`);
+  useDb('b2-fifty-one');
+  const fiftyOne = tracks('b2b', 51, 8);
+  await saveBlobs(fiftyOne, fiftyOne);
+  const last = cacheProgress[cacheProgress.length - 1];
+  expect(cacheProgress.length >= 2 && cacheProgress[0].saved === 0 && last?.saved === 51 && last.total === 51,
+    `51 tracks report their progress, 0 then 51 of 51 (saw ${JSON.stringify(cacheProgress)})`);
+  expect((await keys('blobs')).length === 51, 'all 51 stored');
+});
+
+test('B3. Batches: each its own transaction, up to the limit and at least one track, in the order the lists give', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB });
+    useDb('b3-batches');
+    // Ten tracks of 100 KB: two to a batch (a third would pass 256 KB).
+    const ten = tracks('b3t', 10, 100 * KB);
+    let from = blobBatches.length;
+    await saveBlobs(ten, ten);
+    expect(batchesSince(from) === 'b3t0,b3t1 | b3t2,b3t3 | b3t4,b3t5 | b3t6,b3t7 | b3t8,b3t9',
+      `five transactions of two, in order (saw ${batchesSince(from)})`);
+    // Exactly the limit fits in one batch; a track over it is a batch of its own.
+    useDb('b3-edges');
+    const edge = [song('b3e0', {}, 128 * KB), song('b3e1', {}, 128 * KB), song('b3e2', {}, 300 * KB), song('b3e3', {}, 100 * KB), song('b3e4', {}, 100 * KB)];
+    from = blobBatches.length;
+    await saveBlobs(edge, edge);
+    expect(batchesSince(from) === 'b3e0,b3e1 | b3e2 | b3e3,b3e4',
+      `256 KB in one batch, the 300 KB track alone (saw ${batchesSince(from)})`);
+    // The order is the lists': the play order first, then the rest of the library (uniqueSongs).
+    useDb('b3-order');
+    const lib = tracks('b3o', 4, 200 * KB);
+    from = blobBatches.length;
+    await saveBlobs([lib[3], lib[1]], lib);
+    expect(batchesSince(from) === 'b3o3 | b3o1 | b3o0 | b3o2', `the play order's tracks first (saw ${batchesSince(from)})`);
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+test('B4. A quota error at the 3rd batch: batches 1-2 stay stored, exactly the rest is reported (storage-full, of 10, no cache-ok); a later save stores only the rest', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB, progressTracks: 3 });
+    useDb('b4-partial');
+    const ten = tracks('b4t', 10, 100 * KB);
+    cacheErrors.length = 0;
+    cacheOks.length = 0;
+    cacheProgress.length = 0;
+    // Fix round 1 (T7): what the progress said before the error (once a batch has committed, never at its put()).
+    let progressAtError = '';
+    const atError = (ev: Event) => {
+      if ((ev as CustomEvent).detail?.what !== 'tracks') return;
+      const p = cacheProgress[cacheProgress.length - 1];
+      progressAtError = p ? `${p.saved}/${p.total}` : 'none';
+    };
+    window.addEventListener('aetheria:cache-error', atError);
+    try {
+      await withQuota(450 * KB, () => saveBlobs(ten, ten)); // two batches of 200 KB fit, the third doesn't
+    } finally {
+      window.removeEventListener('aetheria:cache-error', atError);
+    }
+    const stored = (await keys('blobs')).join();
+    expect(stored === 'b4t0,b4t1,b4t2,b4t3', `batches 1 and 2 stored (saw ${stored})`);
+    const e = cacheErrors[0];
+    expect(cacheErrors.length === 1 && e.what === 'tracks' && e.reason === 'storage-full' && e.count === 6 && e.total === 10,
+      `6 of 10 reported as storage-full (saw ${JSON.stringify(cacheErrors)})`);
+    expect(!cacheOks.some((o) => o.what === 'tracks' && o.seq === e.seq), `no cache-ok for the partial save (saw ${JSON.stringify(cacheOks)})`);
+    expect(progressAtError === '4/10', `the last progress before the error says 4 saved, the two committed batches (saw ${progressAtError}; ${cacheProgress.map((p) => `${p.saved}/${p.total}`).join(' ')})`);
+    // Room again: the next save writes only the six that were not stored.
+    writes.length = 0;
+    const from = blobBatches.length;
+    await saveBlobs(ten, ten);
+    expect(batchesSince(from) === 'b4t4,b4t5 | b4t6,b4t7 | b4t8,b4t9', `only the rest is written (saw ${batchesSince(from)})`);
+    expect((await keys('blobs')).length === 10 && cacheOks.some((o) => o.what === 'tracks' && o.seq > e.seq),
+      'all ten stored, and that save says cache-ok');
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+// v16.8.5 fix round 1 (T4): Chrome refuses a transaction at its commit, after every put has succeeded: no request error,
+// only the abort, with the transaction's error a QuotaExceededError. That settles the save through txDone's onabort (the
+// fake above, B4's, goes through onerror), so this pins that branch: worded storage-full, and the save ends (a save that
+// never settles would stall every save after it, and the Reload waiting for it).
+test("B4b. Chrome's own quota form (every put succeeds, the commit is refused): the same partial, reported as storage-full, and the save ends", async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB });
+    useDb('b4b-commit');
+    const ten = tracks('b4c', 10, 100 * KB);
+    cacheErrors.length = 0;
+    cacheOks.length = 0;
+    blobRequestErrors = 0;
+    await within(5000, 'the save never settled after the refused commit', withQuota(450 * KB, () => saveBlobs(ten, ten), 'commit'));
+    expect(blobRequestErrors === 0, `no request failed: only the transaction aborted (saw ${blobRequestErrors})`);
+    const stored = (await keys('blobs')).join();
+    expect(stored === 'b4c0,b4c1,b4c2,b4c3', `batches 1 and 2 stored (saw ${stored})`);
+    const e = cacheErrors[0];
+    expect(cacheErrors.length === 1 && e.what === 'tracks' && e.reason === 'storage-full' && e.count === 6 && e.total === 10,
+      `6 of 10 reported as storage-full (saw ${JSON.stringify(cacheErrors)})`);
+    expect(!cacheOks.some((o) => o.what === 'tracks' && o.seq === e.seq), `no cache-ok for the partial save (saw ${JSON.stringify(cacheOks)})`);
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+test('B5. A Clear between batches: nothing after it is written, nothing is reported (no error, no cache-ok, no progress)', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB, progressTracks: 3 });
+    useDb('b5-clear');
+    const ten = tracks('b5t', 10, 100 * KB);
+    cacheErrors.length = 0;
+    cacheOks.length = 0;
+    cacheProgress.length = 0;
+    const g = holdSave('batch', 1);
+    const from = blobBatches.length;
+    let progressAtClear = -1;
+    try {
+      const run = saveBlobs(ten, ten);
+      await g.reached(); // batch 1 is committed; the save waits
+      progressAtClear = cacheProgress.length;
+      await clearPlaylistCache();
+      g.release();
+      await run;
+    } finally {
+      g.restore();
+    }
+    expect(batchesSince(from) === 'b5t0,b5t1', `only the batch before the Clear was made (saw ${batchesSince(from)})`);
+    expect((await keys('blobs')).length === 0, 'the Clear removed it, and nothing was written after');
+    expect(cacheErrors.length === 0 && !cacheOks.some((o) => o.what === 'tracks'),
+      `nothing reported (errors ${JSON.stringify(cacheErrors)}, oks ${JSON.stringify(cacheOks)})`);
+    expect(cacheProgress.length === progressAtClear, `no progress after the Clear (saw ${JSON.stringify(cacheProgress)})`);
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+test('B6. A delete between batches: that track is not written and not counted (progress, the report)', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB, progressTracks: 3 });
+    useDb('b6-delete');
+    const ten = tracks('b6t', 10, 100 * KB);
+    cacheProgress.length = 0;
+    cacheErrors.length = 0;
+    let g = holdSave('batch', 1);
+    let from = blobBatches.length;
+    try {
+      const run = saveBlobs(ten, ten);
+      await g.reached();
+      await deleteTracksFromCache(['b6t5']);
+      g.release();
+      await run;
+    } finally {
+      g.restore();
+    }
+    expect(!blobBatches.slice(from).flat().includes('b6t5'), `b6t5 is never put (saw ${batchesSince(from)})`);
+    // Fix round 1 (T8 N1): every report in between leaves it out too, from the first one after the delete.
+    const seen = cacheProgress.map((p) => `${p.saved}/${p.total}`).join(' ');
+    expect(seen === '0/10 2/9 4/9 6/9 8/9 9/9', `the progress: 0 of 10, then of 9 from the delete on, ending at 9 of 9 (saw ${seen})`);
+    expect((await keys('blobs')).length === 9 && cacheErrors.length === 0, 'nine stored, nothing reported');
+
+    // And a later failure doesn't count it either: room for two batches, b6u5 deleted after the first.
+    useDb('b6-delete-full');
+    const more = tracks('b6u', 10, 100 * KB);
+    cacheErrors.length = 0;
+    await withQuota(450 * KB, async () => {
+      g = holdSave('batch', 1);
+      from = blobBatches.length;
+      try {
+        const run = saveBlobs(more, more);
+        await g.reached();
+        await deleteTracksFromCache(['b6u5']);
+        g.release();
+        await run;
+      } finally {
+        g.restore();
+      }
+    });
+    const e = cacheErrors[0];
+    expect(cacheErrors.length === 1 && e.count === 5 && e.total === 9 && e.reason === 'storage-full',
+      `5 of 9 reported (saw ${JSON.stringify(cacheErrors)})`);
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+// v16.8.5 fix round 1 (A2): a track deleted during the save is never counted, not even one already stored (its batch
+// in flight or committed: the delete's transaction removes it after). `saved` may then drop by one.
+// Fix round 2 (rev2 tests N-h): the title says what it pins (one delete never shows as a drop between two reports: each
+// batch adds a track); B6c deletes two stored tracks at once, so `saved` visibly drops.
+test('B6b. A track deleted after its batch committed is not counted: the reports leave it out from the next on (1/9 …), the end counts 9, and a later failure says "of 9"', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB, progressTracks: 3 });
+    useDb('b6b-stored');
+    const ten = tracks('b6v', 10, 100 * KB);
+    cacheProgress.length = 0;
+    cacheErrors.length = 0;
+    cacheOks.length = 0;
+    // b6v1 is in batch 1: committed (its commit held from the save) when the delete lands.
+    let g = holdSave('batch', 1);
+    try {
+      const run = saveBlobs(ten, ten);
+      await g.reached();
+      await deleteTracksFromCache(['b6v1']);
+      g.release();
+      await run;
+    } finally {
+      g.restore();
+    }
+    const seen = cacheProgress.map((p) => `${p.saved}/${p.total}`).join(' ');
+    expect(seen === '0/10 1/9 3/9 5/9 7/9 9/9', `saved leaves the deleted track out once it is gone (saw ${seen})`);
+    const seq = cacheProgress[0]?.seq;
+    expect(cacheErrors.length === 0 && cacheOks.some((o) => o.what === 'tracks' && o.seq === seq), `the save ends with cache-ok (saw ${JSON.stringify(cacheErrors)}; ${JSON.stringify(cacheOks)})`);
+    const stored = await keys('blobs');
+    expect(stored.length === 9 && !stored.includes('b6v1'), `nine stored, the deleted one removed (saw ${stored.join()})`);
+
+    // And the warning's total: room for two batches, b6w0 (stored in batch 1) deleted after it.
+    useDb('b6b-stored-full');
+    const more = tracks('b6w', 10, 100 * KB);
+    cacheErrors.length = 0;
+    await withQuota(450 * KB, async () => {
+      g = holdSave('batch', 1);
+      try {
+        const run = saveBlobs(more, more);
+        await g.reached();
+        await deleteTracksFromCache(['b6w0']);
+        g.release();
+        await run;
+      } finally {
+        g.restore();
+      }
+    });
+    const e = cacheErrors[0];
+    expect(cacheErrors.length === 1 && e.count === 6 && e.total === 9 && e.reason === 'storage-full',
+      `6 of 9 reported: three stored that still exist, six not (saw ${JSON.stringify(cacheErrors)})`);
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+test('B6c. Two stored tracks deleted at once: saved visibly drops (2/10, then 1/8), they are never counted again, and the end counts 8', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 150 * KB, progressTracks: 3 }); // one 100 KB track to a batch
+    useDb('b6c-drop');
+    const ten = tracks('b6x', 10, 100 * KB);
+    cacheProgress.length = 0;
+    cacheErrors.length = 0;
+    cacheOks.length = 0;
+    // Batch 3's commit held from the save: b6x0 and b6x1 (batches 1 and 2) are stored and reported (2/10) when both go.
+    const g = holdSave('batch', 3);
+    try {
+      const run = saveBlobs(ten, ten);
+      await g.reached();
+      await deleteTracksFromCache(['b6x0', 'b6x1']);
+      g.release();
+      await run;
+    } finally {
+      g.restore();
+    }
+    const seen = cacheProgress.map((p) => `${p.saved}/${p.total}`).join(' ');
+    expect(seen === '0/10 1/10 2/10 1/8 2/8 3/8 4/8 5/8 6/8 7/8 8/8', `saved drops from 2 to 1 as the two go, and they never count again (saw ${seen})`);
+    const seq = cacheProgress[0]?.seq;
+    expect(cacheErrors.length === 0 && cacheOks.some((o) => o.what === 'tracks' && o.seq === seq), `the save ends with cache-ok (saw ${JSON.stringify(cacheErrors)}; ${JSON.stringify(cacheOks)})`);
+    const stored = await keys('blobs');
+    expect(stored.length === 8 && !stored.includes('b6x0') && !stored.includes('b6x1'), `eight stored, the two deleted removed (saw ${stored.join()})`);
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+test('B7. Reload safety: waitForBlobSaves resolves only after the last batch', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB });
+    useDb('b7-wait');
+    const ten = tracks('b7t', 10, 100 * KB);
+    const g = holdSave('batch', 1);
+    try {
+      saveBlobsNow(ten, ten, 0);
+      await g.reached();
+      setTimeout(g.release, 200);
+      await waitForBlobSaves();
+    } finally {
+      g.restore();
+    }
+    const stored = (await keys('blobs')).length;
+    expect(stored === 10, `all ten stored once the wait resolves (saw ${stored})`);
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+test('B8. Progress: 0 at the start and after each batch, only growing, the last saved = total, then cache-ok; none for a small save (tracks or bytes)', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB, progressTracks: 3 });
+    useDb('b8-progress');
+    const ten = tracks('b8t', 10, 100 * KB);
+    cacheProgress.length = 0;
+    cacheOks.length = 0;
+    await saveBlobs(ten, ten);
+    const seen = cacheProgress.map((p) => `${p.saved}/${p.total}`).join(' ');
+    expect(seen === '0/10 2/10 4/10 6/10 8/10 10/10', `one report per batch (saw ${seen})`);
+    const seq = cacheProgress[0]?.seq;
+    expect(cacheProgress.every((p) => p.seq === seq) && cacheOks.some((o) => o.what === 'tracks' && o.seq === seq),
+      `one save's seq, and its cache-ok (saw ${JSON.stringify(cacheProgress)}; ${JSON.stringify(cacheOks)})`);
+    // Three tracks (not more than 3): none.
+    useDb('b8-small');
+    cacheProgress.length = 0;
+    const three = tracks('b8s', 3, 100 * KB);
+    await saveBlobs(three, three);
+    expect(cacheProgress.length === 0, `no progress for a small save (saw ${JSON.stringify(cacheProgress)})`);
+    // By bytes: over 1 MB reports, 800 KB doesn't.
+    __setCacheLimitsForTests({ batchBytes: 256 * KB, progressBytes: MB });
+    useDb('b8-bytes');
+    const big = tracks('b8b', 3, 400 * KB);
+    await saveBlobs(big, big);
+    expect(cacheProgress.length > 0 && cacheProgress[cacheProgress.length - 1].saved === 3, `1.2 MB reports (saw ${JSON.stringify(cacheProgress)})`);
+    cacheProgress.length = 0;
+    const under = tracks('b8c', 2, 400 * KB);
+    await saveBlobs(under, under);
+    expect(cacheProgress.length === 0, `800 KB doesn't (saw ${JSON.stringify(cacheProgress)})`);
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+test('B9. Persistent storage is asked for after the first committed batch, even when a later batch fails', async () => {
+  const storage = navigator.storage as any;
+  const had = Object.prototype.hasOwnProperty.call(storage, 'persist');
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB });
+    useDb('b9-persist');
+    storage.persist = async () => { events.push('persist'); return true; };
+    __resetPersistRequestForTests();
+    const ten = tracks('b9t', 10, 100 * KB);
+    events.length = 0;
+    cacheErrors.length = 0;
+    await withQuota(250 * KB, () => saveBlobs(ten, ten)); // batch 1 fits, batch 2 doesn't
+    const n = blobBatches.length;
+    // Fix round 1 (T7): after the first batch's commit (its transaction's complete), not merely after it was made.
+    expect(events.join(' ') === `batch#${n - 1} commit#${n - 1} persist batch#${n}`,
+      `asked once, after the first batch committed and before the second (saw ${events.join(' ')})`);
+    expect(cacheErrors.length === 1 && cacheErrors[0].count === 8, `the second batch's failure reported (saw ${JSON.stringify(cacheErrors)})`);
+  } finally {
+    if (!had) delete storage.persist;
+    __setCacheLimitsForTests(null);
+  }
+});
+
+// --- v16.8.5 fix round 1: the edges and paths rev1 found unpinned (B10-B14) ---------------------------------------
+
+test('B10. The progress thresholds are strict: exactly the byte limit shows none, one byte over shows it', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB, progressBytes: 200 * KB });
+    useDb('b10-at');
+    cacheProgress.length = 0;
+    const at = [song('b10a0', {}, 100 * KB), song('b10a1', {}, 100 * KB)];
+    await saveBlobs(at, at);
+    expect(cacheProgress.length === 0, `exactly 200 KB: no progress (saw ${JSON.stringify(cacheProgress)})`);
+    useDb('b10-over');
+    const over = [song('b10b0', {}, 100 * KB), song('b10b1', {}, 100 * KB + 1)];
+    await saveBlobs(over, over);
+    const last = cacheProgress[cacheProgress.length - 1];
+    expect(cacheProgress.length >= 2 && cacheProgress[0].saved === 0 && last?.saved === 2 && last.total === 2,
+      `one byte over: 0 then 2 of 2 (saw ${JSON.stringify(cacheProgress)})`);
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+test('B11. A Clear during the last batch\'s commit: no cache-ok, no error, no progress after it', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB, progressTracks: 3 });
+    useDb('b11-last');
+    const ten = tracks('b11t', 10, 100 * KB); // five batches of two
+    cacheErrors.length = 0;
+    cacheOks.length = 0;
+    cacheProgress.length = 0;
+    const g = holdSave('batch', 5);
+    let progressAtClear = -1;
+    try {
+      const run = saveBlobs(ten, ten);
+      await g.reached(); // the last batch is committed; the save hasn't heard yet
+      progressAtClear = cacheProgress.length;
+      await clearPlaylistCache();
+      g.release();
+      await run;
+    } finally {
+      g.restore();
+    }
+    expect(cacheErrors.length === 0 && !cacheOks.some((o) => o.what === 'tracks'),
+      `nothing reported after the Clear (errors ${JSON.stringify(cacheErrors)}, oks ${JSON.stringify(cacheOks)})`);
+    expect(cacheProgress.length === progressAtClear, `no progress after the Clear (saw ${JSON.stringify(cacheProgress)})`);
+    expect((await keys('blobs')).length === 0, 'the Clear emptied the store');
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+test('B12. An audio write that fails for another reason: write-failed, with the save\'s total; the batches before stay', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB });
+    useDb('b12-failed');
+    const ten = tracks('b12t', 10, 100 * KB);
+    cacheErrors.length = 0;
+    cacheOks.length = 0;
+    const g = holdSave('batch', 2);
+    try {
+      const run = saveBlobs(ten, ten);
+      await g.reached(); // batches 1 and 2 committed; from batch 3 on, every audio put aborts its transaction
+      failing.add('blobs.put');
+      g.release();
+      await run;
+    } finally {
+      failing.delete('blobs.put');
+      g.restore();
+    }
+    const stored = (await keys('blobs')).join();
+    expect(stored === 'b12t0,b12t1,b12t2,b12t3', `batches 1 and 2 stored (saw ${stored})`);
+    const e = cacheErrors[0];
+    expect(cacheErrors.length === 1 && e.what === 'tracks' && e.reason === 'write-failed' && e.count === 6 && e.total === 10,
+      `6 of 10 reported as write-failed (saw ${JSON.stringify(cacheErrors)})`);
+    expect(!cacheOks.some((o) => o.what === 'tracks' && o.seq === e.seq), `no cache-ok (saw ${JSON.stringify(cacheOks)})`);
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+test('B13. A put() that throws mid-batch aborts that batch: nothing of it is stored, and exactly what is not stored is reported', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB });
+    useDb('b13-throw');
+    const ten = tracks('b13t', 10, 100 * KB);
+    cacheErrors.length = 0;
+    throwOn.add('b13t3'); // batch 2 is b13t2, b13t3: the second put throws after the first was made
+    try {
+      await saveBlobs(ten, ten);
+    } finally {
+      throwOn.delete('b13t3');
+    }
+    const stored = await keys('blobs');
+    expect(stored.join() === 'b13t0,b13t1', `only batch 1 is stored, not b13t2 of the failed batch (saw ${stored.join()})`);
+    const e = cacheErrors[0];
+    expect(cacheErrors.length === 1 && e.reason === 'write-failed' && e.count === 8 && e.total === 10 && e.count === 10 - stored.length,
+      `8 of 10 reported, exactly the ones not stored (saw ${JSON.stringify(cacheErrors)})`);
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+test('B14. A batch fails and every track still to store was deleted meanwhile: the save ends cleanly (progress at saved = total, then cache-ok, no error)', async () => {
+  try {
+    __setCacheLimitsForTests({ batchBytes: 256 * KB, progressTracks: 3 });
+    useDb('b14-gone');
+    const six = tracks('b14t', 6, 100 * KB); // three batches of two
+    cacheErrors.length = 0;
+    cacheOks.length = 0;
+    cacheProgress.length = 0;
+    await withQuota(450 * KB, async () => {
+      // Batch 3 fails; its failure reaches the save only once released, and meanwhile its two tracks are deleted.
+      const g = holdSave('batch', 3);
+      try {
+        const run = saveBlobs(six, six);
+        await g.reached();
+        await deleteTracksFromCache(['b14t4', 'b14t5']);
+        g.release();
+        await run;
+      } finally {
+        g.restore();
+      }
+    });
+    const seq = cacheProgress[0]?.seq;
+    const seen = cacheProgress.map((p) => `${p.saved}/${p.total}`).join(' ');
+    expect(cacheErrors.length === 0, `no error: nothing that exists is unsaved (saw ${JSON.stringify(cacheErrors)})`);
+    expect(cacheOks.some((o) => o.what === 'tracks' && o.seq === seq), `the save's cache-ok (saw ${JSON.stringify(cacheOks)}; progress ${seen})`);
+    expect(seen.endsWith(' 4/4'), `its progress ends at 4 of 4 (saw ${seen})`);
+    expect((await keys('blobs')).join() === 'b14t0,b14t1,b14t2,b14t3', 'the four stored');
+  } finally {
+    __setCacheLimitsForTests(null);
+  }
+});
+
+// --- v16.8.5 fix round 2 (rev2 tests SF-c): the A4 path's `listed` guard ----------------------------------------------
+// A save that fails before it knows its tracks has nothing it could report: no cache-error, and above all no cache-ok,
+// which would withdraw a true "could not be saved" warning (App's seq rules) while those tracks are still not stored.
+test('B15. A save whose read of the stored tracks fails reports nothing (no cache-error, no cache-ok, no progress) and writes nothing', async () => {
+  useDb('b15-keys');
+  const two = tracks('b15t', 2, 8);
+  await saveBlobs(two.slice(0, 1), two.slice(0, 1)); // one stored
+  cacheErrors.length = 0;
+  cacheOks.length = 0;
+  cacheProgress.length = 0;
+  const from = blobBatches.length;
+  const before = keysFailed;
+  keysFail = true;
+  try {
+    await within(5000, 'the save did not settle', saveBlobs(two, two));
+  } finally {
+    keysFail = false;
+  }
+  expect(keysFailed > before, 'its read of the stored tracks failed');
+  expect(cacheErrors.length === 0 && cacheOks.length === 0 && cacheProgress.length === 0,
+    `nothing reported (saw ${JSON.stringify(cacheErrors)}; ${JSON.stringify(cacheOks)}; ${JSON.stringify(cacheProgress)})`);
+  expect(blobBatches.length === from, `nothing written (saw ${batchesSince(from)})`);
+  expect((await keys('blobs')).join() === 'b15t0', 'only the first stored');
+});
+
+test('B16. A save whose database does not open reports nothing (no cache-error, no cache-ok, no progress) and writes nothing', async () => {
+  useDb('b16-open');
+  const two = tracks('b16t', 2, 8);
+  await saveBlobs(two.slice(0, 1), two.slice(0, 1)); // the database exists (version 2), one stored
+  cacheErrors.length = 0;
+  cacheOks.length = 0;
+  cacheProgress.length = 0;
+  const from = blobBatches.length;
+  const before = opensFailed;
+  openFail = true;
+  try {
+    await within(5000, 'the save did not settle', saveBlobs(two, two));
+  } finally {
+    openFail = false;
+  }
+  expect(opensFailed > before, 'its database did not open');
+  expect(cacheErrors.length === 0 && cacheOks.length === 0 && cacheProgress.length === 0,
+    `nothing reported (saw ${JSON.stringify(cacheErrors)}; ${JSON.stringify(cacheOks)}; ${JSON.stringify(cacheProgress)})`);
+  expect(blobBatches.length === from, `nothing written (saw ${batchesSince(from)})`);
+  expect((await keys('blobs')).join() === 'b16t0', 'only the first stored');
 });
 
 // --- runner ------------------------------------------------------------------

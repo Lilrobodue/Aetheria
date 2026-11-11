@@ -181,7 +181,7 @@ export function renamedToast(from: string, to: string): string {
 /** A write that failed (sticky, with Retry). */
 export function writeFailedToast(playlist: string, full: boolean): string {
   return full
-    ? `Couldn’t save the change to ${playlist}: this device is out of space for Aetheria.`
+    ? `Couldn’t save the change to ${playlist}: the browser has no more room for this app.`
     : `Couldn’t save the change to ${playlist}. It may be gone after a reload; Retry saves it again.`;
 }
 

@@ -171,18 +171,199 @@ export async function shrinkSavedLibrary(page: Page, keep: number): Promise<void
 }
 
 /**
- * From the next page load on, navigator.storage.estimate reports a full device
- * while window.__storageFull is true (it starts true on every load; set it to
- * false to free the space). The app's audio saves check it before writing.
+ * v16.8.5: the browser's quota error, faked in the page (an init script: from the next page load on). A transaction
+ * marked by `fail(tx)` aborts as Chrome's does at commit: at its commit() when the code calls one, else in a microtask
+ * once the code has made its writes and is waiting; and its requests' and its own `error` read as a
+ * QuotaExceededError DOMException (a plain abort() reads as AbortError, which the app rightly words as a failed write,
+ * not a full browser). Installed once per page; window.__quotaFail(tx) marks one.
+ */
+async function installQuotaFake(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as any;
+    if (w.__quotaFail) return;
+    const failed = new WeakSet<IDBTransaction>();
+    const quotaError = () => new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    for (const [proto, owner] of [[IDBRequest.prototype, 'request'], [IDBTransaction.prototype, 'transaction']] as const) {
+      const real = Object.getOwnPropertyDescriptor(proto, 'error')!;
+      Object.defineProperty(proto, 'error', {
+        configurable: true,
+        enumerable: real.enumerable,
+        get(this: any) {
+          const tx = owner === 'request' ? this.transaction : this;
+          return tx && failed.has(tx) ? quotaError() : real.get!.call(this);
+        },
+      });
+    }
+    w.__quotaFail = (tx: IDBTransaction) => {
+      if (failed.has(tx)) return;
+      failed.add(tx);
+      const abort = () => { try { tx.abort(); } catch { /* already over */ } };
+      (tx as any).commit = abort;
+      queueMicrotask(abort);
+    };
+    // v16.8.5 fix round 1 (T4): Chrome's own form, as measured (the build's quota-result.json: no request error, the
+    // transaction's error QuotaExceededError). Every put succeeds; the transaction aborts from the success of its last
+    // pending put, so no request is left to fail and only 'abort' fires (txDone's onabort decides, not its onerror).
+    // __notePut(request) counts a put (the callers below call it for every audio put) and every request error in
+    // window.__putErrors; __quotaFailAtCommit(tx) marks one.
+    const pending = new WeakMap<IDBTransaction, number>();
+    const atCommit = new WeakSet<IDBTransaction>();
+    w.__putErrors = 0;
+    w.__notePut = (request: IDBRequest) => {
+      const tx = request.transaction!;
+      pending.set(tx, (pending.get(tx) ?? 0) + 1);
+      request.addEventListener('error', () => { w.__putErrors++; });
+      request.addEventListener('success', () => {
+        const left = (pending.get(tx) ?? 1) - 1;
+        pending.set(tx, left);
+        if (left === 0 && atCommit.has(tx)) { try { tx.abort(); } catch { /* already over */ } }
+      });
+    };
+    w.__quotaFailAtCommit = (tx: IDBTransaction) => {
+      failed.add(tx);
+      atCommit.add(tx);
+    };
+  });
+}
+
+/**
+ * From the next page load on, the app's audio writes fail with the browser's
+ * quota error (installQuotaFake) while window.__storageFull is true (it starts
+ * true on every load; set it to false to free the space). v16.8.5: the app no
+ * longer asks navigator.storage.estimate before writing (its free figure is a
+ * reported cap, not the real limit), so a full browser is a write that fails.
  */
 export async function stubStorageFull(page: Page): Promise<void> {
+  await installQuotaFake(page);
   await page.addInitScript(() => {
     const w = window as any;
     w.__storageFull = true;
-    const storage = navigator.storage as any;
-    const estimate = storage.estimate.bind(storage);
-    storage.estimate = async () => (w.__storageFull ? { quota: 1024 * 1024, usage: 1024 * 1024 } : estimate());
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: unknown[]) {
+      const request = (put as any).apply(this, args);
+      if (w.__storageFull && this.name === 'blobs') w.__quotaFail(this.transaction);
+      return request;
+    } as typeof put;
   });
+}
+
+/**
+ * v16.8.5: from the next page load on, the audio has `bytes` of room in the browser: an audio transaction whose puts
+ * would take what is stored past it fails with the quota error (installQuotaFake), as a real limit does; the ones
+ * before it stay stored. Counted from the audio this page stores (window.__audioRoom.left), not the estimate.
+ * v16.8.5 fix round 1: `form` is how that transaction fails. 'pending' (the default): it aborts in a microtask with its
+ * puts still pending, its error a QuotaExceededError (Firefox's and Safari's form reaches the app the same way, through
+ * the requests' errors). 'commit' (T4): Chrome's own, every put succeeding and then only the abort, with the
+ * transaction's error a QuotaExceededError. 'plain' (T6): a plain abort, its error an AbortError: a write that failed
+ * for another reason ('write-failed').
+ */
+export async function audioRoom(page: Page, bytes: number, form: 'pending' | 'commit' | 'plain' = 'pending'): Promise<void> {
+  await installQuotaFake(page);
+  await page.addInitScript(({ bytes, form }) => {
+    const w = window as any;
+    const room = (w.__audioRoom = { left: bytes });
+    const pending = new WeakMap<IDBTransaction, number>();
+    const failing = new WeakSet<IDBTransaction>();
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: unknown[]) {
+      const request = (put as any).apply(this, args);
+      if (this.name !== 'blobs') return request;
+      w.__notePut(request);
+      const tx = this.transaction;
+      if (!pending.has(tx)) {
+        pending.set(tx, 0);
+        tx.addEventListener('complete', () => { room.left -= pending.get(tx) ?? 0; });
+      }
+      const total = (pending.get(tx) ?? 0) + ((args[0] as any)?.fileBlob?.size ?? 0);
+      pending.set(tx, total);
+      if (total > room.left && !failing.has(tx)) {
+        failing.add(tx);
+        if (form === 'commit') w.__quotaFailAtCommit(tx);
+        else if (form === 'plain') queueMicrotask(() => { try { tx.abort(); } catch { /* already over */ } });
+        else w.__quotaFail(tx);
+      }
+      return request;
+    } as typeof put;
+  }, { bytes, form });
+}
+
+/**
+ * v16.8.5: from the next page load on, every audio save is held `ms` in its read of the stored tracks (the 'blobs'
+ * store's getAllKeys, once per save, where the free-space check used to wait), so a test can act while it is still
+ * saving. Recover's and Discard's reads of the stored tracks are held too.
+ */
+export async function holdBlobSaves(page: Page, ms: number): Promise<void> {
+  await page.addInitScript((ms) => {
+    const getAllKeys = IDBObjectStore.prototype.getAllKeys;
+    IDBObjectStore.prototype.getAllKeys = function (this: IDBObjectStore, ...args: unknown[]) {
+      const request = (getAllKeys as any).apply(this, args);
+      if (this.name !== 'blobs') return request;
+      return new Proxy(request, {
+        set(t: any, k, v) {
+          if (k === 'onsuccess' && typeof v === 'function') {
+            t.onsuccess = (ev: Event) => setTimeout(() => v.call(t, ev), ms);
+            return true;
+          }
+          t[k] = v;
+          return true;
+        },
+        get(t: any, k) {
+          const x = t[k];
+          return typeof x === 'function' ? x.bind(t) : x;
+        },
+      });
+    } as typeof getAllKeys;
+  }, ms);
+}
+
+/**
+ * v16.8.5: from the next page load on, the audio saves use these limits (a dev build's window.__aetheriaCacheLimits,
+ * utils/playlistCache.ts cacheLimits): smaller batches, and a lower progress threshold for the progress toast.
+ */
+export async function cacheLimits(page: Page, limits: { batchBytes?: number; progressTracks?: number; progressBytes?: number }): Promise<void> {
+  await page.addInitScript((limits) => { (window as any).__aetheriaCacheLimits = limits; }, limits);
+}
+
+/**
+ * v16.8.5: import synthetic tones of any size through the "Add files" input, built in the page (Playwright's
+ * setInputFiles refuses buffers over 50 MB, and a phone can't read this computer's disk): each a valid 8 kHz mono
+ * 16-bit WAV of `bytes` (rounded to whole 64 KB blocks), a sine at its own pitch, assembled from one block Blob
+ * repeated by reference, so the page holds one block, not the file. Named `${prefix}-01.wav` …. Handed over as a pick
+ * would be.
+ */
+export async function addSynthWavs(page: Page, count: number, bytes: number, prefix = 'big'): Promise<void> {
+  await page.evaluate(
+    ({ count, bytes, prefix }) => {
+      const BLOCK = 64 * 1024;
+      const blocks = Math.max(1, Math.round((bytes - 44) / BLOCK));
+      const rate = 8000;
+      const picked = new DataTransfer();
+      for (let f = 0; f < count; f++) {
+        const freq = 220 + f * 37;
+        // One block of a whole number of cycles (so the repeats join without a click), at about this pitch.
+        const samples = BLOCK / 2;
+        const cycles = Math.max(1, Math.round((freq * samples) / rate));
+        const pcm = new Int16Array(samples);
+        for (let i = 0; i < samples; i++) pcm[i] = Math.round(Math.sin((2 * Math.PI * cycles * i) / samples) * 6000);
+        const dataBytes = blocks * BLOCK;
+        const head = new DataView(new ArrayBuffer(44));
+        const tag = (o: number, s: string) => { for (let i = 0; i < 4; i++) head.setUint8(o + i, s.charCodeAt(i)); };
+        tag(0, 'RIFF'); head.setUint32(4, 36 + dataBytes, true); tag(8, 'WAVE'); tag(12, 'fmt ');
+        head.setUint32(16, 16, true); head.setUint16(20, 1, true); head.setUint16(22, 1, true);
+        head.setUint32(24, rate, true); head.setUint32(28, rate * 2, true); head.setUint16(32, 2, true); head.setUint16(34, 16, true);
+        tag(36, 'data'); head.setUint32(40, dataBytes, true);
+        // The block as a Blob, repeated by reference: the page holds 64 KB per file, not the file.
+        const block = new Blob([pcm]);
+        const parts: BlobPart[] = [head.buffer];
+        for (let b = 0; b < blocks; b++) parts.push(block);
+        picked.items.add(new File(parts, `${prefix}-${String(f + 1).padStart(2, '0')}.wav`, { type: 'audio/wav' }));
+      }
+      const input = document.querySelector('input[aria-label="Add files"]') as HTMLInputElement;
+      input.files = picked.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+    { count, bytes, prefix }
+  );
 }
 
 /**
@@ -192,14 +373,18 @@ export async function stubStorageFull(page: Page): Promise<void> {
  * window.__cacheEvents as { type: 'cache-error' | 'cache-ok', what, seq, ... }.
  * v16.1: only the library's own saves (meta, and the 'current' state record); a saved playlist's write ('pl:<id>') fails
  * only while window.__failPlaylistSaves is true (it starts false).
+ * v16.8.5: while window.__failAsQuota is true (it starts false) those failures are the browser's quota error
+ * (installQuotaFake) instead of a plain abort, and 'cache-progress' reports are recorded too.
  */
 export async function controlStateSaves(page: Page): Promise<void> {
+  await installQuotaFake(page);
   await page.addInitScript(() => {
     const w = window as any;
     w.__failStateSaves = false;
     w.__failPlaylistSaves = false;
+    w.__failAsQuota = false;
     w.__cacheEvents = [];
-    for (const type of ['aetheria:cache-error', 'aetheria:cache-ok']) {
+    for (const type of ['aetheria:cache-error', 'aetheria:cache-ok', 'aetheria:cache-progress']) {
       window.addEventListener(type, (e) =>
         w.__cacheEvents.push({ type: type.slice('aetheria:'.length), ...(e as CustomEvent).detail })
       );
@@ -209,8 +394,12 @@ export async function controlStateSaves(page: Page): Promise<void> {
       const request = (put as any).apply(this, args);
       const key = (args[0] as any)?.key;
       const isPlaylist = this.name === 'playlist-state' && typeof key === 'string' && key.startsWith('pl:');
-      if (w.__failStateSaves && (this.name === 'meta' || (this.name === 'playlist-state' && key === 'current'))) this.transaction.abort();
-      else if (w.__failPlaylistSaves && isPlaylist) this.transaction.abort();
+      const fail = (w.__failStateSaves && (this.name === 'meta' || (this.name === 'playlist-state' && key === 'current'))) ||
+        (w.__failPlaylistSaves && isPlaylist);
+      if (fail) {
+        if (w.__failAsQuota) w.__quotaFail(this.transaction);
+        else this.transaction.abort();
+      }
       return request;
     } as typeof put;
   });

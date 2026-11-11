@@ -6,15 +6,25 @@
 // Then the formats line, the last import ("Added 12 tracks to your library", what was skipped, the lengths still being
 // read, "The list that's playing is unchanged."), and the Recover offer for stored tracks the library doesn't list,
 // shown even after the banner's "Not now": Recover / Remove copies and Discard (two taps) are the banner's own
-// functions, so the same rules apply. No storage progress: none exists to measure.
+// functions, so the same rules apply.
+// v16.8.5 fix round 1 (A1): on the phone, a big save's progress for offline use, right under the last import: the sheet
+// is modal there (#root inert under it), so App's progress toast and its end line would run unseen and unheard behind
+// it. The same words, throttle and end line as the toast (App's cacheSaveNote): "Saving for offline use: 120 of 553 tracks.
+// …", then "553 tracks saved for offline use." or the warning. Its live region is always there while the sheet is open,
+// so a line added to it is read out; App marks a line quiet once said (or when the toast says it). The desktop panel
+// isn't modal: the toast beside it says all this, so the panel shows none of it.
+// v16.8.5 fix round 2: the line comes from a context of its own (ImportSaveContext, C6), so its changes re-render this
+// body alone, not the Library tab's health card; each end line and warning is a new element (its id: read once, C2's
+// later failures too); and once a line has shown in this opening of the sheet, its space stays, the tallest so far,
+// until the sheet closes (C5), so Choose files and Close don't move under a finger as the line changes or goes.
 // Modal on the phone; in the desktop panel it takes the Library's place until closed. Opened from the header's
 // Import, the empty state, and the health card's Review (starting at the Recover offer).
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, FilePlus2, FolderOpen } from 'lucide-react';
 import Sheet from '../../ui/Sheet';
 import { ViewBoundary } from '../../ErrorBoundary';
-import { useActions, useLibraryStatus, useShell } from '../contexts';
+import { useActions, useImportSave, useLibraryStatus, useShell } from '../contexts';
 import { countRender } from '../devRenders';
 import { sheetFallback } from './sheetFallback';
 import { FORMATS_LINE, FORMATS_SKIPPED, lastImportLines, recoverWords } from '../library/libraryModel';
@@ -22,13 +32,22 @@ import { FORMATS_LINE, FORMATS_SKIPPED, lastImportLines, recoverWords } from '..
 const CHOICE =
   'relative min-h-[56px] px-3 rounded-control border border-line-strong bg-surface-raised flex items-center justify-center gap-2 text-sm text-ink cursor-pointer hover:border-ink-faint transition-colors duration-fast focus-within:outline focus-within:outline-2 focus-within:outline-gold-400';
 
-const ImportBody = ({ recoverRef }: { recoverRef: { current: HTMLButtonElement | null } }) => {
+const ImportBody = ({ recoverRef, modal }: { recoverRef: { current: HTMLButtonElement | null }; modal: boolean }) => {
   countRender('ImportBody');
   const actions = useActions();
   const st = useLibraryStatus();
   const last = st.lastImport ? lastImportLines(st.lastImport, st.durationsLeft) : null;
   const o = st.orphans;
   const words = o && o.fresh + o.duplicates > 0 ? recoverWords(o.fresh, o.duplicates) : null;
+  const save = useImportSave().note;
+  // C5: the tallest save line shown in this opening of the sheet (it unmounts on close): the live region keeps that much
+  // room once a line has shown. 0 before any, so the empty region takes none (no margin, no height) as before.
+  const lineRef: { current: HTMLParagraphElement | null } = useRef(null);
+  const [reserve, setReserve] = useState(0);
+  useLayoutEffect(() => {
+    const h = lineRef.current ? lineRef.current.getBoundingClientRect().height : 0;
+    if (h > reserve) setReserve(h);
+  });
   return (
     <div data-testid="import-body" className="px-4 pb-4 space-y-3">
       <div className="grid grid-cols-2 gap-2">
@@ -65,6 +84,25 @@ const ImportBody = ({ recoverRef }: { recoverRef: { current: HTMLButtonElement |
             </p>
           ))}
           {last.quiet ? <p className="text-xs text-ink-faint">{last.quiet}</p> : null}
+        </div>
+      ) : null}
+      {modal ? (
+        // The live region takes no room while empty (no margin from space-y, no height) until a line has shown, then it
+        // keeps the tallest line's (C5). The start and each end line or warning are new elements (their keys), read once;
+        // the updates change the start's in place with aria-live="off".
+        <div role="status" aria-live="polite" aria-atomic="false" data-testid="import-save" style={reserve > 0 ? { minHeight: reserve } : save ? undefined : { marginTop: 0 }}>
+          {save ? (
+            <p
+              key={save.phase === 'saving' ? 'saving' : `end-${save.id}`}
+              ref={lineRef}
+              data-testid="import-save-line"
+              aria-atomic="true"
+              aria-live={save.quiet ? 'off' : undefined}
+              className="rounded-card border border-line-strong bg-surface-raised p-3 text-sm text-ink-strong leading-snug"
+            >
+              {save.text}
+            </p>
+          ) : null}
         </div>
       ) : null}
       {words ? (
@@ -129,7 +167,7 @@ const ImportSheet = ({ presentation }: ImportSheetProps) => {
       bodyRef={bodyRef}
       data-testid="sheet-import"
     >
-      <ViewBoundary name="sheet-import" fallback={sheetFallback(actions.closeSheet)} render={() => <ImportBody recoverRef={recoverRef} />} />
+      <ViewBoundary name="sheet-import" fallback={sheetFallback(actions.closeSheet)} render={() => <ImportBody recoverRef={recoverRef} modal={presentation === 'sheet'} />} />
     </Sheet>
   );
 };

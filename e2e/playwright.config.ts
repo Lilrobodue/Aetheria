@@ -63,7 +63,9 @@ export default defineConfig({
   // device-hide.spec.ts (v16.0.1, D1-D3) only with E2E_HIDE=1, and then it runs ALONE (the projects below): while any
   // Playwright connection is open, Chrome on Android keeps every tab visible, so the worker-wide one the other device
   // tests share would stop its page from ever going hidden. Without a device it is a desktop dry run.
+  // v16.8.5: big-save.spec.ts (the phone gate's ~11.5 GiB import) only with E2E_BIG_SAVE=1.
   testIgnore: [
+    ...(process.env.E2E_BIG_SAVE ? [] : [/[\\/]big-save\.spec\.ts$/]),
     ...(process.env.E2E_REAL_LIBRARY ? [] : [/real-library\.spec\.ts/]),
     ...(process.env.E2E_PARITY ? [] : [/[\\/]parity\.spec\.ts$/]),
     ...(HIDE ? [] : [/[\\/]device-hide\.spec\.ts$/]),

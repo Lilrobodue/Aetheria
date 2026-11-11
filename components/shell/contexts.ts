@@ -435,6 +435,18 @@ export interface LibraryStatusValue {
   assignPending: number;
 }
 
+/** v16.8.5 fix round 2 (C6): the Import sheet's save line alone (ImportSaveContext), read only by the sheet's body, so a
+ *  change of it (about once a second during a big save) re-renders that body and nothing else: not the Library tab's
+ *  health card, which reads LibraryStatusContext (fix round 1 carried the line there, as LibraryStatusValue.saveNote). */
+export interface ImportSaveValue {
+  /** v16.8.5 fix round 1 (A1): a big audio save's line for the Import sheet, which on the phone is modal over the toast:
+   *  the progress ('saving', updated at most once a second), then the end line ('saved', 5 s) or the warning ('failed',
+   *  until a later save ends it), in the toast's words. `quiet`: not to be read out (said already, or the toast says it).
+   *  Fix round 2: `id`, a new number for each end line and warning (their element's key: each is read once). null:
+   *  nothing to say. */
+  note: { phase: 'saving' | 'saved' | 'failed'; text: string; quiet: boolean; id: number } | null;
+}
+
 /** v16.1: one row of the saved playlists' list (resolved against the library as it is now). */
 export interface PlaylistSummaryValue {
   id: string;
@@ -770,6 +782,7 @@ export const GuideContext = createContext(null);
 export const ExportContext = createContext(null);
 export const ExportActionsContext = createContext(null);
 export const JournalContext = createContext(null);
+export const ImportSaveContext = createContext(null); // v16.8.5 fix round 2 (C6)
 
 function read<T>(ctx: unknown, name: string): T {
   const v = useContext(ctx);
@@ -796,3 +809,4 @@ export const useGuide = (): GuideValue => read<GuideValue>(GuideContext, 'GuideC
 export const useExport = (): ExportValue => read<ExportValue>(ExportContext, 'ExportContext');
 export const useExportActions = (): ExportActions => read<ExportActions>(ExportActionsContext, 'ExportActionsContext');
 export const useJournal = (): JournalValue => read<JournalValue>(JournalContext, 'JournalContext');
+export const useImportSave = (): ImportSaveValue => read<ImportSaveValue>(ImportSaveContext, 'ImportSaveContext');

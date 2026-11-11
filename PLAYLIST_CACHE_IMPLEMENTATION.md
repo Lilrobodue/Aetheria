@@ -345,6 +345,17 @@ async function clearPlaylistCache(): Promise<void> {
 
 ### Storage Estimate Check
 
+> **2026-11-09, v16.8.5 ("Big libraries save"): removed.** `hasStorageCapacity`
+> and `availableStorageMB` are gone from `utils/playlistCache.ts`, and no save
+> asks `navigator.storage.estimate()` any more. Its free figure is a reported
+> cap, not the real limit: Chrome on Android reports quota = usage + exactly
+> 10 GiB whatever the phone holds, yet stored 12 GiB with no error. The audio
+> gate sized against it refused a 23.87 GB import whole. Real write errors
+> decide now (a `QuotaExceededError`, or Chrome's abort at commit), and the
+> audio is saved in batches of up to 256 MB, each its own transaction, so a
+> real limit keeps every batch before it. The section below is the original
+> design, kept for the record.
+
 Before caching, check if the device has enough disk space. Skip caching (but
 don't error) if storage is tight.
 
@@ -692,6 +703,9 @@ toast so the user knows their library is back:
   bad cache data.
 - **Storage quota exceeded**: `hasStorageCapacity` check prevents the save;
   the app continues normally without caching. Console warns once.
+  *(2026-11-09, v16.8.5: no longer so. There is no pre-check; a batch that hits
+  the real limit fails, the batches before it stay stored, and the app says how
+  many tracks could not be saved, naming the browser, not the device.)*
 - **Mixed playlist**: If the user imports new songs after a restore, the
   auto-save captures the combined playlist (cached + new).
 - **Walk in progress**: If a Lo Shu walk was active when the page reloaded,

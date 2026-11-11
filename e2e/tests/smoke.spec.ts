@@ -12,6 +12,7 @@ import {
   shrinkSavedLibrary,
   stubStorageFull,
   controlStateSaves,
+  holdBlobSaves,
   toneWav,
   confirmDelete,
 } from './helpers';
@@ -276,13 +277,10 @@ test('Reload for an update waits when the library could not be saved', async ({ 
 });
 
 test('a failure that a later save made good does not hold the reload', async ({ page }) => {
-  // Hold every audio save 3 s in its free-space check, so the flush is still
-  // running while the reports below arrive.
-  await page.addInitScript(() => {
-    const storage = navigator.storage as any;
-    const estimate = storage.estimate.bind(storage);
-    storage.estimate = () => new Promise((resolve) => setTimeout(() => resolve(estimate()), 3000));
-  });
+  // Hold every audio save 3 s in its read of the stored tracks (v16.8.5: there
+  // is no free-space check to hold it in), so the flush is still running while
+  // the reports below arrive.
+  await holdBlobSaves(page, 3000);
   await openApp(page);
   await importTones(page, 3, 30);
   await page.evaluate(() => window.dispatchEvent(new Event('aetheria:update-ready')));
@@ -387,14 +385,10 @@ test('freeing space with Discard saves the library order again, not only the aud
 });
 
 test('Reload for an update stores an import that is still being saved', async ({ page }) => {
-  // Hold every audio save ~3 s in its free-space check, so the import is still
-  // being saved when Reload is tapped. (Without this, these small files are
-  // stored before the page goes, and the test proves nothing.)
-  await page.addInitScript(() => {
-    const storage = navigator.storage as any;
-    const estimate = storage.estimate.bind(storage);
-    storage.estimate = () => new Promise((resolve) => setTimeout(() => resolve(estimate()), 3000));
-  });
+  // Hold every audio save ~3 s in its read of the stored tracks, so the import
+  // is still being saved when Reload is tapped. (Without this, these small files
+  // are stored before the page goes, and the test proves nothing.)
+  await holdBlobSaves(page, 3000);
   const dialogs = await openApp(page);
   await importTones(page, 3, 30);
   // The update banner (a new service worker raises it; blocked in tests).
@@ -424,7 +418,8 @@ test('the perf HUD is off unless switched on', async ({ page }) => {
   expect(await page.evaluate(() => localStorage.getItem('aetheria.perfhud.v1'))).toBeNull();
 });
 
-test('cache round trips pass on a throwaway database', async ({ page }) => {
+// v16.8.5 fix round 1 (rev1 tests N9): @mobile, so the mobile-UA project runs the cache checks too.
+test('cache round trips pass on a throwaway database @mobile', async ({ page }) => {
   await page.goto('/tools/cache-check.html');
-  await expect(page.getByTestId('cache-check-result')).toHaveText('ALL PASS (38)', { timeout: 30_000 });
+  await expect(page.getByTestId('cache-check-result')).toHaveText('ALL PASS (57)', { timeout: 60_000 });
 });

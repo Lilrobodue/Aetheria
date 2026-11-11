@@ -135,7 +135,7 @@ eq(duplicatedToast('Evening', 'Evening copy'), 'Duplicated Evening as Evening co
 eq(deletedToast('Evening', 12), 'Deleted Evening (12 tracks). Your music is not touched.', 'deleted');
 eq(deletedToast('Evening', 1), 'Deleted Evening (1 track). Your music is not touched.', 'deleted, one track');
 eq(renamedToast('Evening', 'Night'), 'Renamed Evening to Night.', 'renamed');
-eq(writeFailedToast('Evening', true), 'Couldn’t save the change to Evening: this device is out of space for Aetheria.', 'write failed: full');
+eq(writeFailedToast('Evening', true), 'Couldn’t save the change to Evening: the browser has no more room for this app.', 'write failed: full');
 eq(writeFailedToast('Evening', false), 'Couldn’t save the change to Evening. It may be gone after a reload; Retry saves it again.', 'write failed');
 eq(undoChangedToast('Evening'), 'Evening changed since, so that can’t be undone.', 'Undo refused');
 eq(allMissingToast('Focus'), 'Every track in Focus is missing. Import the files again to bring them back.', 'all missing');

@@ -1,6 +1,6 @@
 // components/shell/ShellProviders.tsx (v15.5, the new layout beta; v15.6 adds the tuning context; v15.7 the library's two;
 // v16.0 the queue's; v16.1 the saved playlists'; v16.4 the Visuals sheet's and the More area's; v16.5 the Guide's and the
-// Journal's)
+// Journal's; v16.8.5 fix round 2 the Import sheet's save line's)
 //
 // Nests the new layout's context providers around it. It re-renders with App (four times a second while playing);
 // its children do not: App hands it one memo'd <AppShell /> with no props, and each view reads only the contexts it
@@ -28,6 +28,7 @@ import {
   JournalContext,
   ExportContext,
   ExportActionsContext,
+  ImportSaveContext,
 } from './contexts';
 import type {
   ShellActions,
@@ -49,6 +50,7 @@ import type {
   JournalValue,
   ExportValue,
   ExportActions,
+  ImportSaveValue,
 } from './contexts';
 
 interface ShellProvidersProps {
@@ -71,10 +73,11 @@ interface ShellProvidersProps {
   journal: JournalValue;
   exportValue: ExportValue;
   exportActions: ExportActions;
+  importSave: ImportSaveValue;
   children: ReactNode;
 }
 
-const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library, walk, time, libraryList, libraryStatus, queue, playlists, visuals, more, guide, journal, exportValue, exportActions, children }: ShellProvidersProps) => (
+const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library, walk, time, libraryList, libraryStatus, queue, playlists, visuals, more, guide, journal, exportValue, exportActions, importSave, children }: ShellProvidersProps) => (
   <ActionsContext.Provider value={actions}>
     <ShellContext.Provider value={shell}>
       <PlayerContext.Provider value={player}>
@@ -93,7 +96,9 @@ const ShellProviders = ({ actions, shell, player, sound, levels, tuning, library
                                 <GuideContext.Provider value={guide}>
                                   <JournalContext.Provider value={journal}>
                                     <ExportActionsContext.Provider value={exportActions}>
-                                      <ExportContext.Provider value={exportValue}>{children}</ExportContext.Provider>
+                                      <ExportContext.Provider value={exportValue}>
+                                        <ImportSaveContext.Provider value={importSave}>{children}</ImportSaveContext.Provider>
+                                      </ExportContext.Provider>
                                     </ExportActionsContext.Provider>
                                   </JournalContext.Provider>
                                 </GuideContext.Provider>

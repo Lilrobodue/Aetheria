@@ -1978,7 +1978,15 @@ const App: React.FC = () => {
     actionLabel?: string;
     onAction?: () => void;
     sticky: boolean;
-    kind?: 'cache-tracks' | 'cache-state';
+    // v16.8.5: 'cache-progress', a big audio save's progress (timed, never sticky: it covers a warning, never replaces it).
+    kind?: 'cache-tracks' | 'cache-state' | 'cache-progress';
+    // v16.8.5: an update in place that screen readers are not to read again (the progress toast after its first line).
+    quiet?: boolean;
+    // v16.8.5 fix round 2 (C1): set when a save's end line or warning that no one could hear (another modal sheet made
+    // #root inert) is put in again: a new number, so it is a new element (its key), which the live region reads once.
+    // Fix round 3 (D1): put in again 500 ms after #root is live again (HEAR_AFTER_MS, below), not as it comes back:
+    // Chrome announces nothing put in in the same frame as #root's return.
+    rekey?: number;
   };
   const [statusToast, setStatusToast] = useState<StatusToast | null>(null);
   // v15.4: the readout dialog (Current Track Analysis, Library Diagnostics, and the long notices' Details) and the
@@ -1997,6 +2005,12 @@ const App: React.FC = () => {
       sticky?: boolean;
       durationMs?: number;
       kind?: StatusToast['kind'];
+      quiet?: boolean;
+      // v16.8.5 fix round 1 (A6): while this says true, the timed toast outlives its time (armed again each time it
+      // would end): the progress of a save still running. It still goes when replaced, dismissed or cleared.
+      holdWhile?: () => boolean;
+      // v16.8.5 fix round 2 (C1): see StatusToast.rekey.
+      rekey?: number;
     }
   ) => {
     if (statusToastTimerRef.current) clearTimeout(statusToastTimerRef.current);
@@ -2022,24 +2036,66 @@ const App: React.FC = () => {
         : opts?.onAction,
       sticky: !!opts?.sticky,
       kind: opts?.kind,
+      quiet: opts?.quiet,
+      rekey: opts?.rekey,
     };
     if (toast.sticky) stickyToastRef.current = toast;
     setStatusToast(toast);
     if (!toast.sticky) {
-      statusToastTimerRef.current = setTimeout(() => {
+      const ms = opts?.durationMs ?? 6000;
+      const hold = opts?.holdWhile;
+      const expire = () => {
+        if (hold && hold()) {
+          statusToastTimerRef.current = setTimeout(expire, ms);
+          return;
+        }
         statusToastTimerRef.current = null;
         setStatusToast(stickyToastRef.current); // reveal a sticky one it covered
-      }, opts?.durationMs ?? 6000);
+      };
+      statusToastTimerRef.current = setTimeout(expire, ms);
     }
   }, []);
   // The metadata-save warning's failure spell (see the cache listeners below):
   // active from a failed save until one that started after it succeeds.
   const stateSpellRef = useRef({ active: false, shown: false, dismissed: false, full: false });
+  // v16.8.5: the big audio save whose progress the toast shows (the cache listeners below): its seq and counts, the
+  // toast's sequence number once shown (-1 before), when it last changed (at most once a second), its pending update,
+  // the cache generation it belongs to (a Clear ends it), and whether the user dismissed it (then it isn't shown again).
+  // Fix round 1 (A1): and whether its start has been announced (by the toast in a live #root, or by the Import sheet).
+  const cacheProgressRef = useRef<{ seq: number; saved: number; total: number; toastSeq: number; shownAt: number; timer: ReturnType<typeof setTimeout> | null; gen: number; dismissed: boolean; announced: boolean } | null>(null);
+  // v16.8.5 fix round 1 (A1): the same save's line in the Import sheet, which on a phone is modal over the toast (#root
+  // inert): the progress, then the end line (5 s) or the warning (until a later save withdraws it). The same words and
+  // throttle as the toast. `quiet`: not to be read out (said already, or the toast says it); `gen`: a Clear ends it.
+  // Fix round 2: `id`, a new number for each end line and each warning (its element's key in the sheet), so each is a
+  // new element, read once: C2, a later failure's words replace the line up, and are read out too.
+  type CacheSaveNote = { phase: 'saving' | 'saved' | 'failed'; text: string; quiet: boolean; gen: number; id: number };
+  const [cacheSaveNote, setCacheSaveNote] = useState<CacheSaveNote | null>(null);
+  // Fix round 2 (C2): the same line, for the cache listeners (is a line up?), and the last id given.
+  const cacheSaveNoteRef: { current: CacheSaveNote | null } = useRef(null);
+  const cacheSaveNoteIdRef: { current: number } = useRef(0);
+  const cacheSaveNoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // v16.8.5 fix round 2 (C1): the save's end line, or a tracks warning, put up while no one could hear it: another modal
+  // sheet (Sound, Up next, a Dialog …) had made #root inert, so the toast under it isn't exposed to a screen reader
+  // (voice() null below). `seq`: the toast's sequence number (-1: the slot was taken, so only the sheet's line has it);
+  // `end`: the end line (its 5 s start only once heard), else the warning (`sticky`: its toast, until withdrawn);
+  // `note`: the sheet's end line, held with it. Watched (a MutationObserver on #root's inert attribute, only while one
+  // is held) until #root is live again; fix round 3 (D1): and then put in after #root has been live for HEAR_AFTER_MS
+  // (unheardTimerRef, that wait).
+  const unheardCacheLineRef: { current: { seq: number; text: string; end: boolean; note: CacheSaveNote | null; gen: number; sticky: StatusToast | null } | null } = useRef(null);
+  const unheardWatchRef: { current: MutationObserver | null } = useRef(null);
+  const unheardTimerRef: { current: ReturnType<typeof setTimeout> | null } = useRef(null);
+  const toastRekeyRef: { current: number } = useRef(0);
+  // Set at render (below): the Import sheet is open as the phone's modal sheet (it reads out the save, not the toast),
+  // and (A7) the phone's Car screen shows (no progress toast there: it would cover the track for minutes while driving).
+  const importSheetModalRef: { current: boolean } = useRef(false);
+  const carScreenRef: { current: boolean } = useRef(false);
   const dismissStatusToast = useCallback(() => {
     if (statusToastTimerRef.current) clearTimeout(statusToastTimerRef.current);
     statusToastTimerRef.current = null;
     statusToastSeqRef.current++;
     setStatusToast((prev: StatusToast | null) => {
+      // v16.8.5: the progress toast dismissed stays away for the rest of its save (idempotent: StrictMode may run this twice).
+      if (prev?.kind === 'cache-progress' && cacheProgressRef.current) cacheProgressRef.current.dismissed = true;
       if (!prev || prev.sticky) {
         // The user has seen the metadata warning: not again this spell.
         if (prev?.kind === 'cache-state') stateSpellRef.current.dismissed = true;
@@ -2076,17 +2132,172 @@ const App: React.FC = () => {
   // its place — unless the user already dismissed it this spell.
   const cacheErrorSeqRef = useRef({ tracks: -1, state: -1 });
   useEffect(() => {
+    // v16.8.5 (S3): the real cause can be the browser's own limit for the app or a phone that is really full, so the
+    // words name the browser, not the device (this device's storage was false on a phone with hundreds of GB free).
+    const NO_ROOM = ': the browser has no more room for this app';
     const showStateWarning = () => {
       const spell = stateSpellRef.current;
       spell.shown = true;
       showStatusToast(
-        `Your latest library changes could not be saved${spell.full ? ": this device's storage is full" : ''}. ` +
+        `Your latest library changes could not be saved${spell.full ? NO_ROOM : ''}. ` +
           `Recent analysis and list changes may be missing after a reload.`,
         { sticky: true, kind: 'cache-state' }
       );
     };
+    // v16.8.5 (S2): a big audio save's progress toast. Timed (never sticky), so a warning it covers comes back when it
+    // ends; it changes at most once a second, and only while it is the toast up or none is (never over another: an
+    // Undo, the reload's notice), the first time over a cache warning too (this save may be the one that ends it).
+    // No timed toast up, and no sticky one but a cache warning (which a timed toast covers and gives back).
+    const clear = () => {
+      const k = stickyToastRef.current ? stickyToastRef.current.kind : null;
+      return statusToastTimerRef.current === null && (k === null || k === 'cache-tracks' || k === 'cache-state');
+    };
+    // Fix round 1 (A5): an empty slot, no toast up at all (the end line shows only there or over its own progress).
+    const empty = () => statusToastTimerRef.current === null && stickyToastRef.current === null;
+    // Fix round 1 (A1): who reads the save out now. The Import sheet while it is the phone's modal sheet (#root is inert
+    // under it, so the toast is not heard); else the toast, while #root is live; else no one yet (another modal is up).
+    const voice = (): 'sheet' | 'toast' | null => {
+      if (importSheetModalRef.current) return 'sheet';
+      const root = document.getElementById('root') as (HTMLElement & { inert?: boolean }) | null;
+      return root?.inert ? null : 'toast';
+    };
+    // The Import sheet's line: `ms` > 0 ends it then (the end line's 5 s, as the toast's). Fix round 2: every change goes
+    // through putNote, so cacheSaveNoteRef always holds the line up; endNoteIn ends `note` in `ms` if it is still up then.
+    const putNote = (note: CacheSaveNote | null) => {
+      cacheSaveNoteRef.current = note;
+      setCacheSaveNote(note);
+    };
+    const endNoteIn = (note: CacheSaveNote, ms: number) => {
+      if (cacheSaveNoteTimerRef.current) clearTimeout(cacheSaveNoteTimerRef.current);
+      cacheSaveNoteTimerRef.current = setTimeout(() => {
+        cacheSaveNoteTimerRef.current = null;
+        if (cacheSaveNoteRef.current === note) putNote(null);
+      }, ms);
+    };
+    const setNote = (note: CacheSaveNote | null, ms = 0) => {
+      if (cacheSaveNoteTimerRef.current) clearTimeout(cacheSaveNoteTimerRef.current);
+      cacheSaveNoteTimerRef.current = null;
+      putNote(note);
+      if (note && ms > 0) endNoteIn(note, ms);
+    };
+    const nextNoteId = () => ++cacheSaveNoteIdRef.current;
+    // Fix round 2 (C1): the end line or a tracks warning put up while no one could hear it (voice() null: another modal
+    // sheet over #root) is held until #root is live again. Then, if it is still the toast up (nothing replaced it, no
+    // Clear came, the warning not withdrawn), it goes in again as a new element, read once, and the end line's 5 s
+    // start then (the sheet's end line's with it). A later held line takes the earlier one's place (it replaced it).
+    // Fix round 3 (D1): it goes in again HEAR_AFTER_MS after #root is live again, not in the same frame. Chrome exposes
+    // #root's subtree again, with whatever was put in meanwhile, in one accessibility update, and fires no live-region
+    // event for it. The wait starts again at each return of #root, and stops when #root goes inert again (a modal
+    // opened meanwhile), so a modal closed and opened again within it loses nothing. Each guard is checked when the
+    // wait ends. The held card stays on screen meanwhile.
+    // A state warning raised while an end line is held replaces it (the slot is the warning's), and is not held itself,
+    // so neither is read out at the close (accepted scope).
+    // The progress's start needs none of this: it is said by the first change heard after the modal closes, so a save
+    // that ended before anyone could hear its start is heard only by its end.
+    // rev3 measured it in Chrome's own events (EVENT_OBJECT_LIVEREGIONCHANGED, from the same event generator as
+    // Android's announcements): a card put in synchronously, in a microtask, at setTimeout 0 or in the first animation
+    // frame was not announced; once that first frame had rendered (rev4: even a setTimeout 0 after it), it was, once.
+    // 500 ms is a margin for a slow phone,
+    // and TalkBack reads the opener focus returns to first.
+    const HEAR_AFTER_MS = 500;
+    const stopUnheardWatch = () => {
+      unheardWatchRef.current?.disconnect();
+      unheardWatchRef.current = null;
+      if (unheardTimerRef.current) clearTimeout(unheardTimerRef.current);
+      unheardTimerRef.current = null;
+    };
+    const hearUnheard = () => {
+      const u = unheardCacheLineRef.current;
+      unheardCacheLineRef.current = null;
+      stopUnheardWatch();
+      if (!u || u.gen !== cacheGeneration()) return; // a Clear came: none of it is true now
+      if (u.note && cacheSaveNoteRef.current === u.note) endNoteIn(u.note, 5000);
+      if (u.seq < 0 || statusToastSeqRef.current !== u.seq) return; // never on the toast, or replaced since: dropped
+      if (!u.end && stickyToastRef.current !== u.sticky) return; // the warning was withdrawn meanwhile
+      const rekey = ++toastRekeyRef.current;
+      if (u.end) showStatusToast(u.text, { durationMs: 5000, rekey });
+      else showStatusToast(u.text, { sticky: true, kind: 'cache-tracks', rekey });
+    };
+    const holdUnheard = (u: NonNullable<typeof unheardCacheLineRef.current>) => {
+      unheardCacheLineRef.current = u;
+      if (unheardWatchRef.current) return;
+      const root = document.getElementById('root');
+      if (!root) return;
+      // Only while a line is held: one callback per change of #root's inert attribute (a modal opening or closing).
+      // D1: #root live again starts the wait (again); inert again stops it. Put in only if #root is still live then;
+      // else held on, and the observer stays until it is put in or dropped (hearUnheard).
+      const watch = new MutationObserver(() => {
+        if (unheardTimerRef.current) clearTimeout(unheardTimerRef.current);
+        unheardTimerRef.current = null;
+        if (voice() !== 'toast') return;
+        unheardTimerRef.current = setTimeout(() => {
+          unheardTimerRef.current = null;
+          if (voice() === 'toast') hearUnheard();
+        }, HEAR_AFTER_MS);
+      });
+      watch.observe(root, { attributes: true, attributeFilter: ['inert'] });
+      unheardWatchRef.current = watch;
+    };
+    // A held end line still up: a later save's end line may take its place (one end line says the newer total).
+    const heldEndUp = () => {
+      const u = unheardCacheLineRef.current;
+      return !!u && u.end && u.seq >= 0 && u.seq === statusToastSeqRef.current;
+    };
+    const endProgress = (seq: number) => {
+      const p = cacheProgressRef.current;
+      if (!p || p.seq !== seq) return null;
+      if (p.timer) clearTimeout(p.timer);
+      cacheProgressRef.current = null;
+      return p;
+    };
+    const showProgress = () => {
+      const p = cacheProgressRef.current;
+      if (!p || !(p.total > 0)) return;
+      if (p.gen !== cacheGeneration()) { endProgress(p.seq); return; } // a Clear came: its save writes nothing more
+      const wait = p.shownAt + 1000 - Date.now();
+      if (wait > 0) {
+        if (!p.timer) p.timer = setTimeout(() => { p.timer = null; showProgress(); }, wait);
+        return;
+      }
+      p.shownAt = Date.now();
+      // Fix round 2 (C3): "0 of 1 track." for a single track (one over the byte threshold, or a total down to 1).
+      const text = `Saving for offline use: ${p.saved.toLocaleString()} of ${p.total.toLocaleString()} track${p.total === 1 ? '' : 's'}. Keep the app open until it's done.`;
+      const who = voice();
+      // The Import sheet's line (A1), whatever the toast does; read out once, and only by the sheet while it is modal.
+      // (Its element's key is its phase, so `id` is 0.)
+      setNote({ phase: 'saving', text, quiet: p.announced || who !== 'sheet', gen: p.gen, id: 0 });
+      if (who === 'sheet') p.announced = true;
+      // The toast: not once dismissed, not on the Car screen (A7); its own toast, or (the first time) none up but a
+      // cache warning, or (after) none up at all.
+      if (p.dismissed || carScreenRef.current) return;
+      const ours = p.toastSeq >= 0 && statusToastSeqRef.current === p.toastSeq;
+      if (!(ours || (p.toastSeq < 0 ? clear() : empty()))) return;
+      // A6: no lapse during a slow batch: while its save runs, the toast is armed again each time it would end.
+      showStatusToast(text, {
+        durationMs: 120_000,
+        kind: 'cache-progress',
+        quiet: p.announced,
+        holdWhile: () => cacheProgressRef.current === p && p.gen === cacheGeneration(),
+      });
+      p.toastSeq = statusToastSeqRef.current;
+      // Heard only in a live #root: a start line put under an inert one is said again by the next change.
+      if (who === 'toast') p.announced = true;
+    };
+    const onCacheProgress = (e: Event) => {
+      const { saved = 0, total = 0, seq = 0 } = (e as CustomEvent).detail || {};
+      let p = cacheProgressRef.current;
+      if (!p || p.seq !== seq) {
+        if (!(total > 0)) return;
+        if (p?.timer) clearTimeout(p.timer);
+        p = cacheProgressRef.current = { seq, saved, total, toastSeq: -1, shownAt: 0, timer: null, gen: cacheGeneration(), dismissed: false, announced: false };
+      } else {
+        p.saved = saved;
+        p.total = total;
+      }
+      showProgress();
+    };
     const onCacheError = (e: Event) => {
-      const { count = 0, reason = 'write-failed', what = 'tracks', seq = 0 } = (e as CustomEvent).detail || {};
+      const { count = 0, reason = 'write-failed', what = 'tracks', seq = 0, total: totalIn } = (e as CustomEvent).detail || {};
       const kind: 'tracks' | 'state' = what === 'state' ? 'state' : 'tracks';
       // Every failure counts, shown or not: only a save that started after the
       // LATEST one may withdraw the warning.
@@ -2100,12 +2311,28 @@ const App: React.FC = () => {
         showStateWarning();
         return;
       }
-      const tracks = `${count} track${count === 1 ? '' : 's'}`;
-      showStatusToast(
-        `${tracks} could not be saved for offline use${full ? ": this device's storage is full" : ''}. ` +
-          `${count === 1 ? 'It plays' : 'They play'} now but won't be here after a reload.`,
-        { sticky: true, kind: 'cache-tracks' }
-      );
+      // The save's progress ends here: the warning below replaces its toast.
+      const p = endProgress(seq);
+      // v16.8.5: "N of M" when only some of the save's tracks could not be stored (the batches before stay stored).
+      const total = typeof totalIn === 'number' && totalIn > count ? totalIn : count;
+      const some = total > count;
+      const tracks = some ? `${count.toLocaleString()} of ${total.toLocaleString()} tracks` : `${count.toLocaleString()} track${count === 1 ? '' : 's'}`;
+      const message =
+        `${tracks} could not be saved for offline use${full ? NO_ROOM : ''}. ` +
+        `${count === 1 ? 'It plays' : some ? 'Those play' : 'They play'} now but won't be here after a reload.`;
+      showStatusToast(message, { sticky: true, kind: 'cache-tracks' });
+      // Fix round 1 (A1): a save whose progress showed ends with the same words in the Import sheet, read out there
+      // while it is the phone's modal sheet (the toast under it is not heard). It stays until a later save ends it.
+      // Fix round 2 (C2): so does every later failure, of a save that showed progress or not, while the sheet's line is
+      // up (any phase) or the sheet is the phone's modal: its words replace the line, a new element, read once there.
+      const who = voice();
+      const gen = cacheGeneration();
+      const lineUp = !!cacheSaveNoteRef.current && cacheSaveNoteRef.current.gen === gen;
+      if ((p && p.gen === gen) || lineUp || importSheetModalRef.current) {
+        setNote({ phase: 'failed', text: message, quiet: who !== 'sheet', gen, id: nextNoteId() });
+      }
+      // C1: no one could hear it (another modal sheet over #root): it is put in again once #root is live (D1: 500 ms on).
+      if (who === null) holdUnheard({ seq: statusToastSeqRef.current, text: message, end: false, note: null, gen, sticky: stickyToastRef.current });
     };
     const onCacheOk = (e: Event) => {
       const { what = 'tracks', seq = 0 } = (e as CustomEvent).detail || {};
@@ -2115,18 +2342,67 @@ const App: React.FC = () => {
           Object.assign(stateSpellRef.current, { active: false, shown: false, dismissed: false });
           withdrawStickyToast('cache-state');
         }
-      } else if (seq > cacheErrorSeqRef.current.tracks && stickyToastRef.current?.kind === 'cache-tracks') {
-        withdrawStickyToast('cache-tracks');
-        // A metadata failure it kept off the screen may still stand.
-        const spell = stateSpellRef.current;
-        if (spell.active && !spell.dismissed) showStateWarning();
+        return;
       }
+      const p = endProgress(seq);
+      if (seq > cacheErrorSeqRef.current.tracks) {
+        // Its warning is no longer true: the Import sheet's copy goes too (even when the toast was dismissed).
+        if (cacheSaveNoteRef.current?.phase === 'failed') setNote(null);
+        if (stickyToastRef.current?.kind === 'cache-tracks') {
+          withdrawStickyToast('cache-tracks');
+          // A metadata failure it kept off the screen may still stand.
+          const spell = stateSpellRef.current;
+          if (spell.active && !spell.dismissed) showStateWarning();
+        }
+      }
+      // v16.8.5: a big save that stored everything says so once (5 s), over its own progress toast or in an empty slot
+      // (fix round 1, A5): never over another toast. So a sticky state warning raised during the save keeps the slot (no
+      // end line); one raised before the save was covered by the progress toast's first showing (clear() above), so the
+      // end line, over that progress, covers it for its 5 s too, and then it comes back. Decided after the withdrawal
+      // above, so the slot a withdrawn warning leaves counts as empty, and a state warning that takes it isn't covered.
+      if (!p || p.gen !== cacheGeneration()) return;
+      const ours = p.toastSeq >= 0 && statusToastSeqRef.current === p.toastSeq;
+      if (!(p.total > 0)) {
+        // Fix round 1 (A4): everything it had to store was deleted meanwhile: nothing to say, and no stale progress.
+        if (ours) {
+          if (statusToastTimerRef.current) clearTimeout(statusToastTimerRef.current);
+          statusToastTimerRef.current = null;
+          statusToastSeqRef.current++;
+          setStatusToast(stickyToastRef.current);
+        }
+        setNote(null);
+        return;
+      }
+      const line = `${p.total.toLocaleString()} track${p.total === 1 ? '' : 's'} saved for offline use.`;
+      const who = voice();
+      const note: CacheSaveNote = { phase: 'saved', text: line, quiet: who !== 'sheet', gen: p.gen, id: nextNoteId() };
+      if (who !== null) {
+        setNote(note, 5000);
+        if (ours || empty()) showStatusToast(line, { durationMs: 5000 });
+        return;
+      }
+      // Fix round 2 (C1): no one can hear it now (another modal sheet over #root). It waits, its 5 s (and the sheet's
+      // line's) from when it is heard; meanwhile it is held as the progress toast is (re-armed at each 2 min).
+      setNote(note);
+      const held = { seq: -1, text: line, end: true, note, gen: p.gen, sticky: null };
+      if (ours || empty() || heldEndUp()) {
+        showStatusToast(line, { durationMs: 120_000, holdWhile: () => unheardCacheLineRef.current === held });
+        held.seq = statusToastSeqRef.current;
+      }
+      holdUnheard(held);
     };
     window.addEventListener('aetheria:cache-error', onCacheError);
     window.addEventListener('aetheria:cache-ok', onCacheOk);
+    window.addEventListener('aetheria:cache-progress', onCacheProgress);
     return () => {
       window.removeEventListener('aetheria:cache-error', onCacheError);
       window.removeEventListener('aetheria:cache-ok', onCacheOk);
+      window.removeEventListener('aetheria:cache-progress', onCacheProgress);
+      const p = cacheProgressRef.current;
+      if (p?.timer) { clearTimeout(p.timer); p.timer = null; }
+      if (cacheSaveNoteTimerRef.current) { clearTimeout(cacheSaveNoteTimerRef.current); cacheSaveNoteTimerRef.current = null; }
+      stopUnheardWatch();
+      unheardCacheLineRef.current = null;
     };
   }, [showStatusToast, withdrawStickyToast]);
 
@@ -7780,6 +8056,21 @@ registerProcessor('wav-capture', WavCapture);
   useEffect(() => {
     if (carLayout && shellZen) setShellZen(false);
   }, [carLayout, shellZen]);
+  // v16.8.5 fix round 1: what the save's progress needs to know at its events (the cache listeners above). A1: the Import
+  // sheet is the phone's modal sheet (it reads the save out, not the toast under it). A7: the Car screen shows (Now
+  // Playing with Output = Car): no progress toast there, and one up when it appears goes (a warning it covered comes
+  // back); the end line and the warnings show as anywhere.
+  const carScreen = shellOn && carLayout && shellTab === 'now';
+  importSheetModalRef.current = shellOn && !desktopShell && shellSheet === 'import';
+  carScreenRef.current = carScreen;
+  useEffect(() => {
+    const p = cacheProgressRef.current;
+    if (!carScreen || !p || p.toastSeq < 0 || statusToastSeqRef.current !== p.toastSeq) return;
+    if (statusToastTimerRef.current) clearTimeout(statusToastTimerRef.current);
+    statusToastTimerRef.current = null;
+    statusToastSeqRef.current++;
+    setStatusToast(stickyToastRef.current);
+  }, [carScreen]);
   // The heat guard: a solid screen of the phone shell (a tab other than Now Playing, or the Car screen) covers the
   // visualizer, so it stops drawing (VisualsPause). Never in classic or the desktop shell, never while a recording
   // captures the canvas (Visuals Only, AV Mix). v16.5 review (A2): an Audio Only recording keeps the guard, as
@@ -9393,6 +9684,11 @@ registerProcessor('wav-capture', WavCapture);
     }),
     [isScanning, scanProgress, pass, analyseCounts, isRestoring, pendingDurationAnalysis.length, shellOrphans, orphanBusy, discardArmed, lastImport, storedTrackCount, savedPlaylists, scanRun, deviceRate, rescanSkip, bandsLeft, assignPending]
   );
+  // v16.8.5 fix round 1 (A1): the save's line, as long as no Clear came since (a Clear re-renders App at its tap).
+  const shellSaveNote = cacheSaveNote && cacheSaveNote.gen === cacheGeneration() ? cacheSaveNote : null;
+  // Fix round 2 (C6): in a context of its own (ImportSaveContext), read only by the Import sheet's body: a change of it
+  // (about once a second in a big save) reaches nothing else, not the health card (LibraryStatusContext).
+  const shellImportSave = useMemo(() => ({ note: shellSaveNote }), [shellSaveNote]);
   // v16.1: the saved playlists' slice (PlaylistsContext): the list's rows (summaries, O(total entries)), the open
   // playlist's resolved rows, the name Dialog and the Add sheet. Only while the new layout shows; never the clock (the
   // cursor counts only to mark the open playlist's playing row).
@@ -10968,8 +11264,18 @@ registerProcessor('wav-capture', WavCapture);
                   </div>
                 </div>
               )}
+              {/* v16.8.5: the progress toast is its own element (its key), read once as it appears; its updates in place
+                  carry aria-live="off" (quiet), and the line that ends it is a new element, read once. Fix round 2 (C1):
+                  so is an end line or warning put in again (rekey) when it went up unheard; fix round 3 (D1): 500 ms
+                  after #root is live again, as Chrome announces nothing put in in the same frame as its return. */}
               {statusToast && (
-                <div aria-atomic="true" className="flex items-center gap-3 bg-slate-900/95 border border-slate-600 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-lg">
+                <div
+                  key={statusToast.kind === 'cache-progress' ? 'cache-progress' : statusToast.rekey ? `status-${statusToast.rekey}` : 'status'}
+                  data-testid={statusToast.kind === 'cache-progress' ? 'cache-progress' : undefined}
+                  aria-atomic="true"
+                  aria-live={statusToast.quiet ? 'off' : undefined}
+                  className="flex items-center gap-3 bg-slate-900/95 border border-slate-600 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-lg"
+                >
                   <span className="flex-1 leading-snug">{statusToast.message}</span>
                   {statusToast.actionLabel && statusToast.onAction && (
                     <button
@@ -11135,6 +11441,7 @@ registerProcessor('wav-capture', WavCapture);
           journal={shellJournal}
           exportValue={shellExport}
           exportActions={shellExportActions}
+          importSave={shellImportSave}
         >
           <AppShell />
         </ShellProviders>
@@ -11158,7 +11465,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.8.4</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.8.5</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

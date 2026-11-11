@@ -316,11 +316,69 @@ const runningBlobSaves = new Set<Promise<void>>();
 // snapshot order. writeNewBlobs never rejects, so the chain can't break.
 let blobChain: Promise<void> = Promise.resolve();
 
+// v16.8.5, big libraries save. There is no free-space gate any more: navigator.storage.estimate()'s free figure is a
+// reported cap, not the real limit (Chrome on Android reports quota = usage + exactly 10 GiB whatever the phone holds,
+// and stored 12 GiB with no error while still reporting 10 GiB free), so a 23.87 GB import that the old gate sized
+// against it was refused whole and nothing was stored. Real write errors decide now (a QuotaExceededError from a
+// transaction, or Chrome's abort at commit). The audio goes in batches, each its own transaction, so a real quota error
+// keeps every batch committed before it: the earliest tracks, in the order uniqueSongs yields (the play order first,
+// then the rest of the library), are the ones kept.
+/** A batch holds up to this many bytes of files, and always at least one track (a bigger track is a batch alone). */
+const BLOB_BATCH_BYTES = 256 * 1024 * 1024;
+/** A save of more than this many tracks, or more than PROGRESS_MIN_BYTES, reports its progress (App's toast). */
+const PROGRESS_MIN_TRACKS = 50;
+const PROGRESS_MIN_BYTES = 1024 * 1024 * 1024;
+
+interface CacheLimits {
+  batchBytes: number;
+  progressTracks: number;
+  progressBytes: number;
+}
+const DEFAULT_LIMITS: CacheLimits = { batchBytes: BLOB_BATCH_BYTES, progressTracks: PROGRESS_MIN_TRACKS, progressBytes: PROGRESS_MIN_BYTES };
+const IS_DEV_BUILD = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
+let testLimits: Partial<CacheLimits> = {};
+
+/** Dev pages only (tools/cache-check): smaller batches and progress thresholds, so the tests use small files; null
+ *  puts the release values back. Returns the limits a save now uses. */
+function __setCacheLimitsForTests(limits: Partial<CacheLimits> | null): CacheLimits {
+  testLimits = limits ?? {};
+  return cacheLimits();
+}
+
+/** The limits a save uses, read as it starts: the release values, the dev page's, and in a dev build only the e2e
+ *  suite's window.__aetheriaCacheLimits (an init script). Only positive finite numbers count. A production build has
+ *  no override (IS_DEV_BUILD is false there, and the bundler drops the branch). */
+function cacheLimits(): CacheLimits {
+  const out: CacheLimits = { ...DEFAULT_LIMITS };
+  const dev = IS_DEV_BUILD && typeof window !== 'undefined'
+    ? (window as unknown as { __aetheriaCacheLimits?: Partial<CacheLimits> }).__aetheriaCacheLimits
+    : undefined;
+  for (const src of [testLimits, dev ?? {}]) {
+    for (const k of Object.keys(DEFAULT_LIMITS) as (keyof CacheLimits)[]) {
+      const v = src[k];
+      if (typeof v === 'number' && Number.isFinite(v) && v > 0) out[k] = v;
+    }
+  }
+  return out;
+}
+
+/** The end (exclusive) of the batch that starts at `from`: tracks in order while the batch stays within `limit`
+ *  bytes, and always at least one. */
+function batchEnd(songs: readonly Song[], from: number, limit: number): number {
+  let bytes = songs[from].file?.size || 0;
+  let end = from + 1;
+  while (end < songs.length && bytes + (songs[end].file?.size || 0) <= limit) {
+    bytes += songs[end].file?.size || 0;
+    end++;
+  }
+  return end;
+}
+
 /** Write blobs for tracks that are not stored yet, and leave every stored blob
  *  untouched. A metadata-only change produces ZERO blob writes, and a list that
  *  lost tracks deletes NOTHING — removal goes through deleteTracksFromCache.
  *  Never rejects: failures are caught and reported. `epoch` is taken now, so a
- *  Clear cancels a save still waiting its turn. */
+ *  Clear cancels a save still waiting its turn. v16.8.5: in batches (writeNewBlobs). */
 function saveBlobs(
   playlist: Song[],
   originalPlaylist: Song[],
@@ -340,20 +398,31 @@ async function writeNewBlobs(
 ): Promise<void> {
   const seq = ++saveSeq;
   let db: IDBDatabase | null = null;
-  // The tracks this save is storing, for the error report.
+  // The tracks this save has still to store (a batch leaves it once committed), for the error report.
   let storing: Song[] = [];
+  // The tracks of its committed batches, for the progress and the report's total. v16.8.5 fix round 1 (A2): counted
+  // only while they still exist, so a track deleted during the save is never counted (spec §2.1.3), not even one whose
+  // batch was in flight or had committed (the delete's own transaction removes it after).
+  const committed: Song[] = [];
+  const savedNow = () => committed.reduce((n, s) => (tombstones.has(s.id) ? n : n + 1), 0);
+  // Set once the tracks to store are known: a failure before that (e.g. the database not opening) reports nothing.
+  let listed = false;
+  let showProgress = false;
   try {
     db = await openDB();
 
     // Read existing keys (own readonly tx — avoids the "transaction went
-    // inactive across an await" pitfall before we issue writes).
+    // inactive across an await" pitfall before we issue writes). Once per save:
+    // saves run one at a time (blobChain), so nothing else adds audio meanwhile.
     const existing = (await reqDone(
       db.transaction(BLOBS_STORE, 'readonly').objectStore(BLOBS_STORE).getAllKeys()
     )) as string[];
     const existingSet = new Set(existing);
 
     // Listed after the reads, so a delete that landed during them is skipped
-    // (uniqueSongs leaves out tombstoned ids).
+    // (uniqueSongs leaves out tombstoned ids). In the order uniqueSongs yields
+    // (the play order first, then the rest of the library): if room runs out,
+    // the earliest of them are the tracks kept.
     for (const [id, song] of uniqueSongs(playlist, originalPlaylist)) {
       if (!existingSet.has(id)) storing.push(song);
     }
@@ -362,49 +431,71 @@ async function writeNewBlobs(
       reportCacheOk('tracks', seq); // every track in the lists is stored
       return;
     }
+    listed = true;
 
-    const availableMB = await availableStorageMB();
+    // A big save says how far it has got (App's progress toast), decided once from what it has to store.
+    const limits = cacheLimits();
+    const bytes = storing.reduce((sum, s) => sum + (s.file?.size || 0), 0);
+    showProgress = storing.length > limits.progressTracks || bytes > limits.progressBytes;
+    if (showProgress) reportCacheProgress(0, storing.length, seq);
 
-    // Re-check after the await (in the same synchronous block as the write or
-    // the report): a delete or a Clear may have landed meanwhile, and a track
-    // it removed is neither written back, counted for room, nor reported.
-    storing = storing.filter((s) => !tombstones.has(s.id));
+    while (storing.length) {
+      // Before every batch (in the same synchronous block as its write): a
+      // Clear that landed during the last await cancels the rest, and a track a
+      // delete removed is neither written back, counted, nor reported.
+      storing = storing.filter((s) => !tombstones.has(s.id));
+      if (epoch !== cacheEpoch) return;
+      if (storing.length === 0) break;
+
+      const end = batchEnd(storing, 0, limits.batchBytes);
+      const tx = db.transaction(BLOBS_STORE, 'readwrite');
+      const store = tx.objectStore(BLOBS_STORE);
+      // v16.8.5 fix round 1 (A3): a put() that throws (a DataCloneError, a closed connection) aborts its batch, so the
+      // puts before it in the same transaction don't commit while the whole batch is reported as not stored.
+      try {
+        for (let i = 0; i < end; i++) store.put(toBlob(storing[i]));
+      } catch (e) {
+        try { tx.abort(); } catch { /* already over */ }
+        throw e;
+      }
+      await txDone(tx);
+
+      committed.push(...storing.slice(0, end));
+      storing = storing.slice(end);
+      // After the first committed batch, not only after a whole save: a save that fails later still keeps what it stored.
+      requestPersistentStorageOnce();
+      if (showProgress && epoch === cacheEpoch) {
+        const saved = savedNow();
+        reportCacheProgress(saved, saved + storing.filter((s) => !tombstones.has(s.id)).length, seq);
+      }
+    }
+
+    // Only here, with every track of this save stored, may it withdraw a warning (seq rules: App).
     if (epoch !== cacheEpoch) return;
-    if (storing.length === 0) {
-      reportCacheOk('tracks', seq);
-      return;
-    }
-
-    // Room for these files (plus a margin)? Sized from the files themselves,
-    // not a flat figure, so a large import fails visibly instead of silently.
-    const neededMB = storing.reduce((sum, s) => sum + (s.file?.size || 0), 0) / (1024 * 1024) + 50;
-    if (availableMB < neededMB) {
-      console.warn(
-        `[PlaylistCache] Low storage: ${availableMB.toFixed(0)} MB available, ` +
-          `${neededMB.toFixed(0)} MB needed for ${storing.length} track(s). Not stored.`
-      );
-      reportCacheError(storing.length, 'storage-full', 'tracks', seq);
-      return;
-    }
-
-    const tx = db.transaction(BLOBS_STORE, 'readwrite');
-    const store = tx.objectStore(BLOBS_STORE);
-    for (const song of storing) store.put(toBlob(song));
-    await txDone(tx);
-
-    requestPersistentStorageOnce();
     reportCacheOk('tracks', seq);
+    // v16.8.5 fix round 2 (C7): counted as the reports are, without a track deleted during the save.
+    const added = savedNow();
     console.log(
-      `[PlaylistCache] Blobs added: +${storing.length} (stored ${existingSet.size + storing.length})`
+      `[PlaylistCache] Blobs added: +${added} (stored ${existingSet.size + added})`
     );
   } catch (err) {
     console.warn('[PlaylistCache] Blob save failed:', err);
-    // Tracks it was storing won't be here after a reload: say so — leaving out
-    // any a delete removed meanwhile. (A failure before they were known, e.g.
-    // the database not opening, stays a warning.)
+    // Tracks it was still storing (the failed batch and every one after it)
+    // won't be here after a reload: say so, leaving out any a delete removed
+    // meanwhile. The batches committed before it stay stored. (A failure before
+    // the tracks were known, e.g. the database not opening, stays a console
+    // warning: nothing was listed to report.)
     storing = storing.filter((s) => !tombstones.has(s.id));
-    if (storing.length && epoch === cacheEpoch) {
-      reportCacheError(storing.length, isQuotaError(err) ? 'storage-full' : 'write-failed', 'tracks', seq);
+    if (listed && epoch === cacheEpoch) {
+      const saved = savedNow();
+      if (storing.length) {
+        reportCacheError(storing.length, isQuotaError(err) ? 'storage-full' : 'write-failed', 'tracks', seq, saved + storing.length);
+      } else {
+        // v16.8.5 fix round 1 (A4): every track still to store was deleted meanwhile, so nothing that exists is
+        // unsaved: the save ends as a success (the App's usual seq rules), and its progress ends with the end line.
+        if (showProgress) reportCacheProgress(saved, saved, seq);
+        reportCacheOk('tracks', seq);
+      }
     }
   } finally {
     db?.close();
@@ -417,15 +508,33 @@ function isQuotaError(err: unknown): boolean {
 
 /** Tell the App that the cache could not store something, so it can say so
  *  instead of failing silently. `tracks`: audio that will be gone after a
- *  reload. `state`: the library order and analysis results (metadata). */
+ *  reload. `state`: the library order and analysis results (metadata).
+ *  v16.8.5: `total`, the tracks that save was storing (count of total could not
+ *  be stored, the rest are); left out where the whole save failed (App reads
+ *  count then). */
 function reportCacheError(
   count: number,
   reason: 'storage-full' | 'write-failed',
   what: 'tracks' | 'state',
-  seq: number
+  seq: number,
+  total: number = count
 ): void {
   try {
-    window.dispatchEvent(new CustomEvent('aetheria:cache-error', { detail: { count, reason, what, seq } }));
+    window.dispatchEvent(new CustomEvent('aetheria:cache-error', { detail: { count, reason, what, seq, total } }));
+  } catch {
+    // No window (tests) — nothing to tell.
+  }
+}
+
+/** v16.8.5: a big audio save's progress (more than PROGRESS_MIN_TRACKS tracks or PROGRESS_MIN_BYTES), at its start
+ *  (saved 0) and after every committed batch: `saved` of `total` tracks of save `seq` are stored. Neither counts a
+ *  track deleted during the save (fix round 1, A2: not even one already stored). So `saved` grows with each batch, but
+ *  may drop (by one per such track) when a track it had stored is deleted meanwhile. Its end is the save's cache-ok or
+ *  cache-error with the same seq (a Clear ends it with neither); when everything left to store was deleted, a last
+ *  report with saved = total comes just before the cache-ok. */
+function reportCacheProgress(saved: number, total: number, seq: number): void {
+  try {
+    window.dispatchEvent(new CustomEvent('aetheria:cache-progress', { detail: { saved, total, seq } }));
   } catch {
     // No window (tests) — nothing to tell.
   }
@@ -445,6 +554,10 @@ function reportCacheOk(what: 'tracks' | 'state', seq: number): void {
 // storage: without it, a phone short of space can delete the whole database.
 // Chrome grants it silently for installed or engaged PWAs.
 let persistRequested = false;
+/** Dev pages only (tools/cache-check): the next save asks again, as a new session would. */
+function __resetPersistRequestForTests(): void {
+  persistRequested = false;
+}
 function requestPersistentStorageOnce(): void {
   if (persistRequested) return;
   persistRequested = true;
@@ -853,36 +966,8 @@ async function clearPlaylistCache(opts: { playlists?: boolean } = {}): Promise<v
   }
 }
 
-// ----------------------------------------------------------------------------
-// Storage capacity guard
-// ----------------------------------------------------------------------------
-
-/** Free space the browser will give this site, in MB. Infinity when the
- *  Storage API is unavailable, throws or reports no quota — a missing
- *  diagnostic must never block caching on a perfectly capable device. */
-async function availableStorageMB(): Promise<number> {
-  try {
-    if (!navigator.storage?.estimate) return Infinity;
-    const est = await navigator.storage.estimate();
-    if (typeof est.quota !== 'number') return Infinity;
-    return (est.quota - (est.usage || 0)) / (1024 * 1024);
-  } catch {
-    return Infinity;
-  }
-}
-
-/** True if the device looks like it has at least `requiredMB` free. */
-async function hasStorageCapacity(requiredMB: number = 100): Promise<boolean> {
-  const availableMB = await availableStorageMB();
-  if (availableMB < requiredMB) {
-    console.warn(
-      `[PlaylistCache] Low storage: ${availableMB.toFixed(0)} MB available, ` +
-        `${requiredMB.toFixed(0)} MB recommended. Skipping cache.`
-    );
-    return false;
-  }
-  return true;
-}
+// v16.8.5: the storage capacity guard (availableStorageMB, hasStorageCapacity) is gone. Nothing else used it, and
+// navigator.storage.estimate()'s free figure is a reported cap, not the real limit (writeNewBlobs, above).
 
 // ----------------------------------------------------------------------------
 // Debounced savers — separate cadences for the two concerns
@@ -1010,7 +1095,8 @@ let plFailure: 'storage-full' | 'failed' | null = null;
 // playlists" ticked deletes exactly these, so a record App couldn't read stays on disk, as App says it does.
 const plKnown = new Set<string>();
 
-/** Why the latest playlist write failed ('storage-full': this device's storage is full), or null after one landed. */
+/** Why the latest playlist write failed ('storage-full': a QuotaExceededError, the browser has no more room for this
+ *  app), or null after one landed. */
 function playlistWriteFailure(): 'storage-full' | 'failed' | null {
   return plFailure;
 }
@@ -1178,7 +1264,7 @@ function saveBlobsNow(
 ): void {
   if (blobTimer) clearTimeout(blobTimer);
   const epoch = cacheEpoch;
-  // The capacity check lives in saveBlobs, sized from the new files.
+  // No capacity check: real write errors decide, batch by batch (writeNewBlobs, v16.8.5).
   blobTimer = setTimeout(() => {
     blobTimer = null;
     saveBlobs(playlist, originalPlaylist, epoch);
@@ -1237,7 +1323,6 @@ export {
   cacheGeneration,
   cancelPendingSaves,
   waitForBlobSaves,
-  hasStorageCapacity,
   saveBlobsNow,
   debouncedSaveMeta,
   flushPendingSave,
@@ -1255,4 +1340,7 @@ export {
   readKeyBandsRecord,
   writeKeyBandsRecord,
   __setCacheDbNameForTests,
+  // v16.8.5: the dev page's limits (small batches and thresholds) and its persist reset.
+  __setCacheLimitsForTests,
+  __resetPersistRequestForTests,
 };

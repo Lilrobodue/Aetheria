@@ -20,8 +20,8 @@
     "sha": "3fda4156894741a5"
   },
   "clearPlaylistCache call in tools/cache-check.ts: (module)": {
-    "count": 8,
-    "sha": "6b15e9fa5b138b53"
+    "count": 10,
+    "sha": "a64231c6f5fe57e0"
   },
   "confirmPendingDelete reference in App › <ViewBoundary render> › <Dialog actions> › <Button onClick>": {
     "count": 1,
@@ -40,8 +40,8 @@
     "sha": "ea710045e12cc443"
   },
   "deleteTracksFromCache call in tools/cache-check.ts: (module)": {
-    "count": 7,
-    "sha": "6b15e9fa5b138b53"
+    "count": 13,
+    "sha": "a64231c6f5fe57e0"
   },
   "discardOrphans reference in App › <ViewBoundary render> › <button onClick>": {
     "count": 1,
