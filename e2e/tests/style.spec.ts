@@ -1305,7 +1305,8 @@ test.describe('style foundation (v15.3)', () => {
     }
     await page.setViewportSize({ width: 1536, height: 900 });
     await census('desktop 1536, the 520 px centre');
-    const centre = async () => page.getByTestId('desktop-transport').evaluate((f) => Math.round((f.children[1] as HTMLElement).getBoundingClientRect().width));
+    // v16.8.7: the centre column sits in the controls row (the song row is the bar's first child).
+    const centre = async () => page.getByTestId('desktop-controls').evaluate((f) => Math.round((f.children[1] as HTMLElement).getBoundingClientRect().width));
     expect(await centre(), 'from 1536 px the centre is 520 px').toBe(520);
     await page.setViewportSize({ width: 1535, height: 900 });
     await expect.poll(centre, { message: 'below, 400 px' }).toBe(400);

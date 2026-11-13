@@ -8,6 +8,8 @@
 // v15.5 did. The name says what a tap does.
 // v16.7 review: `compact` (the desktop transport): below 1280 px a 44 × 44 dot (its name kept, the word from `xl`), so a
 // recording leaves the title column its room at 1024 px. Absent, the markup is as before.
+// v16.8.7: on the desktop transport it sits in the left group, after Up next (the title has its own row now), so both
+// sides fit their tracks while recording and Play stays at the bar's centre.
 
 import React from 'react';
 import { useActions, usePlayer } from './contexts';

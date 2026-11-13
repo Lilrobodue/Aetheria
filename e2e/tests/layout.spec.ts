@@ -780,13 +780,13 @@ test.describe('phone, accessibility', () => {
 test.describe('desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test('10. the side nav and the 88 px transport; Crystal opens in the panel, the transport works meanwhile; Escape closes it', async ({ page }) => {
+  test('10. the side nav and the 120 px transport (v16.8.7: 88 px controls under a 32 px song row); Crystal opens in the panel, the transport works meanwhile; Escape closes it', async ({ page }) => {
     test.setTimeout(120_000);
     await instrumentAudio(page);
     const dialogs = await playingInNewLayout(page);
     await expect(page.getByTestId('side-nav')).toBeVisible();
     const h = await page.getByTestId('desktop-transport').evaluate((el) => el.getBoundingClientRect().height);
-    expect(h, 'the transport is 88 px').toBe(88);
+    expect(h, 'the transport is 120 px (v16.8.7: the song row over the 88 px controls row; was 88)').toBe(120);
     await page.getByTestId('desktop-crystal').click();
     const panel = page.getByRole('region', { name: 'Crystal', exact: true });
     await expect(panel).toBeVisible();

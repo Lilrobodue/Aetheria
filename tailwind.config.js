@@ -100,7 +100,7 @@ export default {
         row: '4rem', // 64px: a library row
         tabbar: '3.5rem', // 56px: the bottom tab bar
         mini: '4rem', // 64px: the mini player
-        transport: '5.5rem', // 88px: the full transport
+        transport: '7.5rem', // 120px: the desktop transport (v16.8.7: a 32 px song row over the 88 px controls row; was 5.5rem)
       },
       borderRadius: {
         control: '0.5rem', // = rounded-lg: buttons, inputs, chips

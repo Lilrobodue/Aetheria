@@ -52,7 +52,7 @@
     --ae-row: 4rem;
     --ae-tabbar: 3.5rem;
     --ae-mini: 4rem;
-    --ae-transport: 5.5rem;
+    --ae-transport: 7.5rem; /* v16.8.7: the desktop bar with its song row (was 5.5rem) */
 
     --ae-radius-control: 0.5rem;
     --ae-radius-card: 0.75rem;

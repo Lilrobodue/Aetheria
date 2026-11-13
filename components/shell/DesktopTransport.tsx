@@ -1,6 +1,7 @@
 // components/shell/DesktopTransport.tsx (v15.5, the new layout beta)
 //
-// The desktop shell's 88 px transport (mockup desktop-shell), in three columns: the crystal tile (it opens the Crystal
+// The desktop shell's 88 px transport (mockup desktop-shell; v16.8.7: 120 px with the song row, below), in three
+// columns: the crystal tile (it opens the Crystal
 // panel), the title and the chips (24 px, one line, clipped: display only); shuffle, previous, Play 48, next, repeat
 // over the seek bar with its φ ticks and both times; Output, Walks, the master volume and ⋯. The desktop has no Car
 // screen: its layers chip says "Layers v2 · Car (tone only)". v15.6: the Zen button sits left of ⋯ (decision 1, option A).
@@ -15,6 +16,12 @@
 // column at 100 px or more while recording at 1024; Output's and Walks' bubbles only below 1280 (their words show from
 // there: decision 9); Music only is the first chip; the seek row fits the bar (decision 8).
 // v16.8.3 fix round 1 (SF5): the tuning chip ("Tuned −14 c") follows Music only, before the crystal chip, so it shows.
+// v16.8.7 (the song row; the user's decisions C and C1, 2026-11-13): the bar is 120 px, a 32 px song row over the 88 px
+// controls row. The song row holds the title and every chip, centred over Play; the chips never shrink, so each shows in
+// full from 1024 px (in the title column they had 118 px at 1024 and 198 at 1280: the Layers chip was cut and the beat
+// and Key fit chips never showed), and the title truncates first. The controls row keeps its three columns: the crystal
+// tile with Output, Walks and Up next on the left; the centre as before; REC, the volume, Zen, Full screen and ⋯ on the
+// right. Music only always shows its words (the icon-only form while recording saved room the title column no longer needs).
 
 import React from 'react';
 import { Ellipsis, ListVideo, Music2, Pause, Play, Repeat, Route, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, Waves } from 'lucide-react';
@@ -73,8 +80,65 @@ const DesktopTransport = () => {
       ref={barRef}
       aria-label="Player"
       data-testid="desktop-transport"
-      className="absolute bottom-0 inset-x-0 h-transport bg-surface-deep border-t border-line grid grid-cols-[1fr_auto_1fr] items-center gap-6 px-5 pointer-events-auto"
+      className="absolute bottom-0 inset-x-0 h-transport bg-surface-deep border-t border-line flex flex-col pointer-events-auto"
     >
+      {/* v16.8.7 (the song row, decision C): the title and every chip on a 32 px row of their own, centred over Play.
+          The chips never shrink (flex-none), so each shows in full from a 1024 px window (about 650 px at most, with
+          Music only and a tuning on); the title takes what is left and truncates first. Display only, as before. */}
+      {/* Review round 1: `safe center`, so a row too wide for the window (a very large browser font) clips its far end,
+          never Music only at its start; centred in its 32 px (not on its foot), so the chips keep 4 px clear of Play. Round 2:
+          plain justify-center first, as the fallback where `safe` isn't understood (the arbitrary property comes later). */}
+      <div data-testid="desktop-song-row" className="h-8 shrink-0 px-5 flex items-center justify-center [justify-content:safe_center] gap-3 overflow-hidden">
+        <div data-testid="desktop-title" className="min-w-0 flex-[0_1_auto] text-sm font-semibold text-ink-strong truncate">
+          {p.hasTrack ? p.title : 'Nothing playing'}
+        </div>
+        <span aria-hidden="true" className="shrink-0 w-px h-3.5 bg-line-strong" />
+        <div data-testid="desktop-chips" className="flex-none flex items-center gap-1.5 text-xs text-ink-muted whitespace-nowrap">
+          {/* v16.7 review: Music only first (M changes it with no control in view). v16.8.7: always with its words; the
+              icon-only form while recording below 1280 px saved room in the old title column, which no longer holds chips. */}
+          {s.musicOnly ? (
+            <span className={CHIP} data-testid="desktop-music-only-chip">
+              <VolumeX size={12} aria-hidden="true" />
+              Music only
+            </span>
+          ) : null}
+          {/* v16.8.3 (T4): the playing track's tuning while it is tuned (display only, as this row is), after Music only,
+              before the crystal chip. */}
+          {s.tuneChip ? (
+            <span className={CHIP} data-testid="desktop-tuning-chip">
+              {s.tuneChip}
+            </span>
+          ) : null}
+          <span className={CHIP}>
+            <span aria-hidden="true" className={`w-1.5 h-1.5 rounded-pill ${REGIME_DOT[regime]}`} />
+            {s.crystalHz} Hz
+          </span>
+          {s.layersShown ? (
+            <span className={CHIP} title={s.layersTip} data-testid="desktop-layers-chip">
+              {outputIcon(s, 12)}
+              {s.layersText}
+            </span>
+          ) : null}
+          <span className={CHIP}>
+            <Waves size={12} aria-hidden="true" />
+            {s.beatText}
+          </span>
+          {s.keyFitShown ? (
+            <span
+              className={s.keyFitLook === 'duck' ? 'inline-flex items-center gap-1 h-6 px-2 rounded-pill border border-gold-500/40 text-gold-200' : CHIP}
+              title={s.keyFitHint}
+            >
+              <Music2 size={12} aria-hidden="true" />
+              {s.keyFitText}
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      {/* The controls row: the 87 px under the song row (as the whole bar's inside was), its three columns as before. */}
+      <div data-testid="desktop-controls" className="flex-1 min-h-0 grid grid-cols-[1fr_auto_1fr] items-center gap-6 px-5">
+      {/* v16.8.7 (C1): the crystal tile, then Output, Walks and Up next (from the right group), so both sides fit their
+          1fr tracks from 1024 px and Play sits at the bar's centre (the right group's width had pushed it left). */}
       <div className="min-w-0 flex items-center gap-3">
         <Tooltip label={`Crystal ${s.crystalHz} Hz, ${regimeName(regime)}`} side="top-start">
           <button
@@ -87,68 +151,56 @@ const DesktopTransport = () => {
             <span aria-hidden="true" className={`w-3 h-3 rounded-pill ${REGIME_DOT[regime]}`} />
           </button>
         </Tooltip>
-        <div className="min-w-0">
-          <div data-testid="desktop-title" className="text-sm font-semibold text-ink-strong truncate">
-            {p.hasTrack ? p.title : 'Nothing playing'}
-          </div>
-          <div data-testid="desktop-chips" className="mt-1 flex items-center gap-1.5 text-xs text-ink-muted whitespace-nowrap overflow-hidden">
-            {/* v16.7 review: Music only first, so the clipped row never hides it (M changes it with no control in view);
-                while recording below 1280 px, the title column is narrowest: its icon alone, the words from xl. */}
-            {s.musicOnly ? (
-              p.isRecording ? (
-                <>
-                  {/* Below 1280 while recording: the icon alone, so its name is the native title (decision 9). */}
-                  <span className="inline-flex xl:hidden items-center h-6 px-2 rounded-pill border border-line-strong" data-testid="desktop-music-only-chip" title="Music only">
-                    <VolumeX size={12} aria-hidden="true" />
-                    <span className="sr-only">Music only</span>
-                  </span>
-                  <span className="hidden xl:inline-flex items-center gap-1 h-6 px-2 rounded-pill border border-line-strong" data-testid="desktop-music-only-chip">
-                    <VolumeX size={12} aria-hidden="true" />
-                    Music only
-                  </span>
-                </>
-              ) : (
-                <span className={CHIP} data-testid="desktop-music-only-chip">
-                  <VolumeX size={12} aria-hidden="true" />
-                  Music only
-                </span>
-              )
-            ) : null}
-            {/* v16.8.3 (T4): the playing track's tuning while it is tuned (display only, as this row is). Fix round 1 (SF5):
-                before the crystal chip, after Music only (v16.7's rule), so the clipped row shows it from 1024 px. */}
-            {s.tuneChip ? (
-              <span className={CHIP} data-testid="desktop-tuning-chip">
-                {s.tuneChip}
-              </span>
-            ) : null}
-            <span className={CHIP}>
-              <span aria-hidden="true" className={`w-1.5 h-1.5 rounded-pill ${REGIME_DOT[regime]}`} />
-              {s.crystalHz} Hz
-            </span>
-            {s.layersShown ? (
-              <span className={CHIP} title={s.layersTip} data-testid="desktop-layers-chip">
-                {outputIcon(s, 12)}
-                {s.layersText}
-              </span>
-            ) : null}
-            <span className={CHIP}>
-              <Waves size={12} aria-hidden="true" />
-              {s.beatText}
-            </span>
-            {s.keyFitShown ? (
-              <span
-                className={s.keyFitLook === 'duck' ? 'inline-flex items-center gap-1 h-6 px-2 rounded-pill border border-gold-500/40 text-gold-200' : CHIP}
-                title={s.keyFitHint}
-              >
-                <Music2 size={12} aria-hidden="true" />
-                {s.keyFitText}
-              </span>
-            ) : null}
-          </div>
+        <div data-testid="desktop-left-group" className="flex items-center gap-1.5 xl:gap-2">
+          <Tooltip label="Output" hideFrom="xl">
+            <button
+              type="button"
+              aria-label="Output"
+              data-testid="desktop-output"
+              onClick={() => actions.openSheet('sound', 'output')}
+              className={`h-touch min-w-touch justify-center xl:px-3 rounded-control border border-line-strong text-sm text-ink flex items-center gap-2 hover:border-ink-faint transition-colors duration-fast ${FOCUS}`}
+            >
+              {outputIcon(s, 16, 'text-ink-muted')}
+              <span className="hidden xl:inline">Output</span>
+            </button>
+          </Tooltip>
+          <Tooltip label="Walks" hideFrom="xl">
+            <button
+              type="button"
+              aria-label="Walks"
+              data-testid="desktop-walks"
+              onClick={() => actions.openSheet('walks')}
+              className={`h-touch min-w-touch justify-center xl:px-3 rounded-control border border-line-strong text-sm text-ink flex items-center gap-2 hover:border-ink-faint transition-colors duration-fast ${FOCUS}`}
+            >
+              <Route size={16} className="text-ink-muted" aria-hidden="true" />
+              <span className="hidden xl:inline">Walks</span>
+            </button>
+          </Tooltip>
+          <Tooltip label="Up next" keys={keys ? tipKeys('queue') : null}>
+            <button
+              type="button"
+              data-testid="desktop-queue"
+              aria-label={upNextButtonName(queue.waiting)}
+              aria-expanded={queueOpen}
+              onClick={actions.toggleQueue}
+              className={
+                queueOpen
+                  ? `h-touch min-w-touch px-2.5 rounded-control border border-ink-muted bg-surface-raised text-sm text-ink-strong flex items-center justify-center gap-1.5 ${FOCUS}`
+                  : `h-touch min-w-touch px-2.5 rounded-control border border-line-strong text-sm text-ink flex items-center justify-center gap-1.5 hover:border-ink-faint transition-colors duration-fast ${FOCUS}`
+              }
+            >
+              <ListVideo size={18} className="text-ink-soft" aria-hidden="true" />
+              {queue.waiting > 0 ? <span className="text-xs text-ink-soft tabular-nums">{queue.waiting}</span> : null}
+            </button>
+          </Tooltip>
+          {/* Review round 1 (the user's choice, 2026-11-13): REC, while recording, after Up next. First on the right it
+              made that side 298 px at 1024 (a 288 px track), so Play sat 10 px left of centre while recording. */}
+          <RecButton compact />
         </div>
       </div>
 
-      {/* v16.7 review: the centre is 360 px below 1280 (room for the title while recording at 1024), 400 below 1536,
+      {/* v16.7 review: the centre is 360 px below 1280 (room for the title while recording at 1024; v16.8.7: the title has
+          its own row, and the widths stay so both sides fit their tracks from 1024 px), 400 below 1536,
           520 from there. The buttons' row (48 px, for Play) overlaps the seek bar's 44 px row by 5 px, so the whole
           seek row fits the 87 px bar (it hung 5 px past the screen's foot since v15.5): the row sits above it (z) but
           lets pointers through except on its buttons, so a press there is the button's and anywhere else the seek bar's. */}
@@ -206,49 +258,8 @@ const DesktopTransport = () => {
         </div>
       </div>
 
-      <div className="flex items-center justify-end gap-1.5 xl:gap-2">
-        <RecButton compact />
-        <Tooltip label="Output" hideFrom="xl">
-          <button
-            type="button"
-            aria-label="Output"
-            data-testid="desktop-output"
-            onClick={() => actions.openSheet('sound', 'output')}
-            className={`h-touch min-w-touch justify-center xl:px-3 rounded-control border border-line-strong text-sm text-ink flex items-center gap-2 hover:border-ink-faint transition-colors duration-fast ${FOCUS}`}
-          >
-            {outputIcon(s, 16, 'text-ink-muted')}
-            <span className="hidden xl:inline">Output</span>
-          </button>
-        </Tooltip>
-        <Tooltip label="Walks" hideFrom="xl">
-          <button
-            type="button"
-            aria-label="Walks"
-            data-testid="desktop-walks"
-            onClick={() => actions.openSheet('walks')}
-            className={`h-touch min-w-touch justify-center xl:px-3 rounded-control border border-line-strong text-sm text-ink flex items-center gap-2 hover:border-ink-faint transition-colors duration-fast ${FOCUS}`}
-          >
-            <Route size={16} className="text-ink-muted" aria-hidden="true" />
-            <span className="hidden xl:inline">Walks</span>
-          </button>
-        </Tooltip>
-        <Tooltip label="Up next" keys={keys ? tipKeys('queue') : null}>
-          <button
-            type="button"
-            data-testid="desktop-queue"
-            aria-label={upNextButtonName(queue.waiting)}
-            aria-expanded={queueOpen}
-            onClick={actions.toggleQueue}
-            className={
-              queueOpen
-                ? `h-touch min-w-touch px-2.5 rounded-control border border-ink-muted bg-surface-raised text-sm text-ink-strong flex items-center justify-center gap-1.5 ${FOCUS}`
-                : `h-touch min-w-touch px-2.5 rounded-control border border-line-strong text-sm text-ink flex items-center justify-center gap-1.5 hover:border-ink-faint transition-colors duration-fast ${FOCUS}`
-            }
-          >
-            <ListVideo size={18} className="text-ink-soft" aria-hidden="true" />
-            {queue.waiting > 0 ? <span className="text-xs text-ink-soft tabular-nums">{queue.waiting}</span> : null}
-          </button>
-        </Tooltip>
+      {/* v16.8.7 (C1): the volume, Zen, Full screen and ⋯; Output, Walks, Up next and REC are on the left. */}
+      <div data-testid="desktop-right-group" className="flex items-center justify-end gap-1.5 xl:gap-2">
         <DesktopVolume />
         <Tooltip label={zenButtonTitleDesktop(zen.on)} side="top-end">
           <ZenButton data-testid="zen-button-desktop" kitTooltip />
@@ -265,6 +276,7 @@ const DesktopTransport = () => {
             <Ellipsis size={20} />
           </button>
         </Tooltip>
+      </div>
       </div>
     </footer>
   );

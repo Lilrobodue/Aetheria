@@ -542,8 +542,9 @@ test.describe('desktop', () => {
     const t0 = await elapsed(page);
     const volume = page.getByRole('slider', { name: 'Volume', exact: true });
     const v0 = Number(await volume.inputValue());
-    await page.getByTestId('desktop-queue').focus();
-    await page.keyboard.press('Tab'); // the volume, by the keyboard
+    // v16.8.7: Up next moved to the left column, so the volume is reached from its new neighbour, Zen (Shift+Tab).
+    await page.getByTestId('zen-button-desktop').focus();
+    await page.keyboard.press('Shift+Tab'); // the volume, by the keyboard
     await expect(volume).toBeFocused();
     await page.keyboard.press('ArrowLeft');
     await page.keyboard.press('ArrowLeft');
@@ -1365,19 +1366,34 @@ test.describe('desktop', () => {
         const r = el.getBoundingClientRect();
         return { name: el.getAttribute('aria-label') || el.textContent?.trim() || el.tagName, left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: r.width, h: r.height };
       });
-      const left = (f.children[0] as HTMLElement).getBoundingClientRect();
+      // v16.8.7: the controls row's left column (the song row is the bar's first child now).
+      const left = (f.querySelector('[data-testid="desktop-controls"]')!.children[0] as HTMLElement).getBoundingClientRect();
       const crystal = f.querySelector('[data-testid="desktop-crystal"]')!.getBoundingClientRect();
       const time = f.querySelector('[data-testid="desktop-time-elapsed"]')!.getBoundingClientRect();
-      const chips = f.querySelector('[data-testid="desktop-chips"]')!.getBoundingClientRect();
-      // The one showing (recording below 1280 there are two: the icon alone, and the words from xl).
-      const mo = Array.from(f.querySelectorAll('[data-testid="desktop-music-only-chip"]')).find((el) => el.getBoundingClientRect().width > 0) ?? null;
+      // v16.8.7: the chips' row is the song row (the Music only chip must sit whole inside it).
+      const row = f.querySelector('[data-testid="desktop-song-row"]')!.getBoundingClientRect();
+      // v16.8.7 review round 1: where each side's controls end, against the centre column (the left column is min-w-0,
+      // so a group too wide for it would spill over Shuffle without moving anything else).
+      const cols = Array.from(f.querySelector('[data-testid="desktop-controls"]')!.children);
+      const ends = (col: Element) => Array.from(col.querySelectorAll('button, input')).map((el) => el.getBoundingClientRect());
+      const leftEnd = Math.max(...ends(cols[0]).map((r) => r.right));
+      const rightStart = Math.min(...ends(cols[2]).map((r) => r.left));
+      const centreBox = cols[1].getBoundingClientRect();
+      // v16.8.7: one Music only chip, always with its words (no icon-only twin while recording).
+      const mos = Array.from(f.querySelectorAll('[data-testid="desktop-music-only-chip"]'));
+      const mo = mos.find((el) => el.getBoundingClientRect().width > 0) ?? null;
       const music = mo ? mo.getBoundingClientRect() : null;
       return {
         controls,
         leftW: left.width,
+        leftEnd,
+        rightStart,
+        centreLeft: centreBox.left,
+        centreRight: centreBox.right,
+        musicChips: mos.length,
         crystalRight: crystal.right,
         timeLeft: time.left,
-        chipsRight: chips.right,
+        chipsRight: row.right,
         music: music ? { left: music.left, right: music.right, width: music.width, title: mo!.getAttribute('title'), text: (mo!.textContent || '').trim() } : null,
         vw: innerWidth,
         vh: innerHeight,
@@ -1386,7 +1402,7 @@ test.describe('desktop', () => {
     });
   }
 
-  test('TR1. the transport fits from 1024 px, also while recording and with Music only on: every control (the whole seek row too) inside the viewport and 44 × 44, the title has room, the tile clear of the time', async ({ page }) => {
+  test('TR1. the transport fits from 1024 px, also while recording and with Music only on: every control (the whole seek row too) inside the viewport and 44 × 44, both sides clear of the centre (v16.8.7), the tile clear of the time', async ({ page }) => {
     test.setTimeout(150_000);
     const dialogs = await playingSeeded(page, 15);
     // Twelve queued: Up next shows a two-digit count, the widest it usually gets (the spec's probe had 3).
@@ -1405,15 +1421,22 @@ test.describe('desktop', () => {
           expect.soft(c.left >= 0 && c.right <= m.vw + 0.5 && c.top >= 0 && c.bottom <= m.vh + 0.5, `${width}, ${state}: ${c.name} inside the viewport (${Math.round(c.left)}–${Math.round(c.right)} × ${Math.round(c.top)}–${Math.round(c.bottom)})`).toBe(true);
           expect.soft(c.w >= 43.5 && c.h >= 43.5, `${width}, ${state}: ${c.name} at least 44 × 44 (${Math.round(c.w)} × ${Math.round(c.h)})`).toBe(true);
         }
-        expect.soft(m.leftW, `${width}, ${state}: the left column`).toBeGreaterThanOrEqual(100);
+        // v16.8.7: the title lives on the song row (it had to keep 100 px of the left column); it keeps room there.
+        // v16.8.7 (review round 1): the old guard was the left column's 100 px for the title, which now has its own row
+        // (desktop-bar B2 checks it there). Its intent, room on the left without crowding the centre, is now: each side's
+        // controls end before the centre column, in every state (recording too, with REC on the left).
+        expect.soft(m.leftEnd, `${width}, ${state}: the left group ends before the centre column (${Math.round(m.leftEnd)} ≤ ${Math.round(m.centreLeft)})`).toBeLessThanOrEqual(m.centreLeft + 0.5);
+        expect.soft(m.rightStart, `${width}, ${state}: the right group starts after the centre column (${Math.round(m.rightStart)} ≥ ${Math.round(m.centreRight)})`).toBeGreaterThanOrEqual(m.centreRight - 0.5);
         expect.soft(m.crystalRight, `${width}, ${state}: the crystal tile clear of the elapsed time`).toBeLessThanOrEqual(m.timeLeft);
         expect.soft(m.scrollW, `${width}, ${state}: no sideways scroll`).toBeLessThanOrEqual(m.vw);
         if (state.includes('Music only')) {
           expect.soft(m.music, `${width}, ${state}: the Music only chip`).not.toBeNull();
-          if (m.music) expect.soft(m.music.right, `${width}, ${state}: the Music only chip whole, not clipped`).toBeLessThanOrEqual(m.chipsRight + 0.5);
-          // Decision 9: a native title only where the chip is its icon alone (recording below 1280).
-          const iconOnly = state.includes('recording') && width < 1280;
-          if (m.music) expect.soft(m.music.title, `${width}, ${state}: the chip's title`).toBe(iconOnly ? 'Music only' : null);
+          if (m.music) expect.soft(m.music.right, `${width}, ${state}: the Music only chip whole, inside the song row`).toBeLessThanOrEqual(m.chipsRight + 0.5);
+          // v16.8.7: always its words, one chip, no native title (decision 9's icon-only form while recording below 1280
+          // saved room in the old title column; the song row has the room).
+          expect.soft(m.musicChips, `${width}, ${state}: one Music only chip`).toBe(1);
+          if (m.music) expect.soft(m.music.text, `${width}, ${state}: the chip's words`).toBe('Music only');
+          if (m.music) expect.soft(m.music.title, `${width}, ${state}: no native title`).toBeNull();
         }
       }
     };
@@ -1446,7 +1469,7 @@ test.describe('desktop', () => {
     expect(hits.seekFoot, "the seek row's foot (on screen now)").toBe('Seek');
     expect(hits.playFoot, "Play's foot is Play's").toMatch(/^(Play|Pause)$/);
     expect(hits.seekBottom, 'the whole seek row on screen').toBeLessThanOrEqual(hits.vh);
-    // Recording: the compact REC below 1280 keeps the title's room.
+    // Recording: the compact REC (v16.8.7: after Up next on the left) keeps both sides clear of the centre.
     await tab(page, 'more');
     await page.getByTestId('more').waitFor();
     if ((await page.getByTestId('more').getAttribute('data-more-view')) !== 'root') await tab(page, 'more');
