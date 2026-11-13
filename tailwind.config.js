@@ -142,5 +142,16 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // v16.8.6: the new layout's Guide lays itself out by its own width, not the window's (the desktop's More panel is
+    // 420 px in a window of any width). guide-sm/md/lg/xl are sm/md/lg/xl's sizes asked of the nearest container named
+    // `guide` (components/guide/guideWidth.tsx), registered in this order so a wider one wins, as the screens do.
+    // Additive: no class used before v16.8.6 changes.
+    ({ addVariant }) => {
+      addVariant('guide-sm', '@container guide (min-width: 640px)');
+      addVariant('guide-md', '@container guide (min-width: 768px)');
+      addVariant('guide-lg', '@container guide (min-width: 1024px)');
+      addVariant('guide-xl', '@container guide (min-width: 1280px)');
+    },
+  ],
 };

@@ -286,6 +286,95 @@ test.describe('desktop', () => {
     expect(dialogs).toEqual([]);
   });
 
+  // v16.8.6 (the user's PC, 2026-11-12): in the 420 px panel the views stepped up with the WINDOW (md/lg/xl), so the cube's
+  // three squares sat side by side a few dozen pixels wide, spilling over each other, and cards ran past the panel's
+  // edge. They now step up with the Guide's own width (components/guide/guideWidth.tsx): the panel reads as a phone does.
+  test('G7. the Guide fits its panel on a desktop: nothing in either view passes the panel’s edges; the cube’s squares stand one above another, each cell wide enough for its tone', async ({ page }) => {
+    test.setTimeout(120_000);
+    const dialogs = await openSeededNewLayout(page, 3, { real: 3, seconds: 40 });
+    await openGuide(page);
+    const panel = await page.getByTestId('more-scroll').boundingBox();
+    expect(panel?.width ?? 0, 'the desktop panel').toBeLessThan(500);
+    const outside = (view: string) =>
+      page.getByTestId('guide-content').evaluate((root, view) => {
+        const sc = document.querySelector('[data-testid="more-scroll"]')!.getBoundingClientRect();
+        return Array.from(root.querySelectorAll('*'))
+          .filter((el) => {
+            const b = el.getBoundingClientRect();
+            return b.width > 0 && (b.right > sc.right + 1 || b.left < sc.left - 1);
+          })
+          .map((el) => `${view}: ${el.tagName.toLowerCase()} "${(el.textContent || '').trim().slice(0, 30)}"`);
+      }, view);
+    for (const view of ['technical', 'plain'] as const) {
+      await viewButton(page, view).click();
+      await expect(viewButton(page, view)).toHaveAttribute('aria-pressed', 'true');
+      expect(await outside(view), `the ${view} view stays inside the panel`).toEqual([]);
+    }
+    // The cube (Technical): the centre cells of GUT, HEART and HEAD in one column, top to bottom; every cell at least
+    // 44 px wide (v16.8.5 drew them about 0 px wide, three squares across 290 px with their sums).
+    await viewButton(page, 'technical').click();
+    const cell = (hz: number) => page.getByTestId('guide-content').locator(`[title^="Play ${hz} Hz"]`).first();
+    const [gut, heart, head] = await Promise.all([528, 2178, 4920].map((hz) => cell(hz).boundingBox()));
+    expect(gut && heart && head, 'the three centre cells').toBeTruthy();
+    expect(Math.abs(gut!.x - heart!.x), 'GUT and HEART in one column').toBeLessThanOrEqual(1);
+    expect(Math.abs(heart!.x - head!.x), 'HEART and HEAD in one column').toBeLessThanOrEqual(1);
+    expect(gut!.y < heart!.y && heart!.y < head!.y, 'GUT, then HEART, then HEAD, top to bottom').toBe(true);
+    const widths = await page.getByTestId('guide-content').locator('[title^="Play "]').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
+    expect(widths.length, 'the 27 cells').toBe(27);
+    expect(Math.min(...widths), 'the narrowest cell').toBeGreaterThanOrEqual(44);
+    expect(dialogs).toEqual([]);
+  });
+
+  // v16.8.6 (the user, 2026-11-12: "fix the overlapping numbers in those Lo Shu grids in the original layout too"): from
+  // a 1280 px window classic's 896 px Guidebook put the three squares side by side, 40 px cells, and every tone ran under
+  // its cell's corner numbers (54 overlaps). The squares now stand one above another, each at most 440 px wide; the row
+  // sums stretch to their rows (as 56 px squares, beside larger cells all three sat by the first row).
+  test('G8. classic’s cube at 1280 and 1920 px: the squares one above another, no tone over its cell’s corner numbers, each row sum level with its row', async ({ page }) => {
+    test.setTimeout(120_000);
+    const { openApp } = await import('./helpers');
+    const dialogs = await openApp(page);
+    await page.getByRole('button', { name: /The Guidebook/ }).click();
+    await page.getByRole('button', { name: 'Technical', exact: true }).first().click();
+    for (const width of [1280, 1920]) {
+      await page.setViewportSize({ width, height: 900 });
+      // The cube's own cells ("Play 528 Hz — …"): classic's main screen has other titles naming a tone.
+      const cell = (hz: number) => page.locator(`[title^="Play ${hz} Hz"]`).first();
+      await cell(528).waitFor();
+      const [gut, heart, head] = await Promise.all([528, 2178, 4920].map((hz) => cell(hz).boundingBox()));
+      expect(Math.abs(gut!.x - heart!.x) <= 1 && Math.abs(heart!.x - head!.x) <= 1, `${width}: GUT, HEART and HEAD in one column`).toBe(true);
+      expect(gut!.y < heart!.y && heart!.y < head!.y, `${width}: top to bottom`).toBe(true);
+      const found = await cell(528).evaluate((c) => {
+        // Every text run in the three squares (a Range: text that spills counts); any two that cross.
+        const blocks = c.closest('.grid.grid-cols-1')!;
+        const runs: { t: string; l: number; r: number; top: number; b: number }[] = [];
+        const walk = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
+        while (walk.nextNode()) {
+          const n = walk.currentNode;
+          if (!n.textContent!.trim()) continue;
+          const range = document.createRange();
+          range.selectNodeContents(n);
+          for (const b of Array.from(range.getClientRects())) if (b.width > 0) runs.push({ t: n.textContent!.trim(), l: b.left, r: b.right, top: b.top, b: b.bottom });
+        }
+        const crossings: string[] = [];
+        for (let i = 0; i < runs.length; i++)
+          for (let j = i + 1; j < runs.length; j++) {
+            const a = runs[i], o = runs[j];
+            if (Math.min(a.r, o.r) - Math.max(a.l, o.l) > 1 && Math.min(a.b, o.b) - Math.max(a.top, o.top) > 1) crossings.push(`${a.t} × ${o.t}`);
+          }
+        // Row sums: the grid's next sibling, three boxes, each level with its row of cells.
+        const grid = c.parentElement!;
+        const cells = Array.from(grid.children).map((e) => e.getBoundingClientRect());
+        const sums = Array.from(grid.nextElementSibling!.children).map((e) => e.getBoundingClientRect());
+        const offRows = [0, 1, 2].filter((k) => Math.abs(sums[k].top - cells[k * 3].top) > 1 || Math.abs(sums[k].bottom - cells[k * 3].bottom) > 1);
+        return { crossings, offRows, cellWidth: Math.round(cells[0].width) };
+      });
+      expect(found.crossings, `${width}: no text crosses another in the squares`).toEqual([]);
+      expect(found.offRows, `${width}: every row sum level with its row`).toEqual([]);
+      expect(found.cellWidth, `${width}: a cell`).toBeGreaterThanOrEqual(56);
+    }
+    expect(dialogs).toEqual([]);
+  });
+
   test('G2b. (the classic pin’s source) classic’s Technical Guidebook text, hashed, without the tuning line: CLASSIC_TECHNICAL_TEXT_SHA', async ({ page }) => {
     test.setTimeout(120_000);
     const { openApp } = await import('./helpers');

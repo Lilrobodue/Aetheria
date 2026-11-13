@@ -17,6 +17,7 @@ import HowSure from './guide/HowSure';
 import type { HowSureBack } from './guide/HowSure';
 import { place } from '../utils/copy/places';
 import type { Layout } from '../utils/copy/places';
+import { useGuideStep } from './guide/guideWidth';
 
 /** A tag on its own row (the density rule: never inside a sentence). */
 const TagRow = ({ children, className = 'mt-2' }: { children: React.ReactNode; className?: string }) => (
@@ -53,14 +54,15 @@ const Place = ({ text }: { text: string }) => {
 };
 
 const AccessibleGuidebook = ({ layout = 'classic', back = null }: { layout?: Layout; back?: HowSureBack | null }) => {
+  const step = useGuideStep(); // v16.8.6: the window's width (classic) or the new layout's Guide's own (guideWidth)
   // Shared style for outbound reference links in the "What research says about music" section.
   const linkCls = "text-sky-400 hover:text-sky-300 underline decoration-sky-500/40 hover:decoration-sky-300 transition-colors";
   return (
     <div className="px-8 pb-12 space-y-10" data-guide-root="plain">
       {/* Title block */}
       <div className="text-center pt-2">
-        <h1 className="text-3xl md:text-4xl font-serif text-gold-300 tracking-wide">The Aetheria Guidebook</h1>
-        <p className="text-slate-300 mt-2 text-base md:text-lg">Your Guide to the Aetheria 432Hz Harmonic Player</p>
+        <h1 className={`text-3xl ${step('md:text-4xl')} font-serif text-gold-300 tracking-wide`}>The Aetheria Guidebook</h1>
+        <p className={`text-slate-300 mt-2 text-base ${step('md:text-lg')}`}>Your Guide to the Aetheria 432Hz Harmonic Player</p>
         <p className="text-slate-500 text-sm italic mt-3">By the Lewis Family</p>
       </div>
 
@@ -260,7 +262,7 @@ const AccessibleGuidebook = ({ layout = 'classic', back = null }: { layout?: Lay
         <p className="text-slate-300 leading-relaxed mb-4">
           Aetheria organizes its 27 frequencies into three ranges:
         </p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        <div className={`grid grid-cols-1 ${step('md:grid-cols-3')} gap-3 mb-4`}>
           <div className="p-4 bg-red-900/15 border border-red-500/30 rounded-lg">
             <h3 className="text-red-300 font-bold mb-1">GUT (1–9)</h3>
             <p className="text-xs text-slate-400 mb-2">174 Hz – 963 Hz</p>
@@ -428,7 +430,7 @@ const AccessibleGuidebook = ({ layout = 'classic', back = null }: { layout?: Lay
         <p className="text-slate-300 leading-relaxed mb-5">
           The player offers three ways to walk through the Lo Shu pattern:
         </p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className={`grid grid-cols-1 ${step('md:grid-cols-3')} gap-4`}>
           <div className="p-5 bg-emerald-900/15 border border-emerald-500/30 rounded-lg">
             <div className="flex items-center gap-2 mb-2">
               <Mountain size={18} className="text-emerald-300" />
@@ -491,7 +493,7 @@ const AccessibleGuidebook = ({ layout = 'classic', back = null }: { layout?: Lay
             <EvidenceTag tier="arithmetic" />
           </TagRow>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        <div className={`grid grid-cols-1 ${step('md:grid-cols-2')} gap-3 mb-4`}>
           <div className="p-4 bg-slate-900/50 border border-slate-800 rounded-lg">
             <h3 className="text-gold-200 font-bold mb-1">Solfeggio mode</h3>
             <p className="text-sm text-slate-400">The traditional frequencies.</p>

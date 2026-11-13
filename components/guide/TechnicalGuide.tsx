@@ -26,6 +26,7 @@ import LoShuMatrix from '../LoShuMatrix';
 import EvidenceTag from '../ui/EvidenceTag';
 import HowSure from './HowSure';
 import type { HowSureBack } from './HowSure';
+import { useGuideStep } from './guideWidth';
 import {
   crystalCopy, orderLine, REGIME_COPY, TRANSITION_COPY, REGIMES_TITLE, REGIMES_LEAD_START, HEAD_MARK_TITLE, RETUNE_TITLE, RETUNE_LONG, RETUNE_HISTORY, RETUNE_TUNING,
 } from '../../utils/copy/crystalCopy';
@@ -68,7 +69,10 @@ const TechnicalGuide = ({
   containCells,
   layout = 'classic',
   back = null,
-}: TechnicalGuideProps) => (
+}: TechnicalGuideProps) => {
+  // v16.8.6: the columns step up with the window (classic) or, in the new layout's Guide, its own width (guideWidth).
+  const step = useGuideStep();
+  return (
     <>
     {/* Intro Banner */}
     <div className="p-8 pb-4">
@@ -139,7 +143,7 @@ const TechnicalGuide = ({
             </div>
 
             {/* BI-PHASIC SYSTEM */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div className={`grid grid-cols-1 ${step('lg:grid-cols-2')} gap-6 mb-8`}>
               {/* PHASE 1: THE SEED */}
               <div className="bg-emerald-900/20 border border-emerald-500/40 rounded-xl p-6">
                 <h4 className="text-xl font-bold text-emerald-400 mb-4 flex items-center gap-2">
@@ -190,7 +194,7 @@ const TechnicalGuide = ({
               </h4>
               <div className="-mt-2 mb-4 flex flex-wrap items-center gap-x-2 gap-y-3"><EvidenceTag tier="tradition" /></div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div className={`grid grid-cols-1 ${step('md:grid-cols-2')} gap-6 mb-6`}>
                 <div className="bg-emerald-900/20 border border-emerald-500/30 rounded-lg p-4">
                   <div className="font-bold text-emerald-400 mb-2">Orders 1-3 (Seed): STATIC</div>
                   <div className="text-slate-300 text-sm">All 3s — The unchanging foundation</div>
@@ -227,7 +231,7 @@ const TechnicalGuide = ({
               </h4>
               <div className="-mt-2 mb-4 flex flex-wrap items-center gap-x-2 gap-y-3"><EvidenceTag tier="arithmetic" /></div>
               
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className={`grid grid-cols-1 ${step('lg:grid-cols-3')} gap-6`}>
                 {/* NADI DISTRIBUTION */}
                 <div className="bg-cyan-900/20 border border-cyan-500/30 rounded-lg p-4">
                   <h5 className="font-bold text-cyan-400 mb-3">NADI DISTRIBUTION:</h5>
@@ -390,7 +394,7 @@ const TechnicalGuide = ({
                   <EvidenceTag tier="tradition" />
                 </div>
                 <div className="p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className={`grid grid-cols-1 ${step('md:grid-cols-2')} ${step('lg:grid-cols-3')} gap-4`}>
                     {[
                       { freq: 174, color: '#8B0000' },
                       { freq: 285, color: '#FF0000' },
@@ -435,7 +439,7 @@ const TechnicalGuide = ({
                   <EvidenceTag tier="tradition" />
                 </div>
                 <div className="p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className={`grid grid-cols-1 ${step('md:grid-cols-2')} ${step('lg:grid-cols-3')} gap-4`}>
                     {[
                       { freq: 1206, color: '#FF69B4', order: '4th', step: '+243', n: 4 },
                       { freq: 1449, color: '#FF1493', order: '4th', step: '+243', n: 4 },
@@ -504,7 +508,7 @@ const TechnicalGuide = ({
                   <EvidenceTag tier="tradition" />
                 </div>
                 <div className="p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className={`grid grid-cols-1 ${step('md:grid-cols-2')} ${step('lg:grid-cols-3')} gap-4`}>
                     {[
                       { freq: 3504, color: '#1E0066', order: '7th', step: '+354', n: 7 },
                       { freq: 3858, color: '#0D0040', order: '7th', step: '+354', n: 7 },
@@ -576,7 +580,7 @@ const TechnicalGuide = ({
                 <Activity className="w-5 h-5" />
                 Complete Energy Circuit to SOURCE
               </h4>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-sm">
+              <div className={`grid grid-cols-1 ${step('lg:grid-cols-2')} gap-4 text-sm`}>
                 <div>
                   <div className="text-purple-400 font-bold mb-2">Traditional Tree (10 Sephirot)</div>
                   <div className="text-slate-300 leading-relaxed">
@@ -595,7 +599,7 @@ const TechnicalGuide = ({
             </div>
 
             {/* The Twelve Nodes */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className={`grid grid-cols-1 ${step('md:grid-cols-2')} gap-3`}>
                 {SEPHIROT_INFO.map((node, index) => (
                     <div 
                       key={node.name} 
@@ -655,7 +659,7 @@ const TechnicalGuide = ({
               Each crystal is paired with a geometric form: Aetheria's pairings, drawing on sacred-geometry traditions. Read together they spell out the faces of the <strong className="text-emerald-300">Lo Shu cube</strong> — the lower geometries (Circle, Vesica, Triangle) anchor the GUT layer, the middle forms (Flower of Life, Tube Torus) bridge HEART, and the higher geometries open HEAD.
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className={`grid grid-cols-1 ${step('sm:grid-cols-2')} ${step('lg:grid-cols-3')} gap-3`}>
                 {GEOMETRY_INFO.map(geo => (
                     <div key={geo.freq} className="p-4 bg-slate-900/40 rounded-xl border border-slate-800">
                         <div className="flex justify-between items-start mb-2">
@@ -677,6 +681,7 @@ const TechnicalGuide = ({
         </div>
     </div>
     </>
-);
+  );
+};
 
 export default TechnicalGuide;

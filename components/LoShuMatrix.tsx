@@ -4,6 +4,7 @@ import { LO_SHU_WALK_INFO, type LoShuWalkMode } from '../constants';
 import { frequencyToSpectrumColor, type FrequencyColorMode } from '../utils/spectrumColor';
 import EvidenceTag from './ui/EvidenceTag';
 import { place } from '../utils/copy/places';
+import { useGuideStep } from './guide/guideWidth';
 import type { Layout } from '../utils/copy/places';
 
 // v16.6 ("How sure are we?", the copy pass): a cell's name stands alone, untagged, so it carries no claim word ("Tissue
@@ -164,6 +165,7 @@ interface CellProps {
 }
 
 const Cell: React.FC<CellProps> = ({ freq, position, name, selected, onSelect, colorMode, contain }) => {
+  const step = useGuideStep(); // v16.8.6: the window's width (classic) or the new layout's Guide's own (guideWidth)
   const root = digitRoot(freq);
   const color = colorMode === 'spectrum'
     ? frequencyToSpectrumColor(freq)
@@ -215,7 +217,7 @@ const Cell: React.FC<CellProps> = ({ freq, position, name, selected, onSelect, c
       >
         {root}
       </span>
-      <div className="text-base sm:text-lg font-bold font-mono" style={{ color }}>
+      <div className={`text-base ${step('sm:text-lg')} font-bold font-mono`} style={{ color }}>
         {contain ? <span style={{ fontSize: 'min(1em, 36cqi)' }}>{freq}</span> : freq}
       </div>
       <div className="text-[9px] text-slate-400 mt-0.5">Hz</div>
@@ -238,7 +240,7 @@ const RegimeBlock: React.FC<RegimeBlockProps> = ({ regime, currentFrequency, onS
   const isLine = (sum: number) => sum === expected;
 
   return (
-    <div className={`bg-gradient-to-br ${regime.glow} border ${regime.border} rounded-xl p-5`}>
+    <div className={`w-full max-w-[440px] mx-auto bg-gradient-to-br ${regime.glow} border ${regime.border} rounded-xl p-5`}>
       <div className="flex items-start justify-between gap-3 mb-4">
         <div>
           <h4 className={`text-lg font-bold ${regime.accent}`}>{regime.label}</h4>
@@ -254,49 +256,51 @@ const RegimeBlock: React.FC<RegimeBlockProps> = ({ regime, currentFrequency, onS
         </div>
       </div>
 
-      <div className="grid grid-cols-[1fr_auto] gap-3 items-start">
-        {/* 3x3 grid with column sums underneath */}
-        <div>
-          <div className="grid grid-cols-3 gap-1.5">
-            {LO_SHU_POSITIONS.map((pos, i) => {
-              const freq = regime.freqs[pos - 1];
-              return (
-                <Cell
-                  key={i}
-                  freq={freq}
-                  position={pos}
-                  name={regime.names[pos - 1]}
-                  selected={currentFrequency === freq}
-                  onSelect={onSelectFrequency}
-                  colorMode={colorMode}
-                  contain={contain}
-                />
-              );
-            })}
-          </div>
-          {/* Column sums */}
-          <div className="grid grid-cols-3 gap-1.5 mt-1.5">
-            {cols.map((s, i) => (
-              <div
+      {/* v16.8.6: one grid: the 3x3 grid and its row sums side by side, the column sums under the grid. The row sums
+          stretch to the grid's height in three equal rows, so each sits level with its row of cells at any cell size
+          (they were 56 px squares: beside cells larger than 56 px, all three sat by the first row). */}
+      <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1.5 items-start">
+        {/* 3x3 grid */}
+        <div className="grid grid-cols-3 gap-1.5">
+          {LO_SHU_POSITIONS.map((pos, i) => {
+            const freq = regime.freqs[pos - 1];
+            return (
+              <Cell
                 key={i}
-                className={`text-center text-[11px] font-mono py-1 rounded ${
-                  isLine(s)
-                    ? 'text-emerald-300 bg-emerald-500/5'
-                    : 'text-orange-300 bg-orange-500/5'
-                }`}
-              >
-                {s.toLocaleString()}
-              </div>
-            ))}
-          </div>
+                freq={freq}
+                position={pos}
+                name={regime.names[pos - 1]}
+                selected={currentFrequency === freq}
+                onSelect={onSelectFrequency}
+                colorMode={colorMode}
+                contain={contain}
+              />
+            );
+          })}
         </div>
 
-        {/* Row sums + diagonals beside the grid */}
-        <div className="flex flex-col gap-1.5 pt-0">
+        {/* Row sums beside the grid */}
+        <div className="self-stretch grid grid-rows-3 gap-1.5">
           {rows.map((s, i) => (
             <div
               key={i}
-              className={`aspect-square min-w-[56px] flex items-center justify-center text-[11px] font-mono rounded ${
+              className={`min-w-[56px] flex items-center justify-center text-[11px] font-mono rounded ${
+                isLine(s)
+                  ? 'text-emerald-300 bg-emerald-500/5'
+                  : 'text-orange-300 bg-orange-500/5'
+              }`}
+            >
+              {s.toLocaleString()}
+            </div>
+          ))}
+        </div>
+
+        {/* Column sums, under the grid */}
+        <div className="grid grid-cols-3 gap-1.5">
+          {cols.map((s, i) => (
+            <div
+              key={i}
+              className={`text-center text-[11px] font-mono py-1 rounded ${
                 isLine(s)
                   ? 'text-emerald-300 bg-emerald-500/5'
                   : 'text-orange-300 bg-orange-500/5'
@@ -420,6 +424,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
   containCells,
   layout = 'classic',
 }) => {
+  const step = useGuideStep(); // v16.8.6: the window's width (classic) or the new layout's Guide's own (guideWidth)
   const [internalShowPerfect, setInternalShowPerfect] = useState(false);
   const isControlled = loShuPerfectGUT !== undefined;
   const showPerfect = isControlled ? !!loShuPerfectGUT : internalShowPerfect;
@@ -438,10 +443,10 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
           <Box className="text-purple-400" size={28} />
         </div>
         <div>
-          <h3 className="text-2xl sm:text-3xl font-bold text-purple-300 font-serif">
+          <h3 className={`text-2xl ${step('sm:text-3xl')} font-bold text-purple-300 font-serif`}>
             The Lo Shu Cube — 洛書
           </h3>
-          <p className="text-xs sm:text-sm text-purple-400/80 uppercase tracking-widest mt-1">
+          <p className={`text-xs ${step('sm:text-sm')} text-purple-400/80 uppercase tracking-widest mt-1`}>
             Three magic squares stacked into a 3×3×3 architecture
           </p>
         </div>
@@ -461,7 +466,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
       </div>
 
       {/* Position template + GUT toggle */}
-      <div className="grid grid-cols-1 lg:grid-cols-[auto_1fr] gap-6 mb-6 items-start">
+      <div className={`grid grid-cols-1 ${step('lg:grid-cols-[auto_1fr]')} gap-6 mb-6 items-start`}>
         <div className="bg-black/40 border border-slate-700 rounded-xl p-4">
           <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-2 text-center">
             Lo Shu Template
@@ -588,7 +593,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
             Pick a walk and the player builds a playlist from the songs assigned to each crystal; positions with
             no song are skipped.
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className={`grid grid-cols-1 ${step('sm:grid-cols-3')} gap-3`}>
             {(['A', 'B', 'C'] as MatrixWalkMode[]).map(mode => {
               const info = LO_SHU_WALK_INFO[mode];
               const Icon = WALK_ICONS[mode];
@@ -668,7 +673,10 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
         <span>Cell names: the traditional Solfeggio associations (GUT) and the Aetheria framework's (HEART, HEAD).</span>
         <EvidenceTag tier="tradition" />
       </div>
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+      {/* v16.8.6: the three squares stand one above another in both layouts, each at most 440 px wide (centred). Side by
+          side (xl:grid-cols-3) they had about 240 px each in classic's 896 px Guidebook and 40 px cells, where every
+          tone ran under its cell's corner numbers; no host gives them the ~850 px three legible squares need. */}
+      <div className="grid grid-cols-1 gap-5">
         <RegimeBlock regime={gut} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} contain={containCells} />
         <RegimeBlock regime={HEART} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} contain={containCells} />
         <RegimeBlock regime={HEAD} currentFrequency={currentFrequency} onSelectFrequency={onSelectFrequency} colorMode={colorMode} contain={containCells} />
@@ -680,7 +688,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
           <Calculator className="text-cyan-500" size={20} />
           Interval Architecture
         </h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div className={`grid grid-cols-1 ${step('md:grid-cols-3')} gap-4 mb-4`}>
           <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-4">
             <div className="text-xs text-red-300 uppercase tracking-wider mb-1">GUT</div>
             <div className="font-mono text-2xl text-red-200">111</div>
@@ -717,7 +725,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
           Position 5 of HEART — <span className="text-purple-300 font-bold">2178 Hz Compassion Activation</span> —
           sits at the geometric center of the entire system.
         </p>
-        <div className="flex items-center justify-center gap-3 sm:gap-6 font-mono">
+        <div className={`flex items-center justify-center gap-3 ${step('sm:gap-6')} font-mono`}>
           <div className="flex flex-col items-center">
             <div className="px-3 py-2 rounded-lg border border-blue-500/40 bg-blue-500/10 text-blue-200">4920</div>
             <div className="text-[10px] text-slate-500 mt-1">HEAD · root 6</div>
@@ -762,7 +770,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
           We did not invent this topology. We translated it. Across cultures the closed circuit is the form unified things take:
         </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4 text-[11px]">
+        <div className={`grid grid-cols-1 ${step('md:grid-cols-2')} gap-3 mb-4 text-[11px]`}>
           <div className="bg-slate-950/50 border border-cyan-500/20 rounded-lg p-3">
             <div className="text-cyan-300 font-bold uppercase tracking-wider mb-1">Taoist · <span className="font-mono text-cyan-200/90 normal-case">小周天</span></div>
             <div className="text-slate-300 leading-relaxed">The Microcosmic Orbit circulates qi up the Governing Vessel and down the Conception Vessel, always returning to the <span className="italic">dantian</span>. SOURCE is the cube's <span className="italic">dantian</span>. Energy that does not return does not accumulate.</div>

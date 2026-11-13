@@ -18,6 +18,8 @@
 // below the sticky control (instant under reduced motion), focuses it, and shows "Back to <where you were>" just above
 // it (evidenceOriginRef; the header's Back still goes to More). A tag inside the Guide scrolls in place (a nested
 // EvidenceLink): no navigation.
+// v16.8.6: both views sit in GuideWidthContainer (components/guide/guideWidth.tsx), so their columns step up with this
+// page's width, not the window's: on a desktop the 420 px panel reads as a phone does, not three squeezed columns.
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, ChevronRight } from 'lucide-react';
@@ -29,6 +31,7 @@ import { ExternalLinkGuard } from './externalLinks';
 import { GUIDE_VIEWS, GUIDE_VIEW_LABEL, isGuideView, onGuideAnchorRequest } from './moreModel';
 import type { GuideView } from './moreModel';
 import { EvidenceLink, scrollToEvidence } from '../../guide/evidenceLink';
+import { GuideWidthContainer } from '../../guide/guideWidth';
 import { HOW_SURE_JUMP, isTier } from '../../../utils/copy/evidence';
 import type { Tier } from '../../../utils/copy/evidence';
 
@@ -138,6 +141,8 @@ const GuidePage = () => {
         </button>
       </div>
       <ExternalLinkGuard data-testid="guide-content">
+        {/* v16.8.6: the views step up with this page's width, not the window's (on a desktop, the 420 px panel). */}
+        <GuideWidthContainer>
         <EvidenceLink.Provider value={inPlace}>
         {view === 'plain' ? (
           <AccessibleGuidebook layout="new" back={back} />
@@ -157,6 +162,7 @@ const GuidePage = () => {
           />
         )}
         </EvidenceLink.Provider>
+        </GuideWidthContainer>
       </ExternalLinkGuard>
     </div>
   );
