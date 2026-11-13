@@ -88,3 +88,23 @@ body {
   background-color: #020617;
   color: #e2e8f0;
 }
+
+/* v16.8.9 (the side menu away; the user's option A, 2026-11-13): while the desktop side menu is away, the open panel sits
+   at the window's edge with the logo floating over its top-left corner (DesktopShell, nav-show: 44 px at 12-14 px in).
+   Whatever header the panel shows makes room for it: the views' <header> rows (Library, Mixes, the mix builder, a
+   playlist, Layers, More and its pages) and the Sheet's own header ([data-panel-head]: Sound, Crystal, Walks, Import, Up
+   next, Visuals, Record, Export; a tab's crash card). Specificity (0,3,0) (:is takes its most specific argument) over the
+   headers' pl-* utilities; the same 220 ms as the slide, and only during it
+   ([data-nav-sliding], navStore), so nothing else animates. */
+[data-testid="desktop-panel"][data-nav-sliding] :is(header, [data-panel-head]) {
+  transition: padding-left 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+[data-testid="desktop-panel"][data-nav-away] :is(header, [data-panel-head]) {
+  padding-left: 4.5rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The sliding rule's own selector (same specificity, later), so reduced motion wins. */
+  [data-testid="desktop-panel"][data-nav-sliding] :is(header, [data-panel-head]) {
+    transition: none;
+  }
+}

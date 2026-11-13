@@ -29,6 +29,7 @@ export type ShortcutId =
   | 'layers'
   | 'visuals'
   | 'escape'
+  | 'menu' // v16.8.9: C, the side menu away or back
   | 'help';
 
 /** What shortcutFor reads of a keydown (a KeyboardEvent has all of these). */
@@ -75,6 +76,7 @@ const LETTERS: Readonly<Record<string, ShortcutId>> = {
   q: 'queue',
   l: 'layers',
   v: 'visuals',
+  c: 'menu', // v16.8.9 (the user's choice of key, 2026-11-13)
 };
 
 /**
@@ -174,6 +176,7 @@ export const SHORTCUTS: ReadonlyArray<ShortcutGroup> = [
     rows: [
       { id: 'fullscreen', label: 'Full screen', keys: [['F']] },
       { id: 'escape', label: 'Close the panel; leave full screen or Zen', keys: [['Esc']] },
+      { id: 'menu', label: 'Show or hide the menu', keys: [['C']] }, // v16.8.9
       { id: 'help', label: 'This list', keys: [['?']] },
     ],
   },
@@ -199,7 +202,7 @@ export function parseKeysOn(raw: string | null | undefined): boolean {
 // The tooltips' keys (the visible keycaps, the screen reader's description and aria-keyshortcuts)
 // ---------------------------------------------------------------------------------------------------------------
 
-export type TipKeyId = 'playPause' | 'next' | 'prev' | 'queue' | 'fullscreen' | 'layers' | 'help';
+export type TipKeyId = 'playPause' | 'next' | 'prev' | 'queue' | 'fullscreen' | 'layers' | 'menu' | 'help';
 
 export interface TipKeys {
   /** The keycaps the bubble shows ("or" between them). */
@@ -217,6 +220,7 @@ const TIP_CAPS: Readonly<Record<TipKeyId, ReadonlyArray<string>>> = {
   queue: ['Q'],
   fullscreen: ['F'],
   layers: ['L'],
+  menu: ['C'], // v16.8.9: both logo buttons
   help: ['?'],
 };
 
@@ -252,7 +256,14 @@ export type FeedbackKind =
   | 'musicOnlyOff'
   | 'fullscreenOn'
   | 'fullscreenOff'
-  | 'fullscreenFailed';
+  | 'fullscreenFailed'
+  // v16.8.9: C. Read only (no pill: the menu itself shows the change).
+  | 'menuAway'
+  | 'menuShown';
+
+/** v16.8.9: what C's live line says. */
+export const MENU_AWAY_LIVE = 'Menu hidden. Press C or the logo to bring it back.';
+export const MENU_SHOWN_LIVE = 'Menu shown.';
 
 /** F where the browser refuses full screen (an iframe, a policy): the pill and the live line say the same. */
 export const FULLSCREEN_FAILED = "Full screen isn't available in this window: Zen hides the controls instead.";
@@ -307,6 +318,10 @@ export function feedbackLive(kind: FeedbackKind): string | null {
       return 'Left full screen.';
     case 'fullscreenFailed':
       return FULLSCREEN_FAILED;
+    case 'menuAway':
+      return MENU_AWAY_LIVE;
+    case 'menuShown':
+      return MENU_SHOWN_LIVE;
     default:
       return null;
   }

@@ -15,6 +15,10 @@
 // keyboard shortcuts' leaf (DesktopKeys) lives here, in its own region. A tab change still focuses the view's heading,
 // unless the focus is already inside the panel ("/" puts it in the Library's search field). As Zen hides the shell, any
 // tooltip hides with it. Leaving this shell (classic, a peek, a phone-sized window) leaves the full screen entered here.
+// v16.8.9 (the side menu away; decisions A, 2026-11-13): while the menu is away (navStore), the logo floats at its place
+// (nav-show: "Show the menu", C), above the panel, right after the skip links in the tab order; an open panel slides to
+// the window's edge (left 0) and, through one rule in src/index.css ([data-nav-away]), its header makes room for the
+// logo; the empty-library card moves left too.
 // v16.8 (decision 4 A): an empty library gets the phone's "Import music" card over the visuals (DesktopEmpty, its own
 // region), on Now Playing with no panel open and the shell showing; it goes with the first import.
 
@@ -22,7 +26,7 @@ import React, { useEffect, useRef } from 'react';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
 import { ViewBoundary } from '../ErrorBoundary';
 import { overlayDepth } from '../ui/overlayStack';
-import { hideTooltips } from '../ui/Tooltip';
+import Tooltip, { hideTooltips } from '../ui/Tooltip';
 import { useActions, useShell } from './contexts';
 import { countRender } from './devRenders';
 import SideNav from './SideNav';
@@ -38,6 +42,13 @@ import { focusViewHeading } from './PhoneShell';
 import DesktopKeys from './shortcuts/DesktopKeys';
 import DesktopEmpty from './DesktopEmpty';
 import { leaveIfEnteredHere } from './shortcuts/immersive';
+import { Activity as PulseIcon } from 'lucide-react';
+import { SIDE_NAV_ID, showNavNow, useNavAway, useNavSliding } from './navStore';
+import { useKeysOn } from './shortcuts/shortcutsStore';
+import { tipKeys } from './shortcuts/keysModel';
+
+/** v16.8.9: the panel's slide, only while the menu hides or shows (never on a resize across 1280 px). */
+const PANEL_SLIDE = ' transition-[left] duration-[220ms] ease-emphasized motion-reduce:transition-none';
 
 const SKIP =
   'sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-toast focus:px-4 focus:min-h-touch focus:rounded-control focus:bg-surface-panel focus:text-ink focus:pointer-events-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400';
@@ -57,6 +68,9 @@ const DesktopShell = () => {
   const { tab, sheet, zen, rootRef } = useShell();
   const reduced = usePrefersReducedMotion();
   const actions = useActions();
+  const navIsAway = useNavAway();
+  const navSliding = useNavSliding();
+  const keys = useKeysOn();
   // v16.1: the Add to playlist sheet is modal, as the menu (the panel keeps showing what it showed).
   const panelSheet = sheet && sheet !== 'menu' && sheet !== 'playlist-add' ? sheet : null;
   const stubOpen = !panelSheet && tab !== 'now';
@@ -118,9 +132,40 @@ const DesktopShell = () => {
           Skip to the panel
         </button>
       ) : null}
+      {navIsAway ? (
+        // v16.8.9: the logo left behind, where the menu's own logo was (its 44 px box at 8 px down; 14 px in from the rail's
+        // edge below 1280, 12 from 1280), above an open panel (z), so a click or C brings the menu back.
+        <div className="absolute top-2 left-[14px] xl:left-3 z-[5] pointer-events-auto">
+          <Tooltip label="Show the menu" keys={keys ? tipKeys('menu') : null} side="right">
+            <button
+              type="button"
+              aria-label="Show the menu"
+              aria-expanded="false"
+              aria-controls={SIDE_NAV_ID}
+              data-testid="nav-show"
+              data-focus-fallback=""
+              onClick={showNavNow}
+              className="group w-11 h-11 rounded-pill flex items-center justify-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+            >
+              <span aria-hidden="true" className="w-9 h-9 rounded-pill bg-gold-500 group-hover:bg-gold-400 flex items-center justify-center text-black shadow-raised transition-colors duration-fast">
+                <PulseIcon size={20} />
+              </span>
+            </button>
+          </Tooltip>
+        </div>
+      ) : null}
       <SideNav />
       {panelSheet || stubOpen ? (
-        <div data-testid="desktop-panel" className="absolute left-[72px] xl:left-[200px] top-0 bottom-transport w-[420px] pointer-events-auto">
+        <div
+          data-testid="desktop-panel"
+          data-nav-away={navIsAway ? 'true' : undefined}
+          data-nav-sliding={navSliding ? 'true' : undefined}
+          className={
+            (navIsAway
+              ? 'absolute left-0 top-0 bottom-transport w-[420px] pointer-events-auto'
+              : 'absolute left-[72px] xl:left-[200px] top-0 bottom-transport w-[420px] pointer-events-auto') + (navSliding ? PANEL_SLIDE : '')
+          }
+        >
           {panelSheet ? (
             <SheetHost presentation="panel" only="panel" />
           ) : (

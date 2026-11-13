@@ -101,7 +101,15 @@ const Sheet = ({
     return () => {
       const active = document.activeElement;
       const focusWasHere = !active || active === document.body || !active.isConnected || (!!panel && panel.contains(active));
-      if (focusWasHere && opener instanceof HTMLElement && opener.isConnected && opener !== document.body) opener.focus();
+      if (focusWasHere && opener instanceof HTMLElement && opener !== document.body) {
+        // v16.8.9 review rounds 1 and 2: an opener that can't take the focus back, gone (the floating logo, removed when
+        // the menu came back) or now inside an inert region (the desktop side menu, slid away while this panel was
+        // open), hands it to the page's fallback (data-focus-fallback: the floating logo while the menu is away, else
+        // the menu's own logo). A page with no fallback (the phone) keeps the old behaviour: nothing is focused.
+        const lost = !opener.isConnected || !!opener.closest('[inert]');
+        if (!lost) opener.focus();
+        else document.querySelector<HTMLElement>('[data-focus-fallback]')?.focus();
+      }
     };
   }, [open, modal]);
 
@@ -118,7 +126,8 @@ const Sheet = ({
       {title}
     </h2>
   ) : (
-    <div className={modal ? 'shrink-0 px-4 pt-2 pb-2 flex items-start justify-between gap-3' : 'shrink-0 px-5 pt-4 pb-3 flex items-start justify-between gap-3 border-b border-line'}>
+    // v16.8.9: data-panel-head marks the panel presentation's header, for the side-menu-away room (src/index.css).
+    <div data-panel-head={modal ? undefined : ''} className={modal ? 'shrink-0 px-4 pt-2 pb-2 flex items-start justify-between gap-3' : 'shrink-0 px-5 pt-4 pb-3 flex items-start justify-between gap-3 border-b border-line'}>
       <div className="min-w-0">
         <h2 id={titleId} ref={headingRef} tabIndex={-1} className="text-lg font-semibold text-ink-strong outline-none">
           {title}

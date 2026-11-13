@@ -13,15 +13,20 @@ import React from 'react';
 import EmptyState from '../ui/EmptyState';
 import { useActions, useLibraryList, useLibrarySummary } from './contexts';
 import { countRender } from './devRenders';
+import { useNavAway, useNavSliding } from './navStore';
 
 const DesktopEmpty = ({ show }: { show: boolean }) => {
   countRender('DesktopEmpty');
   const lib = useLibrarySummary();
   const { loading } = useLibraryList();
   const actions = useActions();
+  const navAway = useNavAway();
+  const sliding = useNavSliding();
   if (!show || loading || lib.count !== 0) return null;
   return (
-    <div className="absolute left-[72px] xl:left-[200px] right-[29rem] top-0 bottom-transport flex items-center justify-center p-6 pointer-events-none">
+    // v16.8.9: beside the menu, or from the window's edge while it is away.
+    // Review round 1: it glides with the menu (only while it slides), not a jump.
+    <div className={(navAway ? 'absolute left-0 right-[29rem] top-0 bottom-transport flex items-center justify-center p-6 pointer-events-none' : 'absolute left-[72px] xl:left-[200px] right-[29rem] top-0 bottom-transport flex items-center justify-center p-6 pointer-events-none') + (sliding ? ' transition-[left] duration-[220ms] ease-emphasized motion-reduce:transition-none' : '')}>
       <div data-testid="desktop-empty" className="w-full max-w-sm rounded-card bg-surface-panel border border-line shadow-overlay pointer-events-auto">
         <EmptyState
           title="Your library is empty"

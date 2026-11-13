@@ -19,6 +19,8 @@ import {
   FULLSCREEN_FAILED,
 } from './keysModel.ts';
 import type { KeyContext, KeyLike, ShortcutId, FeedbackKind } from './keysModel.ts';
+import { MENU_AWAY_LIVE, MENU_SHOWN_LIVE } from './keysModel.ts';
+import { NAV_AWAY_KEY, parseNavAway } from '../navModel.ts';
 
 let passed = 0;
 const failures: string[] = [];
@@ -54,6 +56,7 @@ const WANT: Array<[string, ShortcutId]> = [
   ['q', 'queue'],
   ['l', 'layers'],
   ['v', 'visuals'],
+  ['c', 'menu'], // v16.8.9
   ['/', 'search'],
   ['?', 'help'],
   ['ArrowLeft', 'back5'],
@@ -61,7 +64,7 @@ const WANT: Array<[string, ShortcutId]> = [
 ];
 for (const [key, id] of WANT) eq(shortcutFor(k(key), IDLE), id, `"${key}"`);
 // Caps Lock: the upper-case letter, no Shift.
-for (const key of ['K', 'N', 'P', 'M', 'F', 'Q', 'L', 'V']) eq(shortcutFor(k(key), IDLE), shortcutFor(k(key.toLowerCase()), IDLE), `Caps Lock "${key}"`);
+for (const key of ['K', 'N', 'P', 'M', 'F', 'Q', 'L', 'V', 'C']) eq(shortcutFor(k(key), IDLE), shortcutFor(k(key.toLowerCase()), IDLE), `Caps Lock "${key}"`);
 // Shift with an arrow is 30 s.
 eq(shortcutFor(k('ArrowLeft', { shiftKey: true }), IDLE), 'back30', 'Shift+←');
 eq(shortcutFor(k('ArrowRight', { shiftKey: true }), IDLE), 'forward30', 'Shift+→');
@@ -155,12 +158,16 @@ eq([seekStep('back5'), seekStep('forward5'), seekStep('back30'), seekStep('forwa
 // ---- The list ---------------------------------------------------------------------------------------------------------
 eq(SHORTCUTS.map((g) => g.title), ['Playback', 'Panels', 'View'], 'three groups');
 const rows = SHORTCUTS.flatMap((g) => g.rows);
-eq(rows.length, 13, 'thirteen rows');
+eq(rows.length, 14, 'fourteen rows (v16.8.9: C, the menu)');
 eq(new Set(rows.map((r) => r.id)).size, rows.length, 'unique row ids');
 check(rows.every((r) => r.label && r.keys.length > 0 && r.keys.every((c) => c.length > 0)), 'every row has a label and keys');
 eq(rows.find((r) => r.id === 'musicOnly')?.keys, [['M']], 'M is Music only');
 eq(rows.find((r) => r.id === 'musicOnly')?.label, 'Music only: the layers off or on', 'its words');
 eq(rows.find((r) => r.id === 'seek5')?.label, 'Back or forward 5 s', 'the arrows step 5 s');
+// v16.8.9: C, in View, before "This list".
+eq(rows.find((r) => r.id === 'menu')?.keys, [['C']], 'C is the menu');
+eq(rows.find((r) => r.id === 'menu')?.label, 'Show or hide the menu', 'its words');
+eq(SHORTCUTS.find((g) => g.title === 'View')?.rows.map((r) => r.id), ['fullscreen', 'escape', 'menu', 'help'], 'the View group');
 
 // ---- The switch ---------------------------------------------------------------------------------------------------
 eq(KEYS_KEY, 'aetheria.keys.v1', 'the key');
@@ -170,6 +177,7 @@ eq([parseKeysOn(null), parseKeysOn(undefined), parseKeysOn(''), parseKeysOn('on'
 eq(tipKeys('playPause'), { caps: ['Space', 'K'], aria: 'Space K', description: 'Shortcut: Space or K' }, 'Play\'s tooltip keys');
 eq(tipKeys('help'), { caps: ['?'], aria: '?', description: 'Shortcut: ?' }, 'the Shortcuts button');
 eq([tipKeys('next').aria, tipKeys('prev').aria, tipKeys('queue').aria, tipKeys('fullscreen').aria, tipKeys('layers').aria], ['N', 'P', 'Q', 'F', 'L'], 'the letters');
+eq(tipKeys('menu'), { caps: ['C'], aria: 'C', description: 'Shortcut: C' }, 'v16.8.9: both logo buttons');
 eq(describeKeys([]), '', 'no keys, no description');
 eq(ariaKeyshortcuts(['Space', 'K']), 'Space K', 'aria-keyshortcuts');
 eq([fullscreenTip(false), fullscreenTip(true)], ['Full screen', 'Exit full screen'], 'the full-screen button');
@@ -193,6 +201,16 @@ eq(feedbackFor('musicOnly', { isPlaying: true, musicOnly: true }), 'musicOnlyOff
 eq(['back5', 'forward5', 'back30', 'forward30', 'next', 'prev'].map((id) => feedbackFor(id as ShortcutId, { isPlaying: true, musicOnly: false })), ['back5', 'forward5', 'back30', 'forward30', 'next', 'prev'], 'arrows, N and P');
 eq(['fullscreen', 'search', 'queue', 'layers', 'visuals', 'escape', 'help'].map((id) => feedbackFor(id as ShortcutId, { isPlaying: true, musicOnly: false })), [null, null, null, null, null, null, null], 'the panel keys show their panel instead');
 eq(FEEDBACK_MS, 1200, '1.2 s');
+// v16.8.9: C is read, never shown (the menu itself shows the change).
+eq([feedbackText('menuAway'), feedbackText('menuShown')], [null, null], 'C: no pill');
+eq([feedbackLive('menuAway'), feedbackLive('menuShown')], [MENU_AWAY_LIVE, MENU_SHOWN_LIVE], 'C: the live line');
+eq(MENU_AWAY_LIVE, 'Menu hidden. Press C or the logo to bring it back.', 'its words, away');
+eq(MENU_SHOWN_LIVE, 'Menu shown.', 'its words, back');
+eq(feedbackFor('menu', { isPlaying: true, musicOnly: false }), null, 'feedbackFor: none (the handler announces it)');
+
+// ---- v16.8.9: the menu away, remembered -----------------------------------------------------------------------------
+eq(NAV_AWAY_KEY, 'aetheria.navAway.v1', 'the key');
+eq([parseNavAway(null), parseNavAway(''), parseNavAway('shown'), parseNavAway('true'), parseNavAway('AWAY'), parseNavAway('away')], [false, false, false, false, false, true], 'only "away" is away');
 
 if (failures.length) {
   console.error(`keysModel: ${failures.length} of ${passed + failures.length} checks FAILED`);

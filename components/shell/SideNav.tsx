@@ -10,6 +10,9 @@
 // open section keeps its tint, semibold and aria-current, plus a 3 px gold bar at the nav's edge (a shape, so colour
 // isn't the only cue). Tooltips (the kit's) give the full name and the key below 1280; from 1280 there are none (decision
 // 9: every row shows its name and key there). aria-label is the full name at every width.
+// v16.8.9 (the side menu away; the user's decisions, 2026-11-13): the logo is a button, "Hide the menu" (C), at every
+// width; a click slides the whole nav off the left edge (-translate-x-full, 220 ms, instant under reduced motion) and
+// makes it inert, and the shell's floating logo (DesktopShell, nav-show) brings it back. Remembered (navStore).
 
 import React from 'react';
 import { Activity as PulseIcon, Disc3, Keyboard, Layers, Library, ListMusic, Menu } from 'lucide-react';
@@ -21,6 +24,7 @@ import { TABS } from './shellModel';
 import { requestMoreRoot } from './more/moreModel';
 import { requestShortcuts, useKeysOn } from './shortcuts/shortcutsStore';
 import { tipKeys } from './shortcuts/keysModel';
+import { SIDE_NAV_ID, focusNavToggle, setNavAway, useNavAway } from './navStore';
 import type { ShellTab } from './shellModel';
 
 const ICONS: Record<ShellTab, any> = { now: Disc3, library: Library, mixes: ListMusic, layers: Layers, more: Menu };
@@ -35,20 +39,47 @@ const SideNav = () => {
   const { tab, moreViewRef } = useShell();
   const actions = useActions();
   const keys = useKeysOn();
+  const away = useNavAway();
   return (
     // Decision 11 (v16.7): the visuals still centre on the whole window, so beside the 200 px nav their centre sits 100 px
     // left of the open area's; left for a later release with the visualizer (its canvas sizing touches heat and full
     // screen; Visualizer.tsx is untouched here).
     <nav
+      id={SIDE_NAV_ID}
       aria-label="Main"
       data-testid="side-nav"
-      className="absolute left-0 top-0 bottom-transport w-[72px] xl:w-[200px] bg-surface-deep border-r border-line flex flex-col items-center xl:items-stretch xl:px-3 pt-3 gap-1 pointer-events-auto"
+      data-away={away ? 'true' : undefined}
+      inert={away}
+      className={
+        away
+          ? 'absolute left-0 top-0 bottom-transport w-[72px] xl:w-[200px] bg-surface-deep border-r border-line flex flex-col items-center xl:items-stretch xl:px-3 pt-3 gap-1 pointer-events-auto transition-transform duration-[220ms] ease-emphasized motion-reduce:transition-none -translate-x-full'
+          : 'absolute left-0 top-0 bottom-transport w-[72px] xl:w-[200px] bg-surface-deep border-r border-line flex flex-col items-center xl:items-stretch xl:px-3 pt-3 gap-1 pointer-events-auto transition-transform duration-[220ms] ease-emphasized motion-reduce:transition-none'
+      }
     >
-      <div aria-hidden="true" className="mb-3 flex items-center gap-3 xl:px-1">
-        <span className="shrink-0 w-9 h-9 rounded-pill bg-gold-500 flex items-center justify-center text-black shadow-glow-gold">
-          <PulseIcon size={20} />
-        </span>
-        <span className="hidden xl:inline text-base font-semibold text-ink-strong">Aetheria</span>
+      <div className="mb-3 flex items-center gap-3 xl:px-1">
+        {/* v16.8.9: the logo hides the menu. A 44 × 44 button around the same 36 px circle (-m-1 keeps its place). */}
+        <Tooltip label="Hide the menu" keys={keys ? tipKeys('menu') : null} side="right">
+          <button
+            type="button"
+            aria-label="Hide the menu"
+            aria-expanded="true"
+            aria-controls={SIDE_NAV_ID}
+            data-testid="nav-hide"
+            // Review round 2: the focus fallback while the menu shows (the floating logo, earlier in the page, is the
+            // one while it is away): a panel whose opener is gone hands the focus here (ui/Sheet.tsx).
+            data-focus-fallback=""
+            onClick={() => {
+              setNavAway(true);
+              focusNavToggle('show');
+            }}
+            className="group shrink-0 w-11 h-11 -m-1 rounded-pill flex items-center justify-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+          >
+            <span aria-hidden="true" className="w-9 h-9 rounded-pill bg-gold-500 group-hover:bg-gold-400 flex items-center justify-center text-black shadow-glow-gold transition-colors duration-fast">
+              <PulseIcon size={20} />
+            </span>
+          </button>
+        </Tooltip>
+        <span aria-hidden="true" className="hidden xl:inline text-base font-semibold text-ink-strong">Aetheria</span>
       </div>
       {TABS.map(({ id, label, short }) => {
         const Icon = ICONS[id];

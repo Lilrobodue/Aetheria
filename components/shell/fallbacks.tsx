@@ -77,8 +77,10 @@ export const TransportCrash = ({ api, what, slot }: { api: FallbackApi; what: st
 };
 
 /** A tab's stub: the card in the tab's place (phone) or the panel (desktop). */
+// v16.8.9 review round 1: in the desktop panel it has no header, so it marks itself (data-panel-head): with the menu away
+// its card makes room for the floating logo (src/index.css).
 export const TabCrash = ({ api, inPanel }: { api: FallbackApi; inPanel: boolean }) => (
-  <div className={inPanel ? 'h-full p-4 bg-surface-panel' : 'absolute inset-0 p-4 bg-surface-deep pointer-events-auto'}>
+  <div data-panel-head={inPanel ? '' : undefined} className={inPanel ? 'h-full p-4 bg-surface-panel' : 'absolute inset-0 p-4 bg-surface-deep pointer-events-auto'}>
     <PanelFallback
       text="This tab hit a problem."
       switchedOff={api.switchedOff}

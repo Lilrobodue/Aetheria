@@ -24,11 +24,16 @@
 // volume). A component that handles a key in its own handler (the seek bar, a list's rows, a radiogroup, a tablist, a
 // sortable handle) runs first and keeps it (rule 1). Decision 7: "/" always focuses the Library's search; it never
 // closes the panel. A held → at a track's end does what the seek bar's own → does there (seekBy clamps to the end).
+// v16.8.9 (the side menu away; the user's decisions, 2026-11-13): C hides or shows the menu (navStore), announced on the
+// live line only; the focus inside the hiding menu moves to the floating logo. While the menu is away, L, / and ? (the
+// keys whose place is in the menu: Layers, Library, Shortcuts) slide it back out first, then do as before; Q and V open
+// their panels with the menu still away.
 
 import { useEffect } from 'react';
 import { overlayDepth } from '../../ui/overlayStack';
 import { ZEN_NON_TEXT_INPUTS } from '../zenModel';
 import { requestLibrarySearch } from '../library/libraryModel';
+import { SIDE_NAV_ID, focusNavToggle, navAway, setNavAway, showNavNow } from '../navStore';
 import type { ShellActions, LibraryViewState } from '../contexts';
 import type { ShellSheet, ShellTab } from '../shellModel';
 import { feedbackFor, seekStep, shortcutFor } from './keysModel';
@@ -234,7 +239,27 @@ export function useDesktopKeys({ actions, openedFromRef, stateRef, libraryViewRe
           if (s.sheet === 'visuals') actions.closeSheet();
           else actions.openVisuals();
           return;
+        case 'menu': {
+          if (navAway()) {
+            // Review round 1: shown at once; the focus on the floating logo moves to the menu's logo.
+            showNavNow();
+            showKeyFeedback('menuShown');
+            return;
+          }
+          const nav = document.getElementById(SIDE_NAV_ID);
+          const focusInNav = !!nav && !!document.activeElement && nav.contains(document.activeElement);
+          setNavAway(true);
+          if (focusInNav) focusNavToggle('show');
+          showKeyFeedback('menuAway');
+          return;
+        }
         case 'layers':
+          if (navAway()) {
+            // v16.8.9: the menu slides out to Layers (shown at once, so Layers records a live opener). Review round 1:
+            // Layers already open stays open: L brings the menu out to it, it doesn't close it.
+            showNavNow();
+            if (s.tab === 'layers' && s.sheet === null) return;
+          }
           if (s.tab === 'layers' && s.sheet === null) closeSection('layers');
           else {
             if (s.tab !== 'layers') openedFromRef.current = { id: 'layers', el: document.activeElement };
@@ -242,6 +267,7 @@ export function useDesktopKeys({ actions, openedFromRef, stateRef, libraryViewRe
           }
           return;
         case 'search': {
+          if (navAway()) showNavNow(); // v16.8.9: the menu slides out to Library
           // Decision 7: always to the search field (Library › Tracks, opened if needed); never a close.
           requestLibrarySearch(libraryViewRef);
           actions.openPlaylist(null); // a playlist's view gives way to Tracks (a no-op with none open)
@@ -253,6 +279,7 @@ export function useDesktopKeys({ actions, openedFromRef, stateRef, libraryViewRe
           else actions.setZen(false);
           return;
         case 'help':
+          if (navAway()) showNavNow(); // v16.8.9: the menu slides out to Shortcuts (the dialog returns the focus there)
           openHelp();
           return;
       }
