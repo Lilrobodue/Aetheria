@@ -97,6 +97,15 @@ async function measure(page: Page) {
 type Measured = Awaited<ReturnType<typeof measure>>;
 /** Names as the tests list them: the crystal without its regime, Up next and REC without their counts and states. */
 const names = (list: { name: string }[]) => list.map((c) => c.name.replace(/, .*$/, '').replace(/^Up next.*$/, 'Up next'));
+/** v16.8.8 (the user, 2026-11-13: "center the matter on the ends in the middle"): every control in both end
+ *  groups centred on the bar's vertical middle (60 px down the 120 px bar), not on the controls row's (76). */
+function expectEndsAtMiddle(m: Measured, where: string): void {
+  const middle = m.bar.top + m.bar.h / 2;
+  for (const c of [...m.left, ...m.right]) {
+    const centre = c.top + c.h / 2;
+    expect.soft(Math.abs(centre - middle), `${where}: ${c.name} at the bar's vertical middle (${(centre - m.bar.top).toFixed(1)} px down, the middle ${(middle - m.bar.top).toFixed(1)})`).toBeLessThanOrEqual(1.5);
+  }
+}
 /** Both side groups clear of the centre column (the review's mutation h: a wide left group spilled over Shuffle). */
 function expectClearOfCentre(m: Measured, where: string): void {
   expect.soft(m.leftEnd!, `${where}: the left group ends before the centre column (${Math.round(m.leftEnd!)} ≤ ${Math.round(m.centreBox!.left)})`).toBeLessThanOrEqual(m.centreBox!.left + 0.5);
@@ -188,7 +197,7 @@ test.describe('desktop bar', () => {
     expect(dialogs).toEqual([]);
   });
 
-  test('B3. the controls in their columns, in order: the tile, Output, Walks, Up next | the centre | the volume, Zen, Full screen, ⋯; each 44 × 44 or more, inside the window, clear of the centre column', async ({ page }) => {
+  test('B3. the controls in their columns, in order: the tile, Output, Walks, Up next | the centre | the volume, Zen, Full screen, ⋯; each 44 × 44 or more, inside the window, clear of the centre column; the end groups at the bar’s vertical middle (v16.8.8)', async ({ page }) => {
     test.setTimeout(150_000);
     const dialogs = await playingFirst(page);
     for (const [width, height] of SIZES_ALL) {
@@ -206,6 +215,7 @@ test.describe('desktop bar', () => {
         expect.soft(c.top >= m.row!.bottom - 0.5, `${where}: ${c.name} under the song row`).toBe(true);
       }
       expectClearOfCentre(m, where);
+      expectEndsAtMiddle(m, where);
       expect.soft(m.scrollW, `${where}: no sideways scroll`).toBeLessThanOrEqual(m.vw);
     }
     expect(dialogs).toEqual([]);
@@ -251,6 +261,7 @@ test.describe('desktop bar', () => {
         expect.soft(c.left >= 0 && c.right <= m.vw + 0.5, `${where}: ${c.name} inside the window`).toBe(true);
       }
       expectClearOfCentre(m, where);
+      expectEndsAtMiddle(m, where);
       const playCentre = m.play.left + m.play.w / 2;
       expect.soft(Math.abs(playCentre - width / 2), `${where}: Play's centre ${playCentre.toFixed(1)} vs the window's ${width / 2}`).toBeLessThanOrEqual(2);
       expect.soft(m.scrollW, `${where}: no sideways scroll`).toBeLessThanOrEqual(m.vw);

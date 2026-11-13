@@ -139,7 +139,11 @@ const DesktopTransport = () => {
       <div data-testid="desktop-controls" className="flex-1 min-h-0 grid grid-cols-[1fr_auto_1fr] items-center gap-6 px-5">
       {/* v16.8.7 (C1): the crystal tile, then Output, Walks and Up next (from the right group), so both sides fit their
           1fr tracks from 1024 px and Play sits at the bar's centre (the right group's width had pushed it left). */}
-      <div className="min-w-0 flex items-center gap-3">
+      {/* v16.8.8 (the user, 2026-11-13: "center the matter on the ends in the middle"): both end groups sit at the bar's
+          vertical middle (centre 60 px down the 120 px bar), not the controls row's (76): -translate-y-4, 16 px up. A
+          transform, so the columns' widths and Play's centring are untouched; the groups stay below the song row (their
+          tops at about 37 px, the row ends at 33). */}
+      <div className="min-w-0 flex items-center gap-3 -translate-y-4">
         <Tooltip label={`Crystal ${s.crystalHz} Hz, ${regimeName(regime)}`} side="top-start">
           <button
             type="button"
@@ -259,7 +263,7 @@ const DesktopTransport = () => {
       </div>
 
       {/* v16.8.7 (C1): the volume, Zen, Full screen and ⋯; Output, Walks, Up next and REC are on the left. */}
-      <div data-testid="desktop-right-group" className="flex items-center justify-end gap-1.5 xl:gap-2">
+      <div data-testid="desktop-right-group" className="flex items-center justify-end gap-1.5 xl:gap-2 -translate-y-4">
         <DesktopVolume />
         <Tooltip label={zenButtonTitleDesktop(zen.on)} side="top-end">
           <ZenButton data-testid="zen-button-desktop" kitTooltip />
