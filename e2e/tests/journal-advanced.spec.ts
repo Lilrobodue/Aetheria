@@ -287,14 +287,14 @@ test.describe('phone', () => {
     expect(await page.evaluate((k) => localStorage.getItem(k), SCORES_KEY)).toBe('true');
     await openLibraryTab(page);
     const badges = (name: string) => libraryRow(page, name).locator('[data-scan-badge]');
-    await expect(badges('tone-0001')).toHaveText(['Φ 75%', '111', 'DNA']);
+    await expect(badges('tone-0001')).toHaveText(['Φ 75%', '111', 'Tones']); // v16.10: the Tone-set score
     expect(await badges('tone-0001').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual([
       'Experimental score: golden ratio 75 %',
       'Experimental score: 111 pattern 55 %',
-      'Experimental score: DNA resonance 65 %',
+      'Experimental score: tone-set 65 %',
     ]);
     await expect(badges('tone-0002'), 'AT the cut-offs (over is exclusive): none').toHaveCount(0);
-    await expect(badges('tone-0003'), 'between classic’s 70/50/60 and 30/20/30: the new cut-offs apply').toHaveText(['Φ 42%', '111', 'DNA']);
+    await expect(badges('tone-0003'), 'between classic’s 70/50/60 and 30/20/30: the new cut-offs apply').toHaveText(['Φ 42%', '111', 'Tones']);
     await expect(badges('tone-0004'), 'no Deep Scan reading: none').toHaveCount(0);
     // Track info's section.
     await rowMenu(page, 'tone-0001').click();
@@ -303,8 +303,8 @@ test.describe('phone', () => {
     await expect(section).toBeVisible();
     await expect(section.getByRole('heading')).toHaveText('Experimental scan scores');
     await expect(section).toContainText("Scores from Deep Scan's reading of the spectrum, which is not a pitch measurement. Not evidence of any effect.");
-    await expect(section.locator('dt')).toHaveText(['Golden ratio score', '111 pattern score', 'DNA resonance score', 'Sacred geometry score', 'Schumann harmony score', 'Peaks in the reading (Hz)']);
-    await expect(section).toContainText('A name for a score, not a biological measure');
+    await expect(section.locator('dt')).toHaveText(['Golden ratio score', '111 pattern score', 'Tone-set score', 'Sacred geometry score', 'Schumann harmony score', 'Peaks in the reading (Hz)']);
+    await expect(section).toContainText('A level read at a fixed list of tones, some of them Solfeggio'); // v16.10
     await expect(section).toContainText('Higher for noisy sound than for pure tones');
     await expect(section).toContainText("Not the track's pitches");
     await expect(page.getByTestId('track-info-dialog')).not.toContainText(/CAUTION|SAFE|Safety|recommended volume|0\.42/i);
@@ -346,14 +346,15 @@ test.describe('phone', () => {
     await expect(page.locator('body')).not.toContainText('DNA Resonance Score');
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(dialog).toHaveCount(0);
-    // With scores on: DNA resonance carries its note.
+    // With scores on: the Tone-set score carries its note (v16.10; it was the DNA resonance score).
     await openPage(page, 'advanced');
     await page.getByTestId('advanced-scan-scores').getByRole('switch').click();
     await tab(page, 'now');
     await page.getByTestId('np-menu-button').click();
     await page.getByTestId('menu-track-info').click();
-    await expect(dialog.getByTestId('track-info-scores')).toContainText('DNA resonance score');
-    await expect(dialog.getByTestId('track-info-scores')).toContainText('A name for a score, not a biological measure');
+    await expect(dialog.getByTestId('track-info-scores')).toContainText('Tone-set score');
+    await expect(dialog.getByTestId('track-info-scores')).toContainText('A level read at a fixed list of tones, some of them Solfeggio');
+    await expect(dialog).not.toContainText('DNA');
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     // Classic's Current Track Analysis still opens its readout.
     await backToClassicViaMore(page);
@@ -361,6 +362,9 @@ test.describe('phone', () => {
     await openHarmonicControl(page);
     await page.getByRole('button', { name: /Current Track Analysis|Track Analysis/ }).first().click();
     await expect(page.getByTestId('readout-dialog')).toBeVisible();
+    // v16.10: classic's readout names the Tone-set score, never DNA.
+    await expect(page.getByTestId('readout-dialog')).toContainText('Tone-set score');
+    await expect(page.getByTestId('readout-dialog')).not.toContainText('DNA');
     expect(dialogs).toEqual([]);
   });
 

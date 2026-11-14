@@ -170,7 +170,7 @@ export const TOPICS: readonly Topic[] = [
   },
   {
     id: 'solfeggio', title: 'The Solfeggio frequencies', tags: ['tradition', 'open'],
-    plain: 'The nine Solfeggio numbers are a modern teaching, from the 1970s to the 1990s, named after the medieval singing syllables. Their meanings are respected here as tradition. No study has tested 528 Hz repairing DNA in people: one lab study exposed cells in a dish. No study of 963 Hz and the pineal gland was found.',
+    plain: 'The nine Solfeggio numbers are a modern teaching, from the 1970s to the 1990s, named after the medieval singing syllables. Their meanings are respected here as tradition. Few studies have tested 528 Hz: one small study in people, and one lab study of cells in a dish. No study of 963 Hz and the pineal gland was found.',
     technical: 'Science Feedback (2022) on the origin. Akimoto et al. 2018: 9 adults, piano music labelled 528 Hz (tuned to A = 444): a small study that hasn’t been repeated. Babayi & Riazi 2017: cultured astrocytes only. No systematic review exists.',
     refs: [
       { cite: 'Science Feedback (2022). No evidence to support claim that solfeggio frequencies remove toxins from the body.', url: 'https://science.feedback.org/review/no-evidence-support-claim-solfeggio-frequencies-remove-toxins-from-body/' },
@@ -235,7 +235,9 @@ export const HOW_SURE_IN_AETHERIA = 'In Aetheria';
 export const HOW_SURE_SOURCES = 'Sources';
 export const HOW_SURE_RESEARCH = 'What research says';
 export const HOW_SURE_WORDS_TITLE = 'The words we use';
-export const HOW_SURE_WORDS = 'We don’t say a sound heals, cures, repairs DNA or activates the pineal gland. Where a tradition teaches that, we write “Traditionally associated with …” and tag it Tradition. Nothing in Aetheria is a treatment; for a health concern, see a qualified professional.';
+// v16.10 (Joe's call, 14 Nov 2026: nothing about DNA in anything the app shows): the rule's first sentence names no
+// claim it rules out; the rest as it was.
+export const HOW_SURE_WORDS = 'We don’t say a sound heals or cures. Where a tradition teaches that, we write “Traditionally associated with …” and tag it Tradition. Nothing in Aetheria is a treatment; for a health concern, see a qualified professional.';
 export const HOW_SURE_FOOTER = 'Reviewed October 2026. Know a good study we missed? Aetheria432@pm.me';
 /** The text button at the top of each Guide view (and classic's Guidebook header). */
 export const HOW_SURE_JUMP = 'How sure are we?';

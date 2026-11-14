@@ -22,7 +22,8 @@ export interface ToneReading {
   /** The hexagram's Judgment, in Legge's words. */
   judgment: string;
   /** Review round 1: the codex's geometry line where it shortened constants.ts's GEOMETRY_INFO desc to drop health
-   *  words (1692, 5274; its _source says so); the other 25 are GEOMETRY_INFO's own, word for word. */
+   *  words (5274; its _source says so; v16.10 shortened 1692's GEOMETRY_INFO desc itself); the others are
+   *  GEOMETRY_INFO's own, word for word. */
   geometryLine?: string;
   /** Layer and Lo Shu palace: "HEAD layer, palace 4, south-east, Wood, ☴ Xun". */
   palace: string;
@@ -81,7 +82,6 @@ export const TONE_READINGS: readonly ToneReading[] = [
     palace: 'HEART layer, palace 2, south-west, Earth, ☷ Kun', mansion: '11 Purva Phalguni', mansionMeaning: 'The Former Reddish One',
     deity: 'Bhaga, god of marital bliss and prosperity', symbol: 'front legs of a bed, hammock, fig tree', planet: 'Venus', tag: 'tradition' },
   { hz: 1692, script: 'The Edge', hexagram: 34, hexagramName: 'Power of the Great',
-    geometryLine: 'The spiral of nature based on the Golden Ratio, found in galaxies and shells.',
     judgment: 'Tâ Kwang indicates that (under the conditions which it symbolises) it will be advantageous to be firm and correct.',
     palace: 'HEART layer, palace 3, east, Wood, ☳ Zhen', mansion: '12 Uttara Phalguni', mansionMeaning: 'The Latter Reddish One',
     deity: 'Aryaman, god of patronage and favours', symbol: 'four legs of a bed, hammock', planet: 'Sun', tag: 'tradition' },

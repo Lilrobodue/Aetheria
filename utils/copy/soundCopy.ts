@@ -73,7 +73,7 @@ export function readoutScoreLines(fa: { goldenRatioAlignment: number; pattern111
   return [
     `• Golden ratio score: ${pct(fa.goldenRatioAlignment)}`,
     `• 111 pattern score: ${pct(fa.pattern111Presence)}`,
-    `• DNA resonance score: ${pct(fa.dnaResonanceScore)} (a name for a score, not a biological measure)`,
+    `• Tone-set score: ${pct(fa.dnaResonanceScore)} (a level at a fixed list of tones)`, // v16.10: the Tone-set score
     `• Sacred geometry score: ${pct(fa.sacredGeometryAlignment)} (higher for noisy sound)`,
     `• Schumann harmony score: ${pct(fa.schumannResonanceHarmony)}`,
   ];
@@ -85,7 +85,7 @@ export function diagScoreLines(golden: number, p111: number, dna: number): strin
   return [
     `• Golden ratio score over 30 %: ${golden}`,
     `• 111 pattern score over 20 %: ${p111}`,
-    `• DNA resonance score over 30 %: ${dna}`,
+    `• Tone-set score over 30 %: ${dna}`,
   ];
 }
 /** P9: the diagnostics' advice when a range has no tracks (it named "Test Distribution", a button that no longer
@@ -111,7 +111,7 @@ export const SCAN_BUTTON_TITLE = 'Start Deep Scan (slow)';
 
 export const BADGE_GOLDEN_TITLE = 'Golden ratio score over 70 % (experimental)';
 export const BADGE_111_TITLE = '111 pattern score over 50 % (experimental)';
-export const BADGE_DNA_TITLE = 'DNA resonance score over 60 % (experimental)';
+export const BADGE_DNA_TITLE = 'Tone-set score over 60 % (experimental)'; // v16.10: the Tone-set score
 
 export function journalSavedToast(hz: number | string): string {
   return `Experience documented! Your ${hz} Hz session is saved on this device.`;

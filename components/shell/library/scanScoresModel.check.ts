@@ -31,15 +31,15 @@ eq([parseScanScores(null), parseScanScores(undefined), parseScanScores('false'),
 // The cut-offs are scanScores.ts's (30 / 20 / 30 %, the superseding note), exclusive.
 eq(SCAN_SCORES.filter((d) => ['golden', 'p111', 'dna'].includes(d.id)).map((d) => d.over), [0.3, 0.2, 0.3], "scanScores' cut-offs");
 const over = song({ goldenRatioAlignment: 0.75, pattern111Presence: 0.55, dnaResonanceScore: 0.65 });
-eq(scanBadges(over).map((b) => b.text), ['Φ 75%', '111', 'DNA'], 'over every cut-off: three badges');
-eq(scanBadges(over).map((b) => b.label), ['Experimental score: golden ratio 75 %', 'Experimental score: 111 pattern 55 %', 'Experimental score: DNA resonance 65 %'], 'their names');
+eq(scanBadges(over).map((b) => b.text), ['Φ 75%', '111', 'Tones'], 'over every cut-off: three badges (v16.10: Tones)');
+eq(scanBadges(over).map((b) => b.label), ['Experimental score: golden ratio 75 %', 'Experimental score: 111 pattern 55 %', 'Experimental score: tone-set 65 %'], 'their names');
 const at = song({ goldenRatioAlignment: 0.3, pattern111Presence: 0.2, dnaResonanceScore: 0.3 });
 eq(scanBadges(at), [], 'AT the cut-offs: none (over is exclusive)');
 const just = song({ goldenRatioAlignment: 0.3001, pattern111Presence: 0.2001, dnaResonanceScore: 0.3001 });
 eq(scanBadges(just).map((b) => b.id), ['golden', 'p111', 'dna'], 'just over: all three');
 // Classic's 70/50/60 would have shown none of these; the new layout's 30/20/30 shows them.
 const mid = song({ goldenRatioAlignment: 0.42, pattern111Presence: 0.25, dnaResonanceScore: 0.31 });
-eq(scanBadges(mid).map((b) => b.text), ['Φ 42%', '111', 'DNA'], 'between the two sets of cut-offs: the new ones apply');
+eq(scanBadges(mid).map((b) => b.text), ['Φ 42%', '111', 'Tones'], 'between the two sets of cut-offs: the new ones apply');
 const some = song({ goldenRatioAlignment: 0.1, pattern111Presence: 0.9, dnaResonanceScore: NaN });
 eq(scanBadges(some).map((b) => b.id), ['p111'], 'one over, one under, one NaN');
 for (const bad of [null, undefined, song(null), song({}), song({ goldenRatioAlignment: '0.9' }), { id: 'y', name: 'z', fractalAnalysis: 7 }]) {
@@ -63,9 +63,10 @@ const full = song(
   { coherenceScore: 63.4, fingerprint: { ratio369: 0.333 } }
 );
 const rows = scanScoreRows(full);
-eq(rows.map((r) => r.label), ['Golden ratio score', '111 pattern score', 'DNA resonance score', 'Sacred geometry score', 'Schumann harmony score', PEAKS_LABEL, 'Coherence', '3-6-9 ratio'], 'the rows in order');
+eq(rows.map((r) => r.label), ['Golden ratio score', '111 pattern score', 'Tone-set score', 'Sacred geometry score', 'Schumann harmony score', PEAKS_LABEL, 'Coherence', '3-6-9 ratio'], 'the rows in order');
 eq(rows.map((r) => r.value).slice(0, 5), ['72 %', '18 %', '41 %', '90 %', '5 %'], 'their values');
-eq(rows.find((r) => r.label === 'DNA resonance score')?.note, 'A name for a score, not a biological measure', "DNA's note");
+eq(rows.find((r) => r.label === 'Tone-set score')?.note, 'A level read at a fixed list of tones, some of them Solfeggio', "the Tone-set score's note (v16.10)");
+eq(rows.filter((r) => /\bDNA\b/.test(`${r.label} ${r.value} ${r.note ?? ''}`)).map((r) => r.label), [], 'v16.10: no row says DNA');
 eq(rows.find((r) => r.label === 'Sacred geometry score')?.note, 'Higher for noisy sound than for pure tones', "geometry's note");
 eq(rows.find((r) => r.label === PEAKS_LABEL), { label: PEAKS_LABEL, value: '1838.0, 919.3, 612.8, 459.6, 367.7, 306.4, 262.6, 229.8, 204.2, 183.8', note: PEAKS_NOTE }, 'the first 10 peaks');
 eq(rows.slice(-2).map((r) => r.value), ['63/100', '33 %'], 'the interval scores');

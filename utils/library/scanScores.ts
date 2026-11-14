@@ -5,7 +5,7 @@
 // info's section) both read this module, so the words and the numbers cannot drift apart.
 //
 // The cut-offs are the ones the new layout already shows (decision 4 A): the Golden mix's "over 30 %" (utils/mix
-// catalog and recipes) and the Library diagnostics readout's golden 30 %, 111 20 %, DNA 30 % (App's
+// catalog and recipes) and the Library diagnostics readout's golden 30 %, 111 20 %, tone-set 30 % (App's
 // showPlaylistDiagnostics, which v16.1 brings into the new layout). Classic's own row badges (70 / 50 / 60 %) stay as they
 // are in classic. Every cut-off is "over" (exclusive), as every shipped one reads.
 //
@@ -52,7 +52,10 @@ const field = (s: ScoreSong, k: string): number | null => {
 export const SCAN_SCORES: readonly ScanScoreDef[] = [
   { id: 'golden', name: 'Golden ratio score', short: 'Φ', over: 0.3, read: (s) => field(s, 'goldenRatioAlignment'), tag: 'design' },
   { id: 'p111', name: '111 pattern score', short: '111', over: 0.2, read: (s) => field(s, 'pattern111Presence'), tag: 'design' },
-  { id: 'dna', name: 'DNA resonance score', short: 'DNA', note: 'A name for a score, not a biological measure.', nameWords: 'Experimental resonance score', over: 0.3, read: (s) => field(s, 'dnaResonanceScore'), tag: 'design' },
+  // v16.10 (the user's name, 14 Nov 2026; was "DNA resonance score"): a weighted mean of single-bin levels at a fixed
+  // list of tones (fractalFrequencyAnalysis.ts, DNA_FREQUENCY_MAP: 20 tones, 7 of them Solfeggio). Review round 1: the
+  // note says only that. Only the shown name changed: the id and field stay.
+  { id: 'dna', name: 'Tone-set score', short: 'Tones', note: 'A level read at a fixed list of tones, some of them Solfeggio.', nameWords: 'Experimental tone-set score', over: 0.3, read: (s) => field(s, 'dnaResonanceScore'), tag: 'design' },
   { id: 'geometry', name: 'Sacred geometry score', short: 'Geometry', note: 'Higher for noisy sound than for pure tones.', over: null, read: (s) => field(s, 'sacredGeometryAlignment'), tag: 'design' },
   { id: 'schumann', name: 'Schumann harmony score', short: 'Schumann', over: null, read: (s) => field(s, 'schumannResonanceHarmony'), tag: 'design' },
   {
@@ -74,7 +77,8 @@ export function scoreChipText(d: ScanScoreDef): string {
   if (d.id === 'candidate' || d.over === null) return d.name;
   return `${d.name} over ${Math.round(d.over * 100)} %`;
 }
-/** The score in a mix's name (decision 13): "Experimental resonance score over 30 %" for the DNA score, else its chip. */
+/** The score in a mix's name (decision 13): "Experimental tone-set score over 30 %" for the Tone-set score (v16.10;
+ *  it was "Experimental resonance score", to keep DNA out of a name), else its chip. */
 export function scoreNameText(d: ScanScoreDef): string {
   if (!d.nameWords) return scoreChipText(d);
   return d.over === null || d.id === 'candidate' ? d.nameWords : `${d.nameWords} over ${Math.round(d.over * 100)} %`;

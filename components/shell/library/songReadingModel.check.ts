@@ -57,7 +57,7 @@ check('a failed scan has no reading', songReadingView(failedScan) === null);
 check('a failed scan: its own line', songReadingNone(failedScan) === SONG_READING_FAILED);
 check('an assigned track: the Scan line', songReadingNone({ closestSolfeggio: 528, crystalSource: 'assigned' }) === SONG_READING_UNSCANNED);
 check('no crystal: the Scan line', songReadingNone({}) === SONG_READING_UNSCANNED);
-// Review round 1: the geometry lines carry no health word (the codex's two shortened lines, 1692 and 5274).
+// Review round 1: the geometry lines carry no health word (the codex's shortened 5274 line; v16.10: 1692's GEOMETRY_INFO desc).
 const HEALTH = /\b(DNA|heal\w*|cure\w*|treat\w*|repair\w*|therap\w*)\b/i;
 for (const t of TONE_READINGS) {
   const geo = GEOMETRY_INFO.find((g) => g.freq === `${t.hz}Hz`)!;

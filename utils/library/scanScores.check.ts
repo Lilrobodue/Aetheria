@@ -20,9 +20,9 @@ const golden = SCAN_SCORES.find((d) => d.id === 'golden')!;
 eq(songs.map((s) => hasScore(golden, s)), [true, false, null, null, null], 'golden: over 0.3, exclusive (the Golden mix\'s rule); no reading → null');
 eq(SCAN_SCORES.filter((d) => d.over !== null).map((d) => [d.id, d.over]), [['golden', 0.3], ['p111', 0.2], ['dna', 0.3], ['candidate', 0.5]], 'the cut-offs (decision 4 A)');
 eq(EXPERIMENTAL_FACETS.map((f) => f.id), ['x-golden', 'x-p111', 'x-dna', 'x-candidate'], 'the experimental facets');
-eq(SCAN_SCORES.filter((d) => d.over !== null).map(scoreChipText), ['Golden ratio score over 30 %', '111 pattern score over 20 %', 'DNA resonance score over 30 %', 'Aetheria number'], 'chip words');
-// v16.6 (decision 13): a mix's name never says DNA; the other scores' names hold no gate word and stay as they are.
-eq(SCAN_SCORES.filter((d) => d.over !== null).map(scoreNameText), ['Golden ratio score over 30 %', '111 pattern score over 20 %', 'Experimental resonance score over 30 %', 'Aetheria number'], 'name words (decision 13)');
+eq(SCAN_SCORES.filter((d) => d.over !== null).map(scoreChipText), ['Golden ratio score over 30 %', '111 pattern score over 20 %', 'Tone-set score over 30 %', 'Aetheria number'], 'chip words (v16.10: the Tone-set score)');
+// v16.6 (decision 13): a mix's name never says DNA; v16.10: the Tone-set score's is "Experimental tone-set score".
+eq(SCAN_SCORES.filter((d) => d.over !== null).map(scoreNameText), ['Golden ratio score over 30 %', '111 pattern score over 20 %', 'Experimental tone-set score over 30 %', 'Aetheria number'], 'name words (decision 13; v16.10)');
 ok(SCAN_SCORES_LEAD.includes('not a pitch measurement'), 'the lead says it is not a measurement');
 
 // Composed: the library's facets + the experimental ones, on a playlist-like set with a repeat.

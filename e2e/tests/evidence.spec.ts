@@ -168,7 +168,7 @@ test.describe('phone', () => {
     await page.getByTestId('layers-crystal-tile').scrollIntoViewIfNeeded();
     await page.getByTestId('crystal-528').first().click();
     await expect(block.getByTestId('crystal-meaning-title')).toHaveText('528 Hz · Transformation');
-    await expect(block.getByTestId('crystal-meaning-association')).toHaveText('Traditionally associated with transformation, miracles and DNA repair. In Solfeggio teaching it is called “the miracle tone”.');
+    await expect(block.getByTestId('crystal-meaning-association')).toHaveText('Traditionally associated with transformation and miracles. In Solfeggio teaching it is called “the miracle tone”.'); // v16.10: no DNA
     await expect(block.getByTestId('crystal-meaning-shape')).toHaveText('Shape: Metatron\'s Cube · Light');
     await expect(block.locator('[data-evidence-tag]')).toHaveCount(1);
     await expect(block.locator('[data-evidence-tag="tradition"]')).toHaveCount(1);
@@ -181,7 +181,7 @@ test.describe('phone', () => {
     await expect(block.getByTestId('crystal-meaning-title')).toHaveText('519 Hz · Transformation');
     // Review B4: the counterpart line first, then its crystal's association, said as its crystal's.
     await expect(block.getByTestId('crystal-meaning-perfect')).toHaveText('Lo Shu Perfect counterpart of 528 Hz.');
-    await expect(block.getByTestId('crystal-meaning-association')).toHaveText('Its crystal, 528 Hz, is traditionally associated with transformation, miracles and DNA repair. In Solfeggio teaching it is called “the miracle tone”.');
+    await expect(block.getByTestId('crystal-meaning-association')).toHaveText('Its crystal, 528 Hz, is traditionally associated with transformation and miracles. In Solfeggio teaching it is called “the miracle tone”.'); // v16.10: no DNA
     expect(
       await block.evaluate((b) => {
         const p = b.querySelector('[data-testid="crystal-meaning-perfect"]');

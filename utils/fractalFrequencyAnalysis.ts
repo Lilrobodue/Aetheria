@@ -92,7 +92,7 @@ export const DNA_FREQUENCY_MAP = {
   // Chromosome frequencies (theoretical)
   TELOMERE_PROTECTION: [174, 285, 396], // Protective frequencies
   GENE_EXPRESSION: [528, 639, 741], // Expression enhancement
-  DNA_REPAIR: [285, 528, 852], // Repair mechanism activation
+  REPAIR_SET: [285, 528, 852], // v16.10: renamed (was DNA_REPAIR; the key reached the bundle); the same tones, in place
   
   // Mitochondrial DNA frequencies
   MITOCHONDRIAL_BASE: 58.27, // Base mitochondrial frequency
@@ -614,7 +614,7 @@ const performFFT = (data: Float32Array): Float32Array => {
  */
 export const getFrequencyByIntention = (intention: string): number[] => {
   const intentionMap: { [key: string]: number[] } = {
-    'dna_repair': DNA_FREQUENCY_MAP.DNA_REPAIR,
+    'dna_repair': DNA_FREQUENCY_MAP.REPAIR_SET,
     'cellular_healing': EXTENDED_SOLFEGGIO.CELLULAR_REPAIR,
     'energy_boost': DNA_FREQUENCY_MAP.CELLULAR_ENERGY,
     'meditation': [7.83, 14.3, 40, 100, 528, 741, 852],
@@ -643,17 +643,4 @@ export const getFrequencyByIntention = (intention: string): number[] => {
   };
   
   return intentionMap[intention.toLowerCase()] || [528, 741, 852];
-};
-
-/**
- * Generate safety warning for high frequencies
- */
-export const generateSafetyWarning = (frequency: number): string | null => {
-  if (frequency >= SAFETY_PROTOCOLS.EXPERT_RANGE.min) {
-    return `⚠️ EXPERT LEVEL FREQUENCY (${frequency.toFixed(0)}Hz)\n\nThis frequency operates beyond normal therapeutic ranges. Use only with:\n• Deep meditation experience\n• Sound healing training\n• Short exposure periods (5-15 minutes)\n• Volume kept at ${Math.round(assessFrequencySafety(frequency).volume * 100)}% or lower\n\nStop immediately if you experience discomfort.`;
-  } else if (frequency >= SAFETY_PROTOCOLS.CAUTION_RANGE.min) {
-    return `⚠️ CAUTION: High Frequency (${frequency.toFixed(0)}Hz)\n\nThis frequency requires subtle resonance mode:\n• Keep volume low (${Math.round(assessFrequencySafety(frequency).volume * 100)}% recommended)\n• Focus on feeling rather than hearing\n• Limit sessions to 20-30 minutes\n• Take breaks between sessions`;
-  }
-  
-  return null;
 };

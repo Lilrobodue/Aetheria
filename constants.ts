@@ -43,8 +43,8 @@ export const SOLFEGGIO_INFO = [
     freq: 528, 
     chakra: 'Solar Plexus (Manipura)', 
     color: '#FFD700', 
-    benefit: 'Transformation, miracles, DNA repair', 
-    description: 'The miracle tone - repairs DNA and brings transformation into your life.',
+    benefit: 'Transformation, miracles', 
+    description: 'The miracle tone - brings transformation into your life.',
     anatomy: 'Digestive System, Pancreas, Liver',
     order: 'Second'
   },
@@ -318,7 +318,7 @@ export const GEOMETRY_INFO = [
   // HEART REGIME - Fourth through Sixth Order Sacred Geometry
   { shape: 'Torus Knot', freq: '1206Hz', benefit: 'Infinite Loop', element: 'Flow', desc: 'A torus that passes through itself, representing the endless circulation of energy through dimensional gateways.' },
   { shape: 'Lemniscate', freq: '1449Hz', benefit: 'Infinity Bridge', element: 'Eternity', desc: 'The figure-eight symbol of infinity, representing eternal flow and balance between dual forces.' },
-  { shape: 'Fibonacci Spiral', freq: '1692Hz', benefit: 'Golden Growth', element: 'Evolution', desc: 'The spiral of nature based on the Golden Ratio, found in galaxies, shells, and DNA itself.' },
+  { shape: 'Fibonacci Spiral', freq: '1692Hz', benefit: 'Golden Growth', element: 'Evolution', desc: 'The spiral of nature based on the Golden Ratio, found in galaxies and shells.' },
   { shape: 'Vesica Matrix', freq: '1935Hz', benefit: 'Multi-Vesica Network', element: 'Networks', desc: 'Multiple overlapping Vesica Piscis creating a matrix of interconnected consciousness portals.' },
   { shape: 'Torus', freq: '2178Hz', benefit: 'Universal Flow', element: 'Energy', desc: 'The primary shape of energy flow in the universe, from atoms to galaxies to the human aura.' },
   { shape: 'Rose Curve', freq: '2421Hz', benefit: 'Sacred Petals', element: 'Beauty', desc: 'Mathematical rose patterns with petals based on sacred number ratios, representing divine beauty and harmony.' },

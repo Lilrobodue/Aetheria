@@ -153,7 +153,7 @@ export const rankJourney = (a: Song, b: Song): number => {
   if (Math.abs(aGolden - bGolden) > 0.1) return bGolden - aGolden;
   return (a.harmonicDeviation || 999) - (b.harmonicDeviation || 999);
 };
-/** Ultimate's (recipes.ts, verbatim): the golden ratio score, then the DNA score, then the deviation. */
+/** Ultimate's (recipes.ts, verbatim): the golden ratio score, then the tone-set score, then the deviation. */
 export const rankUltimate = (a: Song, b: Song): number => {
   const aGolden = a.fractalAnalysis?.goldenRatioAlignment || 0;
   const bGolden = b.fractalAnalysis?.goldenRatioAlignment || 0;
@@ -335,7 +335,7 @@ export function followName(f: Follow): string {
 }
 /** The picked filters as words, up to three, then "+N more" (filterModel's rule; the scores in scanScores' words).
  *  v16.6 (decision 13): a name outlives the builder and its tag, so a score whose name holds a gate word is named
- *  "Experimental resonance score over 30 %" (scoreNameText); the builder's chip keeps the tagged name. */
+ *  "Experimental tone-set score over 30 %" (scoreNameText); the builder's chip keeps the tagged name. */
 export function filterWords(f: Filters): string {
   const chips = activeChips(f, BUILDER_FACETS).map((c) => {
     const d = c.facet.startsWith('x-') ? SCAN_SCORES.find((x) => `x-${x.id}` === c.facet) : null;

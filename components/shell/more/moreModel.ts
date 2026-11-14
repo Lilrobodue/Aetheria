@@ -272,7 +272,7 @@ export const ADVANCED_TESTING = 'For testing';
 export const SCAN_SCORES_TITLE = 'Show experimental scan scores';
 /** v16.6: the line carries its evidence tag (Design choice: the scores are the app's own; check:copy's T2). */
 export const SCAN_SCORES_NOTE = {
-  line: "Deep Scan's golden-ratio, 111 and DNA scores, on Library rows and in Track info. They are scores from an unreliable reading of the spectrum, not measurements.",
+  line: "Deep Scan's golden-ratio, 111 and tone-set scores, on Library rows and in Track info. They are scores from an unreliable reading of the spectrum, not measurements.",
   tag: 'design',
 } as const;
 export const SCAN_SCORES_LINE = SCAN_SCORES_NOTE.line;

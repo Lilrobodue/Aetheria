@@ -70,7 +70,10 @@ for (const c of CRYSTAL_COPY) {
   eq(wordsIn(c.name), [], `${c.hz}: the name "${c.name}" carries no gate word`);
   ok(crystalCopy(c.hz) === c, `${c.hz}: crystalCopy resolves`);
 }
-ok(crystalCopy(528)!.association.includes('DNA repair') && crystalCopy(963)!.association.includes('pineal activation'), 'the tradition’s content words are kept (the user’s decision)');
+// v16.10 (Joe's call, 14 Nov 2026): nothing about DNA in anything shown; 528 keeps transformation and miracles, 963 its
+// pineal activation (the v16.6 decision stands for every other content word).
+ok(crystalCopy(528)!.association.startsWith('Traditionally associated with transformation and miracles.') && !/DNA/.test(crystalCopy(528)!.association) && crystalCopy(963)!.association.includes('pineal activation'), 'the tradition’s content words are kept (the user’s decision; v16.10: no DNA)');
+ok(CRYSTAL_COPY.every((c) => !/\bDNA\b/.test(c.association) && !/\bDNA\b/.test(c.name)), 'v16.10: no crystal’s words say DNA');
 for (const w of ['acts as', 'anesthetic', 'Powerful', 'repairs DNA', 'Activates']) ok(CRYSTAL_COPY.every((c) => !c.association.includes(w)), `no mechanism or effect wording: "${w}"`);
 eq(crystalCopy(111), CRYSTAL_111, '111 resolves');
 eq([CRYSTAL_111.tag, CRYSTAL_111.association], ['design', 'Not one of the 27 crystals.'], '111: Design choice, the chip’s words');

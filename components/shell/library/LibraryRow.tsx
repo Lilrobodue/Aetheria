@@ -9,7 +9,7 @@
 // library-marks-phone): "Queued · 1" for a track waiting in the queue, a string, so React.memo keeps the other rows still.
 // React.memo: it renders when its own props change, never on the clock.
 // v16.5 (Advanced's "Show experimental scan scores", mockup library-badges-phone): `scores` adds dashed, neutral badges
-// after the facts ("Φ 72%", "111", "DNA"), each named "Experimental score: golden ratio 72 %", at scanScores.ts's
+// after the facts ("Φ 72%", "111", "Tones"), each named "Experimental score: golden ratio 72 %", at scanScores.ts's
 // cut-offs (scanScoresModel.scanBadges). No colour carries meaning; never the safety level.
 
 import React from 'react';

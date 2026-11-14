@@ -137,11 +137,11 @@ export const KNOWN_EFFECTS: FrequencyEffect[] = [
     id: "solfeggio_528_dna",
     frequency: 528,
     harmonics: [1056, 2112, 4224],
-    name: "DNA Repair Resonance",
+    name: "528 Hz Transformation", // v16.10: no DNA (Joe's call, 14 Nov 2026); the id stays
     category: "cellular",
     discoveryDate: "1999",
     discoveredBy: "Dr. Leonard Horowitz",
-    description: "Frequency reported to repair DNA damage and promote cellular healing through resonance with the hexagonal structure of water molecules in DNA.",
+    description: "Traditionally associated with transformation (Solfeggio teaching).",
     onsetTime: "15-30 minutes",
     duration: "hours to days",
     intensity: "profound",
@@ -153,7 +153,7 @@ export const KNOWN_EFFECTS: FrequencyEffect[] = [
     validationStatus: "multiple_reports",
     confidenceScore: 8,
     waveform: "sine",
-    tags: ["healing", "dna", "cellular", "transformation"],
+    tags: ["healing", "cellular", "transformation"],
     relatedFrequencies: [396, 639, 741],
     createdAt: new Date().toISOString(),
     lastUpdated: new Date().toISOString()

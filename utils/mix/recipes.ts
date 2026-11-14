@@ -530,7 +530,7 @@ export function sequence111(input: MixInput): MixResult {
       });
 
       if (candidatesForOrder.length > 0) {
-        // Sort by 111 pattern presence, then by DNA resonance, then by harmonic accuracy
+        // Sort by 111 pattern presence, then by the tone-set score, then by harmonic accuracy
         candidatesForOrder.sort((a, b) => {
           const a111 = a.fractalAnalysis?.pattern111Presence || 0;
           const b111 = b.fractalAnalysis?.pattern111Presence || 0;
@@ -540,7 +540,7 @@ export function sequence111(input: MixInput): MixResult {
             return b111 - a111;
           }
 
-          // Then DNA resonance as a tiebreaker
+          // Then the tone-set score as a tiebreaker
           const aDNA = a.fractalAnalysis?.dnaResonanceScore || 0;
           const bDNA = b.fractalAnalysis?.dnaResonanceScore || 0;
 
@@ -723,7 +723,7 @@ export function sourceField(input: MixInput): MixResult {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Ultimate Alignment (was generateUltimateAlignmentPlaylist): all 27, best per crystal (golden, DNA, accuracy). Plays.
+// Ultimate Alignment (was generateUltimateAlignmentPlaylist): all 27, best per crystal (golden, tone-set, accuracy). Plays.
 // ---------------------------------------------------------------------------------------------------------------
 export function ultimateAlignment(input: MixInput): MixResult {
   const originalPlaylist = input.library;
@@ -746,7 +746,7 @@ export function ultimateAlignment(input: MixInput): MixResult {
             return bGolden - aGolden; // Higher golden ratio first
           }
 
-          // 2. Then prioritize DNA resonance
+          // 2. Then prioritize the tone-set score
           const aDNA = a.fractalAnalysis?.dnaResonanceScore || 0;
           const bDNA = b.fractalAnalysis?.dnaResonanceScore || 0;
 

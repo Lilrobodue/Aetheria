@@ -36,14 +36,14 @@ const pct = (v: number): number => Math.round(v * 100);
 const BADGES: ReadonlyArray<{ id: ScanScoreId; spoken: string; text: (p: number) => string }> = [
   { id: 'golden', spoken: 'golden ratio', text: (p) => `Φ ${p}%` },
   { id: 'p111', spoken: '111 pattern', text: () => '111' },
-  // v16.6 (review C5): a row's badge carries no tag (never per row), so this data claims none either; its two words are
-  // score names, allow-listed by name and scoped to the badges (scripts/copy-allow.json, kind score-name).
-  { id: 'dna', spoken: 'DNA resonance', text: () => 'DNA' },
+  // v16.6 (review C5): a row's badge carries no tag (never per row), so this data claims none either. v16.10: the
+  // Tone-set score (was "DNA resonance"), its badge "Tones".
+  { id: 'dna', spoken: 'tone-set', text: () => 'Tones' },
 ];
 
 export interface ScanBadge {
   id: ScanScoreId;
-  /** What the badge shows: "Φ 72%", "111", "DNA". */
+  /** What the badge shows: "Φ 72%", "111", "Tones". */
   text: string;
   /** Its accessible name: "Experimental score: golden ratio 72 %". */
   label: string;

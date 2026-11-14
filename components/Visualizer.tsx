@@ -973,7 +973,7 @@ const Visualizer: React.FC<VisualizerProps> = ({
     } else if (selectedFrequency <= 450) {
         newTargets = getIcosahedronPoints(pCount, scale); // 417Hz - Water/Change
     } else if (selectedFrequency <= 580) {
-        newTargets = getOctahedronPoints(pCount, scale); // 528Hz - Air/DNA Transformation
+        newTargets = getOctahedronPoints(pCount, scale); // 528Hz - Air/Transformation
     } else if (selectedFrequency <= 680) {
         newTargets = getMerkabaPoints(pCount, scale); // 639Hz - Connection/Integration
     }

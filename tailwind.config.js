@@ -74,7 +74,7 @@ export default {
           head: '#60a5fa', // blue-400
           source: '#4ade80', // green-400: the 2178 Hz SOURCE centre, as the sidebar's 2178Hz Filter button labels it
         },
-        // Status, as Safety Protocols colours its levels (components/SafetyProtocols.tsx getSafetyLevelColor).
+        // Status, as the old Safety Protocols coloured its levels (getSafetyLevelColor; the component was removed in v16.10).
         status: {
           ok: '#22c55e', // SAFE (green-500)
           warn: '#eab308', // CAUTION (yellow-500)

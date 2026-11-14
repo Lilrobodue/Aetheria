@@ -8,8 +8,8 @@ import {
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings, BandEnvelope } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, toHeardHz, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, LO_SHU_WALK_COMBINED, LO_SHU_WALK_OUROBOROS, OUROBOROS_PHASES, SOURCE_FREQ, getLoShuPosition, type LoShuWalkMode } from './constants';
 import Visualizer from './components/Visualizer';
-// v16.6 (review C8): FrequencySelector and SafetyProtocols are dead (never rendered; a later release may remove them: v16.9's classic removal was cancelled, 2026-11-08), so App no
-// longer imports them; check:copy fails on any import or use of either, or of generateSafetyWarning, outside their files.
+// v16.6 (review C8): FrequencySelector and SafetyProtocols were dead (never rendered); v16.10 removed both, with
+// generateSafetyWarning (Joe's brief, 14 Nov 2026).
 import ExperienceTracker from './components/ExperienceTracker';
 import OfflineIndicator from './components/OfflineIndicator';
 import LoShuMatrix from './components/LoShuMatrix';
@@ -408,7 +408,7 @@ const storedToneLevel = (engine: LayerEngine): number => {
 
 // The band constants and the octave-mapping helpers (octaveInto, feltCarrierHz,
 // thetaAlphaModHz, toSubBass, solfeggioHz) now live in utils/frequencyMapping.ts
-// — the single source of truth shared with FrequencySelector. They used to be
+// — the single source of truth (once shared with FrequencySelector, removed in v16.10). They used to be
 // duplicated there with a different threshold, so the preview tone and playback
 // emitted different frequencies. Import, never re-inline.
 
@@ -5938,7 +5938,7 @@ const App: React.FC = () => {
         pattern111 = Math.min(0.8, pattern111 + 0.5); // Up to 80% for exact 111 pattern matches
       }
       
-      console.log(`Fallback analysis for ${basicFreq.toFixed(1)}Hz: Golden=${(goldenRatio*100).toFixed(1)}%, 111=${(pattern111*100).toFixed(1)}%, DNA=${(dnaResonance*100).toFixed(1)}%`);
+      console.log(`Fallback analysis for ${basicFreq.toFixed(1)}Hz: Golden=${(goldenRatio*100).toFixed(1)}%, 111=${(pattern111*100).toFixed(1)}%, Tone-set=${(dnaResonance*100).toFixed(1)}%`);
       
       return {
         dominantFrequency: basicFreq,
@@ -11465,7 +11465,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.9.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.10</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -12109,7 +12109,7 @@ registerProcessor('wav-capture', WavCapture);
                               )}
                               {song.fractalAnalysis && song.fractalAnalysis.dnaResonanceScore > 0.6 && (
                                 <span data-classic-badge="dna" className="text-[8px] px-1 rounded bg-green-800 text-green-300 h-fit" title={BADGE_DNA_TITLE}>
-                                  DNA
+                                  Tones
                                 </span>
                               )}
                             </div>
@@ -12944,7 +12944,7 @@ registerProcessor('wav-capture', WavCapture);
                             <div className="text-white font-bold text-lg">{Math.round(fractalAnalysis.pattern111Presence * 100)}%</div>
                           </div>
                           <div className="bg-slate-900 p-2 rounded">
-                            <div className="text-green-400 mb-1">DNA resonance score</div>
+                            <div className="text-green-400 mb-1">Tone-set score</div>
                             <div className="text-white font-bold text-lg">{Math.round(fractalAnalysis.dnaResonanceScore * 100)}%</div>
                           </div>
                           <div className="bg-slate-900 p-2 rounded">
@@ -13262,23 +13262,6 @@ registerProcessor('wav-capture', WavCapture);
                     </button>
                   </div>
                   
-                  {/*
-                  <FrequencySelector
-                    selectedFrequency={selectedSolfeggio}
-                    onFrequencyChange={(freq) => {
-                      setSelectedSolfeggio(freq);
-                      setShowFrequencySelector(false);
-                    }}
-                    volume={solfeggioVolume}
-                    onVolumeChange={setSolfeggioVolume}
-                    isPlaying={isPlaying}
-                    onPlayPause={handlePlayPause}
-                    fractalAnalysis={fractalAnalysis}
-                    userExperienceLevel={userExperienceLevel}
-                    onExperienceLevelChange={setUserExperienceLevel}
-                    loShuPerfectGUT={loShuPerfectGUT}
-                  />
-                  */}
                 </div>
               </div>
             </div>

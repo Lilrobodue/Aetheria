@@ -31,7 +31,7 @@ export const CRYSTAL_COPY: readonly CrystalCopy[] = [
   { hz: 285, name: 'Renewal', association: 'Traditionally associated with tissue repair and quantum cognition.', tag: 'tradition' },
   { hz: 396, name: 'Liberation', association: 'Traditionally associated with liberating fear and guilt.', tag: 'tradition' },
   { hz: 417, name: 'Change', association: 'Traditionally associated with facilitating change and undoing situations.', tag: 'tradition' },
-  { hz: 528, name: 'Transformation', association: 'Traditionally associated with transformation, miracles and DNA repair. In Solfeggio teaching it is called “the miracle tone”.', tag: 'tradition' },
+  { hz: 528, name: 'Transformation', association: 'Traditionally associated with transformation and miracles. In Solfeggio teaching it is called “the miracle tone”.', tag: 'tradition' },
   { hz: 639, name: 'Connection', association: 'Traditionally associated with connecting relationships and harmony.', tag: 'tradition' },
   { hz: 741, name: 'Intuition', association: 'Traditionally associated with awakening intuition and problem solving.', tag: 'tradition' },
   { hz: 852, name: 'Spiritual order', association: 'Traditionally associated with returning to spiritual order and inner strength.', tag: 'tradition' },

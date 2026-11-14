@@ -111,7 +111,8 @@ test.describe('classic', () => {
     await page.getByRole('button', { name: /Library\s*Diagnostics/ }).click();
     const diag = page.getByRole('dialog', { name: 'Library diagnostics', exact: true });
     await expect(diag).toBeVisible();
-    await expect(diag).toContainText('DNA resonance score over 30 %');
+    await expect(diag).toContainText('Tone-set score over 30 %');
+    await expect(diag).not.toContainText('DNA'); // v16.10
     await gate(page, 'the diagnostics', seen);
     await diag.getByRole('button', { name: 'Close', exact: true }).first().click();
     // Review C1: a 5274 Hz track: the status pills name its geometry ("Healing", title "Healing Mandala …"), so the
@@ -186,20 +187,20 @@ test.describe('new layout', () => {
     await page.getByRole('switch', { name: 'Show experimental scan scores', exact: true }).click();
     await openLibraryTab(page);
     await gate(page, 'Library, with the scan scores', seen);
-    // Decisions 11 and 13: the Mix builder with the DNA resonance score filter: its chip is tagged Design choice, the
-    // mix's name (the footer) says "Experimental resonance score".
+    // Decisions 11 and 13: the Mix builder with the Tone-set score filter (v16.10; it was the DNA resonance score): its
+    // chip is tagged Design choice, the mix's name (the footer) says "Experimental tone-set score".
     await tab(page, 'mixes');
     await page.getByTestId('mixes-create').click();
     await page.getByTestId('builder-filters-button').click();
     const fsheet = page.getByTestId('builder-filter-sheet');
     await fsheet.getByTestId('builder-filters-experimental-toggle').click();
     await fsheet.locator('[data-facet="x-dna"][data-value="over"]').click();
-    await gate(page, 'the builder’s filter sheet (DNA resonance score)', seen);
+    await gate(page, 'the builder’s filter sheet (the Tone-set score)', seen);
     await fsheet.getByTestId('builder-filters-done').click();
     await expect(page.getByTestId('builder-chips-block').locator('[data-evidence-tag="design"]')).toBeVisible();
-    await expect(page.getByTestId('builder-name')).toContainText('Experimental resonance score over 30 %');
+    await expect(page.getByTestId('builder-name')).toContainText('Experimental tone-set score over 30 %');
     await expect(page.getByTestId('builder-name')).not.toContainText('DNA');
-    await gate(page, 'the Mix builder (DNA resonance score)', seen);
+    await gate(page, 'the Mix builder (the Tone-set score)', seen);
     await shot(page, 'new-builder-dna-chip');
     await tab(page, 'now');
     await page.getByRole('button', { name: 'More options', exact: true }).click();
