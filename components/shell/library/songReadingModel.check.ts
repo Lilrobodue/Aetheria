@@ -61,7 +61,7 @@ check('no crystal: the Scan line', songReadingNone({}) === SONG_READING_UNSCANNE
 const HEALTH = /\b(DNA|heal\w*|cure\w*|treat\w*|repair\w*|therap\w*)\b/i;
 for (const t of TONE_READINGS) {
   const geo = GEOMETRY_INFO.find((g) => g.freq === `${t.hz}Hz`)!;
-  // (Per crystal: Deep Scan never gives 6336 itself, a measured 6336 Hz folds to 396.)
+  // (Per crystal, all 27 directly.)
   const row = geometryRow(t.hz);
   const line = row ? row.value.slice(geo.shape.length + 2) : '';
   check(`${t.hz}: a geometry row`, !!row && row.value.startsWith(`${geo.shape}. `));

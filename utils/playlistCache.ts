@@ -55,6 +55,9 @@ import type { Mark, SavedQueue } from './queue/queueModel';
 export type { SavedQueue } from './queue/queueModel';
 // v16.8.3: a track's tuning restores only when it holds together (tuningFieldsOf).
 import { restoredTuning } from './tuning/trackTuning';
+// v16.9.1 (The Summit): a track Deep Scan read on 396 from a measurement that reads as 6336 now moves there as it is read
+// back (the user's decision, 14 Nov 2026: quietly, on every device, no rescan); the next save stores it.
+import { summitMove } from './library/summitMove';
 
 const DB_NAME = 'aetheria-db';
 // v2: split the old combined `songs` store into `blobs` + `meta`. The schema is
@@ -825,7 +828,7 @@ async function readSavedPlaylist(): Promise<RestoredPlaylist | null> {
       if (!blob) return null;
       const meta = metaMap.get(id);
       const file = new File([blob.fileBlob], blob.fileName, { type: blob.fileType });
-      return {
+      return summitMove({
         file,
         id,
         name: meta?.name ?? blob.fileName,
@@ -843,7 +846,7 @@ async function readSavedPlaylist(): Promise<RestoredPlaylist | null> {
         crystalSource: meta?.crystalSource === 'scan' || meta?.crystalSource === 'assigned' ? meta.crystalSource : undefined,
         scanRate: typeof meta?.scanRate === 'number' ? meta.scanRate : undefined, // v16.8.1 (D1)
         ...tuningFieldsOf(meta), // v16.8.3 (Track Tuning)
-      };
+      });
     };
     const songsOf = (ids: readonly string[]): Song[] =>
       ids.map(toSong).filter((s): s is Song => s !== null);

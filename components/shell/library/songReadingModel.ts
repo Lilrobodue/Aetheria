@@ -29,8 +29,8 @@ export interface SongReadingView {
 }
 
 /** A crystal's Geometry row (null without a GEOMETRY_INFO entry). Review round 1: the codex's line where it dropped
- *  health words (1692, 5274), else GEOMETRY_INFO's own. Per crystal, so the check covers all 27 (Deep Scan itself never
- *  gives 6336: a measured 6336 Hz folds to its fundamental, 396). */
+ *  health words (1692, 5274), else GEOMETRY_INFO's own. Per crystal, so the check covers all 27 directly (v16.9.1:
+ *  Deep Scan reaches 6336 too). */
 export function geometryRow(crystal: number): ReadingRow | null {
   const geo = GEOMETRY_INFO.find((g) => g.freq === `${crystal}Hz`);
   if (!geo) return null;

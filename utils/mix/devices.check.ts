@@ -73,7 +73,9 @@ const FROZEN_V1681_SHA = 'dcb453f49ef2b2b72f386ada6f1877aabc5108df3c3dc9adb1178c
 const FROZEN_V1681_REF = 'e428022';
 /** v16.8.3: utils/mix/distribution.ts at 862d960 (v16.8.2), sha256 of its LF text: M1 changes nothing in the planner
  *  (the spread reads each track's own bands), so the file must stay v16.8.2's. */
-const DISTRIBUTION_V1682_SHA = 'e81d532276e7826acc855901b2e65b39fba0e0eff572abce845d6629b60b8c00';
+// Re-pinned in v16.9.1: v16.9 changed one comment in distribution.ts ("classic goes in v16.9" -> classic stays), no
+// code, and v16.9.1 leaves the file as it is. The pin still says the spread's code is v16.8.2's.
+const DISTRIBUTION_V1682_SHA = '246d423ceea9bb11006e061ac3c11d7340635bf4c8cff9d0afaade0356522f97';
 /** fix round 1 (§2d), measured on these fixtures (the report has the table) and set with a margin: the keyed open
  *  tracks on a fitting crystal at least, on a worse band than v16.8.1 at most (%). */
 // Measured: 10 % keyed 95.9 % fit, 0.0 % worse (NEUTRAL 1.5 gave 51.9 % and 3.2 %); 30 % keyed 88.1 % and 1.5 % (62.2 %, 2.5 %).

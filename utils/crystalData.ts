@@ -42,6 +42,13 @@ export const getHarmonicSolfeggio = (detectedFreq: number, quiet: boolean = fals
 
     let bestMatch = 396;
     let minScore = Infinity;
+    // v16.9.1 (The Summit; the user, 14 Nov 2026): a HEAD crystal is matched directly only, so a harmonic candidate that
+    // lands exactly on one no longer takes it on a tie. 6336 is 396 × 16 (and 528 × 12): 396's octave candidate scored
+    // exactly what 6336's own direct match did and, met first, kept the track, so no song ever read as 6336. Now a
+    // measured 6318–6363 Hz reads as 6336, and nothing else changes: ties with a candidate merely as far away (388 Hz,
+    // 8 Hz from both 285's fourth and 396) keep v16.9's answer. The sweep in utils/library/summitMove.check.ts holds
+    // every other half hertz from 1 to 24,000 Hz to v16.9's answer.
+    let bestCandidate = NaN; // the frequency the best match was measured against: the crystal, or a harmonic candidate
 
     if (!quiet) console.log(`Analyzing frequency: ${detectedFreq.toFixed(1)}Hz for solfeggio matching`);
 
@@ -66,9 +73,11 @@ export const getHarmonicSolfeggio = (detectedFreq: number, quiet: boolean = fals
         
         // Direct frequency matching
         const directDiff = Math.abs(detectedFreq - sFreq);
-        if (directDiff <= tolerance && directDiff < minScore) {
+        const directOnly = !useExtendedHarmonics; // (a HEAD crystal)
+        if (directDiff <= tolerance && (directDiff < minScore || (directOnly && directDiff === minScore && bestCandidate === sFreq))) {
             minScore = directDiff;
             bestMatch = sFreq;
+            bestCandidate = sFreq;
             if (!quiet) console.log(`Direct match found: ${detectedFreq.toFixed(1)}Hz ≈ ${sFreq}Hz (diff: ${directDiff.toFixed(1)}Hz)`);
         }
 
@@ -114,6 +123,7 @@ export const getHarmonicSolfeggio = (detectedFreq: number, quiet: boolean = fals
                 if (harmonicDiff < minScore) {
                     minScore = harmonicDiff;
                     bestMatch = sFreq;
+                    bestCandidate = candidate;
                     if (!quiet) console.log(`Harmonic match found: ${detectedFreq.toFixed(1)}Hz ≈ ${candidate.toFixed(1)}Hz (${sFreq}Hz harmonic, diff: ${harmonicDiff.toFixed(1)}Hz)`);
                 }
             });
