@@ -4,9 +4,12 @@ import { LO_SHU_WALK_INFO, type LoShuWalkMode } from '../constants';
 import { frequencyToSpectrumColor, type FrequencyColorMode } from '../utils/spectrumColor';
 import EvidenceTag from './ui/EvidenceTag';
 import { place } from '../utils/copy/places';
+import { crystalCopy } from '../utils/copy/crystalCopy';
 import { useGuideStep } from './guide/guideWidth';
 import type { Layout } from '../utils/copy/places';
 
+// v16.11 (decision 4 A): the cells' names are the app's one list's (crystalCopy, the Guide's function names; cellName),
+// shown under the caption's Tradition tag, so check:copy lists the cube as a CRYSTAL_COPY renderer.
 // v16.6 ("How sure are we?", the copy pass): a cell's name stands alone, untagged, so it carries no claim word ("Tissue
 // Repair" is "Renewal"; the association, "tissue repair", is in the meaning block and the technical guide's cards,
 // tagged). A caption over the grids says whose names they are, with its Tradition tag; the walks' and cells' notes name
@@ -47,8 +50,15 @@ interface RegimeDef {
   glow: string;
   intervalNote: string;
   freqs: number[];
-  names: string[];
 }
+
+/** v16.11 (decision 4 A): a cell's name is the app's one list's (crystalCopy, the Guide's function names); a Lo Shu
+ *  Perfect counterpart's is its Solfeggio crystal's, marked "+" ("Liberating Fear & Guilt+"), as the cube had it. */
+const cellName = (hz: number): string => {
+  const c = crystalCopy(hz);
+  if (!c) return `${hz} Hz`;
+  return c.perfectOf ? `${c.name}+` : c.name;
+};
 
 const SOLFEGGIO_GUT: RegimeDef = {
   key: 'GUT',
@@ -58,11 +68,6 @@ const SOLFEGGIO_GUT: RegimeDef = {
   glow: 'from-red-900/20 to-slate-900/30',
   intervalNote: 'Interval irregular (avg 99) — 7/8 lines = 1665',
   freqs: [174, 285, 396, 417, 528, 639, 741, 852, 963],
-  names: [
-    'Foundation', 'Renewal', 'Liberating Fear',
-    'Facilitating Change', 'Transformation', 'Connecting Relationships',
-    'Awakening Intuition', 'Spiritual Order', 'Divine Consciousness',
-  ],
 };
 
 const PERFECT_GUT: RegimeDef = {
@@ -73,11 +78,6 @@ const PERFECT_GUT: RegimeDef = {
   glow: 'from-emerald-900/20 to-slate-900/30',
   intervalNote: 'Interval 111 — 8/8 lines = 1557 (perfect magic square)',
   freqs: [75, 186, 297, 408, 519, 630, 741, 852, 963],
-  names: [
-    'Foundation+', 'Renewal+', 'Liberating Fear+',
-    'Facilitating Change+', 'Transformation+', 'Connecting Relationships+',
-    'Awakening Intuition', 'Spiritual Order', 'Divine Consciousness',
-  ],
 };
 
 const HEART: RegimeDef = {
@@ -88,11 +88,6 @@ const HEART: RegimeDef = {
   glow: 'from-amber-900/20 to-slate-900/30',
   intervalNote: 'Interval 243 = 3⁵ — 8/8 lines = 6534 (perfect, all roots = 9)',
   freqs: [1206, 1449, 1692, 1935, 2178, 2421, 2664, 2907, 3150],
-  names: [
-    'Gateway Integration', 'Harmonic Bridging', 'Unified Field Access',
-    'Emotional Alchemy', 'Compassion Activation', 'Heart Coherence',
-    'Relational Harmony', 'Soul Connection', 'Heart Completion',
-  ],
 };
 
 const HEAD: RegimeDef = {
@@ -103,11 +98,6 @@ const HEAD: RegimeDef = {
   glow: 'from-blue-900/20 to-slate-900/30',
   intervalNote: 'Interval 354 — 8/8 lines = 14760 (perfect magic square)',
   freqs: [3504, 3858, 4212, 4566, 4920, 5274, 5628, 5982, 6336],
-  names: [
-    'Mental Clarity', 'Sacred Geometry', 'Consciousness Mastery',
-    'Soul Star Connection', 'Expressive Truth', 'Universal Mind Access',
-    'Galactic Consciousness', 'Divine Source Portal', 'SOURCE Embodiment',
-  ],
 };
 
 interface MagicAnalysis {
@@ -269,7 +259,7 @@ const RegimeBlock: React.FC<RegimeBlockProps> = ({ regime, currentFrequency, onS
                 key={i}
                 freq={freq}
                 position={pos}
-                name={regime.names[pos - 1]}
+                name={cellName(freq)}
                 selected={currentFrequency === freq}
                 onSelect={onSelectFrequency}
                 colorMode={colorMode}
@@ -670,7 +660,7 @@ const LoShuMatrix: React.FC<LoShuMatrixProps> = ({
         </div>
       )}
       <div data-evidence="tradition" data-testid="loshu-cell-names" className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-3 text-[11px] text-slate-400">
-        <span>Cell names: the traditional Solfeggio associations (GUT) and the Aetheria framework's (HEART, HEAD).</span>
+        <span>Cell names: each tone's function name, as in the Guide.</span>
         <EvidenceTag tier="tradition" />
       </div>
       {/* v16.8.6: the three squares stand one above another in both layouts, each at most 440 px wide (centred). Side by

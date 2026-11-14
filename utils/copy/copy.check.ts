@@ -146,5 +146,30 @@ collect([sound.readoutCrystal(174, 'GUT'), sound.scanNoticeLine(50), sound.scanS
 ok(strings.length > 150, `the modules' strings are read (${strings.length})`);
 for (const s of strings) for (const p of RETIRED) ok(!s.includes(p), `no retired phrase "${p}" in "${s.slice(0, 60)}"`);
 
+// v16.11 (the 27 names; review round 1): the list, pinned here so a change shows by name, without a browser.
+{
+  const NAMES: Record<number, string> = {
+    174: 'Foundation', 285: 'Renewal', 396: 'Liberating Fear & Guilt', 417: 'Facilitating Change', 528: 'Transformation', 639: 'Connecting Relationships',
+    741: 'Awakening', 852: 'Intuition', 963: 'Divine Consciousness', 1206: 'Gateway Integration', 1449: 'Harmonic Bridging', 1692: 'Unified Field Access',
+    1935: 'Emotional Alchemy', 2178: 'Compassion Activation', 2421: 'Heart Coherence', 2664: 'Relational Harmony', 2907: 'Soul Connection', 3150: 'Heart Completion',
+    3504: 'Mental Clarity', 3858: 'Sacred Geometry', 4212: 'Consciousness Mastery', 4566: 'Soul Star Connection', 4920: 'Expressive Truth', 5274: 'Universal Mind Access',
+    5628: 'Galactic Consciousness', 5982: 'Divine Source Portal', 6336: 'SOURCE Embodiment',
+  };
+  eq(crystal.CRYSTAL_COPY.map((c) => [c.hz, c.name]), Object.entries(NAMES).map(([hz, n]) => [Number(hz), n]), "v16.11: the 27 names are the codex's (tones.json name)");
+  // Decision 2 A: the five lines that described another tone's new name, their paragraphs' sentences.
+  const LINES: Record<number, string> = {
+    1692: 'In the Aetheria framework, the heart reaching past the body’s boundary, its power held steady.',
+    1935: 'In the Aetheria framework, feeling turned into seeing: the clean hand, raised before the offering.',
+    2421: 'In the Aetheria framework, the heart releasing what has run its course, so that something new can grow.',
+    3150: 'In the Aetheria framework, the heart’s work grown to its full height.',
+    4920: 'In the Aetheria framework, awareness wide enough to hold the truth and gentle enough to say it.',
+  };
+  for (const [hz, line] of Object.entries(LINES)) eq(crystalCopy(Number(hz))?.association, line, `v16.11: ${hz}'s line (2 A)`);
+  // Decision 1 A: the script name for the 27 only.
+  for (const c of crystal.CRYSTAL_COPY) ok(typeof crystal.scriptName(c.hz) === 'string' && crystal.scriptName(c.hz)!.startsWith('The '), `v16.11: ${c.hz} has a script name`);
+  for (const hz of [...Object.keys(crystal.PERFECT_OF).map(Number), 111, 0, NaN, 5000]) eq(crystal.scriptName(hz), null, `v16.11: no script name for ${hz}`);
+  eq(crystal.functionLine('Transformation'), 'Function name: Transformation', 'v16.11: the labelled line');
+}
+
 console.log(`copy.check: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

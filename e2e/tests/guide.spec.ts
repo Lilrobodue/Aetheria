@@ -48,7 +48,10 @@ const asClassicPlaces = (nodes: string[]): string[] => {
 // Solfeggio topic does too, but its plain line isn't in the hashed Technical text). With those texts put back this
 // build gives a9d9190fbba89855 and 9cfdeff6ef19c552 again (the control, run 14 Nov), so they are the only change.
 // Was 'a9d9190fbba89855'.
-const TECHNICAL_TEXT_SHA = '4d52bf48e44c3888'; // v16.10 (v16.8.4 fix round 1: a9d9190fbba89855)
+// v16.11 (the 27 names: the cards' script names and labelled function names, five lines, The Summit's four texts, the
+// cube's caption). With v16.10.1's crystalCopy, TechnicalGuide, LoShuMatrix and CrystalMeaning put back this build gives
+// 4d52bf48e44c3888 and 17dda7e286a9a6e6 again (the control, run 14 Nov), so they are the only change.
+const TECHNICAL_TEXT_SHA = 'd6ee2e659fc68fb1'; // v16.11 (v16.10: 4d52bf48e44c3888)
 // v16.8.4 (spec §2.6): classic stays for good, and its Guidebook leaves out the tuning line (RETUNE_TUNING, "… in Track
 // info.": classic has no Track info Tuning row); the new layout's Guide keeps it. So TECHNICAL_TEXT_SHA is now the new
 // layout's Guide (read as classic's places), unchanged from v16.8.3, and classic's own text is pinned apart: the same
@@ -57,7 +60,7 @@ const TECHNICAL_TEXT_SHA = '4d52bf48e44c3888'; // v16.10 (v16.8.4 fix round 1: a
 // sentence out of the Arithmetic paragraph, leaving that paragraph v16.8.2's), so classic reads as it did in v16.8.2.
 // v16.8.4 fix round 1 (approved): classic's Guidebook shows the same Design choice line, so its pin moves too; with
 // 7cfecb5's evidence.ts this build gives fc0c8cd57a91a81a again, so that line is the only change. Was 'fc0c8cd57a91a81a'.
-const CLASSIC_TECHNICAL_TEXT_SHA = '17dda7e286a9a6e6'; // v16.10, the same four texts (v16.8.4 fix round 1: 9cfdeff6ef19c552)
+const CLASSIC_TECHNICAL_TEXT_SHA = 'aa3d9ef6c2c6ae98'; // v16.11, the same texts (v16.10: 17dda7e286a9a6e6)
 
 const sha = (parts: string[]) => createHash('sha256').update(parts.join('\n'), 'utf8').digest('hex').slice(0, 16);
 

@@ -161,13 +161,14 @@ test.describe('phone', () => {
     await expect.poll(() => moreView(page)).toBe('safety');
   });
 
-  test('E8. the meaning block: 528 Hz · Transformation, its association, its shape, Tradition; Perfect GUT 519 Hz: 528’s words + the counterpart line; 111: Design choice; the sheet shows the same block', async ({ page }) => {
+  test('E8. the meaning block: 528 Hz · The Drift (v16.11: Function name: Transformation), its association, its shape, Tradition; Perfect GUT 519 Hz: 528’s words + the counterpart line; 111: Design choice; the sheet shows the same block', async ({ page }) => {
     await openSeededNewLayout(page, 6);
     await tab(page, 'layers');
     const block = page.getByTestId('crystal-meaning-section');
     await page.getByTestId('layers-crystal-tile').scrollIntoViewIfNeeded();
     await page.getByTestId('crystal-528').first().click();
-    await expect(block.getByTestId('crystal-meaning-title')).toHaveText('528 Hz · Transformation');
+    await expect(block.getByTestId('crystal-meaning-title')).toHaveText('528 Hz · The Drift'); // v16.11 (decision 1 A): the script name leads
+    await expect(block.getByTestId('crystal-meaning-function')).toHaveText('Function name: Transformation');
     await expect(block.getByTestId('crystal-meaning-association')).toHaveText('Traditionally associated with transformation and miracles. In Solfeggio teaching it is called “the miracle tone”.'); // v16.10: no DNA
     await expect(block.getByTestId('crystal-meaning-shape')).toHaveText('Shape: Metatron\'s Cube · Light');
     await expect(block.locator('[data-evidence-tag]')).toHaveCount(1);
@@ -178,7 +179,8 @@ test.describe('phone', () => {
     const perfect = page.getByRole('switch', { name: 'Lo Shu Perfect GUT', exact: true }).first();
     await perfect.click();
     await page.getByTestId('crystal-519').first().click();
-    await expect(block.getByTestId('crystal-meaning-title')).toHaveText('519 Hz · Transformation');
+    await expect(block.getByTestId('crystal-meaning-title')).toHaveText('519 Hz · Transformation'); // a Perfect counterpart keeps its one name (v16.11)
+    await expect(block.getByTestId('crystal-meaning-function')).toHaveCount(0);
     // Review B4: the counterpart line first, then its crystal's association, said as its crystal's.
     await expect(block.getByTestId('crystal-meaning-perfect')).toHaveText('Lo Shu Perfect counterpart of 528 Hz.');
     await expect(block.getByTestId('crystal-meaning-association')).toHaveText('Its crystal, 528 Hz, is traditionally associated with transformation and miracles. In Solfeggio teaching it is called “the miracle tone”.'); // v16.10: no DNA
@@ -252,7 +254,7 @@ test.describe('phone', () => {
     expect(r.CrystalMeaning ?? 0, 'CrystalMeaning (Layers)').toBe(0);
     await resetRenders(page);
     await page.getByTestId('crystal-639').first().click();
-    await expect(page.getByTestId('crystal-meaning-section').getByTestId('crystal-meaning-title')).toHaveText('639 Hz · Connection');
+    await expect(page.getByTestId('crystal-meaning-section').getByTestId('crystal-meaning-title')).toHaveText('639 Hz · The Root'); // v16.11
     r = await renders(page);
     // One render: DEV runs under React.StrictMode, which calls a component's render twice, so it counts 1 or 2.
     expect(r.CrystalMeaning ?? 0, 'a crystal change renders the block once').toBeGreaterThanOrEqual(1);

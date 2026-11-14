@@ -15,10 +15,12 @@
 // tailwind.config.js scans utils/: no word in these comments is meant as a style name.
 
 import type { Tier } from './evidence.ts';
+import { toneReading } from './songReading.ts';
 
 export interface CrystalCopy {
   hz: number;
-  /** Short and claim-free: the cube's cells, the technical guide's card titles, the meaning block's heading. */
+  /** The function name, short and claim-free (v16.11: the codex's): the cube's cells, Track info's Scanned as, and the
+   *  labelled "Function name:" line under the script name in the technical guide's cards and the meaning block. */
   name: string;
   /** One sentence, framed as an association, tagged. */
   association: string;
@@ -29,33 +31,33 @@ export const CRYSTAL_COPY: readonly CrystalCopy[] = [
   // GUT: the nine Solfeggio frequencies (a modern teaching; its associations, reframed)
   { hz: 174, name: 'Foundation', association: 'Traditionally associated with foundation, security and relief from pain.', tag: 'tradition' },
   { hz: 285, name: 'Renewal', association: 'Traditionally associated with tissue repair and quantum cognition.', tag: 'tradition' },
-  { hz: 396, name: 'Liberation', association: 'Traditionally associated with liberating fear and guilt.', tag: 'tradition' },
-  { hz: 417, name: 'Change', association: 'Traditionally associated with facilitating change and undoing situations.', tag: 'tradition' },
+  { hz: 396, name: 'Liberating Fear & Guilt', association: 'Traditionally associated with liberating fear and guilt.', tag: 'tradition' },
+  { hz: 417, name: 'Facilitating Change', association: 'Traditionally associated with facilitating change and undoing situations.', tag: 'tradition' },
   { hz: 528, name: 'Transformation', association: 'Traditionally associated with transformation and miracles. In Solfeggio teaching it is called “the miracle tone”.', tag: 'tradition' },
-  { hz: 639, name: 'Connection', association: 'Traditionally associated with connecting relationships and harmony.', tag: 'tradition' },
-  { hz: 741, name: 'Intuition', association: 'Traditionally associated with awakening intuition and problem solving.', tag: 'tradition' },
-  { hz: 852, name: 'Spiritual order', association: 'Traditionally associated with returning to spiritual order and inner strength.', tag: 'tradition' },
-  { hz: 963, name: 'Divine consciousness', association: 'Traditionally associated with divine consciousness, unity and pineal activation.', tag: 'tradition' },
+  { hz: 639, name: 'Connecting Relationships', association: 'Traditionally associated with connecting relationships and harmony.', tag: 'tradition' },
+  { hz: 741, name: 'Awakening', association: 'Traditionally associated with awakening intuition and problem solving.', tag: 'tradition' },
+  { hz: 852, name: 'Intuition', association: 'Traditionally associated with returning to spiritual order and inner strength.', tag: 'tradition' },
+  { hz: 963, name: 'Divine Consciousness', association: 'Traditionally associated with divine consciousness, unity and pineal activation.', tag: 'tradition' },
   // HEART: the Aetheria framework's fourth to sixth orders (963 + 243 steps)
-  { hz: 1206, name: 'Gateway', association: 'In the Aetheria framework, the gateway between the physical and the emotional.', tag: 'tradition' },
-  { hz: 1449, name: 'Harmonic bridge', association: 'In the Aetheria framework, a harmonic bridge between emotional states.', tag: 'tradition' },
-  { hz: 1692, name: 'Heart completion', association: 'In the Aetheria framework, the completion of the heart cycle.', tag: 'tradition' },
-  { hz: 1935, name: 'Stellar connection', association: 'In the Aetheria framework, alignment with stellar energies.', tag: 'tradition' },
-  { hz: 2178, name: 'SOURCE · compassion', association: 'In the Aetheria framework, SOURCE: compassion, at the centre of the Lo Shu cube.', tag: 'tradition' },
-  { hz: 2421, name: 'Dimensional awareness', association: 'In the Aetheria framework, awareness of many dimensions.', tag: 'tradition' },
-  { hz: 2664, name: 'Universal love', association: 'In the Aetheria framework, universal love.', tag: 'tradition' },
-  { hz: 2907, name: 'Divine source', association: 'In the Aetheria framework, connection with the divine source.', tag: 'tradition' },
-  { hz: 3150, name: 'Unity bridge', association: 'In the Aetheria framework, a bridge into unity consciousness.', tag: 'tradition' },
+  { hz: 1206, name: 'Gateway Integration', association: 'In the Aetheria framework, the gateway between the physical and the emotional.', tag: 'tradition' },
+  { hz: 1449, name: 'Harmonic Bridging', association: 'In the Aetheria framework, a harmonic bridge between emotional states.', tag: 'tradition' },
+  { hz: 1692, name: 'Unified Field Access', association: 'In the Aetheria framework, the heart reaching past the body’s boundary, its power held steady.', tag: 'tradition' },
+  { hz: 1935, name: 'Emotional Alchemy', association: 'In the Aetheria framework, feeling turned into seeing: the clean hand, raised before the offering.', tag: 'tradition' },
+  { hz: 2178, name: 'Compassion Activation', association: 'In the Aetheria framework, SOURCE: compassion, at the centre of the Lo Shu cube.', tag: 'tradition' },
+  { hz: 2421, name: 'Heart Coherence', association: 'In the Aetheria framework, the heart releasing what has run its course, so that something new can grow.', tag: 'tradition' },
+  { hz: 2664, name: 'Relational Harmony', association: 'In the Aetheria framework, universal love.', tag: 'tradition' },
+  { hz: 2907, name: 'Soul Connection', association: 'In the Aetheria framework, connection with the divine source.', tag: 'tradition' },
+  { hz: 3150, name: 'Heart Completion', association: 'In the Aetheria framework, the heart’s work grown to its full height.', tag: 'tradition' },
   // HEAD: the seventh to ninth orders (3150 + 354 steps)
-  { hz: 3504, name: 'Mental clarity', association: 'In the Aetheria framework, mental clarity.', tag: 'tradition' },
-  { hz: 3858, name: 'Divine architecture', association: 'In the Aetheria framework, sacred geometry: divine architecture.', tag: 'tradition' },
-  { hz: 4212, name: 'Consciousness mastery', association: 'In the Aetheria framework, mastery of consciousness.', tag: 'tradition' },
-  { hz: 4566, name: 'Soul star', association: 'In the Aetheria framework, the first transpersonal gate: the soul star.', tag: 'tradition' },
-  { hz: 4920, name: 'Spirit gate', association: 'In the Aetheria framework, the second transpersonal gate: spirit.', tag: 'tradition' },
-  { hz: 5274, name: 'Universal mind', association: 'In the Aetheria framework, the third transpersonal gate: the universal mind.', tag: 'tradition' },
-  { hz: 5628, name: 'Galactic centre', association: 'In the Aetheria framework, galactic consciousness.', tag: 'tradition' },
-  { hz: 5982, name: 'Divine gateway', association: 'In the Aetheria framework, a portal to the divine source.', tag: 'tradition' },
-  { hz: 6336, name: 'Completion', association: 'In the Aetheria framework, SOURCE embodiment and the completion of the ascent.', tag: 'tradition' },
+  { hz: 3504, name: 'Mental Clarity', association: 'In the Aetheria framework, mental clarity.', tag: 'tradition' },
+  { hz: 3858, name: 'Sacred Geometry', association: 'In the Aetheria framework, sacred geometry: divine architecture.', tag: 'tradition' },
+  { hz: 4212, name: 'Consciousness Mastery', association: 'In the Aetheria framework, mastery of consciousness.', tag: 'tradition' },
+  { hz: 4566, name: 'Soul Star Connection', association: 'In the Aetheria framework, the first transpersonal gate: the soul star.', tag: 'tradition' },
+  { hz: 4920, name: 'Expressive Truth', association: 'In the Aetheria framework, awareness wide enough to hold the truth and gentle enough to say it.', tag: 'tradition' },
+  { hz: 5274, name: 'Universal Mind Access', association: 'In the Aetheria framework, the third transpersonal gate: the universal mind.', tag: 'tradition' },
+  { hz: 5628, name: 'Galactic Consciousness', association: 'In the Aetheria framework, galactic consciousness.', tag: 'tradition' },
+  { hz: 5982, name: 'Divine Source Portal', association: 'In the Aetheria framework, a portal to the divine source.', tag: 'tradition' },
+  { hz: 6336, name: 'SOURCE Embodiment', association: 'In the Aetheria framework, SOURCE embodiment and the completion of the ascent.', tag: 'tradition' },
 ];
 
 /** 111 Hz: the labelled non-canonical exception (v15.9's chip). Its words are the chip's own. */
@@ -73,6 +75,19 @@ export function crystalCopy(hz: number): (CrystalCopy & { perfectOf?: number }) 
   const c = CRYSTAL_COPY.find((x) => x.hz === (base ?? hz));
   if (!c) return null;
   return base ? { ...c, hz, perfectOf: base } : c;
+}
+
+/** v16.11 (decision 1 A, "keep both names, labelled"): one of the 27 crystals' script name (The Drift), from the song
+ *  reading's tones (songReading.ts, the codex's), shown first; null for a Lo Shu Perfect counterpart (it has none of
+ *  its own), 111 and anything else. */
+export function scriptName(hz: number): string | null {
+  if (!Number.isFinite(hz) || PERFECT_OF[hz] !== undefined || !CRYSTAL_COPY.some((x) => x.hz === hz)) return null;
+  return toneReading(hz)?.script ?? null;
+}
+/** The labelled line under a script name: "Function name: Transformation". */
+export const FUNCTION_LABEL = 'Function name';
+export function functionLine(name: string): string {
+  return `${FUNCTION_LABEL}: ${name}`;
 }
 
 /** The meaning block's line for a Perfect counterpart (an Arithmetic fact: the swap table). */

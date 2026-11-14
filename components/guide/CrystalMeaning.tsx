@@ -2,7 +2,8 @@
 //
 // The new layout's crystal meaning, which it never showed before: one bordered block, tagged, in the Crystal sheet
 // (between the subtitle and "Back to the track's crystal") and in Layers › Crystal (under the tile's heard line).
-//   line 1: the regime dot, "528 Hz · Transformation" (111: "111 Hz");
+//   line 1: the regime dot, "528 Hz · The Drift" (v16.11, decision 1 A: the script name; a Perfect counterpart keeps
+//           "519 Hz · Transformation", 111 "111 Hz"), then "Function name: Transformation" for the 27;
 //   line 2: the association (crystalCopy: "Traditionally associated with …" for GUT, "In the Aetheria framework, …" for
 //           HEART and HEAD), and for a Lo Shu Perfect counterpart "Lo Shu Perfect counterpart of 528 Hz." [Arithmetic];
 //   line 3: "Shape: Metatron's Cube · Light", from GEOMETRY_INFO's shape and element (read here, the table untouched);
@@ -17,7 +18,7 @@ import { useSound } from '../shell/contexts';
 import { countRender } from '../shell/devRenders';
 import { REGIME_DOT, regimeOf } from '../shell/shellModel';
 import { GEOMETRY_INFO } from '../../constants';
-import { crystalCopy, perfectAssociation, perfectLine, shapeLine } from '../../utils/copy/crystalCopy';
+import { crystalCopy, functionLine, perfectAssociation, perfectLine, scriptName, shapeLine } from '../../utils/copy/crystalCopy';
 
 /** GEOMETRY_INFO's shape · element for a crystal (its `freq` is "528Hz"). */
 function shapeOf(hz: number): string | null {
@@ -31,14 +32,22 @@ const MeaningBlock = React.memo(({ hz, host }: { hz: number; host: 'sheet' | 'se
   if (!c) return null;
   const base = c.perfectOf ?? c.hz;
   const shape = c.hz === 111 ? null : shapeOf(base);
+  // v16.11 (decision 1 A): one of the 27 leads with its script name, its function name on a labelled line; a Perfect
+  // counterpart (no script name of its own) and 111 keep their one name.
+  const script = scriptName(hz);
   return (
     <div data-evidence={c.tag} data-testid={`crystal-meaning-${host}`} className="rounded-card border border-line bg-surface-raised/60 p-3 space-y-1.5">
       <div className="flex items-center gap-2">
         <span aria-hidden="true" className={`shrink-0 w-2.5 h-2.5 rounded-pill ${REGIME_DOT[regimeOf(hz)]}`} />
         <span data-testid="crystal-meaning-title" className="text-base font-semibold text-ink-strong">
-          {c.hz === 111 ? c.name : `${hz} Hz · ${c.name}`}
+          {c.hz === 111 ? c.name : `${hz} Hz · ${script ?? c.name}`}
         </span>
       </div>
+      {script ? (
+        <p data-testid="crystal-meaning-function" className="text-xs text-ink-muted">
+          {functionLine(c.name)}
+        </p>
+      ) : null}
       {c.perfectOf ? (
         <p data-testid="crystal-meaning-perfect" className="text-xs text-ink-muted">
           {perfectLine(c.perfectOf)}

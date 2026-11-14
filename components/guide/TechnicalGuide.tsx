@@ -28,13 +28,15 @@ import HowSure from './HowSure';
 import type { HowSureBack } from './HowSure';
 import { useGuideStep } from './guideWidth';
 import {
-  crystalCopy, orderLine, REGIME_COPY, TRANSITION_COPY, REGIMES_TITLE, REGIMES_LEAD_START, HEAD_MARK_TITLE, RETUNE_TITLE, RETUNE_LONG, RETUNE_HISTORY, RETUNE_TUNING,
+  crystalCopy, scriptName, functionLine, orderLine, REGIME_COPY, TRANSITION_COPY, REGIMES_TITLE, REGIMES_LEAD_START, HEAD_MARK_TITLE, RETUNE_TITLE, RETUNE_LONG, RETUNE_HISTORY, RETUNE_TUNING,
 } from '../../utils/copy/crystalCopy';
 import { place } from '../../utils/copy/places';
 import type { Layout } from '../../utils/copy/places';
 
 /** A crystal card's name and association (never SOLFEGGIO_INFO's or an inline `benefit`). */
 const nameOf = (hz: number): string => crystalCopy(hz)?.name ?? `${hz} Hz`;
+/** v16.11 (decision 1 A): a card's title is the crystal's script name (The Drift), its function name on a labelled line. */
+const titleOf = (hz: number): string => scriptName(hz) ?? nameOf(hz);
 const meaningOf = (hz: number): string => crystalCopy(hz)?.association ?? '';
 /** A tag on its own row (the density rule: never inside a sentence). */
 const TagRow = ({ children }: { children: React.ReactNode }) => <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-3">{children}</div>;
@@ -411,7 +413,8 @@ const TechnicalGuide = ({
                               <span className="text-xl font-bold font-mono" style={{color: f.color}}>{f.freq} Hz</span>
                               <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-red-500/20 px-2 py-1 rounded">GUT</span>
                           </div>
-                          <h5 className="text-white font-medium mb-1">{nameOf(f.freq)}</h5>
+                          <h5 className="text-white font-medium mb-1">{titleOf(f.freq)}</h5>
+                          {scriptName(f.freq) ? <p data-testid="guide-card-function" className="text-xs text-slate-400 mb-1">{functionLine(nameOf(f.freq))}</p> : null}
                           <p className="text-xs text-slate-400 mb-3 leading-relaxed">{meaningOf(f.freq)}</p>
                       </div>
                     ))}
@@ -456,7 +459,8 @@ const TechnicalGuide = ({
                               <span className="text-xl font-bold font-mono" style={{color: f.color}}>{f.freq} Hz</span>
                               <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-green-500/20 px-2 py-1 rounded">{f.order} {f.step}</span>
                           </div>
-                          <h5 className="text-white font-medium mb-1">{nameOf(f.freq)}</h5>
+                          <h5 className="text-white font-medium mb-1">{titleOf(f.freq)}</h5>
+                          {scriptName(f.freq) ? <p data-testid="guide-card-function" className="text-xs text-slate-400 mb-1">{functionLine(nameOf(f.freq))}</p> : null}
                           <p className="text-xs font-mono text-slate-500 mb-1">{orderLine(f.n, f.freq - 243, 243)}</p>
                           <p className="text-xs text-slate-400 mb-3 leading-relaxed">
                             {meaningOf(f.freq)}
@@ -528,15 +532,16 @@ const TechnicalGuide = ({
                               <span className="text-xl font-bold font-mono" style={{color: f.color}}>{f.freq} Hz</span>
                               <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-purple-500/20 px-2 py-1 rounded">{f.order} {f.step}</span>
                           </div>
-                          <h5 className="text-white font-medium mb-1">{nameOf(f.freq)}</h5>
+                          <h5 className="text-white font-medium mb-1">{titleOf(f.freq)}</h5>
+                          {scriptName(f.freq) ? <p data-testid="guide-card-function" className="text-xs text-slate-400 mb-1">{functionLine(nameOf(f.freq))}</p> : null}
                           <p className="text-xs font-mono text-slate-500 mb-1">{orderLine(f.n, f.freq - 354, 354)}</p>
                           <p className="text-xs text-slate-400 mb-3 leading-relaxed">
                             {meaningOf(f.freq)}
-                            {f.freq === 6336 && " The outermost vertex of the cube; a mirror number reducing to 9. The path that began at 174 Hz returns home through this corner; SOURCE itself sits one layer down at 2178 Hz, the cube's centre."}
+                            {f.freq === 6336 && " The last of the 27 and the top of the climb; a mirror number reducing to 9. The path that began at 174 Hz ends here; SOURCE itself sits one layer down at 2178 Hz, the cube's centre."}
                           </p>
                           {f.freq === 6336 && (
                             <div className="mt-2 p-2 bg-violet-500/20 border border-violet-500/50 rounded text-center">
-                              <div className="text-[9px] text-violet-300 font-bold uppercase tracking-widest">COMPLETION · OUTERMOST VERTEX</div>
+                              <div className="text-[9px] text-violet-300 font-bold uppercase tracking-widest">THE SUMMIT · LAST OF THE 27</div>
                             </div>
                           )}
                       </div>
@@ -553,9 +558,9 @@ const TechnicalGuide = ({
                   <div className="mt-4 p-4 bg-violet-900/20 border border-violet-500/50 rounded-lg text-center">
                     <div className="flex items-center justify-center gap-2 text-violet-300 text-lg font-bold mb-2">
                       <Target size={20} />
-                      6336 Hz — Completion of the Ascent
+                      6336 Hz — The Summit
                     </div>
-                    <p className="text-sm text-violet-200">The mathematically correct completion frequency (5982 + 354). Mirror number reducing to 9 — the corner of the cube farthest from centre. Walks that begin at 174 Hz arrive here, but they do not arrive at SOURCE: SOURCE is 2178 Hz, the geometric heart of the cube. 6336 is the journey's outer turning point, not its origin.</p>
+                    <p className="text-sm text-violet-200">The mathematically correct completion frequency (5982 + 354). Mirror number reducing to 9 — the last of the 27. Walks that begin at 174 Hz arrive here, but they do not arrive at SOURCE: SOURCE is 2178 Hz, the geometric heart of the cube. 6336 is the journey's outer turning point, not its origin.</p>
                   </div>
                 </div>
               </div>

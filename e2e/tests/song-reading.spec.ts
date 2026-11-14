@@ -100,7 +100,7 @@ test.describe('Track info, What it says', () => {
     expect(rows.map((r) => r[0])).toEqual(LABELS);
     // The user (14 Nov): "Scanned as": the dialog keeps one Crystal row, its own.
     await expect(info.locator('dt').filter({ hasText: /^Crystal$/ }), 'one Crystal row in Track info').toHaveCount(1);
-    expect(rows[0][1]).toBe('4566 Hz · The Chorus · Soul starIn the Aetheria framework, the first transpersonal gate: the soul star.');
+    expect(rows[0][1]).toBe('4566 Hz · The Chorus · Soul Star ConnectionIn the Aetheria framework, the first transpersonal gate: the soul star.'); // v16.11: the codex's name
     expect(rows[1][1]).toBe('HEAD layer, palace 4, south-east, Wood, ☴ Xun');
     expect(rows[2][1]).toMatch(/^45 Gathering Together/);
     await expect(section.locator('blockquote')).toHaveText(/^In \(the state denoted by\) Žhui, the king will repair to his ancestral temple\./);
@@ -167,7 +167,7 @@ test.describe('Track info, What it says', () => {
     expect(one.slice(0, at)).toMatch(/^tone-0001\n/);
     expect(one.slice(at + 2).split('\n')).toEqual([
       'What it says (Tradition)',
-      'Scanned as: 4566 Hz · The Chorus · Soul star',
+      'Scanned as: 4566 Hz · The Chorus · Soul Star Connection', // v16.11
       '  In the Aetheria framework, the first transpersonal gate: the soul star.',
       'In the cube: HEAD layer, palace 4, south-east, Wood, ☴ Xun',
       'Hexagram: 45 Gathering Together',
