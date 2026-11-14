@@ -145,7 +145,9 @@ const TrackInfoBody = ({ song, scores, bands, perfectGut, shifts, ctx }: { song:
         </div>
         {reading ? (
           <>
-            <dl className="mt-1">
+            {/* v16.12: the tone in words first (the codex's prose, under the section's Tradition tag). */}
+            <p data-testid="track-info-reading-prose" className="mt-2 text-sm text-ink-strong leading-relaxed">{reading.prose}</p>
+            <dl className="mt-2">
               {reading.rows.map((r) => (
                 <div key={r.label} className="grid grid-cols-[104px_1fr] gap-3 py-2 border-b border-line">
                   <dt className="text-ink-muted">{r.label}</dt>

@@ -7,6 +7,7 @@ import { songReadingView, songReadingText, songReadingNone, geometryRow } from '
 import { TONE_READINGS, toneReading, SONG_READING_FAILED, SONG_READING_UNSCANNED, SONG_READING_HOW } from '../../../utils/copy/songReading.ts';
 import { SOLFEGGIO_INFO, GEOMETRY_INFO } from '../../../constants.ts';
 import { scanCrystalOf, SPREAD_MARK } from '../../../utils/mix/distribution.ts';
+import { createHash } from 'node:crypto';
 
 let failed = 0, passed = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -19,6 +20,38 @@ check('27 readings', TONE_READINGS.length === 27);
 check('same crystals as SOLFEGGIO_INFO', TONE_READINGS.map((t) => t.hz).join() === SOLFEGGIO_INFO.map((s) => s.freq).join());
 check('every reading tagged Tradition', TONE_READINGS.every((t) => t.tag === 'tradition'));
 check('every reading complete', TONE_READINGS.every((t) => t.script && t.hexagramName && t.judgment && t.palace && t.mansion && t.deity && t.symbol && t.planet));
+// v16.12: every tone has its prose, opening with its own script name and naming its hexagram and mansion.
+check('every tone has its prose', TONE_READINGS.every((t) => typeof t.prose === 'string' && t.prose.length > 400), TONE_READINGS.filter((t) => !(t.prose?.length > 400)).map((t) => t.hz).join());
+check('each prose opens with its script name', TONE_READINGS.every((t) => t.prose.startsWith(`${t.script} `)), TONE_READINGS.filter((t) => !t.prose.startsWith(`${t.script} `)).map((t) => t.hz).join());
+check('each prose names its hexagram', TONE_READINGS.every((t) => t.prose.includes(`${t.hexagram} ${t.hexagramName}`)), TONE_READINGS.filter((t) => !t.prose.includes(`${t.hexagram} ${t.hexagramName}`)).map((t) => t.hz).join());
+check('each prose names its mansion', TONE_READINGS.every((t) => t.prose.includes(t.mansion.replace(/^\d+ /, ''))), TONE_READINGS.filter((t) => !t.prose.includes(t.mansion.replace(/^\d+ /, ''))).map((t) => t.hz).join());
+check('no prose says DNA', TONE_READINGS.every((t) => !/\bDNA\b/i.test(t.prose)));
+// v16.12, Joe's answers on "The 27 Paragraphs" (the codex edited to match, Divination 02b0351):
+// v16.12 (the user, 14 Nov): "Scanned as" is the tone and its names only, no Guide line under it, for all 27.
+{
+  const withNote = TONE_READINGS.filter((t) => songReadingView({ harmonicFreq: t.hz + 1, closestSolfeggio: t.hz, harmonicDeviation: 1, crystalSource: 'scan' } as never)?.rows.find((r) => r.label === 'Scanned as')?.note !== undefined).map((t) => t.hz);
+  check('v16.12: no Guide line under "Scanned as"', withNote.length === 0, withNote.join());
+}
+// Word for word: the 27 paragraphs, hashed, equal the codex's (Divination data/tones.json `prose` at 02b0351, the
+// hash of "hz<TAB>prose" lines joined, taken from that file): a changed word anywhere fails here (review round 1).
+const PROSE_SHA = 'd8055f0cd4d23f4b';
+check('the 27 paragraphs are the codex\'s at 02b0351, word for word', createHash('sha256').update(TONE_READINGS.map((t) => `${t.hz}\t${t.prose}`).join('\n'), 'utf8').digest('hex').slice(0, 16) === PROSE_SHA);
+// 1 A: "the player" is always the Aetheria EEG player, and says what that player does, not what a brain does.
+const bare = TONE_READINGS.filter((t) => t.prose.replace(/the Aetheria EEG player/g, '').includes('player')).map((t) => t.hz);
+check('1 A: no bare "player": every one is the Aetheria EEG player', bare.length === 0, bare.join());
+check('1 A: eight tones name it', TONE_READINGS.filter((t) => t.prose.includes('the Aetheria EEG player')).map((t) => t.hz).join() === '741,852,1449,1692,2421,2907,5628,5982');
+check('1 A: 741 says what the player does', toneReading(741)!.prose.includes('the Aetheria EEG player plays it when its reading shows alpha rising.') && !toneReading(741)!.prose.includes('awareness opens'));
+check('1 A: 5982 too', toneReading(5982)!.prose.includes('plays it when its reading shows theta rising.') && !toneReading(5982)!.prose.includes('being taken in'));
+// 3 A: The Summit is not a corner.
+check('3 A: The Summit is the top of the climb, not a corner (and the last of the 27 once, for Revati)', toneReading(6336)!.prose.startsWith('The Summit is the top of the climb. ') && !/corner/.test(toneReading(6336)!.prose) && toneReading(6336)!.prose.split('the last of the 27').length === 2);
+// 4 A: each paragraph's palace names the element its "In the cube" row names.
+const element = (t: (typeof TONE_READINGS)[number]) => t.palace.split(', ')[3];
+// The paragraphs say it as "the north palace, Water (☵ Kan)", "the center palace, Earth", "the south-west palace, the
+// receptive Earth (☷ Kun)" or "the east palace, Wood, where Thunder (☳) wakes things"; 4920 and 6336 name no palace.
+const said = (t: (typeof TONE_READINGS)[number]) => (t.prose.match(/palace, (?:the \w+ )?([A-Z]\w+)/) ?? [])[1];
+check('4 A: only 4920 and 6336 name no palace', TONE_READINGS.filter((t) => !said(t)).map((t) => t.hz).join() === '4920,6336');
+const off = TONE_READINGS.filter((t) => said(t) && said(t) !== element(t)).map((t) => `${t.hz}: ${said(t)} vs ${element(t)}`);
+check('4 A: every paragraph\'s palace element is its row\'s', off.length === 0, off.join('; '));
 const cycle = ['Ketu', 'Venus', 'Sun', 'Moon', 'Mars', 'Rahu', 'Jupiter', 'Saturn', 'Mercury'];
 check('ruling planets cycle from Ketu', TONE_READINGS.every((t, i) => t.planet === cycle[i % 9]));
 const joe = toneReading(4566)!;
@@ -37,6 +70,8 @@ const v = songReadingView(scanned);
 check('scanned track has a reading', !!v && v.crystal === 174, JSON.stringify(v && v.crystal));
 check('no moved note on its own crystal', !!v && v.movedNote === null);
 check('rows in order', !!v && v.rows.map((r) => r.label).join() === 'Scanned as,In the cube,Hexagram,Geometry,Moon mansion');
+check('v16.12: the view carries the prose of its crystal', !!v && v.prose === toneReading(174)!.prose);
+check('v16.12: and a 4566 track The Chorus’s, not another’s', songReadingView({ harmonicFreq: 4568.5, closestSolfeggio: 4566, harmonicDeviation: 2.5, crystalSource: 'scan' })?.prose === toneReading(4566)!.prose);
 // The user (14 Nov): no label Track info's own rows use (its Crystal row can show another crystal).
 check('no second Crystal row', !!v && v.rows.every((r) => !['Length', 'Crystal', 'Key', 'Tuning', 'Visual sync', 'File', 'Added'].includes(r.label)));
 // Assign moved it: the reading still follows the scan.
@@ -77,6 +112,7 @@ const text = songReadingText(scanned);
 check('copy text names the crystal and Legge', /174 Hz · The Circle/.test(text) && /James Legge/.test(text) && /not the song’s measured pitch/.test(text));
 // Review round 1: the tags in words: the heading's Tradition first, the scan note's Design choice last.
 check('copy text: the heading with Tradition', text.split('\n')[0] === 'What it says (Tradition)', text.split('\n')[0]);
+check('v16.12: copy text: the prose next, whole', text.split('\n')[1] === toneReading(174)!.prose);
 check('copy text: the scan note with Design choice', text.split('\n').pop() === `${SONG_READING_HOW.text} (Design choice)`);
 check('no reading, no copy text', songReadingText({}) === '');
 

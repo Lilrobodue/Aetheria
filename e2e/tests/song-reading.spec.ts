@@ -13,6 +13,8 @@ const HOW = 'Deep Scan gives a song its crystal, and the reading follows that cr
 const UNSCANNED = 'Scan this track (Library › Deep Scan) to read what its crystal holds.';
 const FAILED = 'Deep Scan couldn’t read this track, so it has no reading.';
 const LABELS = ['Scanned as', 'In the cube', 'Hexagram', 'Geometry', 'Moon mansion'];
+/** v16.12: 4566's prose opens so (the codex's "In words", word for word). */
+const PROSE_4566_START = 'The Chorus is the first tone past the single self; the Guide calls it the first transpersonal gate, the soul star.';
 const MOVED_BY_ASSIGN = 'It now plays on 4566 Hz, where Assign placed it; the reading follows the crystal its scan gave.';
 
 /** From the next load on, navigator.clipboard.writeText records into window.__copied. */
@@ -96,11 +98,21 @@ test.describe('Track info, What it says', () => {
     await expect(section).toHaveAttribute('data-evidence', 'tradition');
     await expect(section.getByRole('heading', { level: 3, name: 'What it says' })).toBeVisible();
     await expect(section.locator('#track-info-h-reading + *'), 'the Tradition tag beside the heading').toHaveText('Tradition');
+    // v16.12: the tone in words first, right under the heading, before the rows.
+    const prose = section.getByTestId('track-info-reading-prose');
+    await expect(prose).toHaveText(new RegExp(`^${PROSE_4566_START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    await expect(prose).toContainText('In Legge\'s Judgment "the king will repair to his ancestral temple,"');
+    await expect(prose).toContainText('In the Aetheria framework, The Chorus is many voices heard as one.');
+    const first = await section.evaluate((s) => {
+      const p = s.querySelector('[data-testid="track-info-reading-prose"]')!, dl = s.querySelector('dl')!;
+      return !!(p.compareDocumentPosition(dl) & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+    expect(first, 'the prose before the rows').toBe(true);
     const rows = await readingRows(page);
     expect(rows.map((r) => r[0])).toEqual(LABELS);
     // The user (14 Nov): "Scanned as": the dialog keeps one Crystal row, its own.
     await expect(info.locator('dt').filter({ hasText: /^Crystal$/ }), 'one Crystal row in Track info').toHaveCount(1);
-    expect(rows[0][1]).toBe('4566 Hz · The Chorus · Soul Star ConnectionIn the Aetheria framework, the first transpersonal gate: the soul star.'); // v16.11: the codex's name
+    expect(rows[0][1]).toBe('4566 Hz · The Chorus · Soul Star Connection'); // v16.11: the codex's name; v16.12: no line under it
     expect(rows[1][1]).toBe('HEAD layer, palace 4, south-east, Wood, ☴ Xun');
     expect(rows[2][1]).toMatch(/^45 Gathering Together/);
     await expect(section.locator('blockquote')).toHaveText(/^In \(the state denoted by\) Žhui, the king will repair to his ancestral temple\./);
@@ -167,8 +179,8 @@ test.describe('Track info, What it says', () => {
     expect(one.slice(0, at)).toMatch(/^tone-0001\n/);
     expect(one.slice(at + 2).split('\n')).toEqual([
       'What it says (Tradition)',
-      'Scanned as: 4566 Hz · The Chorus · Soul Star Connection', // v16.11
-      '  In the Aetheria framework, the first transpersonal gate: the soul star.',
+      expect.stringMatching(new RegExp(`^${PROSE_4566_START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*many voices heard as one\\.$`)),
+      'Scanned as: 4566 Hz · The Chorus · Soul Star Connection', // v16.11; v16.12: no Guide line under it (the paragraph has it)
       'In the cube: HEAD layer, palace 4, south-east, Wood, ☴ Xun',
       'Hexagram: 45 Gathering Together',
       expect.stringMatching(/^ {2}“In \(the state denoted by\) Žhui, the king will repair to his ancestral temple\..*advantageous\.”$/),
@@ -178,7 +190,7 @@ test.describe('Track info, What it says', () => {
       `${HOW} (Design choice)`,
     ]);
     const moved = await copied(page, 'tone-0003');
-    expect(moved).toContain('\n\nWhat it says (Tradition)\nScanned as: 174 Hz · The Circle · Foundation\n');
+    expect(moved).toMatch(/\n\nWhat it says \(Tradition\)\nThe Circle is where the climb begins[^\n]*\nScanned as: 174 Hz · The Circle · Foundation\n/);
     expect(moved).toContain(`\n${MOVED_BY_ASSIGN}\n${HOW} (Design choice)`);
     for (const name of ['tone-0002', 'tone-0007']) {
       const none = await copied(page, name);

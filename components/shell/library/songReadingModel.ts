@@ -23,6 +23,8 @@ export interface ReadingRow {
 export interface SongReadingView {
   /** The crystal the reading is for (Deep Scan's). */
   crystal: number;
+  /** v16.12: the tone's "In words" paragraph (the codex's prose), shown first. */
+  prose: string;
   rows: ReadingRow[];
   /** When the track now sits on another crystal (Assign or a spread moved it). */
   movedNote: string | null;
@@ -49,7 +51,9 @@ export function songReadingView(s: CrystalFields): SongReadingView | null {
   const rows: ReadingRow[] = [
     // The user (14 Nov): "Scanned as", never a second "Crystal" in Track info (its own Crystal row can show another
     // crystal, where Assign placed the track).
-    { label: 'Scanned as', value: `${crystal} Hz · ${t.script} · ${c.name}`, note: c.association },
+    // v16.12 (the user, 14 Nov): only the tone and its names; the paragraph above it carries the meaning (its Guide line
+    // repeated the paragraph for seven tones). The line still shows in the crystal sheet, Layers and the Guide.
+    { label: 'Scanned as', value: `${crystal} Hz · ${t.script} · ${c.name}` },
     { label: 'In the cube', value: t.palace },
     { label: 'Hexagram', value: `${t.hexagram} ${t.hexagramName}`, quote: t.judgment, note: LEGGE_CREDIT },
   ];
@@ -62,7 +66,7 @@ export function songReadingView(s: CrystalFields): SongReadingView | null {
   const movedNote = typeof now === 'number' && now !== crystal
     ? `It now plays on ${now} Hz, where ${spreadFromScan(s) ? 'Assign' : 'an older Auto-Distribute'} placed it; the reading follows the crystal its scan gave.`
     : null;
-  return { crystal, rows, movedNote };
+  return { crystal, prose: t.prose, rows, movedNote };
 }
 
 /** Review round 1: the line in place of a reading: a scan that couldn't read the track has its own (no queue scans it
@@ -76,7 +80,8 @@ export function songReadingNone(s: CrystalFields): string {
 export function songReadingText(s: CrystalFields): string {
   const v = songReadingView(s);
   if (!v) return '';
-  const lines = [`${SONG_READING_TITLE} (${tagLabel('tradition')})`];
+  // v16.12: the prose first, after the heading, as the section shows it.
+  const lines = [`${SONG_READING_TITLE} (${tagLabel('tradition')})`, v.prose];
   for (const r of v.rows) {
     lines.push(`${r.label}: ${r.value}`);
     if (r.quote) lines.push(`  “${r.quote}”`);

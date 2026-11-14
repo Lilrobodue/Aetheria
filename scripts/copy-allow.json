@@ -5,7 +5,7 @@
     { "file": "utils/copy/crystalCopy.ts", "decl": "CRYSTAL_COPY", "renderers": ["components/guide/CrystalMeaning.tsx", "components/guide/TechnicalGuide.tsx", "components/shell/library/TrackInfoDialog.tsx", "components/LoShuMatrix.tsx"],
       "reason": "the 27 crystals' associations (Tradition): the meaning block, the technical guide's frequency cards, (v16.9) Track info's What it says and (v16.11, decision 4 A) the Lo Shu cube's cell names, under its tagged caption" },
     { "file": "utils/copy/songReading.ts", "decl": "TONE_READINGS", "renderers": ["components/shell/library/TrackInfoDialog.tsx", "components/guide/CrystalMeaning.tsx", "components/guide/TechnicalGuide.tsx"],
-      "reason": "v16.9: the 27 crystals' codex readings (Tradition): script name, hexagram with Legge's Judgment, Lo Shu palace and Moon mansion lore, in Track info's What it says; v16.11 (decision 1 A): the script name leads the meaning block and the technical guide's cards (crystalCopy's scriptName), both tagged Tradition" },
+      "reason": "v16.9: the 27 crystals' codex readings (Tradition): script name, hexagram with Legge's Judgment, Lo Shu palace and Moon mansion lore, in Track info's What it says, opening (v16.12) with the tone's codex paragraph, word for word; v16.11 (decision 1 A): the script name leads the meaning block and the technical guide's cards (crystalCopy's scriptName), both tagged Tradition" },
     { "file": "utils/copy/crystalCopy.ts", "decl": "REGIME_COPY", "renderers": ["components/guide/TechnicalGuide.tsx"],
       "reason": "the three layers' lines (Tradition): the technical guide's GUT / HEART / HEAD cards" },
     { "file": "utils/copy/evidence.ts", "decl": "TOPICS", "renderers": ["components/guide/HowSure.tsx"],

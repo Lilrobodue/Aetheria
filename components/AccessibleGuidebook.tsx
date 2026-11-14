@@ -280,9 +280,10 @@ const AccessibleGuidebook = ({ layout = 'classic', back = null }: { layout?: Lay
           </div>
         </div>
         <p className="text-slate-300 leading-relaxed">
-          Each frequency has a name inspired by sacred geometry (like "Seed of Life," "Torus," or
-          "Unified Field") and a number that places it in the system. The names are part of the Aetheria
-          framework — they give each frequency a character and a place in the journey.
+          Each frequency has a name from the Aetheria Tone Codex (like "The Circle", function name Foundation)
+          and a shape from sacred geometry (like "Seed of Life") and a number that places it in the system. The
+          names are part of the Aetheria framework — they give each frequency a character and a place in the
+          journey.
         </p>
       </section>
 
