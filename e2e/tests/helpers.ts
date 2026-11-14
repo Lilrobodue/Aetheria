@@ -1748,8 +1748,9 @@ export interface SeedOptions {
   names?: string[];
   /** Per-track fields (by index): a crystal (null: none), a key with its confidence, Analyse tracks' visual envelope;
    *  `unscanned` drops harmonicFreq (Deep Scan's queue, and playTrack decodes it); `scanned` gives it Deep Scan's own
-   *  fields (a fractal analysis, harmonicFreq 2.5 Hz off its crystal, that deviation). */
-  patch?: Array<{ index: number; crystal?: number | null; key?: string; confidence?: number; visual?: boolean; unscanned?: boolean; scanned?: boolean; fractal?: Record<string, unknown>; interval?: unknown; amp?: number; seconds?: number; storedSeconds?: number; noBlob?: boolean; freq?: number; rate?: number; stereo?: boolean; from?: number; noFade?: boolean; aiff?: boolean; junk?: boolean; channels?: number; bytes?: string; ext?: string; mime?: string }>;
+   *  fields (a fractal analysis, harmonicFreq 2.5 Hz off its crystal, that deviation); `spreadTo` (v16.9) then has a
+   *  spread move it to that crystal, its reading kept (a scanned seed only); `fields` are merged in last, as given. */
+  patch?: Array<{ index: number; crystal?: number | null; key?: string; confidence?: number; visual?: boolean; unscanned?: boolean; scanned?: boolean; fractal?: Record<string, unknown>; interval?: unknown; amp?: number; seconds?: number; storedSeconds?: number; noBlob?: boolean; freq?: number; rate?: number; stereo?: boolean; from?: number; noFade?: boolean; aiff?: boolean; junk?: boolean; channels?: number; bytes?: string; ext?: string; mime?: string; spreadTo?: number; fields?: Record<string, unknown> }>;
   // v16.5 review: `from` starts the sine at that sample (a sine continued from the track before: from = its length) and
   // `noFade` drops the 400-sample fade at each end (B7's join); `aiff` stores it as an AIFF (.aiff, which Chrome can't
   // decode: B6); `junk` stores bytes no decoder or probe can read, named .mp3 (B1).
@@ -1908,6 +1909,16 @@ export async function seedLibraryRecords(page: Page, n: number, opts: SeedOption
             // v16.5: Deep Scan's experimental scores as given (merged over `scanned`'s), and the interval analysis.
             if (p.fractal) meta.fractalAnalysis = { ...(meta.fractalAnalysis ?? {}), ...p.fractal };
             if (p.interval) meta.intervalAnalysis = p.interval;
+            // v16.9: a spread moved it (as distribution.ts writes one): Assign's, the reading kept, its deviation the
+            // spread's mark, SPREAD_MARK (1000) past the distance from the reading to the crystal it now sits on.
+            // (Review round 1: only a scanned seed, moved off its own crystal, as a spread only ever moves one.)
+            if (typeof p.spreadTo === 'number' && p.scanned && Number.isFinite(meta.harmonicFreq) && p.spreadTo !== meta.closestSolfeggio) {
+              meta.closestSolfeggio = p.spreadTo;
+              meta.crystalSource = 'assigned';
+              meta.harmonicDeviation = 1000 + Math.abs(meta.harmonicFreq - p.spreadTo);
+            }
+            // v16.9 review round 1: fields as given, merged last (a record shape no option above writes).
+            if (p.fields) Object.assign(meta, p.fields);
           }
           tx.objectStore('meta').put(meta);
         }

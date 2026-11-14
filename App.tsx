@@ -8,7 +8,7 @@ import {
 import { Song, SolfeggioFreq, BinauralPreset, VizSettings, BandEnvelope } from './types';
 import { SOLFEGGIO_INFO, BINAURAL_PRESETS, PITCH_SHIFT_FACTOR, toHeardHz, UNIFIED_THEORY, SEPHIROT_INFO, GEOMETRY_INFO, LO_SHU_WALKS, LO_SHU_WALK_INFO, LO_SHU_WALK_COMBINED, LO_SHU_WALK_OUROBOROS, OUROBOROS_PHASES, SOURCE_FREQ, getLoShuPosition, type LoShuWalkMode } from './constants';
 import Visualizer from './components/Visualizer';
-// v16.6 (review C8): FrequencySelector and SafetyProtocols are dead (never rendered; v16.9 removes them), so App no
+// v16.6 (review C8): FrequencySelector and SafetyProtocols are dead (never rendered; a later release may remove them: v16.9's classic removal was cancelled, 2026-11-08), so App no
 // longer imports them; check:copy fails on any import or use of either, or of generateSafetyWarning, outside their files.
 import ExperienceTracker from './components/ExperienceTracker';
 import OfflineIndicator from './components/OfflineIndicator';
@@ -11465,7 +11465,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.8.9</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.9</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

@@ -34,6 +34,7 @@ import { PERFECT_GUT_MAP } from '../shellModel';
 import Select from '../../ui/Select';
 import { SCAN_SECTION_LEAD, SCAN_SECTION_TITLE, scanScoreRows, scanScoreText } from './scanScoresModel';
 import EvidenceTag from '../../ui/EvidenceTag';
+import { songReadingNone, songReadingView, songReadingText, SONG_READING_HOW, SONG_READING_TITLE } from './songReadingModel';
 
 interface TrackInfoDialogProps {
   song: Song;
@@ -94,6 +95,7 @@ const TrackInfoBody = ({ song, scores, bands, perfectGut, shifts, ctx }: { song:
   countRender('TrackInfo');
   const rows = trackInfoRows(song, Date.now(), bands, perfectGut, shifts, ctx);
   const scoreRows = scores ? scanScoreRows(song) : [];
+  const reading = songReadingView(song);
   // v16.8.3: the Tuning choice's polite announcement (always mounted, so a choice that turns the row plain is read too).
   const [said, setSaid] = React.useState('');
   // Fix round 1 (SF4): a choice was made in the select; if it turned the row plain, the select is gone and focus with it:
@@ -132,6 +134,41 @@ const TrackInfoBody = ({ song, scores, bands, perfectGut, shifts, ctx }: { song:
           {part.rows.map((r) => <InfoRowItem key={r.label} r={r} rowRef={plainTuningRef} />)}
         </dl>
       ))}
+      {/* v16.9: "What it says": the song reading for the crystal Deep Scan gave (the same reading as the Divination
+          app's Read a song), its codex words under the Tradition tag and the scan's own line under Design choice. */}
+      <section aria-labelledby="track-info-h-reading" data-testid="track-info-reading" data-evidence="tradition" className="mt-4">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
+          <h3 id="track-info-h-reading" className="text-xs font-semibold uppercase tracking-widest text-ink-soft">
+            {SONG_READING_TITLE}
+          </h3>
+          <EvidenceTag tier="tradition" />
+        </div>
+        {reading ? (
+          <>
+            <dl className="mt-1">
+              {reading.rows.map((r) => (
+                <div key={r.label} className="grid grid-cols-[104px_1fr] gap-3 py-2 border-b border-line">
+                  <dt className="text-ink-muted">{r.label}</dt>
+                  <dd className="min-w-0 text-ink-strong break-words">
+                    {r.value}
+                    {r.quote ? <blockquote className="mt-1 border-l-2 border-line pl-3 text-sm text-ink-soft leading-snug">{r.quote}</blockquote> : null}
+                    {r.note ? <span className="block text-xs text-ink-faint">{r.note}</span> : null}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            {reading.movedNote ? <p className="mt-2 text-xs text-ink-muted leading-snug">{reading.movedNote}</p> : null}
+            <div data-evidence={SONG_READING_HOW.tag} className="mt-2">
+              <p className="text-xs text-ink-muted leading-snug">{SONG_READING_HOW.text}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-3">
+                <EvidenceTag tier={SONG_READING_HOW.tag} />
+              </div>
+            </div>
+          </>
+        ) : (
+          <p className="mt-1 text-xs text-ink-muted leading-snug" data-testid="track-info-reading-none">{songReadingNone(song)}</p>
+        )}
+      </section>
       {scoreRows.length ? (
         <section aria-labelledby="track-info-h-scores" data-testid="track-info-scores" data-evidence="design" className="mt-4">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
@@ -164,7 +201,8 @@ const TrackInfoDialog = ({ song, onClose }: TrackInfoDialogProps) => {
   // entry): the Guide's "Back to Track info" reopens it for this track, on the tab it was on.
   const { tab } = useShell();
   const origin = React.useMemo(() => ({ tab, sheet: null, label: 'Track info', trackInfo: song.id }), [tab, song.id]);
-  const extra = scanScores ? scanScoreText(song) : '';
+  // v16.9: Copy carries the song reading too (after the rows, before the experimental scores).
+  const extra = [songReadingText(song), scanScores ? scanScoreText(song) : ''].filter(Boolean).join('\n\n');
   // v16.8.2 (K7): the track's key bands from App's cache (null without a clear key or before they are made).
   const bands = useLibraryStatus().keyBands.get(song);
   // (Fix round 1, L-N3: with Lo Shu Perfect GUT on, no key note on the six crystals it swaps.)

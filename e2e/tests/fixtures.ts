@@ -71,7 +71,7 @@ export function assertDeviceRun(testOrigin: string, workers: number): void {
  * ?layout=new. `test.use({ layoutSeed: null })` seeds nothing: the tests of the default itself (default-layout.spec).
  * Fix round 1 (review N2): only on `origin`, the tests' own (TEST_ORIGIN): a tab that followed a link elsewhere (on
  * the phone, the live app) is never seeded, so it never cancels that origin's one-time move. fixtures-seed.spec.ts
- * checks the rules on the desktop. v16.9 removes the option with the classic tests.
+ * checks the rules on the desktop. (v16.9's classic removal was cancelled, 2026-11-08: the option stays.)
  */
 export type LayoutSeed = 'classic' | 'new' | null;
 export const SEED_KEYS = { layout: 'aetheria.layout.v1', notice: 'aetheria.layoutNotice.v1' } as const;

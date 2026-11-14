@@ -477,6 +477,12 @@
    "text": "We don’t say a sound heals, cures, repairs DNA or activates the pineal gland. Where a tradition teaches that, we write “Traditionally associated with …” and tag it Tradition. Nothing in Aetheria is a treatment; for a health concern, see a qualified professional."
   },
   {
+   "file": "utils/copy/songReading.ts",
+   "verdict": "T2:tradition",
+   "words": "repair",
+   "text": "In (the state denoted by) Žhui, the king will repair to his ancestral temple. It will be advantageous (also) to meet with the great man; and then there will be progress and success, though the advantage must come through firm correctness. The use of great victims will conduce to good fortune; and in whatever direction movement is made, it will be advantageous."
+  },
+  {
    "file": "utils/copy/soundCopy.ts",
    "verdict": "allowed:score-name",
    "words": "DNA",

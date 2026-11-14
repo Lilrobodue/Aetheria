@@ -974,7 +974,7 @@ export function assignChoiceText(c: AssignChoice, o: { restore?: boolean } = {})
     c.emptyCrystals === 0 && c.uneven ? `Keeping Deep Scan's crystals leaves them very uneven: one crystal has ${plural(c.heaviest, 'track', 'tracks')}, another ${c.lightest}.` : '',
     also.length ? `Keeping them also ${also.join(' and ')}.` : '',
     // v16.8.2: and by key (classic's question, which the app no longer shows: classic does show the done text's key part,
-    // the keys toast and the copy, as the new layout does; classic goes in v16.9).
+    // the keys toast and the copy, as the new layout does; classic stays: v16.9's removal was cancelled, 2026-11-08).
     `Spreading places every track, scanned ones too, so ${c.total >= 27 ? 'every crystal and every range' : 'every range'} has tracks. Tracks with a clear key go first to crystals whose tone fits their key. Deep Scan's own reading stays with each track, and Assign keeps them where they are from then on.`,
     restore ? `${plural(c.spreadAway, 'track is', 'tracks are')} already spread away from Deep Scan's crystal.` : '',
   ];
