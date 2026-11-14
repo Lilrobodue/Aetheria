@@ -59,6 +59,8 @@
     { "file": "constants.ts", "text": "", "within": "GEOMETRY_INFO", "words": ["heal"], "count": 3, "kind": "data",
       "reason": "GEOMETRY_INFO's shapes and elements: data left untouched, rendered only in Tradition blocks (the technical guide's geometry, the meaning block, classic's tagged pill row: decision 8; the DOM gate checks)" },
     { "file": "utils/effectsDocumentation.ts", "text": "", "words": ["repair", "heal", "cellular", "pineal", "medical", "safe for"], "count": 12, "kind": "data",
-      "reason": "the effects database's seed and recommendation texts: stored, never shown (v16.10: its 528 entry lost its DNA words; known entries are re-seeded from code on load, so stored copies follow)" }
+      "reason": "the effects database's seed and recommendation texts: stored, never shown (v16.10: its 528 entry lost its DNA words; known entries are re-seeded from code on load, so stored copies follow)" },
+    { "file": "utils/playlists/oldNames.ts", "text": "DNA", "words": ["DNA"], "count": 2, "kind": "data",
+      "reason": "v16.10.1 (decision 6 A): the old score words a mix's name held from 28 to 31 Oct (v16.3-v16.5), matched in stored playlist names so they read as the new words; never shown (oldNames.check proves no renamed name holds DNA, over v16.5's own names)" }
   ]
 }

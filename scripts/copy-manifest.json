@@ -421,6 +421,18 @@
    "verdict": "allowed:data",
    "words": "pineal",
    "text": "pineal"
+  },
+  {
+   "file": "utils/playlists/oldNames.ts",
+   "verdict": "allowed:data",
+   "words": "DNA",
+   "text": "DNA resonance score over 30 %"
+  },
+  {
+   "file": "utils/playlists/oldNames.ts",
+   "verdict": "allowed:data",
+   "words": "DNA",
+   "text": "DNA"
   }
  ]
 }

@@ -69,6 +69,7 @@ import {
   ENTRIES_MAX,
 } from './utils/playlists/model';
 import type { PlaylistRecord, PlaylistFrom, LibraryIndex } from './utils/playlists/model';
+import { renameOldScoreWords } from './utils/playlists/oldNames';
 import * as playlistWords from './components/shell/playlists/playlistsViewModel';
 import {
   dedupeById,
@@ -3486,7 +3487,12 @@ const App: React.FC = () => {
         setPlaylistsStatus('error');
         return;
       }
-      const { lists, unreadable } = parsePlaylists(raws);
+      const parsed = parsePlaylists(raws);
+      // v16.10.1 (decision 6 A): a mix's name from 28-31 Oct (v16.3-v16.5) that still says "DNA resonance score over
+      // 30 %" reads "Experimental tone-set score over 30 %", in its name and its Saved from line, in memory only (this
+      // read still writes nothing); the next change to that playlist stores it (utils/playlists/oldNames.ts).
+      const lists = renameOldScoreWords(parsed.lists);
+      const { unreadable } = parsed;
       notePlaylistsRead(lists.map((p: PlaylistRecord) => p.key));
       playlistsRef.current = lists;
       setSavedPlaylists(lists);
@@ -11465,7 +11471,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.10</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.10.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

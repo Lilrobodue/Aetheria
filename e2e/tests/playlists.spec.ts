@@ -1656,3 +1656,64 @@ test('PL27. the store: a delete still waiting (its connection closing) when a ti
   });
   expect(out, 'the delete waited (its connection closing); the Clear deleted the record anyway').toEqual({ put: true, before: ['pl:pgone00001'], waited: true, after: [] });
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// PL28. v16.10.1 (decision 6 A): a mix's name saved 28-31 Oct (v16.3-v16.5) that still says "DNA resonance score
+// over 30 %" reads "Experimental tone-set score over 30 %", in its name and its Saved from line; the read writes
+// nothing (the records on disk stay byte for byte), the next change to a playlist stores its new name, and a name
+// typed by hand stays. Fails on v16.10 (the old words show).
+// ---------------------------------------------------------------------------------------------------------------
+test('PL28. old mix names: "DNA resonance score over 30 %" reads "Experimental tone-set score over 30 %" in the list, the view and its Saved from line; nothing is written until the playlist changes; a typed name stays', async ({ page }) => {
+  const OLD = 'Grounding · DNA resonance score over 30 %';
+  const NEW = 'Grounding · Experimental tone-set score over 30 %';
+  const CUT = 'Flow · 1 per crystal · 111 pattern score over 20 % · DNA resonance score over 3'; // a third copy of a cut name (v16.5's own)
+  const CUT_NEW = 'Flow · 1 per crystal · 111 pattern score over 20 % · Experimental tone-set sc… 3';
+  const withFrom = (r: Rec, from: Rec['from']): Rec => ({ ...r, from });
+  const ids = await open(page, {
+    records: (ids) => [
+      withFrom(rec('poldmix001', OLD, [entry(ids[0], 1), entry(ids[1], 2)], 5_000), { kind: 'builder', label: OLD }),
+      withFrom(rec('poldmix002', `${OLD} 2`, [entry(ids[2], 3)], 4_000), { kind: 'builder', label: OLD }),
+      withFrom(rec('poldcopy01', `${OLD} copy`, [entry(ids[8], 9)], 3_500), { kind: 'duplicate', label: OLD }), // Duplicate's copy
+      withFrom(rec('poldcut001', CUT, [entry(ids[3], 4)], 3_000), { kind: 'builder', label: CUT }),
+      withFrom(rec('ptyped0001', 'DNA research', [entry(ids[4], 5)], 2_000), { kind: 'playing', label: OLD }),
+      rec('ptyped0002', 'Gym · DNA 2', [entry(ids[7], 8)], 1_500), // typed: "· DNA" reaches the matcher, but v16.5 never cut a name this short
+      rec('pevening01', 'Evening', [entry(ids[5], 6)], 1_000),
+    ],
+  });
+  const disk = await stored(page);
+  expect(disk.map((r) => r.name), 'on disk (by key): the old names').toEqual(['Evening', `${OLD} copy`, CUT, OLD, `${OLD} 2`, 'DNA research', 'Gym · DNA 2']);
+  const s = await pl(page);
+  expect(s.lists.map((l) => [l.name, l.from?.label ?? null]), 'read: the new words, name and label; a typed name stays').toEqual([
+    [NEW, NEW],
+    [`${NEW} 2`, NEW],
+    [`${NEW} copy`, NEW],
+    [CUT_NEW, CUT_NEW],
+    ['DNA research', NEW],
+    ['Gym · DNA 2', null],
+    ['Evening', null],
+  ]);
+  expect(s.unreadable).toBe(0);
+  // What the list and a playlist's view show.
+  await openPlaylistsTab(page);
+  const rows = await page.getByTestId('playlist-row-open').allTextContents();
+  expect(rows.filter((t) => /DNA/.test(t) && !t.includes('DNA research') && !t.includes('Gym · DNA 2')), 'no row shows the old words').toEqual([]);
+  expect(rows.some((t) => t.includes(NEW))).toBe(true);
+  await openPlaylistView(page, 'poldmix001');
+  await expect(page.getByTestId('playlist-title')).toHaveText(NEW);
+  await expect.poll(async () => (await page.getByTestId('playlist-from').textContent())?.startsWith(`Saved from a mix: ${NEW} · changed `), { message: 'its Saved from line' }).toBe(true);
+  await openPlaylistView(page, 'ptyped0001');
+  await expect(page.getByTestId('playlist-title')).toHaveText('DNA research');
+  await expect(page.getByTestId('playlist-from')).not.toContainText('DNA');
+  // The read wrote nothing.
+  expect((await storeLog(page)).filter((l) => l.includes('(pl:')), 'no playlist record written by the read').toEqual([]);
+  expect(await stored(page), 'the records on disk, byte for byte').toEqual(disk);
+  // The next change stores the new name; the others stay as they were on disk.
+  expect(await P(page, 'add', 'poldmix001', [ids[6]])).toBe(true);
+  await expect.poll(async () => (await storedOf(page, 'poldmix001'))?.name, { message: 'the change stored the new name' }).toBe(NEW);
+  expect((await storedOf(page, 'poldmix001'))!.from).toEqual({ kind: 'builder', label: NEW });
+  expect((await storedOf(page, 'poldmix002'))!.name, 'an unchanged playlist stays as it was on disk').toBe(`${OLD} 2`);
+  // A reload reads the same.
+  const before = (await pl(page)).lists.map((l) => [l.id, l.name, l.from?.label ?? null]);
+  await launch(page, 'new');
+  expect((await pl(page)).lists.map((l) => [l.id, l.name, l.from?.label ?? null]), 'after a reload').toEqual(before);
+});

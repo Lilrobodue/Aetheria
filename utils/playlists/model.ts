@@ -123,6 +123,11 @@ function headOf(s: string, parts: readonly string[], room: number): string {
   return head;
 }
 
+/** v16.10.1: the start of s in at most `room` code points, cut as cleanName and freeName cut (whole graphemes). */
+export function headOfName(s: string, room: number): string {
+  return headOf(s, graphemes(s), room);
+}
+
 /** "New playlist", then "New playlist 2", "New playlist 3"… for the first one not taken (case-insensitive).
  *  v16.3 review: the number always fits. A long name is cut first (and a space it would end on dropped), so
  *  "<name> 2" is at most NAME_MAX characters and never trimmed back to the taken name itself.

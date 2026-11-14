@@ -1,7 +1,7 @@
 {
-  "name": "v16.10-aetheria:-harmonic-resonance-player",
+  "name": "v16.10.1-aetheria:-harmonic-resonance-player",
   "private": true,
-  "version": "16.10.0",
+  "version": "16.10.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,7 @@
     "build:analyze": "vite build --mode analyze",
     "preview": "vite preview",
     "deploy": "npm run build",
-    "check:playlists": "node utils/library/listOps.check.ts && node utils/library/walkRecord.check.ts && node utils/playlists/model.check.ts && node utils/library/filterModel.check.ts",
+    "check:playlists": "node utils/library/listOps.check.ts && node utils/library/walkRecord.check.ts && node utils/playlists/model.check.ts && node utils/playlists/oldNames.check.ts && node utils/library/filterModel.check.ts",
     "check:filters": "node utils/library/filterModel.check.ts && node utils/library/scanScores.check.ts",
     "check:critical": "node scripts/check-critical.mjs",
     "check:dialogs": "node scripts/check-dialogs.mjs",
