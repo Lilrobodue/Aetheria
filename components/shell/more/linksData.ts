@@ -23,6 +23,8 @@ export const LINK_SECTIONS: ReadonlyArray<LinkSection> = [
       { title: 'Aetheria Coherence Lab', sub: 'Adaptive biofield coherence instrument — H10 + Muse + Woojer', href: 'https://aetheria-coherence-lab.org' },
       { title: 'Aetheria Session Tagger', sub: 'Add subjective context to your Coherence Lab sessions', href: 'https://aetheria-session-tagger.org' },
       { title: 'Aetheria Reader', sub: 'Read-aloud e-reader — your own books stay on your device', href: 'https://big-banana-studios.github.io/aetheria-reader/' },
+      // v16.12.1 (the user, 15 Nov 2026): the Divination app, after Reader; classic's panel has the same row.
+      { title: 'Aetheria Divination', sub: 'I Ching readings, each turned into three Aetheria tones', href: 'https://big-banana-studios.github.io/aetheria-divination/' },
       { title: 'Controlled Burn', sub: 'Heart-rate flooding alerts — Gottman conflict de-escalation', href: 'https://big-banana-studios.github.io/Controlled-Burn/' },
     ],
   },

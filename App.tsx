@@ -11471,7 +11471,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.12</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.12.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -13562,6 +13562,17 @@ registerProcessor('wav-capture', WavCapture);
                       <p className="text-[10px] text-slate-500">Read-aloud e-reader — your own books stay on your device</p>
                     </div>
                     <ChevronRight size={14} className="text-slate-700 group-hover:text-cyan-500 transition-colors shrink-0" />
+                  </a>
+                  {/* v16.12.1: the Divination app (linksData.ts has the same row for the new layout). */}
+                  <a href="https://big-banana-studios.github.io/aetheria-divination/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-amber-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                      <Moon size={16} className="text-amber-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-amber-400 transition-colors">Aetheria Divination</h4>
+                      <p className="text-[10px] text-slate-500">I Ching readings, each turned into three Aetheria tones</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-amber-500 transition-colors shrink-0" />
                   </a>
                   <a href="https://big-banana-studios.github.io/Controlled-Burn/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-orange-500/40 transition-all group">
                     <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">
