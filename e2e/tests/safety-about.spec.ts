@@ -449,7 +449,7 @@ test.describe('phone', () => {
     const dialogs = await playingSeeded(page);
     await openMorePage(page, 'about');
     const about = page.getByTestId('more-about');
-    await expect(page.getByTestId('about-version')).toHaveText('Version v16.13.2 · new layout');
+    await expect(page.getByTestId('about-version')).toHaveText('Version v16.13.3 · new layout');
     await expect(about).toContainText('Nothing about your listening sessions leaves your device.');
     // The suite blocks service workers: not saved, and nothing to ask for an update.
     await expect(page.getByTestId('about-offline')).toContainText('Not saved for offline use yet');
@@ -568,7 +568,7 @@ test.describe('phone', () => {
     await page.evaluate(() => {
       const sw = (window as any).__sw;
       sw.setController(true);
-      sw.keys = ['aetheria-v16.13.2-offline'];
+      sw.keys = ['aetheria-v16.13.3-offline'];
       navigator.serviceWorker.dispatchEvent(new Event('controllerchange'));
     });
     await expect.soft(offline, 'a new controller').toContainText('Works offline');
@@ -576,7 +576,7 @@ test.describe('phone', () => {
     await page.evaluate(() => ((window as any).__sw.keys = []));
     await reopen();
     await page.evaluate(() => {
-      (window as any).__sw.keys = ['aetheria-v16.13.2-offline'];
+      (window as any).__sw.keys = ['aetheria-v16.13.3-offline'];
       navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'OFFLINE_READY', added: 0, total: 9 } }));
     });
     await expect.soft(offline, "the worker's cached message").toContainText('Works offline');
@@ -585,7 +585,7 @@ test.describe('phone', () => {
     await reopen();
     await page.evaluate(() => {
       const sw = (window as any).__sw;
-      sw.keys = ['aetheria-v16.13.2-offline'];
+      sw.keys = ['aetheria-v16.13.3-offline'];
       sw.active.state = 'activated';
       sw.active.dispatchEvent(new Event('statechange'));
     });
@@ -595,12 +595,12 @@ test.describe('phone', () => {
 
   test('S5e. only this version\'s offline cache counts: another version\'s says "Not saved for offline use yet"', async ({ page }) => {
     test.setTimeout(150_000);
-    await stubServiceWorker(page, { controller: true, keys: ['aetheria-v16.13-offline', 'aetheria-v16.13.1-offline', 'aetheria-v16.13.3-offline'] });
+    await stubServiceWorker(page, { controller: true, keys: ['aetheria-v16.13.1-offline', 'aetheria-v16.13.2-offline', 'aetheria-v16.13.4-offline'] });
     const dialogs = await playingSeeded(page);
     await openMorePage(page, 'about');
     const offline = page.getByTestId('about-offline');
     await expect(offline, "another version's cache").toContainText('Not saved for offline use yet');
-    await page.evaluate(() => ((window as any).__sw.keys = ['aetheria-v16.13.1-offline', 'aetheria-v16.13.2-offline']));
+    await page.evaluate(() => ((window as any).__sw.keys = ['aetheria-v16.13.2-offline', 'aetheria-v16.13.3-offline']));
     await page.getByRole('button', { name: 'Back to More', exact: true }).click();
     await openMorePage(page, 'about');
     await expect(offline, "this version's").toContainText('Works offline');
@@ -692,7 +692,15 @@ test.describe('phone', () => {
     const tAt = classicLinks.links.findIndex((l) => l.href === titirsa.href);
     expect(classicLinks.links[tAt], 'the Titīrṣā row').toEqual(titirsa);
     expect(classicLinks.links[tAt - 1]?.title, 'after Divination').toBe('Aetheria Divination');
-    expect(classicLinks.links[tAt + 1]?.title, 'before Controlled Burn').toBe('Controlled Burn');
+    // v16.13.3: Chant Sculptor, Operator and Mode 3, in the user's order right after Titīrṣā, then Controlled Burn
+    // (each its public site; the repos are private).
+    const three = [
+      { href: 'https://big-banana-studios.github.io/Chant-Sculpture/', title: 'Chant Sculptor', sub: 'Chant along while your voice and heartbeat shape cymatic sand' },
+      { href: 'https://big-banana-studios.github.io/operator/', title: 'Operator', sub: 'Morning tune-up, resonance breathing, coherence, qigong and tai chi' },
+      { href: 'https://big-banana-studios.github.io/mode-3/', title: 'Mode 3', sub: 'Neuro-adaptive binaural trainer — Muse S Athena + H10, with Aetheria tones' },
+    ];
+    expect(classicLinks.links.slice(tAt + 1, tAt + 4), 'the three rows after Titīrṣā').toEqual(three);
+    expect(classicLinks.links[tAt + 4]?.title, 'then Controlled Burn').toBe('Controlled Burn');
     // The new layout's page.
     await page.evaluate((k) => localStorage.setItem(k, 'new'), LAYOUT_KEY);
     await page.reload();

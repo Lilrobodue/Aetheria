@@ -11777,7 +11777,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.13.2</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.13.3</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -13936,6 +13936,37 @@ registerProcessor('wav-capture', WavCapture);
                       <p className="text-[10px] text-slate-500">Cymatic plate shaped by your goal regime, the Moon's mansion and your heart</p>
                     </div>
                     <ChevronRight size={14} className="text-slate-700 group-hover:text-fuchsia-500 transition-colors shrink-0" />
+                  </a>
+                  {/* v16.13.3: Chant Sculptor, Operator and Mode 3, after Titīrṣā (linksData.ts has the same rows for the new layout). */}
+                  <a href="https://big-banana-studios.github.io/Chant-Sculpture/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-rose-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
+                      <Mic size={16} className="text-rose-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-rose-400 transition-colors">Chant Sculptor</h4>
+                      <p className="text-[10px] text-slate-500">Chant along while your voice and heartbeat shape cymatic sand</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-rose-500 transition-colors shrink-0" />
+                  </a>
+                  <a href="https://big-banana-studios.github.io/operator/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-teal-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-teal-500/10 border border-teal-500/20 flex items-center justify-center shrink-0">
+                      <Wind size={16} className="text-teal-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-teal-400 transition-colors">Operator</h4>
+                      <p className="text-[10px] text-slate-500">Morning tune-up, resonance breathing, coherence, qigong and tai chi</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-teal-500 transition-colors shrink-0" />
+                  </a>
+                  <a href="https://big-banana-studios.github.io/mode-3/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-indigo-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0">
+                      <Headphones size={16} className="text-indigo-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-indigo-400 transition-colors">Mode 3</h4>
+                      <p className="text-[10px] text-slate-500">Neuro-adaptive binaural trainer — Muse S Athena + H10, with Aetheria tones</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-indigo-500 transition-colors shrink-0" />
                   </a>
                   <a href="https://big-banana-studios.github.io/Controlled-Burn/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-orange-500/40 transition-all group">
                     <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">

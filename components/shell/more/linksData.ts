@@ -28,6 +28,11 @@ export const LINK_SECTIONS: ReadonlyArray<LinkSection> = [
       // v16.13.1 (the user, 15 Nov 2026): Titīrṣā (Instrument 04), after Divination; its public site (the repo is
       // private). Classic's panel has the same row.
       { title: 'Titīrṣā', sub: "Cymatic plate shaped by your goal regime, the Moon's mansion and your heart", href: 'https://big-banana-studios.github.io/titirsa/' },
+      // v16.13.3 (the user, 15 Nov 2026): three more, in the user's order, after Titīrṣā; each its public site (the repos
+      // are private), each named as the app names itself. Classic's panel has the same rows.
+      { title: 'Chant Sculptor', sub: 'Chant along while your voice and heartbeat shape cymatic sand', href: 'https://big-banana-studios.github.io/Chant-Sculpture/' },
+      { title: 'Operator', sub: 'Morning tune-up, resonance breathing, coherence, qigong and tai chi', href: 'https://big-banana-studios.github.io/operator/' },
+      { title: 'Mode 3', sub: 'Neuro-adaptive binaural trainer — Muse S Athena + H10, with Aetheria tones', href: 'https://big-banana-studios.github.io/mode-3/' },
       { title: 'Controlled Burn', sub: 'Heart-rate flooding alerts — Gottman conflict de-escalation', href: 'https://big-banana-studios.github.io/Controlled-Burn/' },
     ],
   },
