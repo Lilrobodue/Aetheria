@@ -265,6 +265,8 @@ export const words = {
   back: 'Back to Import music',
   /** Decision 8 C (A's line, then the licence). */
   credit: 'Music by Aetheria · Big Banana Studios. Free to play in Aetheria.',
+  /** v16.13.2 (the user, 15 Nov 2026): the mastering credit, its own line under the credit. */
+  mastering: "Mastered by Masterchannel's Wez Clarke.",
   licence: 'Shared under Creative Commons BY-NC 4.0: share it with credit, never sell it.',
   licenceLink: 'About the licence',
   licenceUrl: 'https://creativecommons.org/licenses/by-nc/4.0/',

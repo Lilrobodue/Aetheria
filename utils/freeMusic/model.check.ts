@@ -164,6 +164,7 @@ const LIST: FreeTrack[] = parseFreeList({
   eq(Object.values(PLAYLIST_NAMES), ['Aetheria · Instrumentals', 'Aetheria · Songs'], "decision 7 A's names");
   eq(words.groupName('all', 222), 'All 222 tracks', 'the All row');
   ok(words.credit.includes('Big Banana Studios') && words.licence.includes('BY-NC 4.0'), 'decision 8 C: the credit, then the licence');
+  eq(words.mastering, "Mastered by Masterchannel's Wez Clarke.", 'v16.13.2: the mastering credit (the user, 15 Nov 2026)');
 }
 
 // ---- 6. The shipped list ----

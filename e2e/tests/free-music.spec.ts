@@ -110,6 +110,9 @@ test.describe('phone', () => {
     await expect(sheet(page).getByTestId('free-add-instrumental')).toHaveAccessibleName('Add the 2 instrumentals');
     await expect(sheet(page).getByTestId('free-group-instrumental')).toContainText('2 tracks');
     await expect(sheet(page).getByTestId('free-credit')).toContainText('Music by Aetheria · Big Banana Studios. Free to play in Aetheria.');
+    // v16.13.2: the mastering credit, its own line right under the credit.
+    await expect(sheet(page).getByTestId('free-mastering')).toHaveText("Mastered by Masterchannel's Wez Clarke.");
+    await expect(sheet(page).locator('[data-testid="free-credit"] > p').nth(1)).toHaveAttribute('data-testid', 'free-mastering');
     await expect(sheet(page).getByTestId('free-credit')).toContainText('Creative Commons BY-NC 4.0');
     await sheet(page).getByTestId('free-add-instrumental').click();
     await expect(statusLine(page)).toHaveText('Added 2 tracks to your library. They\'re in "Aetheria · Instrumentals" too.', { timeout: 30_000 });

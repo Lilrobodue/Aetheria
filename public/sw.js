@@ -1,4 +1,4 @@
-const CACHE_NAME = 'aetheria-v16.13.1-offline';
+const CACHE_NAME = 'aetheria-v16.13.2-offline';
 const OFFLINE_URL = '/';
 // v16.13 (Aetheria's 222): the free music's own site (utils/freeMusic/model.ts MUSIC_BASE). Its downloads, and any
 // audio file, never go through this worker: the app keeps what it adds in its own store.

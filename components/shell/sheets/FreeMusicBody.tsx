@@ -110,6 +110,7 @@ const FreeMusicBody = ({ onBack, backRef, modal }: FreeMusicBodyProps) => {
       </button>
       <div data-testid="free-credit" className="border-l-2 border-line-strong pl-2 space-y-0.5 text-xs text-ink-muted">
         <p>{words.credit}</p>
+        <p data-testid="free-mastering">{words.mastering}</p>
         <p>
           {words.licence}{' '}
           <a href={words.licenceUrl} target="_blank" rel="noopener noreferrer" className={`underline text-ink hover:text-ink-strong rounded-sm ${FOCUS}`}>
