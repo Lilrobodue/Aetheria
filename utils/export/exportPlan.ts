@@ -128,7 +128,7 @@ export interface ExportSnapshot {
   toneLevel: number;
   /** v15.6's tone lowering in effect (its track and the levels), or null. */
   lowering: { trackId: string | null; before: number; after: number } | null;
-  /** binauralVolume. */
+  /** v2's beat level (App's beatLevelV2, v16.14: the export renders v2). */
   beatLevel: number;
   /** selectedBinaural.name: the band in effect now. */
   presetName: string;

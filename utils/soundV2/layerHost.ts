@@ -46,6 +46,18 @@ export const KEY_TONE_LEVEL_CLASSIC = 'aetheria.toneLevelClassic.v1';
 export const V2_TONE_LEVEL_DEFAULT = V2_TONE_SLIDER_STEP;
 /** Classic's release default, unchanged: its 1 %. */
 export const CLASSIC_TONE_LEVEL_DEFAULT = 0.01;
+// v16.14 ("Your levels", the user's decisions of 16 Nov 2026): the beat level is kept per engine too, and the music
+// volume once, each saved only from its slider by a user's move (as the tone level): unset = the release default.
+export const KEY_BEAT_LEVEL_V2 = 'aetheria.beatLevelV2.v1';
+export const KEY_BEAT_LEVEL_CLASSIC = 'aetheria.beatLevelClassic.v1';
+export const KEY_VOLUME = 'aetheria.volume.v1';
+/** Classic's beat slider ("Binaural Volume") runs 0-0.2 (0-100 %). */
+export const CLASSIC_BEAT_SLIDER_MAX = 0.2;
+/** The beat's release default on both engines (v16.14, D3): half the old 0.03, −6.0 dB on v2 (−29.0 dB re music).
+ *  BEAT_SLIDER_DEFAULT stays 0.03: it is v2's 0 dB reference, not a starting value. */
+export const BEAT_LEVEL_DEFAULT = 0.015;
+/** The music volume's release default, unchanged: 80 %. */
+export const VOLUME_DEFAULT = 0.8;
 /** The validated v2 levels under the music, for display only (the player uses the vendored LEVEL_* constants). */
 export const TONE_REF_DB = -26, BEAT_REF_DB = -23, DRONE_REF_DB = -24;
 /** Selected frequencies that are no crystal but still play, as themselves. */
@@ -86,6 +98,32 @@ export function parseToneLevel(raw: string | null, engine: LayerEngine): number 
   if (typeof raw !== 'string' || raw.trim() === '') return null;
   const v = Number(raw);
   const max = engine === 'v2' ? V2_TONE_SLIDER_MAX : CLASSIC_TONE_SLIDER_MAX;
+  return Number.isFinite(v) && v >= 0 && v <= max ? v : null;
+}
+
+/** v16.14: the storage key of an engine's beat level. */
+export function beatLevelKey(engine: LayerEngine): string {
+  return engine === 'v2' ? KEY_BEAT_LEVEL_V2 : KEY_BEAT_LEVEL_CLASSIC;
+}
+
+/** v16.14: an engine's beat level before its slider is ever moved (the same on both engines). */
+export function defaultBeatLevel(_engine: LayerEngine): number {
+  return BEAT_LEVEL_DEFAULT;
+}
+
+/** v16.14: a stored beat level: a number on that engine's slider (0 = off … its max), else null (unset). */
+export function parseBeatLevel(raw: string | null, engine: LayerEngine): number | null {
+  return parseLevel(raw, engine === 'v2' ? V2_BEAT_SLIDER_MAX : CLASSIC_BEAT_SLIDER_MAX);
+}
+
+/** v16.14: a stored music volume: a number from 0 (silent) to 1, else null (unset). */
+export function parseVolume(raw: string | null): number | null {
+  return parseLevel(raw, 1);
+}
+
+function parseLevel(raw: string | null, max: number): number | null {
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
+  const v = Number(raw);
   return Number.isFinite(v) && v >= 0 && v <= max ? v : null;
 }
 

@@ -191,7 +191,7 @@ import { LayerPlayer } from './utils/soundV2/layerPlayer';
 import type { LayerPlayerState } from './utils/soundV2/layerPlayer';
 import { toneOf, BANDS, BAND_ORDER, phiEnvelope, LEVEL_TONE, LEVEL_BEAT, LEVEL_DRONE_SUB } from './utils/soundV2/aetheria_sound_v2';
 import type { Band } from './utils/soundV2/aetheria_sound_v2';
-import { canonicalLayerHz, renderForOutput, planOutputFor, bandOfPresetName, capBand, sliderGain, gainToDb, readIntensity, musicGainFactor, parseLayerEngine, parseLayerOutput, parseOutputAskAgain, parseDroneEnabled, DEFAULT_LAYER_ENGINE, DEFAULT_DRONE_ENABLED, KEY_LAYER_ENGINE, KEY_LAYER_OUTPUT, KEY_LAYER_OUTPUT_ASK_AGAIN, KEY_DRONE_ENABLED, TONE_SLIDER_DEFAULT, BEAT_SLIDER_DEFAULT, V2_TONE_SLIDER_MAX, V2_TONE_SLIDER_STEP, V2_BEAT_SLIDER_MAX, toneLevelKey, defaultToneLevel, parseToneLevel } from './utils/soundV2/layerHost';
+import { canonicalLayerHz, renderForOutput, planOutputFor, bandOfPresetName, capBand, sliderGain, gainToDb, readIntensity, musicGainFactor, parseLayerEngine, parseLayerOutput, parseOutputAskAgain, parseDroneEnabled, DEFAULT_LAYER_ENGINE, DEFAULT_DRONE_ENABLED, KEY_LAYER_ENGINE, KEY_LAYER_OUTPUT, KEY_LAYER_OUTPUT_ASK_AGAIN, KEY_DRONE_ENABLED, TONE_SLIDER_DEFAULT, BEAT_SLIDER_DEFAULT, V2_TONE_SLIDER_MAX, V2_TONE_SLIDER_STEP, V2_BEAT_SLIDER_MAX, toneLevelKey, defaultToneLevel, parseToneLevel, beatLevelKey, defaultBeatLevel, parseBeatLevel, KEY_VOLUME, VOLUME_DEFAULT, parseVolume } from './utils/soundV2/layerHost';
 import type { LayerEngine, LayerOutput, CanonicalLayer, BeatRender } from './utils/soundV2/layerHost';
 // v16.8.4 (Adaptive gamma): v2's Adaptive reaches Gamma on headphones; Gamma in Adaptive, Smooth or Sticky.
 import { AdaptiveBand, adaptivePlan, parseGammaMode, KEY_ADAPTIVE_GAMMA, DEFAULT_GAMMA_MODE } from './utils/soundV2/adaptiveBand';
@@ -421,6 +421,26 @@ const storedToneLevel = (engine: LayerEngine): number => {
     return parseToneLevel(raw, engine) ?? defaultToneLevel(engine);
   } catch {
     return defaultToneLevel(engine);
+  }
+};
+
+/** v16.14: an engine's saved beat level, else its release default; unreadable storage reads as unset. */
+const storedBeatLevel = (engine: LayerEngine): number => {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(beatLevelKey(engine)) : null;
+    return parseBeatLevel(raw, engine) ?? defaultBeatLevel(engine);
+  } catch {
+    return defaultBeatLevel(engine);
+  }
+};
+
+/** v16.14: the saved music volume, else the release default (80 %); unreadable storage reads as unset. */
+const storedVolume = (): number => {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(KEY_VOLUME) : null;
+    return parseVolume(raw) ?? VOLUME_DEFAULT;
+  } catch {
+    return VOLUME_DEFAULT;
   }
 };
 
@@ -1642,7 +1662,8 @@ const App: React.FC = () => {
   // same hook); here it picks the "Wandering hexes" row's status line.
   const prefersReducedMotion = usePrefersReducedMotion();
 
-  const [volume, setVolume] = useState(0.8);
+  // v16.14: the music volume comes back as the user left it (saved only by chooseVolume, a slider move).
+  const [volume, setVolume] = useState<number>(() => storedVolume());
   // The tone level, one per engine (v15.0): saved only when the user moves that
   // engine's slider (chooseToneLevel), so an untouched device keeps each
   // engine's release default: v2 the lowest step before off, classic its 1 %.
@@ -1655,7 +1676,11 @@ const App: React.FC = () => {
   // OS pause/stop, Emergency Stop, deleting the playing track, Next on the
   // last track), Clear, playback errors and the end of the list.
   const [isSolfeggioActive, setIsSolfeggioActive] = useState(false);
-  const [binauralVolume, setBinauralVolume] = useState(0.03); // Initialized to 3%
+  // v16.14: the beat level, one per engine like the tone level, saved only when the user moves that engine's slider
+  // (chooseBeatLevel); unset = the release default, 0.015 on both. binauralVolume (after v2Active, below) is the
+  // playing engine's.
+  const [beatLevelV2, setBeatLevelV2] = useState<number>(() => storedBeatLevel('v2'));
+  const [beatLevelClassic, setBeatLevelClassic] = useState<number>(() => storedBeatLevel('classic'));
   const [selectedSolfeggio, setSelectedSolfeggio] = useState<number>(396);
   // Lo Shu Perfect GUT mode — when ON, the GUT-band Solfeggio frequencies
   // (174,285,396,417,528,639) play at their Lo Shu Perfect counterparts
@@ -1760,6 +1785,7 @@ const App: React.FC = () => {
   // safety check may lower it for the session (setSolfeggioVolume); only the
   // sliders save it.
   const solfeggioVolume = v2Active ? toneLevelV2 : toneLevelClassic;
+  const binauralVolume = v2Active ? beatLevelV2 : beatLevelClassic;
   const setSolfeggioVolume = v2Active ? setToneLevelV2 : setToneLevelClassic;
   // v15.6 (the user's decision): the high-crystal check's tone lowering is for the track it was made on, in both
   // layouts. Remembered: the engine, the level in effect then, the lowered level, and the track (the music element's
@@ -1791,6 +1817,18 @@ const App: React.FC = () => {
   const chooseToneLevel = useCallback((engine: LayerEngine, v: number) => {
     (engine === 'v2' ? setToneLevelV2 : setToneLevelClassic)(v);
     try { if (Number.isFinite(v)) localStorage.setItem(toneLevelKey(engine), String(v)); } catch {}
+  }, []);
+  // v16.14: the beat sliders' handler, as chooseToneLevel: that engine's level, saved under that engine's key, only
+  // here (a user's move).
+  const chooseBeatLevel = useCallback((engine: LayerEngine, v: number) => {
+    (engine === 'v2' ? setBeatLevelV2 : setBeatLevelClassic)(v);
+    try { if (Number.isFinite(v)) localStorage.setItem(beatLevelKey(engine), String(v)); } catch {}
+  }, []);
+  // v16.14: the Volume sliders' handler (the Layers / Sound sheet, the desktop transport, classic's Master): saved
+  // only here.
+  const chooseVolume = useCallback((v: number) => {
+    setVolume(v);
+    try { if (Number.isFinite(v)) localStorage.setItem(KEY_VOLUME, String(v)); } catch {}
   }, []);
 
   // v2's failure fallback (never a choice of classic) with Car in effect: classic has no Car render (it always plays
@@ -4208,16 +4246,18 @@ const App: React.FC = () => {
     solfeggioGainRef.current = gain;
   }, [isPlaying, isSolfeggioActive, selectedSolfeggio, solfeggioVolume, enablePhiMode, volume, binauralVolume, loShuPerfectGUT, v2Active]);
 
+  // v16.14 (review): classic's own beat node follows classic's own level (binauralVolume is the playing engine's, so on
+  // a flip to v2 it would chase v2's level while classic's bus fades out). Under a v2 failure the two are the same.
   useEffect(() => {
       if (binauralGainRef.current && audioCtxRef.current) {
           // CHANGE 1: Apply phi-based volume relationship for binaural layer
           const phiVolumes = enablePhiMode 
-            ? integratePhiVolumes(volume, binauralVolume, solfeggioVolume, true)
-            : { music: volume, binaural: binauralVolume, solfeggio: solfeggioVolume };
+            ? integratePhiVolumes(volume, beatLevelClassic, solfeggioVolume, true)
+            : { music: volume, binaural: beatLevelClassic, solfeggio: solfeggioVolume };
           
           binauralGainRef.current.gain.setTargetAtTime(phiVolumes.binaural, audioCtxRef.current.currentTime, 0.1);
       }
-  }, [binauralVolume, volume, enablePhiMode, solfeggioVolume]);
+  }, [beatLevelClassic, volume, enablePhiMode, solfeggioVolume]);
 
   const updateBinaural = useCallback(() => {
     if (!audioCtxRef.current) return;
@@ -4955,7 +4995,7 @@ const App: React.FC = () => {
   const logF = v2Active ? layer.f : applyLoShuPerfectMap(selectedSolfeggio);
   const statusKey = layerStatus?.key ?? '', statusResting = layerStatus?.resting ?? false;
   // What is heard now, as a log entry. v2: Hz from the player's last transition, dB = the validated level × the
-  // slider gain. Classic: its own formulas without the φ timing multiplier (−26 / −23 / −20 dB at the defaults).
+  // slider gain. Classic: its own formulas without the φ timing multiplier (−26 / −23 / −20 dB at the reference levels; the beat starts 6 dB under, v16.14).
   const soundLogEntry = (): SoundLogFields => {
     const on = layersOnNow;
     if (v2Active) {
@@ -5230,7 +5270,8 @@ const App: React.FC = () => {
 
         // CHANGE 3: Apply phi-based temporal structure for dynamic volume
         if (enablePhiMode && phiTimingEnabled && currDuration > 0 && audioCtxRef.current) {
-          const phiVolumes = integratePhiVolumes(volume, binauralVolume, solfeggioVolume, true);
+          // v16.14 (review): classic's beat node takes classic's own beat level (see the binaural gain effect).
+          const phiVolumes = integratePhiVolumes(volume, beatLevelClassic, solfeggioVolume, true);
           
           // Get phi-based intensity for current track position
           const phiIntensity = getPhiIntensityMultiplier(actualTime, currDuration);
@@ -5261,7 +5302,7 @@ const App: React.FC = () => {
       cancelAnimationFrame(rafRef.current);
       if (isPlaying && appMountedRef.current && mainAudioRef.current) setCurrTime(mainAudioRef.current.currentTime);
     };
-  }, [isPlaying, enablePhiMode, phiTimingEnabled, currDuration, volume, binauralVolume, solfeggioVolume]);
+  }, [isPlaying, enablePhiMode, phiTimingEnabled, currDuration, volume, beatLevelClassic, solfeggioVolume]);
 
 
   // BACKGROUND DURATION ANALYZER
@@ -10519,7 +10560,7 @@ registerProcessor('wav-capture', WavCapture);
       keyFitOn,
       toneLevel: toneLevelV2,
       lowering: low && low.engine === 'v2' ? { trackId: playingSong?.id ?? null, before: low.before, after: low.after } : null,
-      beatLevel: binauralVolume,
+      beatLevel: beatLevelV2, // v16.14: the export renders v2, so v2's beat level (as toneLevel)
       presetName: selectedBinaural.name,
       adaptive: isAdaptiveBinaural,
       gammaMode, // v16.8.4: the export follows Gamma in Adaptive (decision G4)
@@ -10528,7 +10569,7 @@ registerProcessor('wav-capture', WavCapture);
       playingId: playingSong?.id ?? null,
       selectedHz: selectedSolfeggio,
     };
-  }, [layerEngine, musicOnly, layerOutput, droneEnabled, keyFitOn, toneLevelV2, binauralVolume, selectedBinaural, isAdaptiveBinaural, gammaMode, enablePhiMode, phiTimingEnabled, loShuPerfectGUT, currentSongIndex, playlist, selectedSolfeggio]);
+  }, [layerEngine, musicOnly, layerOutput, droneEnabled, keyFitOn, toneLevelV2, beatLevelV2, selectedBinaural, isAdaptiveBinaural, gammaMode, enablePhiMode, phiTimingEnabled, loShuPerfectGUT, currentSongIndex, playlist, selectedSolfeggio]);
   const exportSnapshotRef: { current: ExportSnapshot } = useRef(exportSnapshot);
   exportSnapshotRef.current = exportSnapshot;
   const exportSheetOpenRef: { current: boolean } = useRef(false);
@@ -10961,6 +11002,7 @@ registerProcessor('wav-capture', WavCapture);
       toggleMusicOnly,
       toggleKeyFit,
       chooseToneLevel,
+      chooseBeatLevel,
       showCurrentTrackAnalysis,
       stopRecording,
       setLayout,
@@ -11011,9 +11053,9 @@ registerProcessor('wav-capture', WavCapture);
       chooseOutput: (o: LayerOutput) => A().chooseLayerOutput(o),
       toggleMusicOnly: () => A().toggleMusicOnly(),
       toggleKeyFit: () => A().toggleKeyFit(),
-      setVolume: (v: number) => setVolume(v),
+      setVolume: (v: number) => chooseVolume(v),
       setToneLevel: (v: number) => A().chooseToneLevel(A().v2Active ? 'v2' : 'classic', v),
-      setBeatLevel: (v: number) => setBinauralVolume(v),
+      setBeatLevel: (v: number) => A().chooseBeatLevel(A().v2Active ? 'v2' : 'classic', v),
       // Emergency Stop's body: under v2 the layers fall in 0.1 s, then the music, the anchor and the tone stop.
       stopAll: () => {
         A().stopLayersNow(0.1);
@@ -11777,7 +11819,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.13.3</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.14</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -14604,7 +14646,7 @@ registerProcessor('wav-capture', WavCapture);
                                 <Volume2 size={14} className="text-slate-500 group-hover/vol:text-gold-400 transition-colors" />
                                 <input 
                                     type="range" min="0" max="1" step="0.01" 
-                                    value={volume} onChange={e => setVolume(parseFloat(e.target.value))} 
+                                    value={volume} onChange={e => chooseVolume(parseFloat(e.target.value))} 
                                     className="w-16 sm:w-20 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-gold-500 hover:h-1.5 transition-all" 
                                     title={`Master Volume: ${Math.round(volume*100)}%`}
                                 />
@@ -14617,7 +14659,7 @@ registerProcessor('wav-capture', WavCapture);
                                 <Zap size={14} className={`transition-colors ${outputRender === 'off' ? 'text-slate-700' : 'text-slate-500 group-hover/bin:text-blue-400'}`} />
                                 <input
                                     type="range" min="0" max={V2_BEAT_SLIDER_MAX} step="0.001"
-                                    value={Math.min(binauralVolume, V2_BEAT_SLIDER_MAX)} onChange={e => setBinauralVolume(parseFloat(e.target.value))}
+                                    value={Math.min(binauralVolume, V2_BEAT_SLIDER_MAX)} onChange={e => chooseBeatLevel(v2Active ? 'v2' : 'classic', parseFloat(e.target.value))}
                                     disabled={outputRender === 'off'}
                                     aria-label={BEAT_LEVEL_LABEL}
                                     aria-valuetext={beatLevelText}
@@ -14630,7 +14672,7 @@ registerProcessor('wav-capture', WavCapture);
                                 <Zap size={14} className="text-slate-500 group-hover/bin:text-blue-400 transition-colors" />
                                 <input 
                                     type="range" min="0" max="0.2" step="0.001" 
-                                    value={binauralVolume} onChange={e => setBinauralVolume(parseFloat(e.target.value))} 
+                                    value={binauralVolume} onChange={e => chooseBeatLevel('classic', parseFloat(e.target.value))} 
                                     className="w-16 sm:w-20 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500 hover:h-1.5 transition-all" 
                                     title={`Binaural Volume: ${Math.round(binauralVolume/0.2*100)}%`}
                                 />

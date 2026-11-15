@@ -13,7 +13,7 @@
   },
   "autoDistribute reference in App › useLayoutEffect(no deps)": {
     "count": 1,
-    "sha": "445a95c07e689de6"
+    "sha": "c4b254295e692185"
   },
   "clearEntirePlaylist reference in App › <ViewBoundary render> › <ClearPlaylistButton onClear>": {
     "count": 1,
@@ -57,7 +57,7 @@
   },
   "discardOrphans reference in App › useLayoutEffect(no deps)": {
     "count": 1,
-    "sha": "445a95c07e689de6"
+    "sha": "c4b254295e692185"
   },
   "flushAndReload reference in App › <ViewBoundary render> › <button onClick>": {
     "count": 1,
@@ -77,7 +77,7 @@
   },
   "handleFileUpload reference in App › useLayoutEffect(no deps)": {
     "count": 1,
-    "sha": "445a95c07e689de6"
+    "sha": "c4b254295e692185"
   },
   "libraryRef.current = call in App › useEffect([originalPlaylist])": {
     "count": 1,
@@ -89,7 +89,7 @@
   },
   "onAnalyseTap reference in App › useLayoutEffect(no deps)": {
     "count": 1,
-    "sha": "445a95c07e689de6"
+    "sha": "c4b254295e692185"
   },
   "recoverOrphans reference in App › <ViewBoundary render> › <button onClick>": {
     "count": 1,
@@ -97,7 +97,7 @@
   },
   "recoverOrphans reference in App › useLayoutEffect(no deps)": {
     "count": 1,
-    "sha": "445a95c07e689de6"
+    "sha": "c4b254295e692185"
   },
   "scanLibrary reference in App › <ViewBoundary render> › <button onClick>": {
     "count": 1,
@@ -105,7 +105,7 @@
   },
   "scanLibrary reference in App › useLayoutEffect(no deps)": {
     "count": 1,
-    "sha": "445a95c07e689de6"
+    "sha": "c4b254295e692185"
   },
   "setOriginalPlaylist call in App › appendFreeSongs": {
     "count": 1,

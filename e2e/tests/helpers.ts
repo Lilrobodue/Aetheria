@@ -678,6 +678,10 @@ export const SOUND_LOG_KEY = 'aetheria.soundSessions.v1';
 // The tone level, one per engine (v15.0), saved only when that engine's slider is moved.
 export const TONE_LEVEL_V2_KEY = 'aetheria.toneLevelV2.v1';
 export const TONE_LEVEL_CLASSIC_KEY = 'aetheria.toneLevelClassic.v1';
+// v16.14 (Your levels): the beat level per engine and the music volume, saved only by a slider move, like the tone.
+export const BEAT_LEVEL_V2_KEY = 'aetheria.beatLevelV2.v1';
+export const BEAT_LEVEL_CLASSIC_KEY = 'aetheria.beatLevelClassic.v1';
+export const VOLUME_KEY = 'aetheria.volume.v1';
 // Key fit (v15.2): 'true' / 'false', written only when the switch is tapped; unset = the release default (on since
 // v15.2.1, off in v15.2). A test about something else that needs it one way says so (seedLayers' keyFit).
 export const KEY_FIT_KEY = 'aetheria.keyFit.v1';

@@ -29,6 +29,8 @@ import { MEDIA, ffmpegAvailable, joined, junkAfterTag, midId3Bogus, understateFl
 
 const PSF = 0.981818;
 const LEVEL_BEAT = 0.0708;
+// v16.14 D3: an untouched device's beat starts at half (0.015 over the 0.03 that is 0 dB): −6.02 dB.
+const BEAT_START = 0.015 / 0.03;
 const LEVEL_TONE = 0.0501;
 const SEED_RATE = 8000;
 const db = (x: number) => 20 * Math.log10(x);
@@ -123,7 +125,7 @@ test.describe('phone', () => {
     expect(Math.abs(w.frames - Math.round((20 * SEED_RATE * 48_000) / (SEED_RATE * PSF))), `frames ${w.frames}`).toBeLessThanOrEqual(2);
     expect(Math.abs(w.amps[0] - SEED_DB), `the music at f × PSF: ${w.amps[0].toFixed(3)} dB`).toBeLessThanOrEqual(0.1);
     expect(w.amps[1], 'nothing at the unshifted pitch').toBeLessThan(-80);
-    const beatDb = db(LEVEL_BEAT * hannPhi(6, 14, T));
+    const beatDb = db(LEVEL_BEAT * BEAT_START * hannPhi(6, 14, T));
     expect(Math.abs(w.amps[2] - beatDb), `the carrier (L) ${w.amps[2].toFixed(2)} vs ${beatDb.toFixed(2)}`).toBeLessThanOrEqual(0.5);
     expect(Math.abs(w.amps[3] - beatDb), `the partner (R) ${w.amps[3].toFixed(2)} vs ${beatDb.toFixed(2)}`).toBeLessThanOrEqual(0.5);
     expect(w.amps[4] - w.amps[3], 'the partner stays in the right ear').toBeLessThan(-60);
@@ -141,6 +143,22 @@ test.describe('phone', () => {
       return b.length;
     });
     expect(back).toBe(w.frames);
+    expect(dialogs).toEqual([]);
+  });
+
+  test("E1c (v16.14, R6). the export renders v2, so it takes v2's beat level, never classic's: classic playing with its beat off, v2's at 0.06 gives the file gain 2 (+6 dB)", async ({ page }) => {
+    test.setTimeout(120_000);
+    await stubDownloads(page);
+    await page.addInitScript(() => {
+      localStorage.setItem('aetheria.beatLevelV2.v1', '0.06');
+      localStorage.setItem('aetheria.beatLevelClassic.v1', '0');
+    });
+    const dialogs = await openSeededNewLayout(page, 1, { real: 1, seconds: 4, engine: 'classic' });
+    await page.waitForFunction(() => typeof (window as any).__aetheriaExport?.render === 'function', null, { timeout: 10_000 });
+    const id = (await libraryState(page)).libraryIds[0];
+    const res = await page.evaluate((id) => (window as any).__aetheriaExport.render(id, {}), id);
+    expect(res.spec[0].engineNote, 'classic is the engine in effect (else the test would prove nothing)').toBe(true);
+    expect(res.spec[0].gains.beat, "v2's beat level over its 0.03 reference").toBeCloseTo(2, 9);
     expect(dialogs).toEqual([]);
   });
 

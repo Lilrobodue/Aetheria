@@ -255,6 +255,28 @@ test.describe('desktop', () => {
     expect(dialogs).toEqual([]);
   });
 
+  test("K-V (v16.14). the transport's Volume is kept: moved to 35 %, saved; after a reload it reads 35 %", async ({ page }) => {
+    test.setTimeout(120_000);
+    await instrumentAudio(page);
+    const dialogs = await playingDesktop(page);
+    const volume = () => page.getByRole('slider', { name: 'Volume', exact: true });
+    await expect(volume()).toHaveValue('0.8');
+    expect(await page.evaluate(() => localStorage.getItem('aetheria.volume.v1')), 'untouched: nothing saved').toBeNull();
+    await volume().fill('0.35');
+    await expect(volume()).toHaveAttribute('aria-valuetext', '35 %');
+    expect(await page.evaluate(() => localStorage.getItem('aetheria.volume.v1'))).toBe('0.35');
+    await page.reload();
+    await expect(volume()).toHaveValue('0.35');
+    await expect(volume()).toHaveAttribute('aria-valuetext', '35 %');
+    // Silent stays silent: 0 is a level, not unset.
+    await volume().fill('0');
+    expect(await page.evaluate(() => localStorage.getItem('aetheria.volume.v1'))).toBe('0');
+    await page.reload();
+    await expect(volume()).toHaveValue('0');
+    await expect(volume()).toHaveAttribute('aria-valuetext', '0 %');
+    expect(dialogs).toEqual([]);
+  });
+
   test('K4. M toggles Music only (the layers) and never the music: the volume, the element and its gains stay as they were', async ({ page }) => {
     test.setTimeout(120_000);
     await instrumentAudio(page);

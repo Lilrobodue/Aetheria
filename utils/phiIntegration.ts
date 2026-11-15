@@ -194,7 +194,8 @@ export function logPhiRelationships(musicVolume: number = 1.0, trackDuration: nu
  * These are the two knobs to turn if the layers are too loud or too quiet.
  * Everything else in the gain chain is structural.
  *
- * Derivation (defaults: volume 0.8, binauralVolume 0.03, solfeggioVolume 0.01):
+ * Derivation (the reference levels: volume 0.8, binauralVolume 0.03, solfeggioVolume 0.01; since v16.14 the beat
+ * starts at 0.015, 6 dB under this):
  *
  *   music reference at the output  = volume * MUSIC_OUTPUT_LEVEL * duckComp = 0.8 (desktop)
  *   layer at the output            = trimmedValue * busGain
@@ -252,7 +253,7 @@ export function integratePhiVolumes(
 
   // Scale the phi ratios by the user's current settings
   // This preserves user intent while applying golden ratio relationships
-  const binauralScale = currentBinauralVolume / 0.03; // Current default is 3%
+  const binauralScale = currentBinauralVolume / 0.03; // 0.03 is the reference (the beat starts at 0.015 since v16.14)
   const solfeggioScale = currentSolfeggioVolume / 0.01; // Current default is 1%
 
   // CLAMP — required, not defensive. `solfeggioVolume`'s slider runs to 1.0

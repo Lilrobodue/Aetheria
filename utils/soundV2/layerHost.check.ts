@@ -43,6 +43,16 @@ import {
   toneLevelKey,
   defaultToneLevel,
   parseToneLevel,
+  KEY_BEAT_LEVEL_V2,
+  KEY_BEAT_LEVEL_CLASSIC,
+  KEY_VOLUME,
+  CLASSIC_BEAT_SLIDER_MAX,
+  BEAT_LEVEL_DEFAULT,
+  VOLUME_DEFAULT,
+  beatLevelKey,
+  defaultBeatLevel,
+  parseBeatLevel,
+  parseVolume,
   crystalIdOf,
   canonicalLayerHz,
   renderForOutput,
@@ -129,6 +139,21 @@ check(parseToneLevel('0.0405', 'v2') === null && parseToneLevel('0.5', 'v2') ===
   && parseToneLevel('-0.001', 'v2') === null, "parseToneLevel: off the engine's slider is unset");
 check([null, '', ' ', 'abc', 'NaN', 'Infinity', '-Infinity', '0.01x'].every((r) => parseToneLevel(r, 'v2') === null && parseToneLevel(r, 'classic') === null),
   'parseToneLevel: missing, empty or not a number is unset');
+// v16.14 (Your levels): the beat level per engine and the music volume, saved like the tone level; the beat starts at half.
+check(KEY_BEAT_LEVEL_V2 === 'aetheria.beatLevelV2.v1' && KEY_BEAT_LEVEL_CLASSIC === 'aetheria.beatLevelClassic.v1' && KEY_VOLUME === 'aetheria.volume.v1'
+  && beatLevelKey('v2') === KEY_BEAT_LEVEL_V2 && beatLevelKey('classic') === KEY_BEAT_LEVEL_CLASSIC, 'v16.14: one beat level key per engine, one volume key');
+check(BEAT_LEVEL_DEFAULT === 0.015 && defaultBeatLevel('v2') === 0.015 && defaultBeatLevel('classic') === 0.015 && BEAT_SLIDER_DEFAULT === 0.03,
+  'v16.14 D3: the beat starts at 0.015 on both engines; 0.03 stays the 0 dB reference');
+check(near(gainToDb(sliderGain(BEAT_LEVEL_DEFAULT, BEAT_SLIDER_DEFAULT))!, -6.0206, 1e-4), "v16.14: v2's beat starts 6.02 dB under the validated level");
+check(VOLUME_DEFAULT === 0.8 && CLASSIC_BEAT_SLIDER_MAX === 0.2, 'v16.14: the volume still starts at 80 %; classic beat slider 0-0.2');
+check(parseBeatLevel('0', 'v2') === 0 && parseBeatLevel('0.015', 'v2') === 0.015 && parseBeatLevel('0.12', 'v2') === 0.12
+  && parseBeatLevel('0.2', 'classic') === 0.2 && parseBeatLevel('0', 'classic') === 0, "parseBeatLevel: a saved slider value, 0 (off) to the engine's max");
+check(parseBeatLevel('0.121', 'v2') === null && parseBeatLevel('0.2001', 'classic') === null && parseBeatLevel('-0.001', 'v2') === null,
+  "parseBeatLevel: off the engine's slider is unset");
+check(parseVolume('0') === 0 && parseVolume('0.35') === 0.35 && parseVolume('1') === 1 && parseVolume('1.01') === null && parseVolume('-0.01') === null,
+  'parseVolume: 0 (silent) to 1, else unset');
+check([null, '', ' ', 'abc', 'NaN', 'Infinity', '-Infinity', '0.01x'].every((r) => parseBeatLevel(r, 'v2') === null && parseBeatLevel(r, 'classic') === null && parseVolume(r) === null),
+  'parseBeatLevel / parseVolume: missing, empty or not a number is unset');
 check(TONE_REF_DB === -26 && BEAT_REF_DB === -23 && DRONE_REF_DB === -24, 'the display reference levels');
 check(near(20 * Math.log10(LEVEL_TONE), TONE_REF_DB, 0.01) && near(20 * Math.log10(LEVEL_BEAT), BEAT_REF_DB, 0.01)
   && near(20 * Math.log10(LEVEL_DRONE_SUB), DRONE_REF_DB, 0.01), 'and they are the vendored levels in dB');

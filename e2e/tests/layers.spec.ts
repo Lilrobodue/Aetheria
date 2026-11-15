@@ -23,6 +23,9 @@ import {
   SOUND_LOG_KEY,
   TONE_LEVEL_V2_KEY,
   TONE_LEVEL_CLASSIC_KEY,
+  BEAT_LEVEL_V2_KEY,
+  BEAT_LEVEL_CLASSIC_KEY,
+  VOLUME_KEY,
   setSlider,
   seedLayers,
   layersState,
@@ -465,6 +468,57 @@ test("each engine remembers its own tone level across a reload, saved only when 
   await tapTraditional(page, 528);
   await expect.poll(async () => (await layersState(page))?.gains?.tone ?? -1).toBeCloseTo(0.2, 9);
   expect(await storedToneKeys(page)).toEqual({ [TONE_LEVEL_V2_KEY]: '0.002', [TONE_LEVEL_CLASSIC_KEY]: '0.05' });
+  expect(errors).toEqual([]);
+  expect(dialogs).toEqual([]);
+});
+
+test("v16.14: the volume and each engine's beat level come back after a reload, saved only by a move; the beat starts at −6 dB, and 0 stays 0", async ({ page }) => {
+  const errors = pageErrors(page);
+  const dialogs = await openApp(page, { engine: 'default' });
+  await openHarmonicControl(page);
+  const levels = () =>
+    page.evaluate(
+      (keys) => Object.fromEntries(keys.flatMap((k) => (localStorage.getItem(k) === null ? [] : [[k, localStorage.getItem(k)]]))),
+      [VOLUME_KEY, BEAT_LEVEL_V2_KEY, BEAT_LEVEL_CLASSIC_KEY]
+    );
+  const beatV2 = () => page.getByRole('slider', { name: 'Beat level' });
+  const beatClassic = () => page.getByTitle(/^Binaural Volume/);
+  const master = () => page.getByTitle(/^Master Volume/);
+  // A fresh device: the release defaults (Volume 80 %, the beat at half), and playing writes nothing.
+  await expect(master()).toHaveAttribute('title', 'Master Volume: 80%');
+  await expect(beatV2()).toHaveAttribute('title', 'Beat −6.0 dB · −29.0 dB re music');
+  await tapTraditional(page, 528);
+  await expect.poll(async () => (await layersState(page))?.gains?.beat ?? -1).toBeCloseTo(0.5, 9);
+  expect(await levels()).toEqual({});
+  // Moved: saved under their own keys alone, and the player plays the new beat (0.06 / 0.03 = 2, +6 dB).
+  await setSlider(beatV2(), 0.06);
+  await setSlider(master(), 0.35);
+  await expect(beatV2()).toHaveAttribute('title', 'Beat +6.0 dB · −17.0 dB re music');
+  await expect(master()).toHaveAttribute('title', 'Master Volume: 35%');
+  await expect.poll(async () => (await layersState(page))?.gains?.beat ?? -1).toBeCloseTo(2, 9);
+  expect(await levels()).toEqual({ [VOLUME_KEY]: '0.35', [BEAT_LEVEL_V2_KEY]: '0.06' });
+  await page.reload();
+  await acceptDisclaimer(page);
+  await openHarmonicControl(page);
+  await expect(master()).toHaveAttribute('title', 'Master Volume: 35%');
+  await expect(beatV2()).toHaveAttribute('title', 'Beat +6.0 dB · −17.0 dB re music');
+  // Classic has its own beat level, its default until moved; turned off, it stays off after a reload.
+  await engineButton(page, 'Classic').click();
+  await expect(beatClassic()).toHaveAttribute('title', 'Binaural Volume: 8%');
+  await setSlider(beatClassic(), 0);
+  await expect(beatClassic()).toHaveAttribute('title', 'Binaural Volume: 0%');
+  expect(await levels()).toEqual({ [VOLUME_KEY]: '0.35', [BEAT_LEVEL_V2_KEY]: '0.06', [BEAT_LEVEL_CLASSIC_KEY]: '0' });
+  await page.reload();
+  await acceptDisclaimer(page);
+  await openHarmonicControl(page);
+  await expect(beatClassic()).toHaveAttribute('title', 'Binaural Volume: 0%');
+  await expect(master()).toHaveAttribute('title', 'Master Volume: 35%');
+  // Back to v2: its own level, which the player plays.
+  await engineButton(page, 'v2').click();
+  await expect(beatV2()).toHaveAttribute('title', 'Beat +6.0 dB · −17.0 dB re music');
+  await tapTraditional(page, 528);
+  await expect.poll(async () => (await layersState(page))?.gains?.beat ?? -1).toBeCloseTo(2, 9);
+  expect(await levels()).toEqual({ [VOLUME_KEY]: '0.35', [BEAT_LEVEL_V2_KEY]: '0.06', [BEAT_LEVEL_CLASSIC_KEY]: '0' });
   expect(errors).toEqual([]);
   expect(dialogs).toEqual([]);
 });
@@ -1531,7 +1585,8 @@ test('v2 sliders read in dB; classic keeps its percent readouts', async ({ page 
   await openHarmonicControl(page);
   await expect(layerIntensity(page)).toHaveText('1%');
   await expect(page.getByText('Tone level', { exact: true })).toHaveCount(0);
-  await expect(page.getByTitle('Binaural Volume: 15%')).toBeVisible();
+  // v16.14 D3: the beat starts at half (0.015 of classic's 0.2: 7.5 %, shown 8 %).
+  await expect(page.getByTitle('Binaural Volume: 8%')).toBeVisible();
   await expect(page.getByRole('slider', { name: 'Beat level' })).toHaveCount(0);
 
   await seedLayers(page, { engine: 'v2', output: 'headphones' });
@@ -1546,7 +1601,8 @@ test('v2 sliders read in dB; classic keeps its percent readouts', async ({ page 
   await setSlider(tone, 0.01);
   await expect(toneReadoutText(page)).toHaveText('+0.0 dB · −26.0 dB re music');
   const beat = page.getByRole('slider', { name: 'Beat level' });
-  await expect(beat).toHaveAttribute('title', 'Beat +0.0 dB · −23.0 dB re music');
+  // v16.14 D3: the beat starts at half, −6 dB under the validated level (0 dB stays at 0.03).
+  await expect(beat).toHaveAttribute('title', 'Beat −6.0 dB · −29.0 dB re music');
   await expect(beat).toHaveAttribute('max', '0.12');
   await expect(page.getByTitle(/^Binaural Volume/)).toHaveCount(0);
   expect(errors).toEqual([]);

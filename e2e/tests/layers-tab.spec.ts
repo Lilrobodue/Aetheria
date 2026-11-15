@@ -40,6 +40,9 @@ import {
   PHONE_VIEWPORT,
   TONE_LEVEL_CLASSIC_KEY,
   TONE_LEVEL_V2_KEY,
+  BEAT_LEVEL_V2_KEY,
+  BEAT_LEVEL_CLASSIC_KEY,
+  VOLUME_KEY,
   type LayersSectionName,
   peekClassicLibrary,
 } from './helpers';
@@ -468,7 +471,7 @@ test.describe('phone, controls', () => {
     expect(dialogs).toEqual([]);
   });
 
-  test('6. Levels: classic’s readouts for the same values; a drag saves only the tone level; Car disables the beat; classic reads %', async ({ page }) => {
+  test('6. Levels: classic’s readouts for the same values; a drag saves the volume, the tone level and the beat level (v16.14); Car disables the beat; classic reads %', async ({ page }) => {
     test.setTimeout(150_000);
     await instrumentAudio(page);
     const dialogs = await playInNewLayout(page);
@@ -484,9 +487,11 @@ test.describe('phone, controls', () => {
     await expect(readout(levels.getByTestId('level-tone'))).toHaveText('+6.0 dB · −20.0 dB re music');
     await expect(readout(levels.getByTestId('level-beat'))).toHaveText('Beat +6.0 dB · −17.0 dB re music');
     await expect.poll(() => key(page, TONE_LEVEL_V2_KEY)).toBe('0.02');
+    await expect.poll(() => key(page, VOLUME_KEY)).toBe('0.5');
+    await expect.poll(() => key(page, BEAT_LEVEL_V2_KEY)).toBe('0.06');
     const after = await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)])));
     const changed = Object.keys({ ...before, ...after }).filter((k) => before[k] !== after[k] && k !== 'aetheria.soundSessions.v1');
-    expect(changed, 'only the tone level is saved (volume and beat are not)').toEqual([TONE_LEVEL_V2_KEY]);
+    expect(changed.sort(), 'v16.14: the three levels are saved, nothing else').toEqual([BEAT_LEVEL_V2_KEY, TONE_LEVEL_V2_KEY, VOLUME_KEY].sort());
     const tone = await readout(levels.getByTestId('level-tone')).textContent();
     const beat = await readout(levels.getByTestId('level-beat')).textContent();
 
@@ -507,6 +512,11 @@ test.describe('phone, controls', () => {
     await chooseEngine(page, 'Classic');
     await expect(readout(levels.getByTestId('level-tone'))).toHaveText(/^\d+ %$/);
     await expect(readout(levels.getByTestId('level-beat'))).toHaveText(/^\d+ %$/);
+    // v16.14 (review): moved under Classic, the beat is saved under classic's key; v2's stays as it was.
+    await setSlider(levels.getByTestId('level-beat').locator('input'), 0.1);
+    await expect(readout(levels.getByTestId('level-beat'))).toHaveText('50 %');
+    await expect.poll(() => key(page, BEAT_LEVEL_CLASSIC_KEY)).toBe('0.1');
+    expect(await key(page, BEAT_LEVEL_V2_KEY)).toBe('0.06');
     expect(dialogs).toEqual([]);
   });
 
