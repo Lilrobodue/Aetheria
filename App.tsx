@@ -9559,7 +9559,9 @@ registerProcessor('wav-capture', WavCapture);
   const stopFreeMusic = () => freeAddRef.current?.abort();
   // Their own one-line effect, as the Library tools' are (addFreeMusic reaches the library's writers through
   // appendFreeSongs; the pinned shell actions' effect stays as it is).
-  const freeMusicApiRef: { current: { add: typeof addFreeMusic; stop: typeof stopFreeMusic } | null } = useRef(null);
+  // v16.13.1: the type is written out (no `typeof addFreeMusic`): a use at App's own level is pinned by check:writers
+  // with the whole file as its code, so every edit to App.tsx tripped it.
+  const freeMusicApiRef: { current: { add: (what: FreeAddWhat, oneId?: string | null) => Promise<void>; stop: () => void } | null } = useRef(null);
   useLayoutEffect(() => { freeMusicApiRef.current = { add: addFreeMusic, stop: stopFreeMusic }; });
   // What the shell and classic's block show: which tracks the library has (by id, so only an import or a delete changes
   // it), each group's counts, and the status.
@@ -11775,7 +11777,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.13</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.13.1</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -13923,6 +13925,17 @@ registerProcessor('wav-capture', WavCapture);
                       <p className="text-[10px] text-slate-500">I Ching readings, each turned into three Aetheria tones</p>
                     </div>
                     <ChevronRight size={14} className="text-slate-700 group-hover:text-amber-500 transition-colors shrink-0" />
+                  </a>
+                  {/* v16.13.1: Titīrṣā, after Divination (linksData.ts has the same row for the new layout). */}
+                  <a href="https://big-banana-studios.github.io/titirsa/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-fuchsia-500/40 transition-all group">
+                    <div className="w-9 h-9 rounded-lg bg-fuchsia-500/10 border border-fuchsia-500/20 flex items-center justify-center shrink-0">
+                      <Waves size={16} className="text-fuchsia-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-slate-200 group-hover:text-fuchsia-400 transition-colors">Titīrṣā</h4>
+                      <p className="text-[10px] text-slate-500">Cymatic plate shaped by your goal regime, the Moon's mansion and your heart</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-700 group-hover:text-fuchsia-500 transition-colors shrink-0" />
                   </a>
                   <a href="https://big-banana-studios.github.io/Controlled-Burn/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-orange-500/40 transition-all group">
                     <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">

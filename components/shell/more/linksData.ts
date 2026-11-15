@@ -25,6 +25,9 @@ export const LINK_SECTIONS: ReadonlyArray<LinkSection> = [
       { title: 'Aetheria Reader', sub: 'Read-aloud e-reader — your own books stay on your device', href: 'https://big-banana-studios.github.io/aetheria-reader/' },
       // v16.12.1 (the user, 15 Nov 2026): the Divination app, after Reader; classic's panel has the same row.
       { title: 'Aetheria Divination', sub: 'I Ching readings, each turned into three Aetheria tones', href: 'https://big-banana-studios.github.io/aetheria-divination/' },
+      // v16.13.1 (the user, 15 Nov 2026): Titīrṣā (Instrument 04), after Divination; its public site (the repo is
+      // private). Classic's panel has the same row.
+      { title: 'Titīrṣā', sub: "Cymatic plate shaped by your goal regime, the Moon's mansion and your heart", href: 'https://big-banana-studios.github.io/titirsa/' },
       { title: 'Controlled Burn', sub: 'Heart-rate flooding alerts — Gottman conflict de-escalation', href: 'https://big-banana-studios.github.io/Controlled-Burn/' },
     ],
   },
