@@ -435,6 +435,30 @@
    "text": "pineal"
   },
   {
+   "file": "utils/freeMusic/aetheria222.json",
+   "verdict": "allowed:work-title",
+   "words": "medical",
+   "text": "Mother Nature's Medicine"
+  },
+  {
+   "file": "utils/freeMusic/aetheria222.json",
+   "verdict": "allowed:data",
+   "words": "medical",
+   "text": "aetheria-mother-natures-medicine"
+  },
+  {
+   "file": "utils/freeMusic/aetheria222.json",
+   "verdict": "allowed:data",
+   "words": "medical",
+   "text": "tracks/mother-natures-medicine.env"
+  },
+  {
+   "file": "utils/freeMusic/aetheria222.json",
+   "verdict": "allowed:data",
+   "words": "medical",
+   "text": "tracks/mother-natures-medicine.ogg"
+  },
+  {
    "file": "utils/playlists/oldNames.ts",
    "verdict": "allowed:data",
    "words": "DNA",

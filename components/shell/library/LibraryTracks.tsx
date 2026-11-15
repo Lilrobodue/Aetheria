@@ -33,7 +33,8 @@ import EmptyState from '../../ui/EmptyState';
 import { PanelFallback, ViewBoundary } from '../../ErrorBoundary';
 import type { FallbackApi } from '../../ErrorBoundary';
 import type { Song } from '../../../types';
-import { useActions, useExportActions, useLibraryList, useLibrarySummary, useMore, usePlayer, useQueue, useShell, useWalk } from '../contexts';
+import { useActions, useExportActions, useImportSave, useLibraryList, useLibrarySummary, useMore, usePlayer, useQueue, useShell, useWalk } from '../contexts';
+import { words as freeWords } from '../../../utils/freeMusic/model';
 import type { LibraryViewState } from '../contexts';
 import { addToQueueLine, playNextLine } from '../queue/queueViewModel';
 import { countRender } from '../devRenders';
@@ -113,6 +114,25 @@ const RegionCrash = ({ api, text, testId }: { api: FallbackApi; text: string; te
     <PanelFallback text={text} switchedOff={api.switchedOff} copyDetails={api.copyDetails} buttonRef={api.buttonRef} onRetry={api.retry} />
   </div>
 );
+
+/** v16.13 (Aetheria's 222): the empty Library's second offer, which opens the Import sheet at Aetheria's music. Its own
+ *  component, the one here reading ImportSaveContext (v16.8.5's C6: that context's changes re-render nothing else). */
+const FreeOffer = () => {
+  const free = useImportSave().free;
+  const actions = useActions();
+  // (Review round 1, U2: not while the library is still being read, when an empty list only means "not read yet".)
+  if (!free || free.list.length === 0 || !free.ready) return null;
+  return (
+    <button
+      type="button"
+      data-testid="library-empty-free"
+      onClick={() => actions.openImport('free')}
+      className="w-full min-h-touch text-left px-3 rounded-control border border-gold-500/40 bg-gold-500/5 text-sm text-gold-400 font-semibold hover:border-gold-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+    >
+      {freeWords.emptyOffer(free.list.length)}
+    </button>
+  );
+};
 
 const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
   countRender('LibraryTab');
@@ -468,6 +488,7 @@ const LibraryTracks = ({ inPanel = false, onImport }: LibraryTracksProps) => {
               data-testid="library-empty"
             />
             <p className="text-xs text-ink-faint">{FORMATS_LINE}</p>
+            <FreeOffer />
           </div>
         )}
       </div>

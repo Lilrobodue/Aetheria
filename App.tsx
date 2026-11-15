@@ -20,6 +20,7 @@ import {
   restorePlaylist,
   clearPlaylistCache,
   deleteTracksFromCache,
+  forgetDeletions,
   saveBlobsNow,
   debouncedSaveMeta,
   // v16.8.2 fix round 1 (A-N4): the key bands' pagehide write goes after the play state's waiting save.
@@ -69,6 +70,22 @@ import {
   ENTRIES_MAX,
 } from './utils/playlists/model';
 import type { PlaylistRecord, PlaylistFrom, LibraryIndex } from './utils/playlists/model';
+import {
+  parseFreeList,
+  missingOf as missingFreeTracks,
+  groupViews as freeGroupViews,
+  audioUrl as freeAudioUrl,
+  envUrl as freeEnvUrl,
+  parseEnvelope as parseFreeEnvelope,
+  songOf as freeSongOf,
+  fileNameOf as freeFileNameOf,
+  statusLine as freeStatusLine,
+  words as freeWords,
+  GROUPS as FREE_GROUPS,
+  PLAYLIST_NAMES as FREE_PLAYLIST_NAMES,
+  IDLE_STATUS as FREE_IDLE,
+} from './utils/freeMusic/model';
+import type { FreeTrack, FreeKind, FreeAddWhat, FreeMusicStatus, FreeFailReason } from './utils/freeMusic/model';
 import { renameOldScoreWords } from './utils/playlists/oldNames';
 import * as playlistWords from './components/shell/playlists/playlistsViewModel';
 import {
@@ -1312,7 +1329,7 @@ const App: React.FC = () => {
   // (decision 4: classic shows with `layout` still 'new', and a pill comes back).
   const [shellTab, setShellTab] = useState<ShellTab>('now');
   const [shellSheet, setShellSheet] = useState<ShellSheet | null>(null);
-  const [sheetFocus, setSheetFocus] = useState<'output' | 'recover' | null>(null);
+  const [sheetFocus, setSheetFocus] = useState<'output' | 'recover' | 'free' | null>(null);
   const [classicPeek, setClassicPeek] = useState<PeekPanel | null>(null);
   // The desktop shell from 1024 × 600 (a laptop, a landscape iPad); anything smaller gets the phone shell.
   const desktopShell = useMediaQuery('(min-width: 1024px) and (min-height: 600px)');
@@ -1412,6 +1429,9 @@ const App: React.FC = () => {
     wakeLockManager.setEnabled(keepAwake);
   }, [keepAwake]);
   const [lastImport, setLastImport] = useState<LastImport | null>(null);
+  // v16.13 (Aetheria's 222): the shipped list of the free music (null until read), and the add's status.
+  const [freeList, setFreeList] = useState<FreeTrack[] | null>(null);
+  const [freeStatus, setFreeStatus] = useState<FreeMusicStatus>(FREE_IDLE);
   const lastPlayOrderRef: { current: PlayOrderSnapshot | null } = useRef(null);
   // v15.9: the latest classic notice a mix showed (in classic, or a classic peek). The new layout never routes it to its
   // one toast slot: there the mix's Undo toast is the message, and a notice still up when a peek ends would replace it.
@@ -2767,6 +2787,33 @@ const App: React.FC = () => {
   useEffect(() => {
     libraryRef.current = originalPlaylist;
   }, [originalPlaylist]);
+  // v16.13 (Aetheria's 222): the latest play order, as libraryRef is the latest library, for the free music's add (an
+  // async loop: it applies handleFileUpload's rule, the play order grows only when it IS the library, at each batch).
+  const playOrderRef: { current: Song[] } = useRef<Song[]>(playlist);
+  useEffect(() => {
+    playOrderRef.current = playlist;
+  }, [playlist]);
+  // v16.13: waits for the next commit of the library or the play order (after the two refs above follow it), so the
+  // free music's next batch, and its playlists, read them as they are. Declared after those effects: React runs a
+  // component's effects in order. A wait that no commit answers (a batch that changed nothing) ends after 1.5 s.
+  const commitWaitersRef: { current: Array<() => void> } = useRef([]);
+  useEffect(() => {
+    const waiting = commitWaitersRef.current;
+    if (waiting.length === 0) return;
+    commitWaitersRef.current = [];
+    for (const go of waiting) go();
+  }, [originalPlaylist, playlist]);
+  const waitForCommit = (): Promise<void> =>
+    new Promise<void>((resolve) => {
+      let done = false;
+      const go = () => {
+        if (done) return;
+        done = true;
+        resolve();
+      };
+      commitWaitersRef.current.push(go);
+      setTimeout(go, 1500);
+    });
 
   // v16.8.2 (K6, "Key placement"): App's one key-band cache (utils/mix/keyBands.ts BandCache: how each track's key fits
   // each crystal's tone, by content). Every spread in the app is planned with its planOptions (the Assign press, the
@@ -9273,6 +9320,259 @@ registerProcessor('wav-capture', WavCapture);
   // the shell actions' or the playlists' effects re-pins it.
   const libraryToolsRef: { current: { clear: (alsoPlaylists: boolean) => Promise<void>; diagnostics: () => void } | null } = useRef(null);
   useLayoutEffect(() => { libraryToolsRef.current = { clear: clearEntirePlaylist, diagnostics: showPlaylistDiagnostics }; });
+
+  // ---- v16.13, Aetheria's 222 (utils/freeMusic/model.ts; review page aeb068c3, the user's answers of 15 Nov 2026) ----
+  // The shipped list, read once at start from its own chunk. A dev build takes a test's list instead
+  // (window.__aetheriaFreeList, set before the app loads). A first visit with no connection never reads it: no offer.
+  useEffect(() => {
+    let live = true;
+    const testList = IS_DEV_BUILD ? (window as unknown as { __aetheriaFreeList?: unknown }).__aetheriaFreeList : undefined;
+    const read: Promise<unknown> = testList !== undefined ? Promise.resolve(testList) : import('./utils/freeMusic/aetheria222.json').then((m: { default: unknown }) => m.default);
+    read.then((raw: unknown) => { if (live) setFreeList(parseFreeList(raw)); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  /** The running add's controller (null when none runs): Stop aborts it. */
+  const freeAddRef: { current: AbortController | null } = useRef(null);
+  /** Tracks of a batch per append: each append re-renders the library, starts a save of the new audio, and (its
+   *  commit) a rewrite of the whole library's metadata. Review round 2 (N11): 12 (about 45 MB), so All 222 makes about
+   *  19 such rewrites, not 56; on a big library each rewrite is tens of MB. A dev build takes a test's
+   *  window.__aetheriaFreeBatch (the tests' 5-track lists need several batches). */
+  const FREE_BATCH = (IS_DEV_BUILD && Number((window as unknown as { __aetheriaFreeBatch?: number }).__aetheriaFreeBatch)) || 12;
+  /** Review round 1 (L6): during an add, the library's metadata (the readings, keys and envelopes the list brings) is
+   *  written at once at most this often, and at its end. The 2 s debounce restarts with every batch, so a long add
+   *  would otherwise store the audio and leave the metadata until the add stopped: an app killed meanwhile would come
+   *  back with the audio as nameless orphans. */
+  const FREE_META_FLUSH_MS = 10_000;
+  /** A batch of downloaded tracks into the library, by handleFileUpload's rule: the library grows; the play order grows
+   *  with it only when it IS the library, and an empty play order shows the library again, with them. Read after a
+   *  commit (waitForCommit), so the two refs are the lists as they are. appendToLibrary drops an id already there.
+   *  Review round 1 (L1): a free track deleted earlier in this session has a tombstone on its fixed id, which every
+   *  save would honour; the batch's ids are lifted first (playlistCache forgetDeletions). */
+  const appendFreeSongs = (batch: Song[]) => {
+    const lib = libraryRef.current;
+    const play = playOrderRef.current;
+    const playIsLibrary = sameIdOrder(play, lib);
+    forgetDeletions(batch.map((s: Song) => s.id));
+    setOriginalPlaylist((prev: Song[]) => appendToLibrary(prev, batch));
+    if (playIsLibrary) setPlaylist((prev: Song[]) => appendToLibrary(prev, batch));
+    else if (play.length === 0) setPlaylist(appendToLibrary(lib, batch));
+  };
+  /** Decision 7 A: the tracks just added go into "Aetheria · Instrumentals" and "Aetheria · Songs", each made the first
+   *  time and topped up after (an entry already there is not added twice). Silent (the add's end line names them);
+   *  nothing when a new one would pass PLAYLISTS_MAX. The kinds it filled. Review round 1 (L4): the entries come from
+   *  the Songs the add made (a lookup in the library could miss a last batch whose commit the wait didn't see), and
+   *  the playlists' read is waited for (up to 5 s) when the add began right after the library's restore. */
+  const fillFreePlaylists = async (madeSongs: readonly Song[], kinds: ReadonlyMap<string, FreeKind>): Promise<FreeKind[]> => {
+    if (madeSongs.length === 0) return [];
+    for (let i = 0; i < 20 && playlistsRef.current === null; i++) await new Promise<void>((r) => setTimeout(r, 250));
+    const lists = playlistsRef.current;
+    if (lists === null || !isLoadGateOpen()) return [];
+    const put: PlaylistRecord[] = [];
+    const filled: FreeKind[] = [];
+    let made = 0;
+    const now = Date.now();
+    for (const kind of ['instrumental', 'song'] as const) {
+      const tracks = madeSongs.filter((s: Song) => kinds.get(s.id) === kind);
+      if (tracks.length === 0) continue;
+      const name = FREE_PLAYLIST_NAMES[kind];
+      const existing = lists.find((p: PlaylistRecord) => p.name === name) ?? null;
+      if (existing) {
+        const inIt = new Set(existing.entries.map((e: { id: string }) => e.id));
+        const more = tracks.filter((s: Song) => !inIt.has(s.id));
+        const rec = more.length ? addedRecord(existing, more, now, libraryIndex()) : existing;
+        if (!rec) continue; // ENTRIES_MAX
+        if (rec !== existing) put.push(rec);
+        filled.push(kind);
+        continue;
+      }
+      if (lists.length + made >= PLAYLISTS_MAX) continue;
+      let id = freshPlaylistId();
+      while (put.some((r: PlaylistRecord) => r.id === id)) id = freshPlaylistId();
+      const rec = makePlaylistRecord({ id, name, tracks, now });
+      if (!rec) continue;
+      put.push(rec);
+      made++;
+      filled.push(kind);
+    }
+    if (put.length) commitPlaylists(put, [], { name: put[0].name });
+    return filled;
+  };
+  /** v16.13: add the free music: a group's missing tracks (`what`), or one track (`what` 'one', `oneId`). One download
+   *  at a time from the music site alone (MUSIC_BASE; the worker passes those by), each checked against the list's size,
+   *  with its envelope file; appended in batches; then the playlists. A failed or short download stops the add (what is
+   *  in stays in), and so does a save of the audio that fails meanwhile (round 1 L2); Stop and a Clear end it too (a
+   *  Clear at once, round 1 L3). Nothing runs before the library's restore has settled; one add at a time, released in a
+   *  finally (round 1 L5). */
+  const addFreeMusic = async (what: FreeAddWhat, oneId: string | null = null): Promise<void> => {
+    const list = freeList;
+    if (!list) return;
+    if (freeAddRef.current) {
+      showStatusToast(freeWords.busy, { durationMs: 6000 });
+      return;
+    }
+    if (!isLoadGateOpen()) {
+      showStatusToast(freeWords.notReady, { durationMs: 6000 });
+      return;
+    }
+    const has = new Set(libraryRef.current.map((s: Song) => s.id));
+    const todo = what === 'one' ? list.filter((t: FreeTrack) => t.id === oneId && !has.has(t.id)) : missingFreeTracks(list, what, (id: string) => has.has(id));
+    if (todo.length === 0) return;
+    const ctrl = new AbortController();
+    freeAddRef.current = ctrl;
+    const gen = cacheGeneration();
+    const cleared = () => cacheGeneration() !== gen;
+    const total = todo.length;
+    const bytesTotal = todo.reduce((n: number, t: FreeTrack) => n + t.size, 0);
+    let done = 0;
+    let bytesDone = 0;
+    let reason: FreeFailReason | null = null;
+    let failedTitle: string | null = null;
+    const statusOf = (phase: FreeMusicStatus['phase'], lists: FreeKind[] = []): FreeMusicStatus =>
+      ({ phase, what, one: oneId, done, total, bytesDone, bytesTotal, lists, reason, failedTitle, id: 0 });
+    const show = (phase: FreeMusicStatus['phase'], lists: FreeKind[] = []) =>
+      setFreeStatus((prev: FreeMusicStatus) => ({ ...statusOf(phase, lists), id: phase === 'adding' ? prev.id : prev.id + 1 }));
+    const idle = () => setFreeStatus((prev: FreeMusicStatus) => ({ ...FREE_IDLE, id: prev.id + 1 }));
+    // L2: a save of the tracks' audio that fails while the add runs (storage full, a write error) ends it as failed.
+    let saveFailed = false;
+    const onCacheError = (e: Event) => {
+      if ((e as CustomEvent<{ what?: string }>).detail?.what === 'tracks') saveFailed = true;
+    };
+    window.addEventListener('aetheria:cache-error', onCacheError);
+    // L3: a Clear aborts the download in hand at once (not after up to 7.6 MB more of it).
+    const clearWatch = window.setInterval(() => { if (cleared()) ctrl.abort(); }, 300);
+    let end: 'done' | 'stopped' | 'failed' = 'done';
+    const madeSongs: Song[] = [];
+    const kinds = new Map<string, FreeKind>();
+    let batch: Song[] = [];
+    let metaAt = Date.now();
+    const flush = async () => {
+      if (batch.length === 0) return;
+      const b = batch;
+      batch = [];
+      appendFreeSongs(b);
+      await waitForCommit();
+      // L6 (after the commit: its metadata save is scheduled by then).
+      if (Date.now() - metaAt >= FREE_META_FLUSH_MS) {
+        metaAt = Date.now();
+        flushPendingSave();
+      }
+    };
+    try {
+      show('adding');
+      try {
+        for (const t of todo) {
+          if (ctrl.signal.aborted || cleared()) {
+            end = 'stopped';
+            break;
+          }
+          if (saveFailed) {
+            end = 'failed';
+            reason = 'save';
+            break;
+          }
+          let res: Response;
+          try {
+            res = await fetch(freeAudioUrl(t), { signal: ctrl.signal, credentials: 'omit' });
+          } catch (e) {
+            if (!ctrl.signal.aborted) reason = 'network';
+            throw e;
+          }
+          if (!res.ok) {
+            reason = 'file';
+            failedTitle = t.title;
+            throw new Error(`HTTP ${res.status}`);
+          }
+          let blob: Blob;
+          try {
+            blob = await res.blob();
+          } catch (e) {
+            // A body the connection dropped (round 2, N7: reported as the connection; a device with no room to hold
+            // the body fails the same way, and can't be told apart here: a save that fails says so as 'save').
+            if (!ctrl.signal.aborted) reason = 'network';
+            throw e;
+          }
+          if (blob.size !== t.size) {
+            reason = 'file';
+            failedTitle = t.title;
+            throw new Error('wrong size');
+          }
+          let env: BandEnvelope | null = null;
+          const envAt = freeEnvUrl(t);
+          if (envAt) {
+            try {
+              const r = await fetch(envAt, { signal: ctrl.signal, credentials: 'omit' });
+              if (r.ok) env = parseFreeEnvelope(await r.arrayBuffer());
+            } catch (e) {
+              if (ctrl.signal.aborted) throw e; // (any other failure: the track simply has no envelope)
+            }
+          }
+          if (ctrl.signal.aborted || cleared()) {
+            end = 'stopped';
+            break;
+          }
+          const song = freeSongOf(t, new File([blob], freeFileNameOf(t), { type: 'audio/ogg' }), env);
+          batch.push(song);
+          madeSongs.push(song);
+          kinds.set(t.id, t.kind);
+          done++;
+          bytesDone += t.size;
+          if (batch.length >= FREE_BATCH) await flush();
+          show('adding');
+        }
+      } catch {
+        end = ctrl.signal.aborted ? 'stopped' : 'failed';
+        if (end === 'failed' && reason === null) reason = 'network';
+      }
+      // A Clear came (in the loop, or during the last batch's commit): none of it is in the library now, and nothing
+      // more goes in or is said.
+      if (cleared()) return idle();
+      await flush();
+      if (cleared()) return idle();
+      // L2: the end line says "Added" only once the audio is stored: past the blob save's 300 ms debounce, then every
+      // save writing (at most a minute: a stuck write must not hold the add's end).
+      await new Promise<void>((r) => setTimeout(r, 400));
+      await Promise.race([waitForBlobSaves(), new Promise<void>((r) => setTimeout(r, 60_000))]);
+      if (cleared()) return idle();
+      if (saveFailed && end !== 'stopped') {
+        end = 'failed';
+        reason = 'save';
+      }
+      flushPendingSave();
+      const lists = await fillFreePlaylists(madeSongs, kinds);
+      if (cleared()) return idle();
+      show(end, lists);
+      const line = freeStatusLine(statusOf(end, lists));
+      if (line) showStatusToast(line, { durationMs: end === 'done' ? 6000 : 10_000 });
+    } catch (err) {
+      // Review round 2 (N1): anything after the loop that throws (the playlists' write, a store call) must not leave the
+      // status at 'adding' for the session (every Add disabled, Stop doing nothing): the add ends as failed.
+      console.warn('[free music] the add ended on an error', err);
+      if (cleared()) return idle();
+      show('failed');
+    } finally {
+      window.removeEventListener('aetheria:cache-error', onCacheError);
+      window.clearInterval(clearWatch);
+      // Only now may another add start (a tap during the last batch's commit is still "already being added").
+      freeAddRef.current = null;
+    }
+  };
+  const stopFreeMusic = () => freeAddRef.current?.abort();
+  // Their own one-line effect, as the Library tools' are (addFreeMusic reaches the library's writers through
+  // appendFreeSongs; the pinned shell actions' effect stays as it is).
+  const freeMusicApiRef: { current: { add: typeof addFreeMusic; stop: typeof stopFreeMusic } | null } = useRef(null);
+  useLayoutEffect(() => { freeMusicApiRef.current = { add: addFreeMusic, stop: stopFreeMusic }; });
+  // What the shell and classic's block show: which tracks the library has (by id, so only an import or a delete changes
+  // it), each group's counts, and the status.
+  const freeHas = useMemo(() => new Set(originalPlaylist.map((s: Song) => s.id)), [songIdSetKey]);
+  // Review round 1 (U2): `ready` once the library's restore is done: before it, the groups' counts are not yet true
+  // (a big library still coming reads as empty) and Add can't run, so the panel says so instead.
+  const shellFreeMusic = useMemo(
+    () =>
+      freeList
+        ? { list: freeList, has: freeHas, groups: freeGroupViews(freeList, (id: string) => freeHas.has(id)), status: freeStatus, ready: !libraryLoading }
+        : null,
+    [freeList, freeHas, freeStatus, libraryLoading]
+  );
   // v16.1: the playlists' tests drive them and read them through this hook (dev builds only; production strips it).
   useEffect(() => {
     if (!IS_DEV_BUILD) return;
@@ -9694,7 +9994,8 @@ registerProcessor('wav-capture', WavCapture);
   const shellSaveNote = cacheSaveNote && cacheSaveNote.gen === cacheGeneration() ? cacheSaveNote : null;
   // Fix round 2 (C6): in a context of its own (ImportSaveContext), read only by the Import sheet's body: a change of it
   // (about once a second in a big save) reaches nothing else, not the health card (LibraryStatusContext).
-  const shellImportSave = useMemo(() => ({ note: shellSaveNote }), [shellSaveNote]);
+  // v16.13: the free music rides along (its panel is the sheet's too): an add's progress re-renders that body alone.
+  const shellImportSave = useMemo(() => ({ note: shellSaveNote, free: shellFreeMusic }), [shellSaveNote, shellFreeMusic]);
   // v16.1: the saved playlists' slice (PlaylistsContext): the list's rows (summaries, O(total entries)), the open
   // playlist's resolved rows, the name Dialog and the Add sheet. Only while the new layout shows; never the clock (the
   // cursor counts only to mark the open playlist's playing row).
@@ -10838,10 +11139,13 @@ registerProcessor('wav-capture', WavCapture);
       importFiles: (event: React.ChangeEvent<HTMLInputElement>) => A().handleFileUpload(event),
       recoverOrphans: () => A().recoverOrphans(),
       discardOrphans: () => A().discardOrphans(),
-      openImport: (focus?: 'recover' | null) => {
+      openImport: (focus?: 'recover' | 'free' | null) => {
         setSheetFocus(focus ?? null);
         setShellSheet('import');
       },
+      // v16.13 (Aetheria's 222): through their own ref (freeMusicApiRef), not the pinned effect's.
+      addFreeMusic: (what: FreeAddWhat, oneId?: string) => { void freeMusicApiRef.current?.add(what, oneId ?? null); },
+      stopFreeMusic: () => freeMusicApiRef.current?.stop(),
       setLibraryFocusTarget: (el: HTMLElement | null) => {
         libraryFocusTargetRef.current = el;
       },
@@ -11471,7 +11775,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.12.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.13</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              
@@ -11774,7 +12078,53 @@ registerProcessor('wav-capture', WavCapture);
                       />
                    </label>
                </div>
-               
+
+               {/* v16.13 (Aetheria's 222, decision 5 A): classic's three Add buttons for the free music, and the add's line. */}
+               {/* Review round 1 (U5, U9): no live region here (the end line is the toast's, which classic hears; this line
+                   is the progress alone, shown while an add runs); names that hold the visible text. */}
+               {shellFreeMusic && shellFreeMusic.list.length > 0 ? (
+                 <div data-testid="classic-free-music" className="mb-3 p-2 rounded-lg border border-amber-500/20 bg-amber-500/5">
+                   <div className="flex items-baseline justify-between gap-2">
+                     <span className="text-xs font-semibold text-amber-300">{freeWords.classicHead}</span>
+                     <span className="text-[10px] text-slate-500">
+                       {shellFreeMusic.ready ? freeWords.classicSub(shellFreeMusic.list.length, shellFreeMusic.groups.all.missing === 0) : freeWords.notReady}
+                     </span>
+                   </div>
+                   <div className="grid grid-cols-3 gap-1.5 mt-1.5">
+                     {FREE_GROUPS.map((g) => {
+                       const v = shellFreeMusic.groups[g];
+                       const allIn = v.missing === 0;
+                       const off = !shellFreeMusic.ready || shellFreeMusic.status.phase === 'adding' || allIn;
+                       return (
+                         <button
+                           key={g}
+                           type="button"
+                           aria-disabled={off || undefined}
+                           aria-label={allIn ? freeWords.classicDoneLabel(g, v.count) : freeWords.classicAddLabel(g, v)}
+                           title={freeWords.groupLine(v)}
+                           onClick={() => { if (!off) void freeMusicApiRef.current?.add(g); }}
+                           className={`px-1 py-2.5 rounded-md border text-[10px] font-semibold transition-all ${off ? 'border-slate-800 text-slate-600 cursor-default' : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 active:scale-95'}`}
+                         >
+                           {allIn ? `${freeWords.classicButton(g, v.count)} ✓` : freeWords.classicButton(g, v.count)}
+                         </button>
+                       );
+                     })}
+                   </div>
+                   {shellFreeMusic.status.phase === 'adding' ? (
+                     <div data-testid="classic-free-progress" className="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-slate-400">
+                       <span>{freeStatusLine(shellFreeMusic.status)}</span>
+                       <button
+                         type="button"
+                         onClick={() => freeMusicApiRef.current?.stop()}
+                         className="shrink-0 px-3 py-2 rounded-md border border-slate-600 text-[11px] font-semibold text-slate-200 hover:bg-slate-800"
+                       >
+                         {freeWords.stop}
+                       </button>
+                     </div>
+                   ) : null}
+                 </div>
+               ) : null}
+
                {/* Search Section */}
                <div className="relative mb-3">
                    <Search size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500" />

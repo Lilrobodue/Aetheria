@@ -35,6 +35,7 @@ import type { ShellSheet, ShellTab, PeekPanel, LayoutPref } from './shellModel';
 import type { Song } from '../../types';
 import type { LayersSection } from './layers/layersModel';
 import type { LastImport } from './library/libraryModel';
+import type { FreeTrack, FreeGroup, FreeAddWhat, GroupView, FreeMusicStatus } from '../../utils/freeMusic/model';
 import type { Caps, PassProgress } from '../../utils/library/analysePass';
 import type { Filters } from '../../utils/library/filterModel';
 import type { BuilderSettings, SourceRef } from '../../utils/mix/builder';
@@ -187,8 +188,9 @@ export interface ShellValue {
   tab: ShellTab;
   sheet: ShellSheet | null;
   /** Where the open sheet should start (the Sound sheet opened from Output starts at its Output group; v15.7: the Import
-   *  sheet opened from the health card starts at its Recover offer). */
-  sheetFocus: 'output' | 'recover' | null;
+   *  sheet opened from the health card starts at its Recover offer; v16.13: opened from the empty Library's offer, at
+   *  Aetheria's music). */
+  sheetFocus: 'output' | 'recover' | 'free' | null;
   peek: PeekPanel | null;
   /** The phone shell's Car screen (Output = Car). */
   car: boolean;
@@ -445,6 +447,20 @@ export interface ImportSaveValue {
    *  Fix round 2: `id`, a new number for each end line and warning (their element's key: each is read once). null:
    *  nothing to say. */
   note: { phase: 'saving' | 'saved' | 'failed'; text: string; quiet: boolean; id: number } | null;
+  /** v16.13 (Aetheria's 222): the free music, for the sheet's third choice and its panel (and the empty Library's offer):
+   *  the shipped list, which of its tracks the library has (by id), each group's counts, and the add's status. null
+   *  until the list is read (its own chunk; a first visit with no connection never reads it). */
+  free: FreeMusicView | null;
+}
+
+/** v16.13: the free music as the shell shows it. */
+export interface FreeMusicView {
+  list: readonly FreeTrack[];
+  has: ReadonlySet<string>;
+  groups: Record<FreeGroup, GroupView>;
+  status: FreeMusicStatus;
+  /** The library's restore is done (until then the counts aren't true and Add can't run). */
+  ready: boolean;
 }
 
 /** v16.1: one row of the saved playlists' list (resolved against the library as it is now). */
@@ -659,7 +675,11 @@ export interface ShellActions {
   importFiles: (event: any) => void;
   recoverOrphans: () => void;
   discardOrphans: () => void;
-  openImport: (focus?: 'recover' | null) => void;
+  openImport: (focus?: 'recover' | 'free' | null) => void;
+  /** v16.13 (Aetheria's 222): add a group's missing tracks, or one track (`what` 'one', its id), from the music site;
+   *  and stop the add that is running (what is in stays in). App's addFreeMusic and stopFreeMusic. */
+  addFreeMusic: (what: FreeAddWhat, oneId?: string) => void;
+  stopFreeMusic: () => void;
   /** The list element, the delete Dialog's focus fallback. */
   setLibraryFocusTarget: (el: HTMLElement | null) => void;
   // v16.0, the queue (references to App's queueTracks, editQueue, undoQueue: the queue's one writer, never the library).

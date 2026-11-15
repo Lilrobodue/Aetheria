@@ -167,6 +167,16 @@ function __setCacheDbNameForTests(name: string): void {
 // scheduled with an older list (before the delete) skips them.
 const tombstones = new Set<string>();
 
+/** v16.13 (Aetheria's 222, review round 1 L1): a deleted id that comes back. An import's id is new every time, so a
+ *  tombstone used to be for good; the free music's ids are fixed (`aetheria-<slug>`), so a free track deleted and then
+ *  added again carries a tombstoned id, and every save would skip it (it played, and was gone after a reload). The add
+ *  lifts the tombstones of exactly the ids it is appending, before it appends them. A save scheduled before the delete
+ *  can then write the old copy, which is the same track. The delete's own transaction was opened first, so a later save
+ *  of the id runs after it. */
+function forgetDeletions(ids: readonly string[]): void {
+  for (const id of ids) tombstones.delete(id);
+}
+
 // Bumped by clearPlaylistCache. A save captures the epoch when it is scheduled
 // and writes nothing if a Clear happened in between.
 let cacheEpoch = 0;
@@ -1322,6 +1332,8 @@ export {
   restorePlaylist,
   clearPlaylistCache,
   deleteTracksFromCache,
+  // v16.13: a deleted fixed id that is added again (the free music).
+  forgetDeletions,
   storedTrackIds,
   cacheGeneration,
   cancelPendingSaves,

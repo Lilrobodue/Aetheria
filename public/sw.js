@@ -1,5 +1,9 @@
-const CACHE_NAME = 'aetheria-v16.12.1-offline';
+const CACHE_NAME = 'aetheria-v16.13-offline';
 const OFFLINE_URL = '/';
+// v16.13 (Aetheria's 222): the free music's own site (utils/freeMusic/model.ts MUSIC_BASE). Its downloads, and any
+// audio file, never go through this worker: the app keeps what it adds in its own store.
+const MUSIC_BASE = 'https://big-banana-studios.github.io/aetheria-music/';
+const AUDIO_RE = /\.(mp3|wav|flac|ogg|oga|m4a|aac|opus|weba)$/i;
 
 // Files to cache for offline support
 const STATIC_CACHE_URLS = [
@@ -157,6 +161,11 @@ self.addEventListener('fetch', (event) => {
 
   // Only handle GET requests
   if (request.method !== 'GET') return;
+
+  // v16.13: the free music's downloads (its track files and envelopes) and any audio file pass by untouched. Left to
+  // the CACHE-FIRST branch below, every one would be stored a second time in this cache (844 MB for all 222), and a
+  // cached copy could answer a later download. Not calling respondWith lets the browser fetch it as usual.
+  if (url.href.startsWith(MUSIC_BASE) || AUDIO_RE.test(url.pathname)) return;
 
   // Handle navigation requests
   if (request.mode === 'navigate') {

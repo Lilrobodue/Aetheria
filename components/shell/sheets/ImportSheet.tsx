@@ -19,6 +19,9 @@
 // until the sheet closes (C5), so Choose files and Close don't move under a finger as the line changes or goes.
 // Modal on the phone; in the desktop panel it takes the Library's place until closed. Opened from the header's
 // Import, the empty state, and the health card's Review (starting at the Recover offer).
+// v16.13 (Aetheria's 222): a third choice under the two, Aetheria's music, opens the sheet's second view
+// (FreeMusicBody: the free music's groups, Choose tracks, the add's line). Back returns; the empty Library's offer opens
+// the sheet at it (sheetFocus 'free'). The focus goes to the view's first control as it changes.
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, FilePlus2, FolderOpen } from 'lucide-react';
@@ -28,26 +31,31 @@ import { useActions, useImportSave, useLibraryStatus, useShell } from '../contex
 import { countRender } from '../devRenders';
 import { sheetFallback } from './sheetFallback';
 import { FORMATS_LINE, FORMATS_SKIPPED, lastImportLines, recoverWords } from '../library/libraryModel';
+import { words as freeWords } from '../../../utils/freeMusic/model';
+import FreeMusicBody from './FreeMusicBody';
+import SaveLine from './SaveLine';
 
 const CHOICE =
   'relative min-h-[56px] px-3 rounded-control border border-line-strong bg-surface-raised flex items-center justify-center gap-2 text-sm text-ink cursor-pointer hover:border-ink-faint transition-colors duration-fast focus-within:outline focus-within:outline-2 focus-within:outline-gold-400';
 
-const ImportBody = ({ recoverRef, modal }: { recoverRef: { current: HTMLButtonElement | null }; modal: boolean }) => {
+const ImportBody = ({
+  recoverRef,
+  modal,
+  onFree,
+  freeRef,
+}: {
+  recoverRef: { current: HTMLButtonElement | null };
+  modal: boolean;
+  onFree: () => void;
+  freeRef: { current: HTMLButtonElement | null };
+}) => {
   countRender('ImportBody');
   const actions = useActions();
   const st = useLibraryStatus();
   const last = st.lastImport ? lastImportLines(st.lastImport, st.durationsLeft) : null;
   const o = st.orphans;
   const words = o && o.fresh + o.duplicates > 0 ? recoverWords(o.fresh, o.duplicates) : null;
-  const save = useImportSave().note;
-  // C5: the tallest save line shown in this opening of the sheet (it unmounts on close): the live region keeps that much
-  // room once a line has shown. 0 before any, so the empty region takes none (no margin, no height) as before.
-  const lineRef: { current: HTMLParagraphElement | null } = useRef(null);
-  const [reserve, setReserve] = useState(0);
-  useLayoutEffect(() => {
-    const h = lineRef.current ? lineRef.current.getBoundingClientRect().height : 0;
-    if (h > reserve) setReserve(h);
-  });
+  const { free } = useImportSave();
   return (
     <div data-testid="import-body" className="px-4 pb-4 space-y-3">
       <div className="grid grid-cols-2 gap-2">
@@ -69,6 +77,18 @@ const ImportBody = ({ recoverRef, modal }: { recoverRef: { current: HTMLButtonEl
           <input type="file" aria-label="Add files" multiple className="sr-only" onChange={(e: unknown) => actions.importFiles(e)} />
         </label>
       </div>
+      {free && free.list.length > 0 ? (
+        <button
+          type="button"
+          ref={freeRef}
+          onClick={onFree}
+          data-testid="import-free"
+          className="w-full text-left rounded-card border border-gold-500/40 bg-gold-500/5 hover:border-gold-400 p-3 transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-400"
+        >
+          <span className="block text-sm font-semibold text-gold-400">{freeWords.choiceTitle}</span>
+          <span className="block text-xs text-ink-muted">{freeWords.choiceSub(free.list.length)}</span>
+        </button>
+      ) : null}
       <p className="text-xs text-ink-faint">
         {FORMATS_LINE} {FORMATS_SKIPPED}
       </p>
@@ -86,25 +106,8 @@ const ImportBody = ({ recoverRef, modal }: { recoverRef: { current: HTMLButtonEl
           {last.quiet ? <p className="text-xs text-ink-faint">{last.quiet}</p> : null}
         </div>
       ) : null}
-      {modal ? (
-        // The live region takes no room while empty (no margin from space-y, no height) until a line has shown, then it
-        // keeps the tallest line's (C5). The start and each end line or warning are new elements (their keys), read once;
-        // the updates change the start's in place with aria-live="off".
-        <div role="status" aria-live="polite" aria-atomic="false" data-testid="import-save" style={reserve > 0 ? { minHeight: reserve } : save ? undefined : { marginTop: 0 }}>
-          {save ? (
-            <p
-              key={save.phase === 'saving' ? 'saving' : `end-${save.id}`}
-              ref={lineRef}
-              data-testid="import-save-line"
-              aria-atomic="true"
-              aria-live={save.quiet ? 'off' : undefined}
-              className="rounded-card border border-line-strong bg-surface-raised p-3 text-sm text-ink-strong leading-snug"
-            >
-              {save.text}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
+      {/* The save's line on the phone (SaveLine: v16.8.5's A1/C5/C6, unchanged; both views draw it, v16.13 U1). */}
+      {modal ? <SaveLine /> : null}
       {words ? (
         <div data-testid="import-recover" className="rounded-card border border-line-strong p-3">
           <div className="text-sm text-ink-strong">{words.head}</div>
@@ -152,22 +155,48 @@ const ImportSheet = ({ presentation }: ImportSheetProps) => {
   const { sheetFocus } = useShell();
   const recoverRef: { current: HTMLButtonElement | null } = useRef(null);
   const bodyRef: { current: HTMLDivElement | null } = useRef(null);
+  // v16.13: which view shows (the sheet opens at Aetheria's music from the empty Library's offer), and the controls the
+  // focus goes to as it changes (not on opening: the Sheet places that).
+  const [view, setView] = useState<'import' | 'free'>(sheetFocus === 'free' ? 'free' : 'import');
+  const freeRef: { current: HTMLButtonElement | null } = useRef(null);
+  const backRef: { current: HTMLButtonElement | null } = useRef(null);
+  const viewChanged = useRef(false);
   useEffect(() => {
     if (sheetFocus !== 'recover') return;
     recoverRef.current?.scrollIntoView({ block: 'nearest' });
   }, [sheetFocus]);
+  useEffect(() => {
+    if (!viewChanged.current) return;
+    (view === 'free' ? backRef : freeRef).current?.focus();
+    bodyRef.current?.scrollTo?.({ top: 0 });
+  }, [view]);
+  const go = (v: 'import' | 'free') => {
+    viewChanged.current = true;
+    setView(v);
+  };
+  const free = view === 'free';
   return (
     <Sheet
       open
-      title="Import music"
-      subtitle="Aetheria keeps its own copy on this device. Your files are not changed."
+      title={free ? freeWords.title : 'Import music'}
+      subtitle={free ? freeWords.subtitle : 'Aetheria keeps its own copy on this device. Your files are not changed.'}
       onClose={actions.closeSheet}
       presentation={presentation}
-      initialFocusRef={sheetFocus === 'recover' ? recoverRef : undefined}
+      initialFocusRef={sheetFocus === 'recover' ? recoverRef : sheetFocus === 'free' ? backRef : undefined}
       bodyRef={bodyRef}
       data-testid="sheet-import"
     >
-      <ViewBoundary name="sheet-import" fallback={sheetFallback(actions.closeSheet)} render={() => <ImportBody recoverRef={recoverRef} modal={presentation === 'sheet'} />} />
+      <ViewBoundary
+        name="sheet-import"
+        fallback={sheetFallback(actions.closeSheet)}
+        render={() =>
+          free ? (
+            <FreeMusicBody onBack={() => go('import')} backRef={backRef} modal={presentation === 'sheet'} />
+          ) : (
+            <ImportBody recoverRef={recoverRef} modal={presentation === 'sheet'} onFree={() => go('free')} freeRef={freeRef} />
+          )
+        }
+      />
     </Sheet>
   );
 };

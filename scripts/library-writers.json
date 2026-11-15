@@ -1,4 +1,16 @@
 {
+  "addFreeMusic reference in App": {
+    "count": 1,
+    "sha": "acd0424a8b343fcc"
+  },
+  "addFreeMusic reference in App › useLayoutEffect(no deps)": {
+    "count": 1,
+    "sha": "d288f8e23460fd06"
+  },
+  "appendFreeSongs call in App › addFreeMusic › flush": {
+    "count": 1,
+    "sha": "45f3b29d9078d124"
+  },
   "autoDistribute call in App › <ViewBoundary render> › <button onClick>": {
     "count": 1,
     "sha": "bc46eacd3cd01b94"
@@ -98,6 +110,10 @@
   "scanLibrary reference in App › useLayoutEffect(no deps)": {
     "count": 1,
     "sha": "445a95c07e689de6"
+  },
+  "setOriginalPlaylist call in App › appendFreeSongs": {
+    "count": 1,
+    "sha": "595955fb99760c99"
   },
   "setOriginalPlaylist call in App › autoDistribute": {
     "count": 1,
