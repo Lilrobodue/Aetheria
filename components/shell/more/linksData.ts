@@ -51,7 +51,12 @@ export const LINK_SECTIONS: ReadonlyArray<LinkSection> = [
   },
   {
     section: 'Music',
-    items: [{ title: 'Aetheria on Spotify', sub: 'Lyric-aligned music', href: 'https://open.spotify.com/artist/4CXB2ctrUCvInDQkKDhw4q' }],
+    items: [
+      { title: 'Aetheria on Spotify', sub: 'Lyric-aligned music', href: 'https://open.spotify.com/artist/4CXB2ctrUCvInDQkKDhw4q' },
+      // v16.14.1 (the user, 17 Nov 2026): the studio's music channel, where the transformed music is released, after
+      // Spotify. Classic's panel has the same row.
+      { title: 'Big Banana Studios Music', sub: "Aetheria's transformed music on YouTube", href: 'https://www.youtube.com/@BigBananaStudiosMusic' },
+    ],
   },
   {
     section: 'Interactive Simulations',
