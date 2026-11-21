@@ -27,8 +27,26 @@ climbing into a lap; "quiet stretch" is its calm middle. Real sessions should
 land between the two, which is why quiet sessions matter. At the planned 40
 sessions, a 1 bpm shift is caught 94% to 100% of the time.
 
-## Still to build
+## The app
 
-A small app that plays the tones in the hidden order, records the H10's beats
-on the same clock, fingerprints the schedule before the session and reveals it
-only in the export. No tone session counts until it exists.
+[Tone Test](https://big-banana-studios.github.io/tone-test/) (Big Banana
+Studios, Chrome on Android with a Polar H10) runs a session exactly as the plan
+describes: it seals a random order and control tone with a SHA-256 fingerprint
+before the session, plays the tones on the audio clock, logs every beat on the
+same clock and saves one file per session. Nothing leaves the phone unless the
+participant sends the file. `?demo` runs it with a pretend strap, and files from
+demo mode are marked and never counted.
+
+## The analysis
+
+- `python3 -I analyze.py --check DIR`: blind. Lists each session file, checks
+  its fingerprint against its order, and applies the quality rules, without
+  comparing tones. Safe to run as sessions come in.
+- `python3 -I analyze.py DIR`: the pre-registered test. Refuses to run before
+  40 sessions pass the quality rules.
+- `tests/make_sessions.py`: testing only. Writes simulated sessions in the app's
+  file format. Over 30 simulated sets with no effect, the test called a
+  difference once (3%); over 8 sets with a 1.5 bpm effect it found it every
+  time, estimating 1.51 bpm on average, with the 95% interval covering 1.5 in
+  all 8. A file saved by the app in demo mode also passes the reader: its
+  fingerprint checks out and its 840 beats cover 99.9% of the session.
