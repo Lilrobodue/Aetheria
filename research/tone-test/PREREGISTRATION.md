@@ -4,6 +4,9 @@ Written and pushed to GitHub before any tone session is recorded. If anything
 here changes, the change is a new commit with its reason, made before the
 first session.
 
+**Amendment 1 (21 November 2026), at the end of this file, replaces the session
+design and the analysis below.** Nothing else changes.
+
 ## The question
 
 While a person sits still and listens, does their heart behave differently
@@ -91,3 +94,60 @@ baseline session, and its quiet stretch. Seed 20261121.
   plan.
 - The participants know the hypothesis. The hidden order and the random
   higher-or-lower control are there so that knowing it can't steer the result.
+
+## Amendment 1 (21 November 2026, before any session counts)
+
+**Why.** The Aetheria apps' own duration protocol (`DURATION_PROTOCOL` in
+`interval-analysis.js`) gives HEART tones 25 to 45 minutes, 30 being optimal
+(HEAD 15 to 30, GUT 40 to 60). 2178 Hz is a HEART tone. The block design above
+plays it for 45 seconds at a time, far under that minimum, and switching tones
+every minute would blur an effect that builds slowly. Joe raised this on
+21 November. No session has counted: BBS-P1's only session, on 21 November,
+was lost to an app bug before anything was compared (see README). So the
+design changes now, before any data.
+
+**A session.** Seated upright and still, Polar H10 on, the phone face down,
+pets out of the room. 5 minutes of silence, then 30 minutes of one tone,
+without a break: 35 minutes in all. At most one session a day per person, at
+about the same time of day where possible.
+
+**Which tone.** For each session the app draws Aetheria or control with a fair
+coin (the browser's cryptographic random source), and the control (2056 or
+2308 Hz) with a second coin. Before the session starts it shows a fingerprint
+of the draw: SHA-256 of `tone-test-v2|<A or C>|<control Hz>|<salt>`, with a
+random 16-byte salt. The draw is stored in the session file in a sealed
+(base64) field, so it isn't seen at a glance when the file is sent; participants
+are asked not to decode it. The tones, level, 2-second fades and the volume rule
+are unchanged.
+
+**How many.** 40 sessions that pass the quality rules above (unchanged).
+Sessions stopped early don't count. Files from version 1 of the app don't count.
+
+**Primary result.** For each session, the change in heart rate: mean heart rate
+over tone minutes 10 to 30 (session seconds 900 to 2100) minus mean heart rate
+over silence minutes 1 to 5 (session seconds 60 to 300). The first ten minutes
+of tone give an effect time to build, as the protocol implies. The result is
+the mean change in Aetheria sessions minus the mean change in control sessions.
+Two-sided permutation test, relabelling sessions within each participant
+(keeping each participant's numbers of Aetheria and control sessions), 10,000
+relabellings; a difference is called if p < 0.05. Reported with its size in bpm
+and a 95% interval from resampling sessions within each arm. Heart rate is
+processed exactly as above.
+
+**Secondary results**, reported but not used for the verdict: the same test on
+RMSSD over the same windows, and on heart rate over all 30 tone minutes minus
+the silence.
+
+**Design check**, to run after this amendment is pushed and before any session:
+the false-alarm rate with no effect, and the chance of catching a 1, 2 or 3 bpm
+shift at 20, 40 and 80 sessions, using 35-minute windows of the public resting
+hearts (the seven good Fantasia recordings) and simulated hearts fitted to
+BBS-P1's baseline. Seed 20261121. A rough first look on those windows, made
+while weighing this change: 40 sessions catch a 2 bpm shift about 9 times in
+10, and a 1 bpm shift about 4 times in 10.
+
+**What "no difference" will mean.** With 40 sessions this test is built to catch
+a shift of about 2 bpm. A 1 bpm shift could easily be missed.
+
+**Software.** The app becomes version 2.0.0, and `analyze.py` reads its files.
+The block analysis it replaces is in commit 553c836.
