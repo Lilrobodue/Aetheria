@@ -83,7 +83,25 @@ out["heart_interval_from_solfeggio"] = {
     "first_gap_power_of_3": int(np.isin(first_gap[triad_shaped], powers_of_3).sum()),
 }
 
-# 5. A well-known curiosity nobody claimed: 2178 x 4 = 8712, its own reverse.
+# 5. Joe's third answer (21 Nov 2026): he stopped HEAD at 6336 because it is a
+#    mirror number. So the palindrome is design; the coincidence is that the
+#    first mirror number in HEART and HEAD falls exactly on HEAD's ninth tone,
+#    closing the 27. How often, over HEART intervals that keep the pattern?
+def pal(n):
+    s = str(int(n))
+    return len(s) > 1 and s == s[::-1]
+landing = {}
+for step in range(108, 1000, 9):  # multiples of 9, with HEAD = 111 + HEART
+    tones = [963 + step * k for k in range(1, 10)]
+    tones += [tones[-1] + (step + 111) * k for k in range(1, 40)]
+    landing[step] = next((i + 1 for i, t in enumerate(tones) if pal(t)), None)
+out["first_mirror_number"] = {
+    "aetheria_position": landing[243],  # 18 = HEAD's ninth tone
+    "intervals_checked": len(landing),
+    "first_mirror_on_head_ninth_tone": [s for s, i in landing.items() if i == 18],
+}
+
+# 6. A well-known curiosity nobody claimed: 2178 x 4 = 8712, its own reverse.
 out["unclaimed_curiosity"] = {"2178x4": 2178 * 4, "reverse_of_2178": int(str(2178)[::-1])}
 
 json.dump(out, open("exploratory.json", "w"), indent=1)

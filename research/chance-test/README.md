@@ -45,8 +45,12 @@ digit roots run 3, 6, 9. A gap between digit rotations (174 to 417) is always
 a multiple of 9, so HEART's root 9 was certain. That 243 is also 3^5 comes from
 the Solfeggio's digits 1, 7, 4: of the 8 triad-shaped sets in Family T, only
 the Solfeggio's first gap is a power of three. So the extension is derived from
-the Solfeggio's own arithmetic plus one rule (HEAD = GUT + HEART), and the one
-coincidence left is the top tone, 6336, being a palindrome.
+the Solfeggio's own arithmetic plus one rule (HEAD = GUT + HEART).
+
+Joe stopped HEAD at 6336 because it is a mirror number, so that is design too.
+The one coincidence left is where it falls: 6336 is the first mirror number in
+HEART or HEAD, and it lands exactly on HEAD's ninth tone, closing the 27. Of the
+100 HEART intervals that keep the pattern, that happens for 3 (144, 243, 342).
 
 ## A bug found and fixed before reporting
 

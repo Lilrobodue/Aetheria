@@ -334,6 +334,15 @@
   "first_gap_multiple_of_9": 8,
   "first_gap_power_of_3": 1
  },
+ "first_mirror_number": {
+  "aetheria_position": 18,
+  "intervals_checked": 100,
+  "first_mirror_on_head_ninth_tone": [
+   144,
+   243,
+   342
+  ]
+ },
  "unclaimed_curiosity": {
   "2178x4": 8712,
   "reverse_of_2178": 8712
