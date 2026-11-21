@@ -215,6 +215,97 @@
   "10 interval digit roots sum to 9, 15, 18 or 27",
   "11 top frequency is a palindrome"
  ],
+ "rule_head_is_gut_plus_heart": {
+  "members": 900,
+  "aetheria_score": 6,
+  "share_scoring_at_least_aetheria": 0.014444444444444444,
+  "a_values_scoring_at_least_aetheria": [
+   111,
+   144,
+   222,
+   243,
+   333,
+   444,
+   474,
+   495,
+   555,
+   666,
+   777,
+   888,
+   999
+  ],
+  "claims": {
+   "1 HEART perfect magic square": {
+    "share": 1.0,
+    "count": 900,
+    "share_when_a_is_multiple_of_9": 1.0
+   },
+   "2 HEAD perfect magic square": {
+    "share": 1.0,
+    "count": 900,
+    "share_when_a_is_multiple_of_9": 1.0
+   },
+   "3 any evenly spaced nine are a perfect magic square": {
+    "share": 1.0,
+    "count": 900,
+    "share_when_a_is_multiple_of_9": 1.0
+   },
+   "4 every HEART digit root is 9": {
+    "share": 0.1111111111111111,
+    "count": 100,
+    "share_when_a_is_multiple_of_9": 1.0
+   },
+   "5 HEAD digit roots cycle 3,6,9 like GUT": {
+    "share": 0.1111111111111111,
+    "count": 100,
+    "share_when_a_is_multiple_of_9": 1.0
+   },
+   "6 HEAD interval = GUT + HEART intervals": {
+    "share": 1.0,
+    "count": 900,
+    "share_when_a_is_multiple_of_9": 1.0
+   },
+   "7 interval digit roots sum to 15": {
+    "share": 0.1111111111111111,
+    "count": 100,
+    "share_when_a_is_multiple_of_9": 1.0
+   },
+   "8 HEART interval is a power of three": {
+    "share": 0.0022222222222222222,
+    "count": 2,
+    "share_when_a_is_multiple_of_9": 0.02
+   },
+   "9 cube centre has digit root 9": {
+    "share": 0.1111111111111111,
+    "count": 100,
+    "share_when_a_is_multiple_of_9": 1.0
+   },
+   "10 central axis digit roots 6,9,6": {
+    "share": 0.1111111111111111,
+    "count": 100,
+    "share_when_a_is_multiple_of_9": 1.0
+   },
+   "11 top frequency is a mirror number": {
+    "share": 0.0033333333333333335,
+    "count": 3,
+    "share_when_a_is_multiple_of_9": 0.03
+   }
+  },
+  "palindromic_tops_when_a_is_multiple_of_9": [
+   [
+    144,
+    4554
+   ],
+   [
+    243,
+    6336
+   ],
+   [
+    342,
+    8118
+   ]
+  ]
+ },
  "unclaimed_curiosity": {
   "2178x4": 8712,
   "reverse_of_2178": 8712

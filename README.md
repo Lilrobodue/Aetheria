@@ -26,6 +26,17 @@ together on a fixed catalogue of 15 patterns, Aetheria's choice of intervals
 which the plan calls unusual. Whether that is a discovery or a design depends on
 how 243 and 354 were chosen. None of this bears on what the tones do to people.
 
+## What Joe told us afterwards
+
+Joe made 354 by adding the first two intervals (111 + 243), so claim 6 is a
+design, not a discovery. `exploratory.py` rescores with that rule built in.
+Once HEAD = GUT + HEART, a HEART interval that is a multiple of 9 (as 243 is)
+brings claims 4, 5, 7, 9 and 10 with it, every time. What is left: 243 being a
+power of three (2 of the 100 multiples of 9 from 100 to 999) and the top
+frequency 6336 being a palindrome (3 of those 100: 144, 243 and 342). On the
+15-pattern list, 13 of the 900 possible HEART intervals score as high as 243,
+mostly repdigits like 222 and 333.
+
 ## A bug found and fixed before reporting
 
 The first run had a palindrome check that miscounted numbers when longer
