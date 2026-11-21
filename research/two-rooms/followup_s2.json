@@ -1,0 +1,15 @@
+{
+ "experiments": 5000,
+ "sessions_each": 20,
+ "seed": 20261122,
+ "sessions_in_pool": 75,
+ "S2_false_alarm_rate": 0.047,
+ "binomial_se": 0.0030822070014844883,
+ "share_p_below": {
+  "0.01": 0.0102,
+  "0.05": 0.047,
+  "0.1": 0.0988,
+  "0.25": 0.2544,
+  "0.5": 0.5012
+ }
+}

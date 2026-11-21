@@ -1,0 +1,151 @@
+{
+ "records": {
+  "f1y01": {
+   "beats": 8708,
+   "other_annotations": 2,
+   "minutes": 120.3875,
+   "intervals_dropped": 0.0354886872631216,
+   "sessions": 11,
+   "mean_hr": 73.15097131889733
+  },
+  "f1y02": {
+   "beats": 6960,
+   "other_annotations": 78,
+   "minutes": 120.51666666666667,
+   "intervals_dropped": 0.011783302198591805,
+   "sessions": 11,
+   "mean_hr": 58.26848611615877
+  },
+  "f1y03": {
+   "beats": 7642,
+   "other_annotations": 1,
+   "minutes": 121.175,
+   "intervals_dropped": 0.0007852375343541107,
+   "sessions": 11,
+   "mean_hr": 63.071563655684464
+  },
+  "f1y04": {
+   "beats": 5497,
+   "other_annotations": 14,
+   "minutes": 120.50416666666666,
+   "intervals_dropped": 0.00709606986899558,
+   "sessions": 11,
+   "mean_hr": 45.749783630666535
+  },
+  "f1y05": {
+   "beats": 6950,
+   "other_annotations": 15,
+   "minutes": 121.49583333333334,
+   "intervals_dropped": 0.00561231831918263,
+   "sessions": 11,
+   "mean_hr": 57.33013977701015
+  },
+  "f2y01": {
+   "beats": 8042,
+   "other_annotations": 64,
+   "minutes": 117.15416666666667,
+   "intervals_dropped": 0.007213033204825248,
+   "sessions": 10,
+   "mean_hr": 68.85190357660899
+  },
+  "f2y03": {
+   "beats": 6756,
+   "other_annotations": 51,
+   "minutes": 116.34583333333333,
+   "intervals_dropped": 0.0,
+   "sessions": 10,
+   "mean_hr": 58.05861358402418
+  }
+ },
+ "left_out": {
+  "f2y02": "flagged as damaged by the download; its beats span 156 minutes against the study's 120",
+  "f2y04": "damaged in transfer: contains UTF-8 replacement characters",
+  "f2y05": "damaged in transfer: contains UTF-8 replacement characters"
+ },
+ "real_heart": {
+  "sessions": 75,
+  "mean_hr": 60.30589757338606,
+  "sd_within_session": 4.36832033015693,
+  "share_vlf": 0.5618783358212838,
+  "share_lf": 0.2787483836092044,
+  "share_hf": 0.15334493610140357,
+  "peak_hf_hz": 0.3046875
+ },
+ "fitted_sizes": {
+  "drift_sd": 3.2744293282841306,
+  "mayer_sd": 2.3063257964691504,
+  "breath_amp": 2.4191577836046876
+ },
+ "power_S2_refit_simulation": {
+  "scenario": "guided_breathing",
+  "experiments": 500,
+  "power": {
+   "5": {
+    "0.25": 0.056,
+    "0.5": 0.122,
+    "1.0": 0.37
+   },
+   "10": {
+    "0.25": 0.094,
+    "0.5": 0.216,
+    "1.0": 0.638
+   },
+   "20": {
+    "0.25": 0.106,
+    "0.5": 0.358,
+    "1.0": 0.892
+   },
+   "40": {
+    "0.25": 0.24,
+    "0.5": 0.634,
+    "1.0": 0.998
+   },
+   "80": {
+    "0.25": 0.352,
+    "0.5": 0.918,
+    "1.0": 1.0
+   }
+  }
+ },
+ "naive_false_alarms": {
+  "pairs": 220,
+  "N1_correlation": 0.6909090909090909,
+  "N2_best_lag": 0.990909090909091,
+  "N3_fixed_order": 0.8227272727272728,
+  "mean_r": 0.01781158770241126,
+  "sd_r": 0.0959681541193867
+ },
+ "sound_false_alarms": {
+  "experiments": 1000,
+  "sessions_each": 20,
+  "S1_swapped_partner": 0.012,
+  "S2_hidden_schedule": 0.064
+ },
+ "power_S2_real_sessions": {
+  "5": {
+   "0.25": 0.094,
+   "0.5": 0.184,
+   "1.0": 0.416
+  },
+  "10": {
+   "0.25": 0.106,
+   "0.5": 0.242,
+   "1.0": 0.67
+  },
+  "20": {
+   "0.25": 0.152,
+   "0.5": 0.408,
+   "1.0": 0.916
+  },
+  "40": {
+   "0.25": 0.212,
+   "0.5": 0.65,
+   "1.0": 1.0
+  },
+  "80": {
+   "0.25": 0.368,
+   "0.5": 0.922,
+   "1.0": 1.0
+  }
+ }
+}

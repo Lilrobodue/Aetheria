@@ -71,3 +71,45 @@ and 100%; 20 give 52%, 97% and 100%; 40 give 80%, 100% and 100%.
 5. Never call one session's correlation a link, and never use a fixed
    rest-then-send order.
 6. Publish every session, including the ones that show nothing.
+
+## Real hearts (Fantasia study, seven strangers)
+
+Plan: `PREREG_REAL_HEARTS.md` (pushed 12:21, before the data arrived; the
+three files damaged in transfer were noted at 12:30, before any analysis).
+Run: `python3 -I real_hearts.py DATA_DIR` writes `results_real.json`.
+
+Seven healthy young adults from the public Fantasia recordings (Iyengar et al.
+1996, PhysioNet), recorded separately, so every pairing is a real no-link pair:
+75 ten-minute sessions, 220 stranger pairings.
+
+| Analysis | Simulated hearts | Real strangers |
+| --- | --- | --- |
+| Correlation, textbook test | 70-100% | 69% |
+| Best lag within 10 s | about 100% | 99% |
+| Rest first, send second | 81-87% | 82% |
+| Swapped-partner test | 4.3-5.3% | 1.2% |
+| Hidden random schedule | 4.1-5.5% | 6.4%, then 4.7% |
+
+The hidden-schedule test came out at 6.4% in the planned 1,000 experiments,
+just over the plan's 6% line. A follow-up written afterwards
+(`followup_s2.py`, not part of the plan) reran it with 5,000 experiments on a
+fresh seed: 4.7%, with p-values spread evenly as they should be (1.0% below
+0.01, 9.9% below 0.1, 50.1% below 0.5). A randomization test with truly random
+labels can't exceed 5% by construction, so the 6.4% was chance.
+
+Real hearts wander more on slow timescales than the textbook heart (56% of
+their variation is slower than 0.04 Hz, against 22%), so an honest test needs
+more sessions. Hidden random schedule, real sessions, chance of detecting a
+shift during send periods:
+
+| Sessions | 0.25 bpm | 0.5 bpm | 1 bpm |
+| --- | --- | --- | --- |
+| 5 | 9% | 18% | 42% |
+| 10 | 11% | 24% | 67% |
+| 20 | 15% | 41% | 92% |
+| 40 | 21% | 65% | 100% |
+| 80 | 37% | 92% | 100% |
+
+The simulated heart refitted to these recordings gives nearly the same table
+(63% and 92% at 40 and 80 sessions for 0.5 bpm). So: 40 sessions for a 1 bpm
+shift, about 80 for a 0.5 bpm shift.
