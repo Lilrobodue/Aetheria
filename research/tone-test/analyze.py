@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
-Tone test analysis, exactly as PREREGISTRATION.md lays it out.
+Tone test analysis, exactly as PREREGISTRATION.md (amendment 1) lays it out:
+30-minute sessions, one hidden tone each.
 
     python3 -I analyze.py --check SESSIONS_DIR    # blind: quality of each session, no tone comparison
     python3 -I analyze.py SESSIONS_DIR            # the test, once 40 sessions are in
 
-SESSIONS_DIR holds the files the Tone Test app saves (tone-test_*.json). The
-test refuses to run before 40 sessions pass the quality rules; --force exists
-only for testing this script on simulated sessions.
+SESSIONS_DIR holds the files the Tone Test app (version 2) saves. The test
+refuses to run before 40 sessions pass the quality rules; --force exists only
+for testing this script on simulated sessions. The check never opens the
+sealed pick; it only confirms the fingerprint matches it.
 """
 import argparse
+import base64
 import glob
 import hashlib
 import json
@@ -24,29 +27,48 @@ AETHERIA = 2178
 SESSIONS_NEEDED = 40
 PERMS = 10_000
 SEED = 20261121
+BASE = (60, 300)        # silence minutes 1-5, session seconds
+LATE = (900, 2100)      # tone minutes 10-30
+WHOLE = (300, 2100)     # all 30 tone minutes
 
 
 # -- Reading a session ------------------------------------------------------------------
+
+def unseal(s):
+    sch = s.get("schedule", {})
+    try:
+        pick = json.loads(base64.b64decode(sch.get("sealed", "")).decode())
+    except Exception:
+        return None
+    return pick
+
 
 def load_session(path):
     s = json.load(open(path))
     problems = []
     if s.get("app") != "Tone Test, Big Banana Studios":
         problems.append("not a Tone Test file")
+    if not str(s.get("app_version", "")).startswith("2."):
+        problems.append("not from version 2 of the app (amendment 1)")
     if s.get("demo"):
         problems.append("demo mode")
     if not s.get("completed"):
         problems.append("stopped early")
-    sch = s.get("schedule", {})
-    order, control, salt = sch.get("order", []), sch.get("control"), sch.get("salt", "")
-    expected = hashlib.sha256(f"tone-test-v1|{''.join(order)}|{control}|{salt}".encode()).hexdigest()
-    if expected != sch.get("fingerprint"):
-        problems.append("fingerprint does not match the order")
-    if sorted(order) != ["A"] * 5 + ["C"] * 5 or control not in CONTROLS:
-        problems.append("schedule is not 5 + 5 with a listed control")
+    pick = unseal(s)
+    if pick is None:
+        problems.append("sealed pick unreadable")
+    else:
+        expected = hashlib.sha256(f"tone-test-v2|{pick.get('tone')}|{pick.get('control')}|{pick.get('salt')}".encode()).hexdigest()
+        if expected != s.get("schedule", {}).get("fingerprint"):
+            problems.append("fingerprint does not match the sealed pick")
+        if pick.get("tone") not in ("A", "C") or pick.get("control") not in CONTROLS:
+            problems.append("pick is not A or C with a listed control")
     if s.get("tones", {}).get("aetheria_hz") != AETHERIA:
         problems.append("Aetheria tone is not 2178 Hz")
-    return s, problems
+    tm = s.get("timing", {})
+    if (tm.get("silence_s"), tm.get("tone_s")) != (300, 1800):
+        problems.append("timing is not 5 + 30 minutes")
+    return s, pick, problems
 
 
 def beat_times(beats):
@@ -91,59 +113,46 @@ def quality_ok(q):
             and q["audio_interruptions"] == 0)
 
 
-# -- Per-block measures -----------------------------------------------------------------
+# -- Per-session measures -----------------------------------------------------------------
 
-def windows(s, lo, hi):
-    tm = s["timing"]
-    return [(tm["settle_s"] + j * tm["block_s"] + lo, tm["settle_s"] + j * tm["block_s"] + hi)
-            for j in range(tm["blocks"])]
+def mean_hr(grid, hr, win):
+    return float(np.nanmean(hr[(grid >= win[0]) & (grid < win[1])]))
 
 
-def block_hr(grid, hr, wins):
-    return np.array([np.nanmean(hr[(grid >= a) & (grid < b)]) for a, b in wins])
-
-
-def block_rmssd(ends, rr, ok, wins):
-    out = []
-    for a, b in wins:
-        sel = ok & (ends >= a) & (ends < b)
-        d = np.diff(rr[sel] * 1000)
-        out.append(np.sqrt(np.mean(d ** 2)) if len(d) else np.nan)
-    return np.array(out)
+def rmssd(ends, rr, ok, win):
+    sel = ok & (ends >= win[0]) & (ends < win[1])
+    d = np.diff(rr[sel] * 1000)
+    return float(np.sqrt(np.mean(d ** 2))) if len(d) else float("nan")
 
 
 # -- The test ---------------------------------------------------------------------------
 
-def perm_test(values, labels, rng, perms=PERMS):
-    """values, labels: (K, 10). Score: sum over sessions of mean(A) - mean(C).
-    Two-sided p from relabelling blocks within each session."""
-    def score(lab):
-        a = np.nansum(values * lab, -1) / np.sum(~np.isnan(values) * lab, -1)
-        c = np.nansum(values * (1 - lab), -1) / np.sum(~np.isnan(values) * (1 - lab), -1)
-        return (a - c).sum(-1)
-    obs = score(labels)
-    k = len(values)
-    shuffled = np.take_along_axis(np.broadcast_to(labels, (perms, k, labels.shape[1])),
-                                  np.argsort(rng.random((perms, k, labels.shape[1])), axis=2), axis=2)
-    null = score(shuffled)
+def perm_test(values, is_a, groups, rng, perms=PERMS):
+    """Two-sided permutation test of mean(A) - mean(C), relabelling sessions
+    within each participant (keeping each one's numbers of A and C)."""
+    def stat(L):
+        return (values * L).sum(-1) / L.sum(-1) - (values * ~L).sum(-1) / (~L).sum(-1)
+    obs = stat(is_a)
+    shuffled = np.broadcast_to(is_a, (perms, len(is_a))).copy()
+    for g in np.unique(groups):
+        idx = np.flatnonzero(groups == g)
+        order = np.argsort(rng.random((perms, len(idx))), axis=1)
+        shuffled[:, idx] = is_a[idx][order]
+    null = stat(shuffled)
     p = (1 + np.sum(np.abs(null) >= abs(obs))) / (1 + perms)
     return float(obs), float(p)
 
 
-def per_session_diff(values, labels):
-    a = np.nansum(values * labels, 1) / np.sum(~np.isnan(values) * labels, 1)
-    c = np.nansum(values * (1 - labels), 1) / np.sum(~np.isnan(values) * (1 - labels), 1)
-    return a - c
-
-
-def bootstrap_ci(diffs, rng, n=10_000):
-    idx = rng.integers(0, len(diffs), size=(n, len(diffs)))
-    means = diffs[idx].mean(axis=1)
-    return [float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))]
+def bootstrap_ci(values, is_a, rng, n=10_000):
+    a, c = values[is_a], values[~is_a]
+    da = a[rng.integers(0, len(a), size=(n, len(a)))].mean(1)
+    dc = c[rng.integers(0, len(c), size=(n, len(c)))].mean(1)
+    d = da - dc
+    return [float(np.percentile(d, 2.5)), float(np.percentile(d, 97.5))]
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Tone test analysis")
+    ap = argparse.ArgumentParser(description="Tone test analysis (amendment 1)")
     ap.add_argument("sessions_dir")
     ap.add_argument("--check", action="store_true", help="quality only, no tone comparison")
     ap.add_argument("--force", action="store_true", help="testing only: run before 40 sessions")
@@ -152,7 +161,7 @@ def main():
 
     rows, kept = [], []
     for path in sorted(glob.glob(os.path.join(args.sessions_dir, "*.json"))):
-        s, problems = load_session(path)
+        s, pick, problems = load_session(path)
         row = {"file": os.path.basename(path), "participant": s.get("participant"), "date": s.get("date")}
         if not problems:
             grid, hr, ends, rr, ok, q = heart_trace(s)
@@ -160,7 +169,7 @@ def main():
             if not quality_ok(q):
                 problems.append("technical failure (artefacts, gaps, strap or audio dropout)")
             else:
-                kept.append((s, grid, hr, ends, rr, ok))
+                kept.append((s, pick, grid, hr, ends, rr, ok))
         row["included"] = not problems
         row["reasons"] = problems
         rows.append(row)
@@ -177,21 +186,23 @@ def main():
         sys.exit(f"Not running the test: {len(kept)} of {SESSIONS_NEEDED} sessions so far. Use --check meanwhile.")
 
     rng = np.random.default_rng(SEED)
-    labels = np.array([[1.0 if o == "A" else 0.0 for o in s["schedule"]["order"]] for s, *_ in kept])
+    is_a = np.array([pick["tone"] == "A" for _, pick, *_ in kept])
+    groups = np.array([s.get("participant") for s, *_ in kept])
+    if is_a.all() or not is_a.any():
+        sys.exit("All kept sessions used the same tone; the test can't run.")
     measures = {
-        "heart_rate_during_tone": np.array([block_hr(g, h, windows(s, 5, 45)) for s, g, h, *_ in kept]),
-        "rmssd_during_tone": np.array([block_rmssd(e, r, o, windows(s, 5, 45)) for s, g, h, e, r, o in kept]),
-        "heart_rate_after_tone": np.array([block_hr(g, h, windows(s, 45, 60)) for s, g, h, *_ in kept]),
+        "heart_rate_change": np.array([mean_hr(g, h, LATE) - mean_hr(g, h, BASE) for _, _, g, h, *_ in kept]),
+        "rmssd_change": np.array([rmssd(e, r, o, LATE) - rmssd(e, r, o, BASE) for *_, e, r, o in kept]),
+        "heart_rate_change_whole_tone": np.array([mean_hr(g, h, WHOLE) - mean_hr(g, h, BASE)
+                                                  for _, _, g, h, *_ in kept]),
     }
-    out = {}
+    out = {"sessions_aetheria": int(is_a.sum()), "sessions_control": int((~is_a).sum())}
     for name, vals in measures.items():
-        total, p = perm_test(vals, labels, rng)
-        diffs = per_session_diff(vals, labels)
-        out[name] = {"sum_of_differences": total, "mean_difference": float(diffs.mean()),
-                     "ci95": bootstrap_ci(diffs, rng), "p": p,
-                     "role": "primary" if name == "heart_rate_during_tone" else "secondary"}
-    prim = out["heart_rate_during_tone"]
-    out["verdict"] = ("difference" if prim["p"] < 0.05 else "no difference detected")
+        diff, p = perm_test(vals, is_a, groups, rng)
+        out[name] = {"aetheria_minus_control": diff, "ci95": bootstrap_ci(vals, is_a, rng), "p": p,
+                     "mean_aetheria": float(vals[is_a].mean()), "mean_control": float(vals[~is_a].mean()),
+                     "role": "primary" if name == "heart_rate_change" else "secondary"}
+    out["verdict"] = "difference" if out["heart_rate_change"]["p"] < 0.05 else "no difference detected"
     result["results"] = out
     result["forced_before_40"] = len(kept) < SESSIONS_NEEDED
     print(json.dumps(out, indent=1))

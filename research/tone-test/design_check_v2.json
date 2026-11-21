@@ -1,0 +1,37 @@
+{
+ "seed": 20261121,
+ "perms_per_test": 2000,
+ "experiments": 1000,
+ "fantasia_windows": 21,
+ "sim_sizes": {
+  "drift_sd": 3.4514763834547257,
+  "mayer_sd": 3.1399843626087502,
+  "breath_amp": 3.5003648099080795
+ },
+ "results": {
+  "real (Fantasia windows, resampled)": {
+   "false_alarms_at_40": 0.044,
+   "power_1bpm_20": 0.218,
+   "power_1bpm_40": 0.402,
+   "power_1bpm_80": 0.706,
+   "power_2bpm_20": 0.634,
+   "power_2bpm_40": 0.93,
+   "power_2bpm_80": 1.0,
+   "power_3bpm_20": 0.948,
+   "power_3bpm_40": 1.0,
+   "power_3bpm_80": 1.0
+  },
+  "simulated (fitted to BBS-P1)": {
+   "false_alarms_at_40": 0.052,
+   "power_1bpm_20": 0.13,
+   "power_1bpm_40": 0.254,
+   "power_1bpm_80": 0.446,
+   "power_2bpm_20": 0.426,
+   "power_2bpm_40": 0.684,
+   "power_2bpm_80": 0.958,
+   "power_3bpm_20": 0.734,
+   "power_3bpm_40": 0.962,
+   "power_3bpm_80": 1.0
+  }
+ }
+}
