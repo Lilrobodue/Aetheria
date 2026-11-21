@@ -46,6 +46,8 @@ Changes to the app (none touch the test itself):
   A Send button shares the session through Android's share list as a `.txt`
   holding the same JSON, because Chrome won't share `.json` files; shared copies
   are renamed to `.json` when they arrive.
+- 1.0.2 (21 Nov 2026): a line under the seal button says what's left before it
+  works.
 
 Sessions lost (they count toward the one-a-day rule but are never analysed):
 
