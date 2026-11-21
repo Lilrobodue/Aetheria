@@ -1,0 +1,712 @@
+{
+ "aetheria_values": {
+  "heart": [
+   1206,
+   1449,
+   1692,
+   1935,
+   2178,
+   2421,
+   2664,
+   2907,
+   3150
+  ],
+  "head": [
+   3504,
+   3858,
+   4212,
+   4566,
+   4920,
+   5274,
+   5628,
+   5982,
+   6336
+  ],
+  "solfeggio_line_sums": [
+   1665,
+   1665,
+   1665,
+   1665,
+   1665,
+   1665,
+   1584,
+   1665
+  ],
+  "solfeggio_offsets": [
+   99,
+   99,
+   99,
+   9,
+   9,
+   9,
+   0,
+   0,
+   0
+  ]
+ },
+ "family_s": {
+  "100-999": {
+   "range": [
+    100,
+    999
+   ],
+   "members": 810000,
+   "claims": {
+    "1 HEART perfect magic square": {
+     "aetheria": true,
+     "share": 1.0,
+     "count": 810000
+    },
+    "2 HEAD perfect magic square": {
+     "aetheria": true,
+     "share": 1.0,
+     "count": 810000
+    },
+    "3 any evenly spaced nine are a perfect magic square": {
+     "aetheria": true,
+     "share": 1.0,
+     "count": 810000
+    },
+    "4 every HEART digit root is 9": {
+     "aetheria": true,
+     "share": 0.1111111111111111,
+     "count": 90000
+    },
+    "5 HEAD digit roots cycle 3,6,9 like GUT": {
+     "aetheria": true,
+     "share": 0.1111111111111111,
+     "count": 90000
+    },
+    "6 HEAD interval = GUT + HEART intervals": {
+     "aetheria": true,
+     "share": 0.000974074074074074,
+     "count": 789
+    },
+    "7 interval digit roots sum to 15": {
+     "aetheria": true,
+     "share": 0.08641975308641975,
+     "count": 70000
+    },
+    "8 HEART interval is a power of three": {
+     "aetheria": true,
+     "share": 0.0022222222222222222,
+     "count": 1800
+    },
+    "9 cube centre has digit root 9": {
+     "aetheria": true,
+     "share": 0.1111111111111111,
+     "count": 90000
+    },
+    "10 central axis digit roots 6,9,6": {
+     "aetheria": true,
+     "share": 0.012345679012345678,
+     "count": 10000
+    },
+    "11 top frequency is a mirror number": {
+     "aetheria": true,
+     "share": 0.009965432098765431,
+     "count": 8072
+    }
+   },
+   "catalogue": {
+    "1 HEART one digit root": {
+     "aetheria": true,
+     "share": 0.1111111111111111
+    },
+    "2 HEAD one digit root": {
+     "aetheria": false,
+     "share": 0.1111111111111111
+    },
+    "3 HEART cycles 3,6,9": {
+     "aetheria": false,
+     "share": 0.2222222222222222
+    },
+    "4 HEAD cycles 3,6,9": {
+     "aetheria": true,
+     "share": 0.2222222222222222
+    },
+    "5 one interval is the sum of the other two": {
+     "aetheria": true,
+     "share": 0.001948148148148148
+    },
+    "6 one interval is a 2-9x multiple of another": {
+     "aetheria": false,
+     "share": 0.02019753086419753
+    },
+    "7 a or b is a perfect power": {
+     "aetheria": true,
+     "share": 0.06125432098765432
+    },
+    "8 a or b is a palindrome or repdigit": {
+     "aetheria": false,
+     "share": 0.19
+    },
+    "9 a or b is a multiple of 111": {
+     "aetheria": false,
+     "share": 0.0199
+    },
+    "10 interval digit roots sum to 9, 15, 18 or 27": {
+     "aetheria": true,
+     "share": 0.19753086419753085
+    },
+    "11 top frequency is a palindrome": {
+     "aetheria": true,
+     "share": 0.009965432098765431
+    },
+    "12 end of HEART is a palindrome": {
+     "aetheria": false,
+     "share": 0.01
+    },
+    "13 a regime centre is a palindrome or repdigit": {
+     "aetheria": false,
+     "share": 0.021025925925925927
+    },
+    "14 a magic constant is a palindrome or repdigit": {
+     "aetheria": false,
+     "share": 0.016582716049382717
+    },
+    "15 a regime end is a multiple of 432": {
+     "aetheria": false,
+     "share": 0.041525925925925924
+    }
+   },
+   "aetheria_score": 6,
+   "score_histogram": [
+    181182,
+    385242,
+    143959,
+    66392,
+    24845,
+    4509,
+    3532,
+    322,
+    16,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "share_scoring_at_least_aetheria": 0.004779012345679012,
+   "count_scoring_at_least_aetheria": 3871,
+   "top_scorers": [
+    [
+     474,
+     222,
+     9
+    ],
+    [
+     333,
+     363,
+     8
+    ],
+    [
+     408,
+     333,
+     8
+    ],
+    [
+     408,
+     444,
+     8
+    ],
+    [
+     408,
+     666,
+     8
+    ],
+    [
+     408,
+     777,
+     8
+    ],
+    [
+     408,
+     999,
+     8
+    ],
+    [
+     474,
+     333,
+     8
+    ],
+    [
+     474,
+     555,
+     8
+    ],
+    [
+     474,
+     666,
+     8
+    ]
+   ]
+  },
+  "50-1500": {
+   "range": [
+    50,
+    1500
+   ],
+   "members": 2105401,
+   "claims": {
+    "1 HEART perfect magic square": {
+     "aetheria": true,
+     "share": 1.0,
+     "count": 2105401
+    },
+    "2 HEAD perfect magic square": {
+     "aetheria": true,
+     "share": 1.0,
+     "count": 2105401
+    },
+    "3 any evenly spaced nine are a perfect magic square": {
+     "aetheria": true,
+     "share": 1.0,
+     "count": 2105401
+    },
+    "4 every HEART digit root is 9": {
+     "aetheria": true,
+     "share": 0.11095796002756719,
+     "count": 233611
+    },
+    "5 HEAD digit roots cycle 3,6,9 like GUT": {
+     "aetheria": true,
+     "share": 0.11095796002756719,
+     "count": 233611
+    },
+    "6 HEAD interval = GUT + HEART intervals": {
+     "aetheria": true,
+     "share": 0.0006364583278909813,
+     "count": 1340
+    },
+    "7 interval digit roots sum to 15": {
+     "aetheria": true,
+     "share": 0.0864880371957646,
+     "count": 182092
+    },
+    "8 HEART interval is a power of three": {
+     "aetheria": true,
+     "share": 0.002067539627842867,
+     "count": 4353
+    },
+    "9 cube centre has digit root 9": {
+     "aetheria": true,
+     "share": 0.11095796002756719,
+     "count": 233611
+    },
+    "10 central axis digit roots 6,9,6": {
+     "aetheria": true,
+     "share": 0.0123116688934792,
+     "count": 25921
+    },
+    "11 top frequency is a mirror number": {
+     "aetheria": true,
+     "share": 0.009914975816958384,
+     "count": 20875
+    }
+   },
+   "catalogue": {
+    "1 HEART one digit root": {
+     "aetheria": true,
+     "share": 0.11095796002756719
+    },
+    "2 HEAD one digit root": {
+     "aetheria": false,
+     "share": 0.11095796002756719
+    },
+    "3 HEART cycles 3,6,9": {
+     "aetheria": false,
+     "share": 0.22260509993108202
+    },
+    "4 HEAD cycles 3,6,9": {
+     "aetheria": true,
+     "share": 0.22260509993108202
+    },
+    "5 one interval is the sum of the other two": {
+     "aetheria": true,
+     "share": 0.0012786162825988968
+    },
+    "6 one interval is a 2-9x multiple of another": {
+     "aetheria": false,
+     "share": 0.013202235583625162
+    },
+    "7 a or b is a perfect power": {
+     "aetheria": true,
+     "share": 0.053033602624868136
+    },
+    "8 a or b is a palindrome or repdigit": {
+     "aetheria": false,
+     "share": 0.13308628617541265
+    },
+    "9 a or b is a multiple of 111": {
+     "aetheria": false,
+     "share": 0.01783840703029969
+    },
+    "10 interval digit roots sum to 9, 15, 18 or 27": {
+     "aetheria": true,
+     "share": 0.1975989372095862
+    },
+    "11 top frequency is a palindrome": {
+     "aetheria": true,
+     "share": 0.009914975816958384
+    },
+    "12 end of HEART is a palindrome": {
+     "aetheria": false,
+     "share": 0.009648518263266712
+    },
+    "13 a regime centre is a palindrome or repdigit": {
+     "aetheria": false,
+     "share": 0.020227025635496516
+    },
+    "14 a magic constant is a palindrome or repdigit": {
+     "aetheria": false,
+     "share": 0.014760133580253833
+    },
+    "15 a regime end is a multiple of 432": {
+     "aetheria": false,
+     "share": 0.041080060283052965
+    }
+   },
+   "aetheria_score": 6,
+   "score_histogram": [
+    502457,
+    1040987,
+    330051,
+    168340,
+    48926,
+    8319,
+    5845,
+    452,
+    22,
+    2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "share_scoring_at_least_aetheria": 0.0030022784258200695,
+   "count_scoring_at_least_aetheria": 6321,
+   "top_scorers": [
+    [
+     474,
+     222,
+     9
+    ],
+    [
+     777,
+     1035,
+     9
+    ],
+    [
+     222,
+     1428,
+     8
+    ],
+    [
+     333,
+     363,
+     8
+    ],
+    [
+     408,
+     333,
+     8
+    ],
+    [
+     408,
+     444,
+     8
+    ],
+    [
+     408,
+     666,
+     8
+    ],
+    [
+     408,
+     777,
+     8
+    ],
+    [
+     408,
+     999,
+     8
+    ],
+    [
+     474,
+     333,
+     8
+    ]
+   ]
+  },
+  "100-500": {
+   "range": [
+    100,
+    500
+   ],
+   "members": 160801,
+   "claims": {
+    "1 HEART perfect magic square": {
+     "aetheria": true,
+     "share": 1.0,
+     "count": 160801
+    },
+    "2 HEAD perfect magic square": {
+     "aetheria": true,
+     "share": 1.0,
+     "count": 160801
+    },
+    "3 any evenly spaced nine are a perfect magic square": {
+     "aetheria": true,
+     "share": 1.0,
+     "count": 160801
+    },
+    "4 every HEART digit root is 9": {
+     "aetheria": true,
+     "share": 0.10972568578553615,
+     "count": 17644
+    },
+    "5 HEAD digit roots cycle 3,6,9 like GUT": {
+     "aetheria": true,
+     "share": 0.11221945137157108,
+     "count": 18045
+    },
+    "6 HEAD interval = GUT + HEART intervals": {
+     "aetheria": true,
+     "share": 0.001803471371446695,
+     "count": 290
+    },
+    "7 interval digit roots sum to 15": {
+     "aetheria": true,
+     "share": 0.08591986368243978,
+     "count": 13816
+    },
+    "8 HEART interval is a power of three": {
+     "aetheria": true,
+     "share": 0.0024937655860349127,
+     "count": 401
+    },
+    "9 cube centre has digit root 9": {
+     "aetheria": true,
+     "share": 0.10972568578553615,
+     "count": 17644
+    },
+    "10 central axis digit roots 6,9,6": {
+     "aetheria": true,
+     "share": 0.012313356260222263,
+     "count": 1980
+    },
+    "11 top frequency is a mirror number": {
+     "aetheria": true,
+     "share": 0.01006212647931294,
+     "count": 1618
+    }
+   },
+   "catalogue": {
+    "1 HEART one digit root": {
+     "aetheria": true,
+     "share": 0.10972568578553615
+    },
+    "2 HEAD one digit root": {
+     "aetheria": false,
+     "share": 0.10972568578553615
+    },
+    "3 HEART cycles 3,6,9": {
+     "aetheria": false,
+     "share": 0.22194513715710723
+    },
+    "4 HEAD cycles 3,6,9": {
+     "aetheria": true,
+     "share": 0.22194513715710723
+    },
+    "5 one interval is the sum of the other two": {
+     "aetheria": true,
+     "share": 0.00360694274289339
+    },
+    "6 one interval is a 2-9x multiple of another": {
+     "aetheria": false,
+     "share": 0.017891679778110833
+    },
+    "7 a or b is a perfect power": {
+     "aetheria": true,
+     "share": 0.08776064825467503
+    },
+    "8 a or b is a palindrome or repdigit": {
+     "aetheria": false,
+     "share": 0.18955106000584573
+    },
+    "9 a or b is a multiple of 111": {
+     "aetheria": false,
+     "share": 0.01985062281950983
+    },
+    "10 interval digit roots sum to 9, 15, 18 or 27": {
+     "aetheria": true,
+     "share": 0.19704479449754667
+    },
+    "11 top frequency is a palindrome": {
+     "aetheria": true,
+     "share": 0.01006212647931294
+    },
+    "12 end of HEART is a palindrome": {
+     "aetheria": false,
+     "share": 0.012468827930174564
+    },
+    "13 a regime centre is a palindrome or repdigit": {
+     "aetheria": false,
+     "share": 0.022275980870765728
+    },
+    "14 a magic constant is a palindrome or repdigit": {
+     "aetheria": false,
+     "share": 0.024850591725175838
+    },
+    "15 a regime end is a multiple of 432": {
+     "aetheria": false,
+     "share": 0.0403728832532136
+    }
+   },
+   "aetheria_score": 6,
+   "score_histogram": [
+    35177,
+    74905,
+    29790,
+    13621,
+    5510,
+    997,
+    701,
+    95,
+    4,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "share_scoring_at_least_aetheria": 0.004981312305271733,
+   "count_scoring_at_least_aetheria": 801,
+   "top_scorers": [
+    [
+     474,
+     222,
+     9
+    ],
+    [
+     333,
+     363,
+     8
+    ],
+    [
+     408,
+     333,
+     8
+    ],
+    [
+     408,
+     444,
+     8
+    ],
+    [
+     474,
+     333,
+     8
+    ],
+    [
+     102,
+     333,
+     7
+    ],
+    [
+     102,
+     444,
+     7
+    ],
+    [
+     111,
+     144,
+     7
+    ],
+    [
+     111,
+     162,
+     7
+    ],
+    [
+     111,
+     189,
+     7
+    ]
+   ]
+  }
+ },
+ "family_t": {
+  "members": 112,
+  "claims": {
+   "12a at least 7 of 8 lines equal": {
+    "aetheria": true,
+    "share": 0.17857142857142858,
+    "count": 20,
+    "share_among_369_sets": 1.0
+   },
+   "12b exactly 7 equal, odd line off by a multiple of 9": {
+    "aetheria": true,
+    "share": 0.17857142857142858,
+    "count": 20,
+    "share_among_369_sets": 1.0
+   },
+   "12c exactly 7 equal, odd line off by exactly 81": {
+    "aetheria": true,
+    "share": 0.125,
+    "count": 14,
+    "share_among_369_sets": 1.0
+   },
+   "13a one offset per triad": {
+    "aetheria": true,
+    "share": 0.07142857142857142,
+    "count": 8,
+    "share_among_369_sets": 1.0
+   },
+   "13b all offsets multiples of 9": {
+    "aetheria": true,
+    "share": 0.07142857142857142,
+    "count": 8,
+    "share_among_369_sets": 1.0
+   },
+   "13c offsets fall to zero": {
+    "aetheria": true,
+    "share": 0.22321428571428573,
+    "count": 25,
+    "share_among_369_sets": 1.0
+   },
+   "13 all three together": {
+    "aetheria": true,
+    "share": 0.05357142857142857,
+    "count": 6,
+    "share_among_369_sets": 1.0
+   },
+   "digit roots cycle 3,6,9 (the Solfeggio's own pattern)": {
+    "aetheria": true,
+    "share": 0.017857142857142856,
+    "count": 2,
+    "share_among_369_sets": 1.0
+   }
+  },
+  "members_with_369_roots": 2
+ },
+ "family_r": {
+  "draws": 1000000,
+  "seed": 20261121,
+  "range": [
+   150,
+   1000
+  ],
+  "share_7_of_8_lines_equal": 0.0,
+  "count_7_of_8": 0,
+  "share_offsets_one_per_triad_and_multiples_of_9": 0.0,
+  "count_offsets": 0
+ }
+}

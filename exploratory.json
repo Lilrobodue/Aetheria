@@ -1,0 +1,222 @@
+{
+ "a_fixed_243": {
+  "members": 900,
+  "aetheria_score": 6,
+  "share_b_scoring_at_least_6": 0.013333333333333334,
+  "count": 12,
+  "b_values_scoring_at_least_6": [
+   111,
+   222,
+   333,
+   354,
+   393,
+   444,
+   525,
+   555,
+   666,
+   777,
+   888,
+   999
+  ]
+ },
+ "top_scorers": [
+  {
+   "a": 474,
+   "b": 222,
+   "score": 9,
+   "heart": [
+    1437,
+    1911,
+    2385,
+    2859,
+    3333,
+    3807,
+    4281,
+    4755,
+    5229
+   ],
+   "head": [
+    5451,
+    5673,
+    5895,
+    6117,
+    6339,
+    6561,
+    6783,
+    7005,
+    7227
+   ],
+   "patterns": [
+    "3 HEART cycles 3,6,9",
+    "4 HEAD cycles 3,6,9",
+    "6 one interval is a 2-9x multiple of another",
+    "8 a or b is a palindrome or repdigit",
+    "9 a or b is a multiple of 111",
+    "10 interval digit roots sum to 9, 15, 18 or 27",
+    "11 top frequency is a palindrome",
+    "13 a regime centre is a palindrome or repdigit",
+    "14 a magic constant is a palindrome or repdigit"
+   ]
+  },
+  {
+   "a": 333,
+   "b": 363,
+   "score": 8,
+   "heart": [
+    1296,
+    1629,
+    1962,
+    2295,
+    2628,
+    2961,
+    3294,
+    3627,
+    3960
+   ],
+   "head": [
+    4323,
+    4686,
+    5049,
+    5412,
+    5775,
+    6138,
+    6501,
+    6864,
+    7227
+   ],
+   "patterns": [
+    "1 HEART one digit root",
+    "4 HEAD cycles 3,6,9",
+    "6 one interval is a 2-9x multiple of another",
+    "8 a or b is a palindrome or repdigit",
+    "9 a or b is a multiple of 111",
+    "10 interval digit roots sum to 9, 15, 18 or 27",
+    "11 top frequency is a palindrome",
+    "13 a regime centre is a palindrome or repdigit"
+   ]
+  },
+  {
+   "a": 408,
+   "b": 333,
+   "score": 8,
+   "heart": [
+    1371,
+    1779,
+    2187,
+    2595,
+    3003,
+    3411,
+    3819,
+    4227,
+    4635
+   ],
+   "head": [
+    4968,
+    5301,
+    5634,
+    5967,
+    6300,
+    6633,
+    6966,
+    7299,
+    7632
+   ],
+   "patterns": [
+    "2 HEAD one digit root",
+    "3 HEART cycles 3,6,9",
+    "6 one interval is a 2-9x multiple of another",
+    "8 a or b is a palindrome or repdigit",
+    "9 a or b is a multiple of 111",
+    "10 interval digit roots sum to 9, 15, 18 or 27",
+    "13 a regime centre is a palindrome or repdigit",
+    "14 a magic constant is a palindrome or repdigit"
+   ]
+  },
+  {
+   "a": 408,
+   "b": 444,
+   "score": 8,
+   "heart": [
+    1371,
+    1779,
+    2187,
+    2595,
+    3003,
+    3411,
+    3819,
+    4227,
+    4635
+   ],
+   "head": [
+    5079,
+    5523,
+    5967,
+    6411,
+    6855,
+    7299,
+    7743,
+    8187,
+    8631
+   ],
+   "patterns": [
+    "3 HEART cycles 3,6,9",
+    "4 HEAD cycles 3,6,9",
+    "6 one interval is a 2-9x multiple of another",
+    "8 a or b is a palindrome or repdigit",
+    "9 a or b is a multiple of 111",
+    "10 interval digit roots sum to 9, 15, 18 or 27",
+    "13 a regime centre is a palindrome or repdigit",
+    "14 a magic constant is a palindrome or repdigit"
+   ]
+  },
+  {
+   "a": 408,
+   "b": 666,
+   "score": 8,
+   "heart": [
+    1371,
+    1779,
+    2187,
+    2595,
+    3003,
+    3411,
+    3819,
+    4227,
+    4635
+   ],
+   "head": [
+    5301,
+    5967,
+    6633,
+    7299,
+    7965,
+    8631,
+    9297,
+    9963,
+    10629
+   ],
+   "patterns": [
+    "2 HEAD one digit root",
+    "3 HEART cycles 3,6,9",
+    "6 one interval is a 2-9x multiple of another",
+    "8 a or b is a palindrome or repdigit",
+    "9 a or b is a multiple of 111",
+    "10 interval digit roots sum to 9, 15, 18 or 27",
+    "13 a regime centre is a palindrome or repdigit",
+    "14 a magic constant is a palindrome or repdigit"
+   ]
+  }
+ ],
+ "aetheria_patterns": [
+  "1 HEART one digit root",
+  "4 HEAD cycles 3,6,9",
+  "5 one interval is the sum of the other two",
+  "7 a or b is a perfect power",
+  "10 interval digit roots sum to 9, 15, 18 or 27",
+  "11 top frequency is a palindrome"
+ ],
+ "unclaimed_curiosity": {
+  "2178x4": 8712,
+  "reverse_of_2178": 8712
+ }
+}
