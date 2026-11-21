@@ -37,6 +37,16 @@ same clock and saves one file per session. Nothing leaves the phone unless the
 participant sends the file. `?demo` runs it with a pretend strap, and files from
 demo mode are marked and never counted.
 
+Changes to the app (none touch the test itself):
+
+- 1.0.1 (21 Nov 2026): on 1.0.0, tapping Done before Save threw a finished
+  session away. Every session is now kept on the phone the moment it ends, a
+  copy is kept every 30 seconds while it runs (a closed tab leaves the beats so
+  far, marked interrupted, which never count), and session numbers never repeat.
+  A Send button shares the session through Android's share list as a `.txt`
+  holding the same JSON, because Chrome won't share `.json` files; shared copies
+  are renamed to `.json` when they arrive.
+
 ## The analysis
 
 - `python3 -I analyze.py --check DIR`: blind. Lists each session file, checks
