@@ -7,7 +7,7 @@ or against a link.
 
 - `PREREGISTRATION.md`: the plan, pushed to GitHub (commit 2f90c29, 11:31
   Mountain, 21 Nov 2026) before anything ran.
-- `two_rooms_sim.py`: the simulation. Writes `results.json` (about 6 minutes).
+- `two_rooms_sim.py`: the simulation. Writes `results.json` (a few minutes).
 - `crosscheck.py`: the main conclusions again, with a simpler heart model and
   analysis code written separately.
 
