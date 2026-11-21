@@ -47,6 +47,12 @@ Changes to the app (none touch the test itself):
   holding the same JSON, because Chrome won't share `.json` files; shared copies
   are renamed to `.json` when they arrive.
 
+Sessions lost (they count toward the one-a-day rule but are never analysed):
+
+- BBS-P1, 21 Nov 2026, session 1: finished, then lost to the 1.0.0 Done bug
+  before it was saved. Its hidden order went with it, so nothing from it was
+  ever compared. BBS-P1's next session is on a later day, as the plan requires.
+
 ## The analysis
 
 - `python3 -I analyze.py --check DIR`: blind. Lists each session file, checks
