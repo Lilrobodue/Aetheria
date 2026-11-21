@@ -37,6 +37,17 @@ frequency 6336 being a palindrome (3 of those 100: 144, 243 and 342). On the
 15-pattern list, 13 of the 900 possible HEART intervals score as high as 243,
 mostly repdigits like 222 and 333.
 
+Joe took 243 from the Solfeggio itself: it is the gap between the first two
+triads (417 - 174 = 528 - 285 = 639 - 396 = 243). He saw it on a calculator
+keypad, whose columns are 1-4-7, 2-5-8 and 3-6-9: every Solfeggio number uses
+the three keys of one column, and the column sums 12, 15 and 18 are why the
+digit roots run 3, 6, 9. A gap between digit rotations (174 to 417) is always
+a multiple of 9, so HEART's root 9 was certain. That 243 is also 3^5 comes from
+the Solfeggio's digits 1, 7, 4: of the 8 triad-shaped sets in Family T, only
+the Solfeggio's first gap is a power of three. So the extension is derived from
+the Solfeggio's own arithmetic plus one rule (HEAD = GUT + HEART), and the one
+coincidence left is the top tone, 6336, being a palindrome.
+
 ## A bug found and fixed before reporting
 
 The first run had a palindrome check that miscounted numbers when longer

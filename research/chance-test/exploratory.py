@@ -61,7 +61,29 @@ out["rule_head_is_gut_plus_heart"] = {
             rhead[mult9 & rclaims["11 top frequency is a mirror number"], -1])],
 }
 
-# 4. A well-known curiosity nobody claimed: 2178 x 4 = 8712, its own reverse.
+# 4. Joe's second answer (21 Nov 2026): 243 is the Solfeggio's own gap between
+#    its first two triads (417 - 174 = 528 - 285 = 639 - 396 = 243), found by
+#    reading the Solfeggio on a calculator keypad, whose columns are 1-4-7,
+#    2-5-8 and 3-6-9.
+from chance_test import family_t, SOLFEGGIO
+columns = [{1, 4, 7}, {2, 5, 8}, {3, 6, 9}]
+tsets = family_t()
+triad_shaped = np.all(tsets[:, [1, 2, 4, 5, 7, 8]] - tsets[:, [0, 1, 3, 4, 6, 7]] == 111, axis=1)
+first_gap = tsets[:, 3] - tsets[:, 0]
+powers_of_3 = [3 ** k for k in range(1, 9)]
+out["heart_interval_from_solfeggio"] = {
+    "triad_gaps": [SOLFEGGIO[i + 3] - SOLFEGGIO[i] for i in range(6)],
+    "each_solfeggio_number_is_one_keypad_column": all(set(map(int, str(n))) in columns for n in SOLFEGGIO),
+    "keypad_column_sums": [sum(c) for c in columns],
+    # A gap between rotations xyz -> zxy is 9 x (11z - 10x - y), so always a multiple of 9.
+    "rotation_gap_174_to_417": "9 x (11*4 - 10*1 - 7) = 9 x 27 = 243",
+    "triad_shaped_sets_in_family_t": int(triad_shaped.sum()),
+    "their_first_gaps": sorted(set(first_gap[triad_shaped].tolist())),
+    "first_gap_multiple_of_9": int((first_gap[triad_shaped] % 9 == 0).sum()),
+    "first_gap_power_of_3": int(np.isin(first_gap[triad_shaped], powers_of_3).sum()),
+}
+
+# 5. A well-known curiosity nobody claimed: 2178 x 4 = 8712, its own reverse.
 out["unclaimed_curiosity"] = {"2178x4": 2178 * 4, "reverse_of_2178": int(str(2178)[::-1])}
 
 json.dump(out, open("exploratory.json", "w"), indent=1)

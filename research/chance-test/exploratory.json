@@ -306,6 +306,34 @@
    ]
   ]
  },
+ "heart_interval_from_solfeggio": {
+  "triad_gaps": [
+   243,
+   243,
+   243,
+   324,
+   324,
+   324
+  ],
+  "each_solfeggio_number_is_one_keypad_column": true,
+  "keypad_column_sums": [
+   12,
+   15,
+   18
+  ],
+  "rotation_gap_174_to_417": "9 x (11*4 - 10*1 - 7) = 9 x 27 = 243",
+  "triad_shaped_sets_in_family_t": 8,
+  "their_first_gaps": [
+   225,
+   234,
+   243,
+   252,
+   324,
+   342
+  ],
+  "first_gap_multiple_of_9": 8,
+  "first_gap_power_of_3": 1
+ },
  "unclaimed_curiosity": {
   "2178x4": 8712,
   "reverse_of_2178": 8712
