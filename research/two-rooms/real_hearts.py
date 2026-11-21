@@ -17,10 +17,13 @@ import json
 import os
 import struct
 
+import sys
+
 import numpy as np
 from scipy import signal
 
-import two_rooms_sim as sim
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # works under python3 -I too
+import two_rooms_sim as sim  # noqa: E402
 
 FS_ANN = 250.0      # Fantasia sampling rate, from the database description
 NORMAL = 1          # WFDB code for a normal beat
@@ -72,11 +75,12 @@ def heart_rate_trace(samples, codes):
     return grid, hr, float(1 - ok.mean())
 
 
-def sessions_from(grid, hr):
-    """Skip the first 10 minutes, then back-to-back 10-minute sessions."""
+def sessions_from(grid, hr, cap=11):
+    """Skip the first 10 minutes, then back-to-back 10-minute sessions, at most
+    11 per person as the plan says."""
     out = []
     start = grid[0] + 600.0
-    while True:
+    while len(out) < cap:
         a = np.searchsorted(grid, start)
         if a + sim.N > len(hr):
             break
@@ -151,6 +155,28 @@ def real_power_s2(sessions, rng, ks, deltas, experiments=500, perms=1000):
     return out
 
 
+def fitted_sizes(facts):
+    """Simulated-heart sizes that match the real heart's spread and band shares:
+    slow drift carries the slow band, the 0.1 Hz wave its band, breathing the
+    breathing band (a sine of amplitude a has spread a / sqrt 2)."""
+    sd = facts["sd_within_session"]
+    return {"drift_sd": sd * facts["share_vlf"] ** 0.5,
+            "mayer_sd": sd * facts["share_lf"] ** 0.5,
+            "breath_amp": sd * (2 * facts["share_hf"]) ** 0.5}
+
+
+# Files left out, with the reason, decided before any analysis was run.
+EXCLUDED = {
+    "f2y02": "flagged as damaged by the download; its beats span 156 minutes against the study's 120",
+}
+
+
+def damaged(path):
+    """True if the file passed through a text conversion that replaced bytes
+    with the UTF-8 replacement character, which can't be undone."""
+    return bytes.fromhex("efbfbd") in open(path, "rb").read()
+
+
 def main():
     ap = argparse.ArgumentParser(description="Two Rooms real-heart check")
     ap.add_argument("data_dir")
@@ -158,18 +184,28 @@ def main():
     ap.add_argument("--experiments", type=int, default=1000)
     args = ap.parse_args()
     rng = np.random.default_rng(20261121)
-    people, info = {}, {}
+    people, info, left_out = {}, {}, {}
     for path in sorted(glob.glob(os.path.join(args.data_dir, "*.ecg"))):
         name = os.path.basename(path)[:-4]
+        if name in EXCLUDED:
+            left_out[name] = EXCLUDED[name]
+            continue
+        if damaged(path):
+            left_out[name] = "damaged in transfer: contains UTF-8 replacement characters"
+            continue
         samples, codes = read_annotations(path)
         grid, hr, dropped = heart_rate_trace(samples, codes)
         people[name] = sessions_from(grid, hr)
         info[name] = {"beats": int((codes == NORMAL).sum()), "other_annotations": int((codes != NORMAL).sum()),
                       "minutes": float((grid[-1] - grid[0]) / 60), "intervals_dropped": dropped,
                       "sessions": len(people[name]), "mean_hr": float(hr.mean())}
-    res = {"records": info}
+    res = {"records": info, "left_out": left_out}
     sessions = [s for p in sorted(people) for s in people[p]]
     res["real_heart"] = spectrum_facts(sessions)
+    sizes = fitted_sizes(res["real_heart"])
+    res["fitted_sizes"] = sizes
+    res["power_S2_refit_simulation"] = sim.power_s2(rng, args.experiments // 2, [5, 10, 20, 40, 80],
+                                                    [0.25, 0.5, 1.0], sizes=sizes)
     x, y = stranger_pairs(people)
     r, h1 = sim.n1_correlation(x, y)
     _, h2 = sim.n2_best_lag(x, y)

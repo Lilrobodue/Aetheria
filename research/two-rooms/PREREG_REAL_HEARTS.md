@@ -58,3 +58,18 @@ directly on the real sessions, adding the shift to their send periods.
 
 As in `PREREGISTRATION.md`: a test is safe if its false-alarm rate is at most
 6% here too. Everything is reported, including any failure of a sound test.
+
+## Addendum, before any analysis (21 Nov 2026, 12:30)
+
+Ten files arrived. Three were damaged on the way and are left out:
+
+- f2y04 and f2y05 contain thousands of UTF-8 replacement characters: they went
+  through a text conversion that overwrote the original bytes, which can't be
+  recovered.
+- f2y02 was flagged as damaged by Joe's download, and its beats span 156
+  minutes against the study's 120.
+
+That leaves seven people (f1y01 to f1y05, f2y01, f2y03), 21 stranger pairs and
+up to 77 sessions. The three can be added later from a clean download. Also,
+the first 50 beats of each f2 record are marked "learning" (code 30) rather
+than normal; they fall in the skipped first 10 minutes either way.

@@ -57,8 +57,10 @@ def soundtrack_dips(rng, k, size=1.5, every_s=60, tau=2.5):
     return out
 
 
-def hearts(rng, k, scenario):
-    """k simulated heart-rate traces (bpm) for one side of k sessions."""
+def hearts(rng, k, scenario, drift_sd=2.0, mayer_sd=1.5, breath_amp=3.0):
+    """k simulated heart-rate traces (bpm) for one side of k sessions. The
+    sizes default to the pre-registered textbook values; real_hearts.py
+    passes sizes fitted to real recordings."""
     level = rng.normal(70.0, 8.0, size=(k, 1))
     settle_size = np.clip(rng.normal(4.0, 1.5, size=(k, 1)), 0.0, None)
     if scenario == "apart":  # each person started sitting at their own time
@@ -66,8 +68,8 @@ def hearts(rng, k, scenario):
     else:
         onset = np.zeros((k, 1))
     settle = -settle_size * (1.0 - np.exp(-(T[None, :] - onset) / 90.0))
-    drift = ar1(rng, k, 60.0, 2.0)
-    mw = mayer(rng, k, 1.5)
+    drift = ar1(rng, k, 60.0, drift_sd)
+    mw = mayer(rng, k, mayer_sd)
     if scenario == "guided_breathing":  # one guide, 6 breaths a minute, same start
         lag = rng.normal(0.0, 0.5, size=(k, 1))
         breath = 6.0 * np.sin(2 * math.pi * 0.1 * (T[None, :] - lag))
@@ -75,7 +77,7 @@ def hearts(rng, k, scenario):
         rate = np.clip(rng.normal(0.25, 0.04, size=(k, 1)), 0.15, 0.40)
         wobble = ar1(rng, k, 20.0, 0.02)
         phase = 2 * math.pi * np.cumsum(rate + wobble, axis=1) / FS + rng.uniform(0, 2 * math.pi, size=(k, 1))
-        breath = 3.0 * np.sin(phase)
+        breath = breath_amp * np.sin(phase)
     dips = soundtrack_dips(rng, k) if scenario == "same_soundtrack" else 0.0
     noise = rng.normal(0.0, 0.5, size=(k, N))
     return level + settle + drift + mw + breath + dips + noise
@@ -214,12 +216,12 @@ def false_alarms_sound(rng, experiments, k=20, perms=1000):
     return out
 
 
-def power_s2(rng, experiments, ks, deltas, perms=1000, scenario="guided_breathing"):
+def power_s2(rng, experiments, ks, deltas, perms=1000, scenario="guided_breathing", sizes=None):
     out = {}
     for k in ks:
         hits = {d: 0 for d in deltas}
         for _ in range(experiments):
-            y = hearts(rng, k, scenario)
+            y = hearts(rng, k, scenario, **(sizes or {}))
             lab = schedules(rng, k)
             offset = rng.normal(0.0, 1.0, size=k)
             base = period_means(y, offset)
