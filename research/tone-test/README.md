@@ -10,6 +10,8 @@ hidden coin flip.
   (commit bdf1264, 16:40 Mountain, 21 Nov 2026), also before any session
   counted. The amendment replaced 45-second blocks with 30-minute sessions,
   because the Aetheria duration protocol gives HEART tones 25 to 45 minutes.
+  **Amendment 2** (same day, before any session under amendment 1) raised the
+  number of sessions from 40 to 80.
 - `design_check_v2.py`: the design check the amendment calls for. Writes
   `design_check_v2.json`.
 - `design_check.py`, `design_check.json`: the design check for the original
@@ -32,9 +34,10 @@ each):
 
 "Real" is 35-minute windows of the seven good Fantasia resting recordings
 (PhysioNet), resampled. "Simulated" is the Two Rooms heart fitted to BBS-P1's
-whole baseline, dog and all, so it is the restless case. At the planned 40
-sessions, a 3 bpm shift is caught almost every time and a 2 bpm shift two times
-in three to nine times in ten. A 1 bpm shift would usually be missed.
+whole baseline, dog and all, so it is the restless case. At 40 sessions a
+2 bpm shift was caught only two times in three to nine times in ten, so
+amendment 2 set the test at 80 sessions, where a 2 bpm shift is caught 96% to
+100% of the time and a 1 bpm shift roughly half the time.
 
 ## The app
 
@@ -73,7 +76,7 @@ Sessions lost (they count toward the one-a-day rule but are never analysed):
   its fingerprint against its sealed pick without printing the pick, and applies
   the quality rules, without comparing tones. Safe to run as sessions come in.
 - `python3 -I analyze.py DIR`: the pre-registered test. Refuses to run before
-  40 sessions pass the quality rules.
+  80 sessions pass the quality rules.
 - `tests/make_sessions.py`: testing only. Writes simulated sessions in the app's
   version 2 format. Over 30 simulated sets of 40 sessions with no effect, the
   test called a difference twice (7%, in line with 5% at this count); over 8

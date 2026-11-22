@@ -5,7 +5,8 @@ here changes, the change is a new commit with its reason, made before the
 first session.
 
 **Amendment 1 (21 November 2026), at the end of this file, replaces the session
-design and the analysis below.** Nothing else changes.
+design and the analysis below. Amendment 2, after it, raises the number of
+sessions to 80.** Nothing else changes.
 
 ## The question
 
@@ -151,3 +152,17 @@ a shift of about 2 bpm. A 1 bpm shift could easily be missed.
 
 **Software.** The app becomes version 2.0.0, and `analyze.py` reads its files.
 The block analysis it replaces is in commit 553c836.
+
+## Amendment 2 (21 November 2026, before any session under amendment 1)
+
+**How many: 80 sessions, not 40.** The design check for amendment 1 found that
+40 sessions catch a 2 bpm shift 68% (simulated, restless heart) to 93% (real
+resting hearts) of the time, and 80 sessions catch it 96% to 100% of the time.
+Joe chose 80 on 21 November, after seeing those numbers and before any session
+under amendment 1 was recorded, so the choice can't have been steered by any
+result. The test runs once, at 80 sessions that pass the quality rules, and not
+before. Everything else in amendment 1 stands.
+
+**What "no difference" will mean.** With 80 sessions this test is built to
+catch a shift of about 2 bpm. A 1 bpm shift would be caught roughly half the
+time (45% to 71%), so it can't be ruled out.

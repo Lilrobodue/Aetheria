@@ -4,10 +4,10 @@ Tone test analysis, exactly as PREREGISTRATION.md (amendment 1) lays it out:
 30-minute sessions, one hidden tone each.
 
     python3 -I analyze.py --check SESSIONS_DIR    # blind: quality of each session, no tone comparison
-    python3 -I analyze.py SESSIONS_DIR            # the test, once 40 sessions are in
+    python3 -I analyze.py SESSIONS_DIR            # the test, once 80 sessions are in
 
 SESSIONS_DIR holds the files the Tone Test app (version 2) saves. The test
-refuses to run before 40 sessions pass the quality rules; --force exists only
+refuses to run before 80 sessions (amendment 2) pass the quality rules; --force exists only
 for testing this script on simulated sessions. The check never opens the
 sealed pick; it only confirms the fingerprint matches it.
 """
@@ -24,7 +24,7 @@ import numpy as np
 FS = 4.0
 CONTROLS = (2056, 2308)
 AETHERIA = 2178
-SESSIONS_NEEDED = 40
+SESSIONS_NEEDED = 80          # amendment 2
 PERMS = 10_000
 SEED = 20261121
 BASE = (60, 300)        # silence minutes 1-5, session seconds
@@ -155,7 +155,7 @@ def main():
     ap = argparse.ArgumentParser(description="Tone test analysis (amendment 1)")
     ap.add_argument("sessions_dir")
     ap.add_argument("--check", action="store_true", help="quality only, no tone comparison")
-    ap.add_argument("--force", action="store_true", help="testing only: run before 40 sessions")
+    ap.add_argument("--force", action="store_true", help="testing only: run before 80 sessions")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -204,7 +204,7 @@ def main():
                      "role": "primary" if name == "heart_rate_change" else "secondary"}
     out["verdict"] = "difference" if out["heart_rate_change"]["p"] < 0.05 else "no difference detected"
     result["results"] = out
-    result["forced_before_40"] = len(kept) < SESSIONS_NEEDED
+    result["forced_early"] = len(kept) < SESSIONS_NEEDED
     print(json.dumps(out, indent=1))
     if args.out:
         json.dump(result, open(args.out, "w"), indent=1)
