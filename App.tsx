@@ -196,8 +196,8 @@ import type { LayerEngine, LayerOutput, CanonicalLayer, BeatRender } from './uti
 // v16.8.4 (Adaptive gamma): v2's Adaptive reaches Gamma on headphones; Gamma in Adaptive, Smooth or Sticky.
 import { AdaptiveBand, adaptivePlan, parseGammaMode, KEY_ADAPTIVE_GAMMA, DEFAULT_GAMMA_MODE } from './utils/soundV2/adaptiveBand';
 import type { GammaMode } from './utils/soundV2/adaptiveBand';
-import { createSoundLog } from './utils/soundV2/soundLog';
-import type { SoundLog, SoundLogFields, StorageLike } from './utils/soundV2/soundLog';
+import { createSoundLog, createMusicStateLog, MUSIC_SETTLE_MS } from './utils/soundV2/soundLog';
+import type { SoundLog, SoundLogFields, StorageLike, MusicState, MusicStateLog } from './utils/soundV2/soundLog';
 // Analyse tracks (v15.1): key analysis and visual sync. Static imports, so they are in the offline precache.
 import { createDecodeContext, analyseKeyOf, needsKey } from './utils/soundV2/keyAnalysis';
 import { startPass, capsFor, countAnalysable, upcomingIds, passStartText, passEndText, passButtonText, passEtaMinutes, PASS_IDLE, DEFAULT_TUNING, ANALYSE_INFLIGHT_KEY, PASS, HoldBounds, idleAfter } from './utils/library/analysePass';
@@ -3212,8 +3212,10 @@ const App: React.FC = () => {
   const analysePassRef: { current: PassHandle | null } = useRef(null);
   // True while playTrack decodes a track that has no crystal (its isAnalyzing), so the pass never decodes at the
   // same time. Mirrored in a layout effect: playTrack is pinned and stays untouched.
+  // v16.14.2: and while a track the swap took without a crystal is read (swapReading, readCrystalAfterSwap).
+  const [swapReading, setSwapReading] = useState(false);
   const playStartBusyRef: { current: boolean } = useRef(false);
-  useLayoutEffect(() => { playStartBusyRef.current = isAnalyzing; }, [isAnalyzing]);
+  useLayoutEffect(() => { playStartBusyRef.current = isAnalyzing || swapReading; }, [isAnalyzing, swapReading]);
 
   // v15.9: the walk as it is saved with the play order (walks survive a reload): a new object only when the walk changes.
   const savedWalk = useMemo(
@@ -4985,6 +4987,50 @@ const App: React.FC = () => {
     log.load();                                                               // the load gate: nothing is written before it
     soundLogRef.current = log;
   }, [soundLogOn]);
+  // v16.14.2: the music element's own state on each entry (createMusicStateLog). On 27 Nov 2026 the music went quiet
+  // under the layers on a locked phone, and the log, which followed only the layers, showed nothing until the app was
+  // opened. The listeners go on each new element here, as playTrack and setupAudioElement are pinned; an element that
+  // is already playing when it is first seen starts as 'playing'. One settle timer, restarted when a stop begins.
+  // What an entry reads is the ref's `shown`, set the moment a change is published (so the entry noted in the same
+  // commit as the element's first sighting already says 'playing'); musicLogSeq only wakes the note effect.
+  const [musicLogSeq, setMusicLogSeq] = useState(0);
+  type MusicLogRef = { log: MusicStateLog; timer: number | null; el: HTMLAudioElement | null; shown: { state: MusicState; since: number; err: string | null } };
+  const musicStateRef: { current: MusicLogRef | null } = useRef(null);
+  if (musicStateRef.current === null) {
+    const M: MusicLogRef = {
+      log: createMusicStateLog('paused', (state, since, err) => { M.shown = { state, since, err }; setMusicLogSeq((n: number) => n + 1); }),
+      timer: null, el: null, shown: { state: 'paused', since: 0, err: null },
+    };
+    musicStateRef.current = M;
+  }
+  const noteMusic = useCallback((state: MusicState, err: string | null = null) => {
+    const M = musicStateRef.current;
+    if (!M) return;
+    const was = M.log.pending();
+    M.log.event(state, Date.now(), err);
+    if (!was && M.log.pending()) {
+      if (M.timer !== null) window.clearTimeout(M.timer);
+      M.timer = window.setTimeout(() => { M.timer = null; M.log.settle(); }, MUSIC_SETTLE_MS);
+    }
+  }, []);
+  useEffect(() => {
+    const M = musicStateRef.current, el = mainAudioRef.current;
+    if (!M || !el || M.el === el) return;
+    M.el = el;
+    const mine = () => el === mainAudioRef.current;
+    el.addEventListener('playing', () => { if (mine()) noteMusic('playing'); });
+    el.addEventListener('pause', () => { if (mine() && !el.ended) noteMusic('paused'); });
+    el.addEventListener('waiting', () => { if (mine()) noteMusic('waiting'); });
+    el.addEventListener('ended', () => { if (mine()) noteMusic('ended'); });
+    el.addEventListener('error', () => { if (mine()) noteMusic('error', el.error ? `code ${el.error.code}` : null); });
+    if (!el.paused && !el.ended) noteMusic('playing');
+  }, [isPlaying, currentSongIndex, noteMusic]);
+  /** The music fields of an entry: 'off' while the app is not playing, unless an error or a refused play shows. */
+  const musicLogFields = (): Pick<SoundLogFields, 'music' | 'music_since' | 'music_err' | 'hidden'> => {
+    const m = musicStateRef.current?.shown ?? { state: 'paused' as MusicState, since: 0, err: null };
+    const off = !isPlaying && m.state !== 'error' && m.state !== 'rejected';
+    return { music: off ? 'off' : m.state, music_since: off ? null : m.since, music_err: off ? null : m.err, hidden: document.hidden };
+  };
   const layersOnNow = v2Active ? v2Wanted : (!musicOnly && !v2CarFallback && (isPlaying || isSolfeggioActive));
   const listeningNow = soundLogOn && (layersOnNow || isPlaying);
   const logRender: SoundLogFields['render'] = !layersOnNow
@@ -5011,6 +5057,7 @@ const App: React.FC = () => {
         drone_resting: !!st && st.resting, music_only: musicOnly, v2_failed: v2Failed,
         ...keyFitLogFields(keyFitView),
         gamma_mode: gammaMode, // v16.8.4
+        ...musicLogFields(), // v16.14.2
       };
     }
     const mapped = applyLoShuPerfectMap(selectedSolfeggio), music = on && isPlaying;
@@ -5026,6 +5073,7 @@ const App: React.FC = () => {
       tone_db: on ? reMusic(phi.solfeggio) : null, beat_db: music ? reMusic(phi.binaural) : null,
       drone_db: music ? gainToDb(SUB_BASS_DRONE_LEVEL * classicLayerGain) : null,
       drone_resting: false, music_only: musicOnly, v2_failed: v2Failed,
+      ...musicLogFields(), // v16.14.2
     };
   };
   // Key fit (v15.2): with it on, a change of the duck that applies is a change of what is heard (one entry); off, the
@@ -5049,7 +5097,7 @@ const App: React.FC = () => {
     }
     if (!S.open || (v2Active && layersOnNow && !layerStatus)) return;   // v2: wait for the player's first transition
     if (log.note(soundLogEntry(), now)) saveSoundLogSoon();
-  }, [listeningNow, v2Active, v2Failed, musicOnly, layersOnNow, layerOutput, logRender, logF, droneEnabled, statusKey, statusResting, flushSoundLog, saveSoundLogSoon, fitLogKey, gammaMode]);
+  }, [listeningNow, v2Active, v2Failed, musicOnly, layersOnNow, layerOutput, logRender, logF, droneEnabled, statusKey, statusResting, flushSoundLog, saveSoundLogSoon, fitLogKey, gammaMode, isPlaying, musicLogSeq]);
   // Band steps, retunes and drone rests are counted into the open session.
   const prevBandNameRef: { current: string } = useRef(selectedBinaural.name);
   useEffect(() => {
@@ -6723,9 +6771,65 @@ Run Deep Scan to analyse this track.
     return nextIndex;
   };
 
+  // v16.14.2: a track with no crystal takes the swap too. Before, it fell back to
+  // playNext → playTrack: pause, decode the whole file, then play. On a locked
+  // phone that pause let the music stop under the layers until the app was opened
+  // (the sound log of 27 Nov 2026, on shuffle). Its crystal now: Deep Scan's, else
+  // what its stored reading gives (as playTrack works it out), else one read since
+  // the page loaded, else 0 = not known yet (the tone holds and the track is read
+  // once it plays). Nothing is saved to the library: Deep Scan still gives the
+  // track its full reading.
+  const swapReadsRef: { current: Map<string, number> } = useRef(new Map());
+  const swapCrystalOf = (song: Song): number =>
+    song.closestSolfeggio || (song.harmonicFreq ? getHarmonicSolfeggio(song.harmonicFreq) : 0) || swapReadsRef.current.get(song.id) || 0;
+  const swapReadSeqRef: { current: number } = useRef(0);
+  const swapReadsBusyRef: { current: number } = useRef(0);   // reads decoding now (an older one may still be finishing)
+  const selectedSolfeggioNowRef: { current: number } = useRef(selectedSolfeggio);
+  useEffect(() => { selectedSolfeggioNowRef.current = selectedSolfeggio; }, [selectedSolfeggio]);
+  // The read, as playTrack's (the whole file, then detectDominantFrequencyAdvanced
+  // and getHarmonicSolfeggio), but after the swap: it starts PASS.START_HOLD_S after
+  // the new track plays (the hold Analyse tracks keeps at a track start), never on
+  // the swap's own turn, and holds the pass and the key warm as 'starting' while it
+  // decodes, so two full decodes never run at once. It stands down if another
+  // track or read has taken over, and a tone picked by hand meanwhile stays.
+  const readCrystalAfterSwap = (el: HTMLAudioElement, song: Song, url: string, held: number): void => {
+    const seq = ++swapReadSeqRef.current;
+    const current = () => seq === swapReadSeqRef.current && el === mainAudioRef.current && el.src === url;
+    const read = async () => {
+      if (!current()) return;
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      swapReadsBusyRef.current++;
+      setSwapReading(true);
+      try {
+        const buffer = await ctx.decodeAudioData(await song.file.arrayBuffer());
+        if (!current()) return;
+        const freq = await detectDominantFrequencyAdvanced(buffer);
+        if (!current()) return;
+        const crystal = getHarmonicSolfeggio(freq || 0);
+        swapReadsRef.current.set(song.id, crystal);
+        console.log(`Read after the swap: ${crystal}Hz for "${song.name}"`);
+        if (selectedSolfeggioNowRef.current !== held) return;
+        setSelectedSolfeggio(crystal);
+        setSubtleResonanceMode(crystal > 963);
+      } catch (err) {
+        console.warn(`[Aetheria] The crystal of "${song.name}" could not be read after the swap; the tone stays.`, err);
+      } finally {
+        swapReadsBusyRef.current--;
+        if (swapReadsBusyRef.current === 0) setSwapReading(false);
+      }
+    };
+    el.addEventListener('playing', () => { window.setTimeout(() => { void read(); }, PASS.START_HOLD_S * 1000); }, { once: true });
+  };
+  /** A refused play()'s name for the sound log (an AbortError is a newer load taking over: not a stop). */
+  const notePlayRefused = (err: unknown): void => {
+    const name = typeof (err as { name?: unknown } | null)?.name === 'string' ? (err as { name: string }).name : String(err);
+    if (name !== 'AbortError') noteMusic('rejected', name);
+  };
+
   // The clean single-element advance. Returns true if it handled the advance,
-  // false to fall back to the normal playNext path (terminal stop, shuffle wrap,
-  // or an un-analyzed next track that would need a blocking decode).
+  // false to fall back to the normal playNext path (terminal stop or shuffle
+  // wrap).
   //
   // The whole point: do the MINIMUM on the one active, user-activated element —
   // set .src, play(), update metadata, assert playbackState='playing' — with NO
@@ -6740,13 +6844,15 @@ Run Deep Scan to analyse this track.
     const peek = resolveNext(false);
     if (peek === null) return false;
     const nextSong = stateRef.current.playlist[peek];
-    // Require a pre-assigned frequency (Deep-Scanned) so we don't have to decode
-    // on the critical path (a multi-second await here would drop the card).
-    if (!nextSong || !nextSong.closestSolfeggio) return false;
+    if (!nextSong) return false;
 
     // Commit the shuffle/index bookkeeping.
     resolveNext(true);
-    const targetFreq = nextSong.closestSolfeggio;
+    // v16.14.2: never a decode on the critical path (a multi-second await here
+    // would drop the card). A track with no crystal yet keeps the tone; it is
+    // read once it plays (readCrystalAfterSwap, below the swap).
+    const known = swapCrystalOf(nextSong);
+    const targetFreq = known || selectedSolfeggio;
 
     // Reuse the current song's blob URL or mint one (local file → instant).
     let url = blobUrlsRef.current[nextSong.id];
@@ -6761,7 +6867,7 @@ Run Deep Scan to analyse this track.
     // normally-started track (rate AND pitch-preservation together).
     applyPlaybackRate(el, trackRate(nextSong));
     const p = el.play();
-    if (p) p.catch((err: unknown) => console.error('Gapless swap play() failed:', err));
+    if (p) p.catch((err: unknown) => { console.error('Gapless swap play() failed:', err); notePlayRefused(err); });
     applyMusicElementVolume();
 
     // Re-arm auto-advance for the new track.
@@ -6804,12 +6910,12 @@ Run Deep Scan to analyse this track.
       }
     });
 
+    if (!known) readCrystalAfterSwap(el, nextSong, url, targetFreq);
     return true;
   };
 
   // Called by the active element's end-of-track listeners. Clean single-element
-  // swap if possible, else the normal advance (terminal stop / shuffle wrap /
-  // un-analyzed track).
+  // swap if possible, else the normal advance (terminal stop / shuffle wrap).
   const handleAutoAdvance = () => {
     if (!tryGaplessAdvance()) {
       playNextRef.current();
@@ -7174,8 +7280,8 @@ Run Deep Scan to analyse this track.
   // Centralized Play Next Logic for Shuffle/Loop. Delegates the index/shuffle/
   // loop math to resolveNext (the SAME resolver the gapless preload + handoff
   // use, so the three never diverge). This is the non-gapless advance path —
-  // used for the terminal stop, shuffle wraps, and un-analyzed tracks, and as
-  // the fallback whenever a gapless handoff can't run.
+  // used for the terminal stop and shuffle wraps (since v16.14.2 an un-analyzed
+  // track takes the swap), and as the fallback whenever a gapless handoff can't run.
   const playNext = useCallback(() => {
     const next = resolveNext(true); // commits shuffle bookkeeping, like before
     if (next === null) {
@@ -11819,7 +11925,7 @@ registerProcessor('wav-capture', WavCapture);
             <div className="w-8 h-8 rounded-full bg-gold-500 animate-pulse-slow flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.5)]">
               <Activity className="text-slate-950 w-5 h-5" />
             </div>
-            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.14.1</span></h1>
+            <h1 className="text-xl md:text-2xl font-serif text-gold-400 tracking-wider">AETHERIA <span className="text-[10px] text-slate-500 ml-2">v16.14.2</span></h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-4">
              

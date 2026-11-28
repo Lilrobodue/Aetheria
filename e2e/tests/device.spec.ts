@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { test, expect, ON_DEVICE } from './fixtures';
-import { acceptDisclaimerNew, seedToneLibrary, LAYER_ENGINE_KEY, LAYOUT_KEY } from './helpers';
+import { acceptDisclaimerNew, seedToneLibrary, addFiles, toneWav, LAYER_ENGINE_KEY, LAYOUT_KEY } from './helpers';
 import { openApp, acceptDisclaimer, importTones, pauseCount, instrumentAudio, layerState, pickFrequency, seedLayers, layersState, metaRecords, seedTracks, keyFitState, KEY_FIT_KEY, crash, optInNewLayout, layoutPref, tapAt, shellHidden, PHONE_VIEWPORT, openSeededNewLayout, openLibraryTab, libraryState, startWalk, libraryRowButton, rowMenu, recordHudDraws, openHarmonicControl, type LibraryState } from './helpers';
 import { adb, mediaSession, chromeSessions } from './adb';
 import { stubDownloads, caughtDownloads, wavInfo } from './downloads';
@@ -17,7 +17,8 @@ import { stubDownloads, caughtDownloads, wavInfo } from './downloads';
 // tab's row tap after that; v15.8: the walk after Assign after that; v15.9: a mix from the Mixes tab after that; v16.0:
 // the queue after that; v16.1: a saved playlist after that; v16.2: a filtered set after that; v16.3: a built mix after
 // that; v16.4: Keep screen awake off with Pause visuals on after that; v16.5: a recording, then an export, with the
-// screen off, after that; v16.8.3: a tuned track between Standard ones, and Next / Previous across one, after that).
+// screen off, after that; v16.8.3: a tuned track between Standard ones, and Next / Previous across one, after that;
+// v16.14.2: tracks with no crystal after that).
 // While Playwright is connected, Chrome on Android keeps every tab visible: no test here ever sees a real hide. The
 // tests that need one (v16.0.1's D1-D3, the hide flush; v16.1's D-PL1, a playlist made just before a background kill)
 // are in device-hide.spec.ts, run on their own with E2E_HIDE=1.
@@ -2109,6 +2110,43 @@ test('v16.8.3 D-T2: the car / lock-screen Next and Previous across a tuned track
   const plays = all.slice(n0).filter((p, i, a) => (i === 0 ? p.src !== all[n0 - 1]?.src : p.src !== a[i - 1].src));
   expect(plays.map((p) => p.rate), 'each start at its track\'s rate: −50 c, Standard, −50 c, Standard').toEqual([tuneRateOf(-50), TUNE_PSF, tuneRateOf(-50), TUNE_PSF]);
   expect(await page.evaluate(() => (window as any).__aetheriaTuning.rate()), 'tone-0001 plays at Standard').toBe(TUNE_PSF);
+  expect(dialogs).toEqual([]);
+});
+
+test('v16.14.2 D-U1: tracks with no crystal (no Deep Scan, no Auto-Distribute) with the screen off: the card follows three gapless advances without a pause(), and the v2 layers move to each track’s crystal once it is read @device', async ({ page }) => {
+  // The 27 Nov 2026 stop (BBS-P1's sound log): on shuffle the next track had no crystal, so the advance went through
+  // playTrack (pause, decode, play), and on the locked phone the music stopped under the layers until the app was
+  // opened. Classic, the v2 layers, 8 s tones at three different pitches (the read starts 2 s into each). Turns the
+  // screen off; a secure lock stays locked after the test.
+  const dialogs = await openApp(page);
+  await seedLayers(page, { engine: 'v2', output: 'headphones' });
+  await addFiles(page, [220, 330, 495, 220].map((hz, i) => ({ name: `tone-0${i + 1}.wav`, mimeType: 'audio/wav', buffer: toneWav(8, hz) })));
+  await page.getByText('tone-01', { exact: true }).click();
+  await expect(page.getByTestId('now-playing-title')).toHaveText('tone-01');
+  await expect.poll(() => mediaSession(), { timeout: 15_000 }).toEqual({ state: 'playing', title: 'tone-01' });
+  const pausesBefore = await pauseCount(page);
+  const crystals = new Set<number>();
+  const readV2 = async () => {
+    const requested = (await layersState(page))?.requested;
+    if (requested?.canonical_hz > 0) crystals.add(requested.canonical_hz);
+  };
+  await readV2();
+  adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+  try {
+    for (const title of ['tone-02', 'tone-03', 'tone-04']) {
+      await expect.poll(() => mediaSession(), { timeout: 15_000, intervals: [500], message: `${title} PLAYING on the card` }).toEqual({ state: 'playing', title });
+      // Each is read 2 s into it: the layers move to its crystal before it ends.
+      await expect.poll(async () => { await readV2(); return crystals.size; }, { timeout: 7_000, intervals: [500] }).toBeGreaterThanOrEqual(title === 'tone-02' ? 2 : 3);
+    }
+    expect(chromeSessions().filter((s) => s.state === 'playing').length, 'one PLAYING Chrome card: none stranded').toBe(1);
+  } finally {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  }
+  // After the wake, DOM and state reads only.
+  expect(await pauseCount(page), 'the swap never pauses, with or without a crystal').toBe(pausesBefore);
+  test.info().annotations.push({ type: 'v2 crystals with the screen off', description: [...crystals].join(', ') });
+  const music = await page.evaluate(() => JSON.parse(localStorage.getItem('aetheria.soundSessions.v1') ?? '[]').flatMap((s: any) => s.entries).map((e: any) => e.music ?? null));
+  expect(music.filter((m: string | null) => m !== null && m !== 'playing' && m !== 'off'), 'the sound log notes no stop of the music').toEqual([]);
   expect(dialogs).toEqual([]);
 });
 
