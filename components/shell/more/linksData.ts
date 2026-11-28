@@ -34,6 +34,9 @@ export const LINK_SECTIONS: ReadonlyArray<LinkSection> = [
       { title: 'Operator', sub: 'Morning tune-up, resonance breathing, coherence, qigong and tai chi', href: 'https://big-banana-studios.github.io/operator/' },
       { title: 'Mode 3', sub: 'Neuro-adaptive binaural trainer — Muse S Athena + H10, with Aetheria tones', href: 'https://big-banana-studios.github.io/mode-3/' },
       { title: 'Controlled Burn', sub: 'Heart-rate flooding alerts — Gottman conflict de-escalation', href: 'https://big-banana-studios.github.io/Controlled-Burn/' },
+      // v16.14.3 (the user, 27 Nov 2026): the studio's tester sign-up for its Android apps, after Controlled Burn.
+      // Classic's panel has the same row.
+      { title: 'Big Banana Studios Testers', sub: 'Test our Android apps — each one free with a promo code', href: 'https://big-banana-studios.github.io/Tester-Sign-up/' },
     ],
   },
   {
