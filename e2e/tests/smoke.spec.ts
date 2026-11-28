@@ -71,6 +71,41 @@ test('gapless auto-advance across distributed tracks @mobile', async ({ page }) 
   expect(dialogs).toEqual([]);
 });
 
+test('v16.14.2: gapless auto-advance across tracks with no crystal: no pause(), the tone holds, then each is read once it plays, as playTrack reads it; the sound log notes the music @mobile', async ({ page }) => {
+  // No Deep Scan, no Auto-Distribute: none of the three has a crystal. Before v16.14.2 each advance onto one went
+  // through playTrack (pause, decode, play), the path that stopped the music on a locked phone (27 Nov 2026).
+  const dialogs = await openApp(page);
+  await addFiles(page, [220, 330, 495].map((hz, i) => ({ name: `tone-0${i + 1}.wav`, mimeType: 'audio/wav', buffer: toneWav(7, hz) })));
+  await page.getByText('tone-01', { exact: true }).click();
+  const title = page.getByTestId('now-playing-title');
+  await expect(title).toHaveText('tone-01');
+  await expect.poll(() => elapsedSeconds(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
+  const album = () => page.evaluate(() => navigator.mediaSession.metadata?.album ?? null);
+  const first = await album();
+  expect(first, "tone-01's crystal on the card (playTrack read it)").toMatch(/^\d+Hz • /);
+  const pausesBefore = await pauseCount(page);
+  await expect(title).toHaveText('tone-02', { timeout: 15_000 });
+  expect(await album(), 'the tone holds over the swap').toBe(first);
+  await expect.poll(album, { message: 'then tone-02 is read: the card names its crystal', timeout: 10_000 }).not.toBe(first);
+  const second = await album();
+  await expect(title).toHaveText('tone-03', { timeout: 15_000 });
+  await expect.poll(album, { message: 'and tone-03 is read', timeout: 10_000 }).not.toBe(second);
+  expect(await pauseCount(page), 'the swap never pauses, with or without a crystal').toBe(pausesBefore);
+  // The sound log notes the music element's state on each entry (one entry per crystal at least, saved within 5 s),
+  // and the two advances made no stop of it ('off' is the end of the list: three tracks, no loop).
+  const music = () => page.evaluate(() => {
+    const ss = JSON.parse(localStorage.getItem('aetheria.soundSessions.v1') ?? '[]');
+    return ss.flatMap((s: any) => s.entries).map((e: any) => e.music ?? null);
+  });
+  await expect.poll(async () => (await music()).filter((m: string | null) => m === 'playing').length, { message: 'the sound log notes the music playing under each crystal', timeout: 15_000 }).toBeGreaterThanOrEqual(3);
+  expect((await music()).filter((m: string | null) => m !== 'playing' && m !== 'off'), 'no stop of the music across the advances').toEqual([]);
+  // The read gives what playTrack gives: a tap on tone-02 (playTrack decodes it) puts the same crystal on the card.
+  await page.getByText('tone-02', { exact: true }).click();
+  await expect(title).toHaveText('tone-02');
+  await expect.poll(album, { message: "playTrack's crystal for tone-02 is the read's", timeout: 10_000 }).toBe(second);
+  expect(dialogs).toEqual([]);
+});
+
 test('the library survives walks, imports, Auto-Distribute and Deep Scan (v14.5 data safety)', async ({ page }) => {
   // On v14.4 every step below lost stored audio: each of these paths wrote the
   // list that was showing over the library, and the blob sync then deleted the

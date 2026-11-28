@@ -14,8 +14,10 @@ import {
   SOUND_LOG_MAX_ENTRIES,
   SOUND_LOG_MAX_BYTES,
   createSoundLog,
+  createMusicStateLog,
+  MUSIC_SETTLE_MS,
 } from './soundLog.ts';
-import type { SoundLogFields, SoundLogSession, StorageLike } from './soundLog.ts';
+import type { SoundLogFields, SoundLogSession, StorageLike, MusicState } from './soundLog.ts';
 
 let passed = 0;
 const failures: string[] = [];
@@ -342,6 +344,76 @@ check(SOUND_LOG_KEY === 'aetheria.soundSessions.v1' && SOUND_LOG_MAX_SESSIONS ==
   l2.load();
   check(l2.sessions().length === 1 && l2.sessions()[0].entries.length === 2, 'gamma_mode: a v16.8.3 session loads whole');
   check(SOUND_LOG_MAX_SESSIONS === 200 && SOUND_LOG_MAX_ENTRIES === 50 && SOUND_LOG_MAX_BYTES === 262144, 'gamma_mode: the budgets are unchanged');
+}
+
+{
+  // v16.14.2: entries carry the music element's own state (music, music_since, music_err, hidden). Optional: an entry
+  // without them stays valid beside new ones; a change of the music state alone is an entry; they round-trip.
+  const st = fakeStorage();
+  const log = createSoundLog(st);
+  log.load();
+  log.open(1);
+  const old = entry(0);
+  const playing = entry(0, { music: 'playing', music_since: 10, music_err: null, hidden: true });
+  const paused = entry(0, { music: 'paused', music_since: 20, music_err: null, hidden: true });
+  const refused = entry(0, { music: 'rejected', music_since: 30, music_err: 'NotAllowedError', hidden: true });
+  const off = entry(0, { music: 'off', music_since: null, music_err: null, hidden: false });
+  check(log.note(old, 2) && log.note(playing, 3) && log.note(paused, 4) && log.note(refused, 5) && log.note(off, 6),
+    'music: an entry without it, then playing, paused, rejected and off: five entries');
+  check(log.note(off, 7) === false, 'music: the same state again is no new entry');
+  check(log.flush() === true, 'music: flushed');
+  const back = createSoundLog(st);
+  back.load();
+  const got = JSON.parse(back.exportJson()).sessions[0]?.entries ?? [];
+  const want = [old, playing, paused, refused, off];
+  const keys = ['music', 'music_since', 'music_err', 'hidden'];
+  check(got.length === 5 && !('music' in got[0]) && got.every((e: Record<string, unknown>, i: number) =>
+    keys.every((k) => (want[i] as Record<string, unknown>)[k] === undefined ? !(k in e) : e[k] === (want[i] as Record<string, unknown>)[k])),
+    `music: the four fields round-trip, and the entry from before them stays as it was (${JSON.stringify(got.map((e: Record<string, unknown>) => [e.music ?? null, e.music_err ?? null]))})`);
+}
+
+{
+  // v16.14.2: createMusicStateLog. 'playing', 'error' and 'rejected' at once; a pause, wait or end only once it has
+  // settled (the caller's timer, MUSIC_SETTLE_MS) with no 'playing' since, and then from the first of them.
+  check(MUSIC_SETTLE_MS === 2000, 'music state: settles after 2 s');
+  const seen: [MusicState, number, string | null][] = [];
+  const m = createMusicStateLog('paused', (s, since, err) => seen.push([s, since, err]));
+  check(m.state() === 'paused' && !m.pending() && seen.length === 0, 'music state: starts as given, nothing published');
+  m.event('playing', 100);
+  m.event('playing', 101);
+  check(seen.length === 1 && seen[0][0] === 'playing' && seen[0][1] === 100 && m.state() === 'playing', 'music state: playing is published at once, and once');
+  // A track change's own pause and wait, then playing before the timer: nothing.
+  m.event('paused', 200);
+  check(m.pending(), 'music state: a pause waits to settle');
+  m.event('waiting', 200.1);
+  m.event('playing', 200.4);
+  check(!m.pending(), 'music state: playing ends the wait');
+  m.settle();
+  check(seen.length === 1 && m.state() === 'playing', "music state: a track change's brief pause and wait make no entry");
+  // The 27 Nov 2026 stop: the music pauses and nothing plays it; then a wait comes; the settle shows one stop from the pause.
+  m.event('paused', 300);
+  m.event('waiting', 301);
+  m.settle();
+  check(seen.length === 2 && seen[1][0] === 'waiting' && seen[1][1] === 300 && seen[1][2] === null,
+    `music state: a pause then a wait that settle are one stop, from the pause (${JSON.stringify(seen[1])})`);
+  m.event('waiting', 302);
+  m.settle();
+  check(seen.length === 2, 'music state: the same state again is not published again');
+  m.settle();
+  check(seen.length === 2, 'music state: a settle with nothing waiting does nothing');
+  m.event('playing', 346);
+  check(seen.length === 3 && seen[2][0] === 'playing' && seen[2][1] === 346, 'music state: playing again is published, from when it came');
+  // A refused play and an error show at once, with their reason, and drop a waiting pause.
+  m.event('paused', 400);
+  m.event('rejected', 400.2, 'NotAllowedError');
+  check(seen.length === 4 && seen[3][0] === 'rejected' && seen[3][2] === 'NotAllowedError' && !m.pending(), 'music state: a refused play shows at once with its name');
+  m.settle();
+  check(seen.length === 4, 'music state: the pause before the refusal is not published after it');
+  m.event('error', 500, 'code 4');
+  check(seen.length === 5 && seen[4][0] === 'error' && seen[4][1] === 500 && seen[4][2] === 'code 4', 'music state: an error shows at once with its code');
+  m.event('ended', 600);
+  m.settle();
+  check(seen.length === 6 && seen[5][0] === 'ended' && seen[5][1] === 600, 'music state: an end that settles is published');
 }
 
 console.log(`soundLog: ${passed} checks passed, ${failures.length} failed`);

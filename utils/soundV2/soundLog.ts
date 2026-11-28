@@ -10,7 +10,8 @@
 // write: nothing is written before load() has read what is there, and every
 // flush re-reads the store and merges by session id, so sessions another tab
 // wrote in between survive. Records it cannot read are dropped; fields it
-// does not know are kept (v15.2 adds key_fit, duck_db and fit_*; v16.8.4 gamma_mode). A stored value that
+// does not know are kept (v15.2 adds key_fit, duck_db and fit_*; v16.8.4 gamma_mode; v16.14.2 music,
+// music_since, music_err and hidden). A stored value that
 // is not a list of sessions is replaced, so a new format takes a new key.
 //
 // Pure: the storage is injected (null = none) and times come from the caller.
@@ -60,7 +61,75 @@ export type SoundLogFields = {
   // v16.8.4 (Adaptive gamma), v2 entries only: Gamma in Adaptive, the saved choice (optional: older entries have none).
   // On each entry, not the session, as the setting can change within one.
   gamma_mode?: 'smooth' | 'sticky';
+  // v16.14.2, both engines (optional: older entries have none): the music element's own state, so a stop of the music
+  // under the layers shows in the log. 'off' while the app is not playing (an error or a refused play still shows).
+  // 'paused', 'waiting' and 'ended' count only once they have lasted MUSIC_SETTLE_MS, so a track change's own brief
+  // pause or wait never makes an entry; 'rejected' = a play() the browser refused.
+  music?: MusicState | 'off';
+  music_since?: number | null; // when that state began (Date.now(); a hidden page's timer can note it late); null when 'off'
+  music_err?: string | null; // the refused play()'s error name, or the element's error code
+  hidden?: boolean; // the page was hidden (screen off, or another app in front) when the entry was made
 };
+
+/** What the music element is doing, as the sound log notes it (MusicStateLog). */
+export type MusicState = 'playing' | 'paused' | 'waiting' | 'ended' | 'error' | 'rejected';
+/** How long a pause, a wait or an end must last, with the app playing, before the log notes it. */
+export const MUSIC_SETTLE_MS = 2000;
+
+/**
+ * The music element's state as the log notes it: 'playing', 'error' and 'rejected' at once; 'paused', 'waiting' and
+ * 'ended' only once MUSIC_SETTLE_MS has passed with no 'playing' since, and then with the time the first of them came
+ * (a pause then a wait is one stop). Pure: the caller's clock and timer, and `publish` gets each settled change.
+ */
+export interface MusicStateLog {
+  /** An element event (or a refused play()) at `now`. */
+  event(state: MusicState, now: number, err?: string | null): void;
+  /** The settle timer the last event asked for has run out (the caller's timer). */
+  settle(): void;
+  /** True while a pause, wait or end is waiting to settle (the caller keeps one timer running). */
+  pending(): boolean;
+  /** The last published state. */
+  state(): MusicState;
+}
+
+export function createMusicStateLog(
+  initial: MusicState,
+  publish: (state: MusicState, since: number, err: string | null) => void,
+): MusicStateLog {
+  let shown: MusicState = initial;
+  let waiting: { state: MusicState; since: number } | null = null;
+  const show = (state: MusicState, since: number, err: string | null): void => {
+    shown = state;
+    publish(state, since, err);
+  };
+  return {
+    event(state: MusicState, now: number, err: string | null = null): void {
+      if (state === 'playing') {
+        waiting = null;
+        if (shown !== 'playing') show('playing', now, null);
+        return;
+      }
+      if (state === 'error' || state === 'rejected') {
+        waiting = null;
+        show(state, now, err);
+        return;
+      }
+      waiting = { state, since: waiting ? waiting.since : now };
+    },
+    settle(): void {
+      if (!waiting) return;
+      const w = waiting;
+      waiting = null;
+      if (shown !== w.state) show(w.state, w.since, null);
+    },
+    pending(): boolean {
+      return waiting !== null;
+    },
+    state(): MusicState {
+      return shown;
+    },
+  };
+}
 
 export interface SoundLogEntry extends SoundLogFields {
   at: number; // Date.now()
